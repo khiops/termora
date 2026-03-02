@@ -117,13 +117,14 @@ The orchestrator (main session) NEVER writes code, runs tests, or explores files
 
 | Task | Model | How | Why |
 |------|-------|-----|-----|
-| **Code implementation** (write blocks, fix findings) | **Opus** | `Task(general-purpose, opus)` | Architecture decisions, code quality |
-| **Code review** | **Opus** | `Task(senior-code-reviewer, opus)` | Deep analysis, security, patterns |
+| **Code implementation** (write blocks, fix findings) | **Sonnet** | `Task(general-purpose, sonnet)` | Excellent at spec-guided implementation, cost-efficient |
+| **Code review** | **Opus** | `Task(senior-code-reviewer, opus)` | Deep analysis, security, catches what Sonnet misses |
 | **Tests, lint, build** | **Haiku** | `Task(Bash, haiku)` | Mechanical execution, cheapest |
 | **File exploration, codebase search** | **Haiku** | `Task(Explore, haiku)` | Read-only, no judgment needed |
 | **Git push, PR, merge** | **Haiku** | `Task(Bash, haiku)` | Mechanical git operations |
 
 The orchestrator itself: reads specs, formulates delegation prompts, routes results, updates state.
+Sonnet produces the code, Opus challenges it — best ROI for the Opus premium.
 
 ### Block Implementation Pattern
 
@@ -137,17 +138,17 @@ For each implementation block, the orchestrator MUST delegate like this:
    - Relevant spec excerpts (copy the sections, don't say "read file X")
    - Files to create/modify (from SPEC.md § 8.2 directory layout)
    - Test requirements
-4. Task(general-purpose, opus, "Implement block N.M: [description]... [full context]")
-5. Opus writes code + tests
+4. Task(general-purpose, sonnet, "Implement block N.M: [description]... [full context]")
+5. Sonnet writes code + tests
 6. Task(Bash, haiku, "cd ~/dev/nexterm && pnpm test && pnpm lint")
-7. If tests fail → Task(general-purpose, opus, "Fix: [error output]")
+7. If tests fail → Task(general-purpose, sonnet, "Fix: [error output]")
 8. Loop until green
 9. Update .workflow-state.json + TODO.md
 ```
 
 ### What the Orchestrator Does NOT Do
 
-- **NEVER** write implementation code directly (always delegate to Opus)
+- **NEVER** write implementation code directly (always delegate to Sonnet)
 - **NEVER** run tests directly (always delegate to Haiku)
 - **NEVER** explore codebase directly (delegate to Haiku Explore)
 - **NEVER** make architectural decisions — if an ambiguity arises that specs don't cover, STOP and ask the user
