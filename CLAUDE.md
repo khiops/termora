@@ -109,27 +109,30 @@ pnpm -F @nexterm/web dev  # Dev single package
 ## Workflow Execution Strategy
 
 This project uses `/workflow` in **plan-provided mode** — specs are pre-written in `docs/`.
-The orchestrating session MUST be **Sonnet**. Launch with: `claude --model sonnet`
+The orchestrator model is irrelevant (Opus, Sonnet, or any future model). What matters is delegation.
 
 ### Model Routing (MANDATORY — no discretion)
 
+The orchestrator (main session) NEVER writes code, runs tests, or explores files directly. It delegates ALL work to subagents with explicit model assignments:
+
 | Task | Model | How | Why |
 |------|-------|-----|-----|
-| **Orchestration** (workflow state, stage transitions, TODO tracking) | **Sonnet** | Main session | Mechanical protocol following, cost-efficient |
 | **Code implementation** (write blocks, fix findings) | **Opus** | `Task(general-purpose, opus)` | Architecture decisions, code quality |
 | **Code review** | **Opus** | `Task(senior-code-reviewer, opus)` | Deep analysis, security, patterns |
 | **Tests, lint, build** | **Haiku** | `Task(Bash, haiku)` | Mechanical execution, cheapest |
 | **File exploration, codebase search** | **Haiku** | `Task(Explore, haiku)` | Read-only, no judgment needed |
 | **Git push, PR, merge** | **Haiku** | `Task(Bash, haiku)` | Mechanical git operations |
 
+The orchestrator itself: reads specs, formulates delegation prompts, routes results, updates state.
+
 ### Block Implementation Pattern
 
-For each implementation block, Sonnet orchestrator MUST delegate like this:
+For each implementation block, the orchestrator MUST delegate like this:
 
 ```
-1. Sonnet reads MVP_ROADMAP.md block description + exit criteria
-2. Sonnet reads relevant spec sections (SPEC.md, PROTOCOL.md, etc.)
-3. Sonnet formulates detailed prompt with:
+1. Read MVP_ROADMAP.md block description + exit criteria
+2. Read relevant spec sections (SPEC.md, PROTOCOL.md, etc.)
+3. Formulate detailed prompt with:
    - Block description + exit criteria
    - Relevant spec excerpts (copy the sections, don't say "read file X")
    - Files to create/modify (from SPEC.md § 8.2 directory layout)
@@ -139,17 +142,17 @@ For each implementation block, Sonnet orchestrator MUST delegate like this:
 6. Task(Bash, haiku, "cd ~/dev/nexterm && pnpm test && pnpm lint")
 7. If tests fail → Task(general-purpose, opus, "Fix: [error output]")
 8. Loop until green
-9. Sonnet updates .workflow-state.json + TODO.md
+9. Update .workflow-state.json + TODO.md
 ```
 
-### What Sonnet Orchestrator Does NOT Do
+### What the Orchestrator Does NOT Do
 
 - **NEVER** write implementation code directly (always delegate to Opus)
 - **NEVER** run tests directly (always delegate to Haiku)
 - **NEVER** explore codebase directly (delegate to Haiku Explore)
 - **NEVER** make architectural decisions — if an ambiguity arises that specs don't cover, STOP and ask the user
 
-### What Sonnet Orchestrator DOES Do
+### What the Orchestrator DOES Do
 
 - Read and update `.workflow-state.json`
 - Read and update `TODO.md`
