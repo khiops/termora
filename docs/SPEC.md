@@ -164,7 +164,7 @@ Local daemon, single process, binds to 127.0.0.1.
 - `nexterm pair` — generate pairing code for multi-device
 - `nexterm decode` — decode MessagePack frames from stdin (debug tool)
 
-### 3.4 UI (`@nexterm/ui`)
+### 3.4 Web Client (`@nexterm/web`)
 
 Vue 3 SPA built with Vite. Served by hub in production, dev server in development.
 
@@ -522,11 +522,28 @@ Resolved config → xterm.js instance
 
 ## 8. Monorepo Structure
 
+### 8.1 npm Naming Strategy
+
+| Package | npm name | Published? | Purpose |
+|---------|----------|-----------|---------|
+| Root | `nexterm` | Yes | CLI entrypoint (`npx nexterm`) |
+| shared | `@nexterm/shared` | Yes | Types, codec, framing |
+| agent | `@nexterm/agent` | Yes | Remote PTY manager (installed on remotes) |
+| hub | `@nexterm/hub` | Yes | Local daemon (imported by root CLI) |
+| web | `@nexterm/web` | No | Vue SPA (built + served by hub) |
+| desktop | `@nexterm/desktop` | No (P1) | Tauri desktop app |
+
+Root `nexterm` package is a thin CLI wrapper that depends on `@nexterm/hub`.
+`npx nexterm` launches the hub daemon. `npx @nexterm/agent` is available for remote install.
+
+### 8.2 Directory Layout
+
 ```
 nexterm/
-├── package.json             # pnpm workspace root
+├── package.json             # nexterm (root CLI entrypoint)
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json       # Shared TS config (strict)
+├── biome.json               # Linter/formatter config
 ├── docs/
 │   ├── SPEC.md
 │   ├── PROTOCOL.md
@@ -535,14 +552,17 @@ nexterm/
 │   └── MVP_ROADMAP.md
 ├── packages/
 │   ├── shared/              # @nexterm/shared — types, codec, framing
+│   │   ├── package.json
 │   │   └── src/
+│   │       ├── index.ts     # Barrel export
 │   │       ├── protocol.ts  # Message types (discriminated unions)
-│   │       ├── codec.ts     # MessagePack encode/decode
+│   │       ├── codec.ts     # MessagePack encode/decode + snake_case↔camelCase
 │   │       ├── framing.ts   # Length-prefixed frame encoder/decoder
-│   │       ├── config.ts    # Config types + deep merge
-│   │       ├── entities.ts  # Host, Session, Channel, etc.
-│   │       └── constants.ts # Protocol version, defaults
+│   │       ├── config.ts    # Config types (TerminalProfile, TabLayout) + deep merge
+│   │       ├── entities.ts  # Host, Session, Channel, Workspace, ChannelGroup
+│   │       └── constants.ts # Protocol version, defaults, error codes
 │   ├── agent/               # @nexterm/agent — remote PTY manager
+│   │   ├── package.json
 │   │   └── src/
 │   │       ├── main.ts      # Entry point (--stdio flag)
 │   │       ├── pty.ts       # PTY manager (node-pty wrapper)
@@ -550,8 +570,9 @@ nexterm/
 │   │       ├── handler.ts   # Protocol message handler
 │   │       └── config.ts    # Agent config (visual_hints)
 │   ├── hub/                 # @nexterm/hub — local daemon
+│   │   ├── package.json
 │   │   └── src/
-│   │       ├── main.ts      # CLI + daemon start
+│   │       ├── main.ts      # Daemon start (exported for root CLI)
 │   │       ├── server.ts    # HTTP + WS server (Fastify)
 │   │       ├── api/         # REST route handlers
 │   │       ├── ws/          # WS message handlers
@@ -559,20 +580,55 @@ nexterm/
 │   │       ├── ssh.ts       # SSH connection manager
 │   │       ├── cache.ts     # Cache manager
 │   │       ├── storage/     # SQLite DAL (meta.db + spool.db)
+│   │       │   └── migrations/
+│   │       │       ├── meta/    # 001-initial.sql, ...
+│   │       │       └── spool/   # 001-initial.sql, ...
 │   │       ├── config.ts    # Config resolver (4-layer cascade)
 │   │       ├── auth.ts      # Token auth + pairing
-│   │       └── cli.ts       # CLI commands
-│   └── ui/                  # @nexterm/ui — Vue 3 SPA
-│       ├── vite.config.ts
-│       └── src/
-│           ├── App.vue
-│           ├── stores/      # Pinia (hosts, sessions, channels, config)
-│           ├── composables/ # useTerminal, useWs, useConfig
-│           ├── components/  # HostRail, ChannelSidebar, TerminalPane, ...
-│           └── services/    # API client, WS client
+│   │       └── cli.ts       # CLI commands (start, stop, host, pair, ...)
+│   └── clients/
+│       ├── web/             # @nexterm/web — Vue 3 SPA (MVP)
+│       │   ├── package.json
+│       │   ├── vite.config.ts
+│       │   └── src/
+│       │       ├── App.vue
+│       │       ├── stores/      # Pinia (hosts, sessions, channels, config)
+│       │       ├── composables/ # useTerminal, useWs, useConfig
+│       │       ├── components/  # HostRail, ChannelSidebar, TerminalPane, ...
+│       │       └── services/    # API client, WS client
+│       └── desktop/         # @nexterm/desktop — Tauri v2 (P1, placeholder)
+│           └── README.md
 └── scripts/
-    ├── dev.sh               # Start hub + UI dev servers
+    ├── dev.sh               # Start hub + web dev servers
     └── install-agent.sh     # Install agent on remote via SSH
+```
+
+### 8.3 Dependency Graph
+
+```
+nexterm (root CLI)
+  └── @nexterm/hub
+        ├── @nexterm/shared
+        ├── @nexterm/web (build output embedded as static files)
+        ├── better-sqlite3
+        ├── ssh2
+        ├── node-pty
+        └── fastify + @fastify/websocket
+
+@nexterm/agent
+  ├── @nexterm/shared
+  ├── node-pty
+  └── xterm-headless + @xterm/addon-serialize
+
+@nexterm/web
+  ├── @nexterm/shared (types only, tree-shaken)
+  ├── vue 3
+  ├── pinia
+  ├── xterm + @xterm/addon-fit + @xterm/addon-serialize
+  └── @msgpack/msgpack
+
+@nexterm/desktop (P1)
+  └── @nexterm/web (embedded in Tauri webview)
 ```
 
 ## 9. Technology Stack

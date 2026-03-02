@@ -57,8 +57,8 @@ MVP RELEASE
 | 1.1 | Hub HTTP server | hub | Fastify server on 127.0.0.1:3100, health endpoint, static file serving |
 | 1.2 | Local PTY spawn | hub | node-pty integration, SPAWN creates PTY, channel status BORN→LIVE |
 | 1.3 | WS transport (hub side) | hub | WS upgrade on /ws, MessagePack frames, INPUT→PTY→OUTPUT pipeline |
-| 1.4 | UI shell (Vue 3) | ui | Vite + Vue 3, 3-column layout scaffold (host rail empty, sidebar stub, main area) |
-| 1.5 | xterm.js integration | ui | Terminal renders in main pane, WS connection, INPUT/OUTPUT flowing, fit addon for resize |
+| 1.4 | UI shell (Vue 3) | web | Vite + Vue 3, 3-column layout scaffold (host rail empty, sidebar stub, main area) |
+| 1.5 | xterm.js integration | web | Terminal renders in main pane, WS connection, INPUT/OUTPUT flowing, fit addon for resize |
 
 **Dependencies:** M0 complete.
 
@@ -123,7 +123,7 @@ $ curl -X POST localhost:3100/api/hosts \
 | 3.1 | xterm headless on agent | agent | jsdom/linkedom polyfill, xterm.js headless, serialize()/deserialize(), SNAPSHOT_REQ/SNAPSHOT_RES |
 | 3.2 | Snapshot scheduler (hub) | hub | Idle 3s / forced 5s / on-detach snapshot requests, store in spool.db (kind=snapshot) |
 | 3.3 | Output chunking + spool | hub | 256KB chunks / 1s timer, write to spool.db, seq numbering, cache_index updates |
-| 3.4 | ATTACH with restore | hub, ui | ATTACH → snapshot + tail → ATTACH_OK → xterm deserialize + replay tail → seamless resume |
+| 3.4 | ATTACH with restore | hub, web | ATTACH → snapshot + tail → ATTACH_OK → xterm deserialize + replay tail → seamless resume |
 | 3.5 | SSH reconnect | hub | Retry backoff (1s→2s→4s→...→30s), re-HELLO, re-ATTACH all channels, UI overlay "Reconnecting..." |
 
 **Dependencies:** M2 complete.
@@ -154,9 +154,9 @@ $ curl -X POST localhost:3100/api/hosts \
 | Block | Description | Package(s) | Exit Criteria |
 |-------|-------------|------------|---------------|
 | 4.1 | Token auth | hub | Generate auth.json (32 bytes, chmod 600), Bearer header for REST, AUTH message for WS, startup permission check |
-| 4.2 | Pairing flow | hub, ui | POST /pair (generate code), POST /pair/verify (validate + return token), pairing UI screen, rate limiting |
+| 4.2 | Pairing flow | hub, web | POST /pair (generate code), POST /pair/verify (validate + return token), pairing UI screen, rate limiting |
 | 4.3 | Write-lock 3-tier | hub | WRITE_CLAIM/GRANT/DENY/FORCE/RELEASE/REVOKED/LOCK messages, auto-release on disconnect, lock state in ATTACH_OK |
-| 4.4 | Multi-client UI | ui | Write-lock indicators (✍ writer, 👁 reader), lock request/grant notifications, force override button |
+| 4.4 | Multi-client UI | web | Write-lock indicators (✍ writer, 👁 reader), lock request/grant notifications, force override button |
 
 **Dependencies:** M3 complete.
 
@@ -185,13 +185,13 @@ $ curl -X POST localhost:3100/api/hosts \
 
 | Block | Description | Package(s) | Exit Criteria |
 |-------|-------------|------------|---------------|
-| 5.1 | Host rail + icons | ui | Auto-generated initials + color hash, status dots (●/○/🔴/◐), click to select |
-| 5.2 | Channel sidebar + groups | ui | Channel list per host, drag to reorder, groups (create/rename/collapse), unread indicators |
-| 5.3 | Tabs + split panes | ui | Tab bar, [+] new channel, split horizontal/vertical, drag divider, workspace layout persistence |
-| 5.4 | Command palette | ui | Ctrl+P fuzzy search (hosts, channels, actions), keyboard navigation |
-| 5.5 | Config cascade | hub, ui | 4-layer deep merge (defaults→TOML→host profile→channel profile), settings UI, remote visual hints (trust policy) |
+| 5.1 | Host rail + icons | web | Auto-generated initials + color hash, status dots (●/○/🔴/◐), click to select |
+| 5.2 | Channel sidebar + groups | web | Channel list per host, drag to reorder, groups (create/rename/collapse), unread indicators |
+| 5.3 | Tabs + split panes | web | Tab bar, [+] new channel, split horizontal/vertical, drag divider, workspace layout persistence |
+| 5.4 | Command palette | web | Ctrl+P fuzzy search (hosts, channels, actions), keyboard navigation |
+| 5.5 | Config cascade | hub, web | 4-layer deep merge (defaults→TOML→host profile→channel profile), settings UI, remote visual hints (trust policy) |
 | 5.6 | CLI commands | hub | `nexterm start/stop`, `nexterm host add/list/test`, `nexterm pair`, `nexterm session list`, `nexterm config` |
-| 5.7 | Onboarding + packaging | root, ui | First-run UX (local terminal auto-opens), `npx nexterm` works, npm publish ready |
+| 5.7 | Onboarding + packaging | root, web | First-run UX (local terminal auto-opens), `npx nexterm` works, npm publish ready |
 
 **Dependencies:** M4 complete for auth-dependent features. M1 sufficient for UI blocks (can be parallelized).
 

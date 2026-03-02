@@ -45,15 +45,20 @@ Sessions survive client disconnects, SSH drops, and device switches.
 ## Monorepo Structure
 
 ```
+nexterm (root)        → npm: nexterm (CLI entrypoint, `npx nexterm`)
 packages/
-├── shared/    # @nexterm/shared — types, codec, framing
-├── agent/     # @nexterm/agent — remote PTY manager
-├── hub/       # @nexterm/hub   — local daemon
-└── ui/        # @nexterm/ui    — Vue 3 SPA
+├── shared/           → npm: @nexterm/shared (published)
+├── agent/            → npm: @nexterm/agent  (published)
+├── hub/              → npm: @nexterm/hub    (published)
+└── clients/
+    ├── web/          → @nexterm/web (NOT published, embedded by hub)
+    └── desktop/      → @nexterm/desktop (P1, Tauri)
 ```
 
-Dependencies flow: shared ← agent, shared ← hub, shared ← ui.
+Dependencies: shared ← agent, shared ← hub, shared ← web.
 hub depends on agent types but NOT agent package (agent runs as separate process).
+hub embeds web build output as static files.
+Root `nexterm` CLI wraps `@nexterm/hub`.
 
 ## Commands
 
@@ -65,7 +70,7 @@ pnpm test                 # Run all tests (vitest)
 pnpm lint                 # Lint + format check (biome)
 pnpm lint:fix             # Auto-fix lint issues
 pnpm -F @nexterm/hub test # Test single package
-pnpm -F @nexterm/ui dev   # Dev single package
+pnpm -F @nexterm/web dev  # Dev single package
 ```
 
 ## Conventions
@@ -98,7 +103,7 @@ pnpm -F @nexterm/ui dev   # Dev single package
 
 - Commit format: `type(scope): description`
 - Types: feat, fix, refactor, docs, test, chore
-- Scopes: shared, agent, hub, ui, root
+- Scopes: shared, agent, hub, web, desktop, root
 - Branch: `main` for trunk, `feat/xxx` for features
 
 ## Architecture Quick Reference
