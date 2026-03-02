@@ -106,6 +106,67 @@ pnpm -F @nexterm/web dev  # Dev single package
 - Scopes: shared, agent, hub, web, desktop, root
 - Branch: `main` for trunk, `feat/xxx` for features
 
+## Workflow Execution Strategy
+
+This project uses `/workflow` in **plan-provided mode** — specs are pre-written in `docs/`.
+The orchestrating session MUST be **Sonnet**. Launch with: `claude --model sonnet`
+
+### Model Routing (MANDATORY — no discretion)
+
+| Task | Model | How | Why |
+|------|-------|-----|-----|
+| **Orchestration** (workflow state, stage transitions, TODO tracking) | **Sonnet** | Main session | Mechanical protocol following, cost-efficient |
+| **Code implementation** (write blocks, fix findings) | **Opus** | `Task(general-purpose, opus)` | Architecture decisions, code quality |
+| **Code review** | **Opus** | `Task(senior-code-reviewer, opus)` | Deep analysis, security, patterns |
+| **Tests, lint, build** | **Haiku** | `Task(Bash, haiku)` | Mechanical execution, cheapest |
+| **File exploration, codebase search** | **Haiku** | `Task(Explore, haiku)` | Read-only, no judgment needed |
+| **Git push, PR, merge** | **Haiku** | `Task(Bash, haiku)` | Mechanical git operations |
+
+### Block Implementation Pattern
+
+For each implementation block, Sonnet orchestrator MUST delegate like this:
+
+```
+1. Sonnet reads MVP_ROADMAP.md block description + exit criteria
+2. Sonnet reads relevant spec sections (SPEC.md, PROTOCOL.md, etc.)
+3. Sonnet formulates detailed prompt with:
+   - Block description + exit criteria
+   - Relevant spec excerpts (copy the sections, don't say "read file X")
+   - Files to create/modify (from SPEC.md § 8.2 directory layout)
+   - Test requirements
+4. Task(general-purpose, opus, "Implement block N.M: [description]... [full context]")
+5. Opus writes code + tests
+6. Task(Bash, haiku, "cd ~/dev/nexterm && pnpm test && pnpm lint")
+7. If tests fail → Task(general-purpose, opus, "Fix: [error output]")
+8. Loop until green
+9. Sonnet updates .workflow-state.json + TODO.md
+```
+
+### What Sonnet Orchestrator Does NOT Do
+
+- **NEVER** write implementation code directly (always delegate to Opus)
+- **NEVER** run tests directly (always delegate to Haiku)
+- **NEVER** explore codebase directly (delegate to Haiku Explore)
+- **NEVER** make architectural decisions — if an ambiguity arises that specs don't cover, STOP and ask the user
+
+### What Sonnet Orchestrator DOES Do
+
+- Read and update `.workflow-state.json`
+- Read and update `TODO.md`
+- Formulate delegation prompts with full context (specs + block details)
+- Route results between stages (implement → test → review → fix → finalize)
+- Track progress, announce checkpoints
+
+### Review Pattern
+
+After all blocks in a milestone are complete:
+
+```
+Task(senior-code-reviewer, opus, "Review all code changes for milestone MN.
+  Check against: docs/SPEC.md, docs/PROTOCOL.md, docs/STORAGE.md, docs/SECURITY.md.
+  Focus: architecture compliance, security (OWASP), test coverage, naming conventions.")
+```
+
 ## Architecture Quick Reference
 
 ```
