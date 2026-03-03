@@ -1,1 +1,38 @@
-// @nexterm/agent entry point
+import { encodeFrame } from "@nexterm/shared";
+import type { ProtocolMessage } from "@nexterm/shared";
+import { AgentHandler } from "./handler.js";
+
+function main(): void {
+	// The agent speaks only via stdin/stdout (length-prefixed MessagePack).
+	// All diagnostic output goes to stderr so it never corrupts the frame stream.
+
+	const handler = new AgentHandler((msg: ProtocolMessage) => {
+		const frame = encodeFrame(msg);
+		process.stdout.write(Buffer.from(frame));
+	});
+
+	// Announce ourselves immediately; hub will not send commands until it
+	// receives HELLO.
+	handler.sendHello();
+
+	process.stdin.on("data", (data: Buffer) => {
+		try {
+			handler.onData(data);
+		} catch (err) {
+			console.error("[nexterm-agent] frame error:", err);
+		}
+	});
+
+	process.stdin.on("end", () => {
+		// Hub closed its end of the pipe — shut down cleanly.
+		handler.shutdown();
+		process.exit(0);
+	});
+
+	process.on("SIGTERM", () => {
+		handler.shutdown();
+		process.exit(0);
+	});
+}
+
+main();
