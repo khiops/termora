@@ -8,17 +8,20 @@
 		"nexterm": "./dist/cli.js"
 	},
 	"scripts": {
-		"dev": "echo 'TODO: concurrent hub + web dev'",
+		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @nexterm/hub dev\" \"pnpm -F @nexterm/web dev\"",
 		"build": "pnpm -r build",
 		"test": "vitest",
+		"test:run": "vitest run",
 		"lint": "biome check .",
-		"lint:fix": "biome check --write ."
+		"lint:fix": "biome check --write .",
+		"typecheck": "pnpm -r typecheck"
 	},
 	"dependencies": {
 		"@nexterm/hub": "workspace:*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
+		"concurrently": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

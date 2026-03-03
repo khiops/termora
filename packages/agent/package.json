@@ -6,6 +6,7 @@
 		"nexterm-agent": "./dist/main.js"
 	},
 	"scripts": {
+		"dev": "tsx watch src/main.ts",
 		"build": "tsc -p tsconfig.json",
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
