@@ -1,0 +1,23 @@
+{
+	"name": "@nexterm/hub",
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@nexterm/shared": "workspace:*",
+		"@msgpack/msgpack": "catalog:",
+		"better-sqlite3": "catalog:",
+		"fastify": "catalog:",
+		"@fastify/websocket": "catalog:",
+		"ssh2": "catalog:",
+		"@iarna/toml": "catalog:"
+	},
+	"devDependencies": {
+		"typescript": "catalog:",
+		"@types/better-sqlite3": "catalog:",
+		"@types/ssh2": "catalog:"
+	}
+}

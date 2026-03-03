@@ -1,0 +1,23 @@
+{
+	"name": "@nexterm/web",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "vue-tsc -p tsconfig.json --noEmit && vite build",
+		"dev": "vite",
+		"typecheck": "vue-tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@nexterm/shared": "workspace:*",
+		"vue": "catalog:",
+		"pinia": "catalog:",
+		"@msgpack/msgpack": "catalog:"
+	},
+	"devDependencies": {
+		"typescript": "catalog:",
+		"vite": "catalog:",
+		"@vitejs/plugin-vue": "catalog:",
+		"vue-tsc": "catalog:"
+	}
+}

@@ -1,0 +1,1 @@
+// @nexterm/web entry point

@@ -1,0 +1,20 @@
+{
+	"name": "@nexterm/agent",
+	"version": "0.1.0",
+	"type": "module",
+	"bin": {
+		"nexterm-agent": "./dist/main.js"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@nexterm/shared": "workspace:*",
+		"@msgpack/msgpack": "catalog:",
+		"node-pty": "catalog:"
+	},
+	"devDependencies": {
+		"typescript": "catalog:"
+	}
+}

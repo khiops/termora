@@ -1,0 +1,25 @@
+{
+	"name": "nexterm",
+	"version": "0.1.0",
+	"private": false,
+	"type": "module",
+	"description": "Local-first session terminal platform",
+	"bin": {
+		"nexterm": "./dist/cli.js"
+	},
+	"scripts": {
+		"dev": "echo 'TODO: concurrent hub + web dev'",
+		"build": "pnpm -r build",
+		"test": "vitest",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write ."
+	},
+	"dependencies": {
+		"@nexterm/hub": "workspace:*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}
