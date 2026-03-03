@@ -10,8 +10,10 @@ Two SQLite databases, both in WAL mode:
 
 | Database | Path | Purpose | Size profile |
 |----------|------|---------|-------------|
-| **meta.db** | `~/.config/nexterm/data/meta.db` | Config + relational data | Small (KB–MB) |
-| **spool.db** | `~/.config/nexterm/data/spool.db` | Output chunks + snapshots | Large (MB–GB) |
+| **meta.db** | `$NEXTERM_DATA_DIR/meta.db` | Config + relational data | Small (KB–MB) |
+| **spool.db** | `$NEXTERM_DATA_DIR/spool.db` | Output chunks + snapshots | Large (MB–GB) |
+
+Platform paths for `$NEXTERM_DATA_DIR`: see SPEC.md § 7 (Linux: `~/.local/share/nexterm/`, Windows: `%LOCALAPPDATA%\nexterm\`).
 
 **Why 2 databases:**
 - VACUUM spool without blocking meta reads
@@ -386,12 +388,12 @@ Each migration is a **SQL file**, run inside a transaction. Files are discovered
 ### 10.1 Backup
 
 ```bash
-# Full backup (both DBs)
-cp ~/.config/nexterm/data/meta.db backup/meta.db
-cp ~/.config/nexterm/data/spool.db backup/spool.db
+# Full backup (both DBs) — paths shown for Linux, see SPEC.md § 7 for Windows
+cp ~/.local/share/nexterm/meta.db backup/meta.db
+cp ~/.local/share/nexterm/spool.db backup/spool.db
 
 # Config-only backup (tiny, recommended for sync)
-cp ~/.config/nexterm/data/meta.db backup/meta.db
+cp ~/.local/share/nexterm/meta.db backup/meta.db
 cp ~/.config/nexterm/config.toml backup/config.toml
 # Spool is regeneratable — no need to backup
 ```

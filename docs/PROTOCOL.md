@@ -65,7 +65,7 @@ Hub ──── ssh2 session ──── Agent
 ### 2.2 Hub ↔ UI (WebSocket)
 
 ```
-UI ──── ws://localhost:3100/ws ──── Hub
+UI ──── ws://localhost:4100/ws ──── Hub
              │                         │
              │ binary WS frames        │
              │ (one frame = one msg)   │
@@ -451,7 +451,7 @@ Client A (WRITER)           Hub                Client B (READER)
 
 ## 6. REST API
 
-Base: `http://localhost:3100/api`
+Base: `http://localhost:4100/api`
 Auth: `Authorization: Bearer <token>` (except `/health`).
 
 ### Endpoints

@@ -13,7 +13,7 @@
 │ User's machine (trusted)                                  │
 │                                                           │
 │  Browser (PWA) ──── WS/REST ──── Hub daemon               │
-│  127.0.0.1:3100     │            127.0.0.1:3100           │
+│  127.0.0.1:4100     │            127.0.0.1:4100           │
 │                      │            ┌───────────────┐       │
 │  Token auth          │            │ meta.db       │       │
 │  (Bearer header)     │            │ spool.db      │ 0600  │
@@ -47,7 +47,7 @@
 
 | Actor | Access | Capability |
 |-------|--------|------------|
-| Malicious local process | Same machine, different user | Can attempt WS connection to 127.0.0.1:3100 |
+| Malicious local process | Same machine, different user | Can attempt WS connection to 127.0.0.1:4100 |
 | Malicious local process | Same user | Can read auth.json, DB files |
 | Network attacker | On same LAN | Cannot reach 127.0.0.1 (loopback only) |
 | Compromised remote | Agent's SSH user | Can send crafted protocol messages |
@@ -72,8 +72,8 @@
 ```
 1. Generate 32 bytes of crypto-random data
 2. Encode as hex string (64 chars)
-3. Write to ~/.config/nexterm/auth.json: { "token": "<hex>" }
-4. Set file permissions: chmod 600
+3. Write to $NEXTERM_CONFIG_DIR/auth.json: { "token": "<hex>" }
+4. Set file permissions: chmod 600 (Linux/macOS) or restrictive ACL (Windows)
 ```
 
 **Token validation:**
@@ -117,7 +117,7 @@ Device A (has token):
   Enter this code on the other device.
 
 Device B (needs token):
-  Opens http://<hub-ip>:3100 → pairing screen
+  Opens http://<hub-ip>:4100 → pairing screen
   Enters: 847293
   → Hub verifies code, returns token
   → Device B stores token locally
@@ -289,7 +289,7 @@ Security notes:
   • Use ssh-agent for key management (recommended over key files)
   • auth.json must be readable only by you (chmod 600)
   • Do not share your auth token — use 'nexterm pair' for other devices
-  • Terminal output is stored locally in ~/.config/nexterm/data/
+  • Terminal output is stored locally in data dir (see SPEC.md § 7 for platform paths)
   • To encrypt stored data, enable SQLCipher (P2 feature)
 ```
 

@@ -52,8 +52,8 @@
 
 ### MVP (Must Have)
 
-1. **Local PTY spawn** — bash (Linux), pwsh/cmd/wsl (Windows) via node-pty
-2. **Remote PTY via SSH stdio agent** — hub lance agent distant, framing MessagePack
+1. **Local PTY via agent** — hub spawns agent locally (child_process --stdio), agent manages PTY: bash/zsh (Linux/macOS), pwsh/cmd/wsl (Windows) via node-pty
+2. **Remote PTY via SSH stdio agent** — hub launches agent via SSH, same protocol as local. Agent is the universal PTY manager.
 3. **Snapshot + reconnect** — xterm serialize, cache hub, restore instantané
 4. **Multi-device attach** — un client se déconnecte, un autre attache au même channel
 5. **Multi-tab/pane UI** — Vue 3 + xterm.js, split horizontal/vertical, tabs
@@ -129,7 +129,7 @@ Resolution order (deep merge, last wins):
 
 ```
 1. Built-in defaults         (code — sensible defaults, catppuccin-mocha)
-2. User global config        (~/.config/nexterm/config.toml — dotfiles-friendly)
+2. User global config        ($NEXTERM_CONFIG_DIR/config.toml — XDG on Linux, %APPDATA% on Windows)
 3. Host profile override     (meta.db hosts.profile_json — per-host)
 4. Channel profile override  (meta.db channels.profile_json — per-session)
 ```
@@ -139,12 +139,16 @@ Host "prod-web-01" overrides background=#2d0000 + badge="PROD" (layer 3).
 Result: JetBrains + catppuccin BUT red background + PROD badge on that pane.
 
 ```
-~/.config/nexterm/
+Config dir ($XDG_CONFIG_HOME/nexterm/ or %APPDATA%\nexterm\):
 ├── config.toml          # Layer 2: theme, fonts, keybindings, defaults (user-editable)
-├── auth.json            # Token (chmod 600, auto-generated)
-└── data/
-    ├── meta.db          # Layers 3-4: host/channel profiles + relational data
-    └── spool.db         # Output chunks, snapshots
+└── auth.json            # Token (chmod 600 / ACL, auto-generated)
+
+Data dir ($XDG_DATA_HOME/nexterm/ or %LOCALAPPDATA%\nexterm\):
+├── meta.db              # Layers 3-4: host/channel profiles + relational data
+└── spool.db             # Output chunks, snapshots
+
+State dir ($XDG_STATE_HOME/nexterm/ or %LOCALAPPDATA%\nexterm\):
+└── runtime.json         # { port, pid, started_at } — discovery for CLI/UI
 ```
 
 ### Remote Visual Hints (MVP — killer feature)
@@ -168,10 +172,10 @@ No existing terminal does this. Differentiator.
 
 ### Transport Local (hub ↔ UI)
 
-Single HTTP server on one port (default 3100):
+Single HTTP server on one port (default 4100):
 
 ```
-HTTP server (port 3100)
+HTTP server (port 4100)
 ├─ GET  /api/hosts              ← REST (CRUD)
 ├─ POST /api/hosts
 ├─ GET  /api/sessions
@@ -477,7 +481,7 @@ Remote reboot scenario:
 ### User Flows
 
 **Flow 1 — First launch (onboarding):**
-1. `npx nexterm` → hub starts → opens http://localhost:3100
+1. `npx nexterm` → hub starts → opens http://localhost:4100
 2. Local host (🟦 L) auto-created in host rail
 3. Default local channel #bash auto-opened in main area
 4. User types commands immediately — no setup needed
@@ -496,7 +500,7 @@ Remote reboot scenario:
 **Flow 3 — Reconnect (same device):**
 1. User closes browser / laptop sleeps
 2. Agent keeps PTY alive, hub caches OUTPUT in spool.db
-3. User reopens http://localhost:3100
+3. User reopens http://localhost:4100
 4. Host rail shows hosts with status dots
 5. Click host → sidebar shows channels: #bash (◌ ORPHAN), #logs (◌ ORPHAN)
 6. Click #bash → ATTACH → hub sends SNAPSHOT → restore → tail catch-up → LIVE ✍

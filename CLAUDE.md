@@ -30,7 +30,7 @@ Sessions survive client disconnects, SSH drops, and device switches.
 | Test framework | vitest |
 | Test pattern | `*.spec.ts` (colocated) |
 | PTY | node-pty |
-| SSH | ssh2 |
+| SSH (client + mock server) | ssh2 (Client + Server) |
 | Terminal (UI) | xterm.js + addon-fit + addon-serialize |
 | Terminal (Agent) | xterm.js headless + addon-serialize |
 | Codec | @msgpack/msgpack |
@@ -56,9 +56,10 @@ packages/
 ```
 
 Dependencies: shared ← agent, shared ← hub, shared ← web.
-hub depends on agent types but NOT agent package (agent runs as separate process).
+hub depends on agent (spawns it locally via child_process for local sessions).
 hub embeds web build output as static files.
 Root `nexterm` CLI wraps `@nexterm/hub`.
+Hub does NOT depend on node-pty — all PTY management is in the agent.
 
 ## Commands
 
@@ -126,6 +127,22 @@ The orchestrator (main session) NEVER writes code, runs tests, or explores files
 The orchestrator itself: reads specs, formulates delegation prompts, routes results, updates state.
 Sonnet produces the code, Opus challenges it — best ROI for the Opus premium.
 
+### Judgment vs Mechanical (BLOCKING)
+
+Ad-hoc `Task()` prompts must match the task's cognitive demand to the right model.
+
+| Task asks to... | Type | Model |
+|-----------------|------|-------|
+| Find, list, search, count | Mechanical | **haiku** |
+| Run, execute, build, test | Mechanical | **haiku** |
+| Summarize, extract, condense | Mechanical | **haiku** |
+| **Evaluate, assess, audit** | **Judgment** | **sonnet min.** |
+| **Compare, classify, decide** | **Judgment** | **sonnet min.** |
+| **Flag violations, rate quality** | **Judgment** | **sonnet min.** |
+| **Recommend, prioritize** | **Judgment** | **sonnet min.** |
+
+Litmus test: if the prompt says "verify", "check compliance", "is this correct" → judgment → sonnet.
+
 ### Block Implementation Pattern
 
 For each implementation block, the orchestrator MUST delegate like this:
@@ -150,7 +167,7 @@ For each implementation block, the orchestrator MUST delegate like this:
 
 - **NEVER** write implementation code directly (always delegate to Sonnet)
 - **NEVER** run tests directly (always delegate to Haiku)
-- **NEVER** explore codebase directly (delegate to Haiku Explore)
+- **NEVER** explore codebase directly (delegate to subagent — haiku for mechanical, sonnet for judgment)
 - **NEVER** make architectural decisions — if an ambiguity arises that specs don't cover, STOP and ask the user
 
 ### What the Orchestrator DOES Do
@@ -174,15 +191,16 @@ Task(senior-code-reviewer, opus, "Review all code changes for milestone MN.
 ## Architecture Quick Reference
 
 ```
-UI (Vue 3 + xterm.js) ──── WS + REST ──── Hub (Fastify, 127.0.0.1:3100)
-                                            ├── Local PTY (node-pty)
-                                            ├── SSH → Agent (ssh2 + stdio)
+UI (Vue 3 + xterm.js) ──── WS + REST ──── Hub (Fastify, 127.0.0.1:4100)
+                                            ├── Local Agent (child_process, stdio)
+                                            ├── Remote Agent (ssh2, stdio)
                                             ├── meta.db (config, relational)
                                             └── spool.db (output, snapshots)
 
-Agent (remote, via SSH stdio):
-  stdin → MessagePack frames → PTY manager → N channels
+Agent (local or remote, same binary):
+  stdin → MessagePack frames → PTY manager (node-pty) → N channels
   stdout ← MessagePack frames ← OUTPUT/SNAPSHOT
+  Hub never touches PTY directly — agent is the universal PTY manager.
 ```
 
 ## Entity Model
@@ -194,10 +212,13 @@ Workspace (layout persistence)
 ## Config Cascade (4 layers, deep merge, last wins)
 
 1. Built-in defaults (code)
-2. `~/.config/nexterm/config.toml` (user)
+2. `config.toml` (XDG config dir on Linux, %APPDATA% on Windows — see SPEC.md § 7)
 3. `hosts.profile_json` (per-host, meta.db)
 3.5. Agent visual hints (from HELLO, ephemeral)
 4. `channels.profile_json` (per-channel, meta.db)
+
+**Port:** default 4100, configurable via CLI flag > `NEXTERM_PORT` env > config.toml > default.
+`zero_conf` mode: auto-increment 4100→4199 if port taken, write `runtime.json` in state dir.
 
 ## Common Pitfalls
 

@@ -14,15 +14,15 @@
 - [ ] [Foundation] Dev tooling: `pnpm dev` concurrent, CI GitHub Actions — Priority: H
 
 ### MVP — Local Terminal (M1)
-- [ ] [Hub] Fastify HTTP server on 127.0.0.1:3100, health endpoint — Priority: H
-- [ ] [Hub] Local PTY spawn via node-pty — Priority: H
-- [ ] [Hub] WS transport: upgrade on /ws, MessagePack frames, INPUT/OUTPUT pipeline — Priority: H
+- [ ] [Hub] Fastify HTTP server on 127.0.0.1:4100, health endpoint — Priority: H
+- [ ] [Agent] Core: stdin/stdout framing, PTY spawn via node-pty, HELLO, SPAWN flow — Priority: H (moved from M2 — agent needed for local sessions)
+- [ ] [Agent] Multiplexing: multiple channels per agent — Priority: H (moved from M2)
+- [ ] [Hub] Local agent spawn via child_process (--stdio), HELLO handshake — Priority: H
+- [ ] [Hub] WS transport: upgrade on /ws, MessagePack frames, INPUT→Agent→PTY→OUTPUT pipeline — Priority: H
 - [ ] [UI] Vue 3 + Vite scaffold, 3-column layout shell — Priority: H
 - [ ] [UI] xterm.js integration, WS client, fit addon — Priority: H
 
 ### MVP — Remote Terminal (M2)
-- [ ] [Agent] Core: stdin/stdout framing, PTY spawn, HELLO, SPAWN flow — Priority: H
-- [ ] [Agent] Multiplexing: multiple channels per agent — Priority: H
 - [ ] [Hub] SSH connector via ssh2, launch nexterm-agent --stdio — Priority: H
 - [ ] [Hub] Session manager: state machine, DB persistence — Priority: H
 - [ ] [Hub] REST API: /hosts CRUD, /sessions, /hosts/:id/test — Priority: H

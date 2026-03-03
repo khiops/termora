@@ -20,7 +20,7 @@ nexterm is a **local-first session terminal platform** that lets developers and 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         UI (PWA / Tauri)                        │
-│   Vue 3 + xterm.js — served at http://localhost:3100            │
+│   Vue 3 + xterm.js — served at http://localhost:4100            │
 │   Discord-style: host rail │ channel sidebar │ terminal panes   │
 └──────────┬──────────────────────────────┬───────────────────────┘
            │ REST (/api/*)                │ WS (/ws)
@@ -29,13 +29,13 @@ nexterm is a **local-first session terminal platform** that lets developers and 
            │                              │ SNAPSHOT, WRITE_*, HEARTBEAT
 ┌──────────▼──────────────────────────────▼───────────────────────┐
 │                        Hub (Node.js daemon)                     │
-│   Binds 127.0.0.1:3100 — single HTTP server (REST + WS)        │
+│   Binds 127.0.0.1:4100 — single HTTP server (REST + WS)        │
 │                                                                  │
 │   ┌──────────┐ ┌──────────────┐ ┌────────────┐ ┌────────────┐  │
 │   │ Client   │ │ Session      │ │ Cache      │ │ Config     │  │
 │   │ Manager  │ │ Manager      │ │ Manager    │ │ Resolver   │  │
 │   │          │ │              │ │            │ │            │  │
-│   │ WS conns │ │ Local PTY    │ │ Snapshots  │ │ 4-layer    │  │
+│   │ WS conns │ │ Local Agent  │ │ Snapshots  │ │ 4-layer    │  │
 │   │ Auth     │ │ SSH → Agent  │ │ Tail spool │ │ cascade    │  │
 │   │ WriteLock│ │ Reconnect    │ │ GC policy  │ │ deep merge │  │
 │   └──────────┘ └──────────────┘ └────────────┘ └────────────┘  │
@@ -45,13 +45,13 @@ nexterm is a **local-first session terminal platform** that lets developers and 
 │   │          spool.db (output chunks, snapshots)              │  │
 │   └───────────────────────────────────────────────────────────┘  │
 └──────────┬──────────────────────────────────────────────────────┘
-           │ SSH (ssh2 library)
-           │ Launches: nexterm-agent --stdio
-           │ Transport: MessagePack framed over stdio
+           │ Local: child_process.spawn("nexterm-agent --stdio")
+           │ Remote: SSH (ssh2) → "nexterm-agent --stdio"
+           │ Transport: MessagePack framed over stdio (both modes)
            │
 ┌──────────▼──────────────────────────────────────────────────────┐
-│                    Agent (Node.js, remote machine)              │
-│   Launched via SSH, communicates over stdin/stdout               │
+│                    Agent (Node.js, local or remote)             │
+│   Universal PTY manager — same binary, same protocol            │
 │                                                                  │
 │   ┌──────────────┐ ┌────────────────┐ ┌──────────────────────┐  │
 │   │ PTY Manager  │ │ Screen Model   │ │ Protocol Handler     │  │
@@ -79,7 +79,7 @@ TypeScript library used by hub, agent, and UI.
 
 ### 3.2 Agent (`@nexterm/agent`)
 
-Runs on remote machines (or locally for local sessions). Launched via SSH in stdio mode.
+Universal PTY manager. Runs locally (child process) or remotely (via SSH). Same binary, same protocol.
 
 **Responsibilities:**
 - Protocol handshake (HELLO with version, capabilities, visual_hints)
@@ -89,15 +89,27 @@ Runs on remote machines (or locally for local sessions). Launched via SSH in std
 - Channel multiplexing: N channels per agent process
 - Backpressure: pause PTY read when output buffer exceeds threshold
 
-**Process model:**
+**Process model (local):**
 ```
-ssh user@host "nexterm-agent --stdio"
+hub: child_process.spawn("nexterm-agent", ["--stdio"])
+  → Agent starts, writes HELLO to stdout
+  → Hub reads HELLO, sends SPAWN commands
+  → Each SPAWN creates a PTY + headless xterm
+  → OUTPUT flows: PTY → headless xterm (for state) → framed stdout → Hub
+  → INPUT flows: Hub → framed stdin → Agent → PTY
+```
+
+**Process model (remote):**
+```
+hub: ssh2.exec("nexterm-agent --stdio")
   → Agent starts, writes HELLO to stdout
   → Hub reads HELLO, sends SPAWN commands
   → Each SPAWN creates a PTY + headless xterm
   → OUTPUT flows: PTY → headless xterm (for state) → framed stdout → SSH → Hub
   → INPUT flows: Hub → SSH → framed stdin → Agent → PTY
 ```
+
+The protocol is identical in both modes. Only the transport differs (stdio pipe vs SSH channel).
 
 **Headless xterm.js (spike required):**
 - Needs minimal DOM polyfill (jsdom or custom shim)
@@ -119,18 +131,22 @@ Local daemon, single process, binds to 127.0.0.1.
 
 **Responsibilities:**
 
-**HTTP Server (single port, default 3100):**
+**HTTP Server (single port, default 4100, configurable):**
 - REST API: CRUD for hosts, sessions, channels, workspaces, config
 - WebSocket upgrade on `/ws` path
 - Static file serving for UI (production build)
 - Health endpoint (`GET /api/health`)
+- Port resolution: CLI flag > `NEXTERM_PORT` env > config.toml `[server] port` > default 4100
+- `zero_conf` mode (opt-in): if default port taken, auto-increment 4100→4199, write actual port to `runtime.json`
 
 **Session Manager:**
-- Local sessions: spawn PTY directly via node-pty
+- Local sessions: spawn agent as child process (`child_process.spawn`, --stdio), same protocol as remote
 - Remote sessions: open SSH via ssh2, launch agent, pipe stdio
+- Hub never spawns PTYs directly — agent is the universal PTY manager
 - Session state machine: STARTING → ACTIVE ↔ DISCONNECTED → CLOSED, with DETACHED branch
-- Reconnect: exponential backoff (1s, 2s, 4s, ... 30s max, 5min total timeout)
-- Channel multiplexing: multiple PTYs per SSH connection
+- Reconnect (remote): exponential backoff (1s, 2s, 4s, ... 30s max, 5min total timeout)
+- Reconnect (local): respawn agent immediately on unexpected exit
+- Channel multiplexing: multiple PTYs per agent connection
 
 **Client Manager:**
 - Track connected WS clients
@@ -147,7 +163,7 @@ Local daemon, single process, binds to 127.0.0.1.
 
 **Config Resolver:**
 - Layer 1: built-in defaults (code)
-- Layer 2: ~/.config/nexterm/config.toml (user file)
+- Layer 2: `$NEXTERM_CONFIG_DIR/config.toml` (user file — see § 7 for platform paths)
 - Layer 3: host.profile_json (meta.db)
 - Layer 3.5: agent visual_hints (from HELLO, if trust policy allows)
 - Layer 4: channel.profile_json (meta.db)
@@ -356,16 +372,24 @@ User types "ls\n"
   │
   Hub: find channel ch-1, verify write-lock
   │
-  Hub → PTY (node-pty): pty.write(data)
+  Hub → Agent (local stdio): [4-byte len][msgpack INPUT { channelId, data }]
   │
-  PTY → Hub: pty.onData(output)  // echoed input + command output
+  Agent: find PTY for ch-1 → pty.write(data)
   │
-  Hub: assign seqNo, write to spool.db (chunk)
+  PTY → Agent: pty.onData(output)
+  │
+  Agent: feed output to headless xterm (for screen state)
+  Agent → Hub (local stdio): [4-byte len][msgpack OUTPUT { channelId, seqNo, ts, data }]
+  │
+  Hub: write to spool.db (chunk)
   │
   Hub → ALL attached clients (WS): OUTPUT { channelId: "ch-1", seqNo: 42, ts, data }
   │
   UI: xterm.js terminal.write(data) → renders on screen
 ```
+
+Note: local and remote data flows are now identical — only the transport differs
+(child_process stdio vs SSH stdio). Hub never touches PTYs directly.
 
 ### 5.2 Remote PTY — Input/Output
 
@@ -416,8 +440,29 @@ Client connects, user clicks channel #bash (ORPHAN)
 UI: xterm.js restore snapshot → write tail chunks → channel LIVE (or cached READ-ONLY)
 ```
 
-### 5.4 SSH Connection Lifecycle
+### 5.4 Agent Connection Lifecycle
 
+**Local host:**
+```
+User clicks [+ channel] on local host
+  │
+  Hub: session exists for local host?
+  │
+  ├─ No → create Session (STARTING)
+  │  Hub: child_process.spawn("nexterm-agent", ["--stdio"])
+  │  Read HELLO from agent stdout
+  │  Session → ACTIVE
+  │  Proceed to SPAWN
+  │
+  └─ Yes (ACTIVE) → reuse agent process
+     Hub → Agent: SPAWN { shell, cwd, env, cols, rows }
+     Agent: spawn PTY, create headless xterm
+     Agent → Hub: SPAWN_OK { channelId: "ch-new" }
+     Hub: create Channel record (meta.db), status: BORN → LIVE
+     Hub → UI: channel available, auto-ATTACH
+```
+
+**Remote host:**
 ```
 User clicks [+ channel] on remote host
   │
@@ -490,7 +535,7 @@ Hub: broadcast WRITE_LOCK { holder: B }
 Layer 1: Built-in defaults (code)
   │ font: "monospace", fontSize: 14, theme: catppuccin-mocha
   │
-Layer 2: ~/.config/nexterm/config.toml (user)
+Layer 2: config.toml (see § 7 for platform paths)
   │ Overrides: font, theme, keybindings, hub settings
   │
 Layer 3: Host profile (meta.db hosts.profile_json)
@@ -509,16 +554,43 @@ Resolved config → xterm.js instance
 
 ## 7. File System Layout
 
+### Platform Paths
+
+| Purpose | Linux / macOS (XDG) | Windows |
+|---------|---------------------|---------|
+| **Config** | `$XDG_CONFIG_HOME/nexterm/` → `~/.config/nexterm/` | `%APPDATA%\nexterm\` |
+| **Data** (DBs) | `$XDG_DATA_HOME/nexterm/` → `~/.local/share/nexterm/` | `%LOCALAPPDATA%\nexterm\` |
+| **State** (runtime) | `$XDG_STATE_HOME/nexterm/` → `~/.local/state/nexterm/` | `%LOCALAPPDATA%\nexterm\` |
+
+All XDG variables respect user overrides. Fall back to defaults shown above.
+
+### Directory Contents
+
 ```
-~/.config/nexterm/
+Config dir:
 ├── config.toml              # User preferences (layer 2)
-├── auth.json                # { token: "crypto-random-hex" } (chmod 600)
-└── data/
-    ├── meta.db              # Hosts, sessions, channels, workspaces, groups
-    ├── meta.db-wal
-    ├── spool.db             # Output chunks, snapshots
-    └── spool.db-wal
+└── auth.json                # { token: "crypto-random-hex" } (chmod 600 / ACL on Windows)
+
+Data dir:
+├── meta.db                  # Hosts, sessions, channels, workspaces, groups
+├── meta.db-wal
+├── spool.db                 # Output chunks, snapshots
+└── spool.db-wal
+
+State dir:
+└── runtime.json             # { port, pid, started_at } — written on start, deleted on shutdown
 ```
+
+### runtime.json (zero_conf discovery)
+
+Written at startup when `zero_conf` is enabled and port auto-incremented.
+Always written when hub starts (even on default port) for CLI/UI discovery.
+
+```json
+{ "port": 4100, "pid": 12345, "started_at": "2026-03-03T10:00:00Z" }
+```
+
+CLI and UI read this file to find the hub. Deleted on clean shutdown; stale file detected via PID check.
 
 ## 8. Monorepo Structure
 
@@ -610,15 +682,18 @@ nexterm (root CLI)
   └── @nexterm/hub
         ├── @nexterm/shared
         ├── @nexterm/web (build output embedded as static files)
+        ├── @nexterm/agent (spawned as child process for local sessions)
         ├── better-sqlite3
         ├── ssh2
-        ├── node-pty
         └── fastify + @fastify/websocket
 
 @nexterm/agent
   ├── @nexterm/shared
   ├── node-pty
   └── xterm-headless + @xterm/addon-serialize
+
+Note: Hub does NOT depend on node-pty — all PTY management is in the agent.
+Hub spawns agent locally (child_process) or remotely (SSH).
 
 @nexterm/web
   ├── @nexterm/shared (types only, tree-shaken)
@@ -638,7 +713,7 @@ nexterm (root CLI)
 | Runtime | Node.js ≥ 20 LTS | Hub + Agent |
 | Language | TypeScript (strict) | All packages |
 | Monorepo | pnpm workspaces | Package management |
-| PTY | node-pty | Terminal spawn/resize |
+| PTY | node-pty | Terminal spawn/resize (agent only — hub delegates to agent) |
 | SSH | ssh2 | Remote connections |
 | Terminal (UI) | xterm.js + addon-fit + addon-serialize | Rendering + restore |
 | Terminal (Agent) | xterm.js headless + addon-serialize | Screen model |
@@ -674,8 +749,8 @@ nexterm (root CLI)
 |----------|:---:|:-----:|:--:|
 | Linux x64 | ✅ | ✅ | ✅ |
 | macOS arm64/x64 | ✅ | ✅ | ✅ |
-| Windows x64 | ✅ | ❌ (WSL) | ✅ |
+| Windows x64 | ✅ | ✅ | ✅ |
 | WSL | ✅ | ✅ | ✅ |
 
-Windows hub spawns local PTYs for: PowerShell, cmd, wsl.exe.
-Agent on Windows not supported MVP (use WSL).
+Agent spawns PTYs for the host OS: bash/zsh (Linux/macOS), PowerShell/cmd/wsl.exe (Windows).
+Hub never spawns PTYs directly — it delegates to the agent (local or remote).
