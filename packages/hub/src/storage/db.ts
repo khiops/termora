@@ -19,7 +19,6 @@ function applyCommonPragmas(db: Database.Database): void {
 	db.pragma("foreign_keys = ON");
 	db.pragma("busy_timeout = 5000");
 	db.pragma("cache_size = -8000");
-	db.pragma("wal_autocheckpoint = 1000");
 }
 
 function applySpoolPragmas(db: Database.Database): void {
@@ -27,7 +26,6 @@ function applySpoolPragmas(db: Database.Database): void {
 	if (currentAutoVacuum !== 2) {
 		db.pragma("auto_vacuum = INCREMENTAL");
 	}
-	db.pragma("wal_autocheckpoint = 2000");
 }
 
 function runMigrations(db: Database.Database, migrationsDir: string): void {
@@ -50,12 +48,14 @@ function runMigrations(db: Database.Database, migrationsDir: string): void {
 			.filter((f) => /^\d{3}-.*\.sql$/.test(f))
 			.sort();
 	} catch {
+		console.debug(`No migrations found at ${migrationsDir}`);
 		return;
 	}
 
 	const parseNum = (filename: string): number => Number.parseInt(filename.slice(0, 3), 10);
 
-	const latestMigration = files.length > 0 ? parseNum(files[files.length - 1]) : 0;
+	const lastFile = files[files.length - 1];
+	const latestMigration = files.length > 0 && lastFile !== undefined ? parseNum(lastFile) : 0;
 
 	if (currentVersion > latestMigration && latestMigration > 0) {
 		console.warn("[storage] DB schema version ahead of latest migration - skipping");
@@ -88,10 +88,12 @@ function runMigrations(db: Database.Database, migrationsDir: string): void {
 export function openDatabases(dataDir: string): DatabaseManager {
 	const metaDb = new Database(join(dataDir, "meta.db"));
 	applyCommonPragmas(metaDb);
+	metaDb.pragma("wal_autocheckpoint = 1000");
 
 	const spoolDb = new Database(join(dataDir, "spool.db"));
 	applySpoolPragmas(spoolDb);
 	applyCommonPragmas(spoolDb);
+	spoolDb.pragma("wal_autocheckpoint = 2000");
 
 	runMigrations(metaDb, join(MIGRATIONS_DIR, "meta"));
 	runMigrations(spoolDb, join(MIGRATIONS_DIR, "spool"));
@@ -109,10 +111,12 @@ export function openDatabases(dataDir: string): DatabaseManager {
 export function openTestDatabases(): DatabaseManager {
 	const metaDb = new Database(":memory:");
 	applyCommonPragmas(metaDb);
+	metaDb.pragma("wal_autocheckpoint = 1000");
 
 	const spoolDb = new Database(":memory:");
 	applySpoolPragmas(spoolDb);
 	applyCommonPragmas(spoolDb);
+	spoolDb.pragma("wal_autocheckpoint = 2000");
 
 	runMigrations(metaDb, join(MIGRATIONS_DIR, "meta"));
 	runMigrations(spoolDb, join(MIGRATIONS_DIR, "spool"));

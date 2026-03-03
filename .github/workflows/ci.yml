@@ -10,6 +10,7 @@ jobs:
   test:
     strategy:
       matrix:
+        # TODO: Add windows-latest to matrix after M1 (P1 per MVP roadmap)
         os: [ubuntu-latest, macos-latest]
         node: [20, 22]
     runs-on: ${{ matrix.os }}

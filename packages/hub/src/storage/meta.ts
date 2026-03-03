@@ -1,4 +1,4 @@
-import type { Host } from "@nexterm/shared";
+import type { Host, SshAuthMethod } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import type Database from "better-sqlite3";
 
@@ -38,24 +38,25 @@ interface HostRow {
 }
 
 function rowToHost(row: HostRow): Host {
-	return {
+	const host: Host = {
 		id: row.id,
 		type: row.type as Host["type"],
 		label: row.label,
-		sshHost: row.ssh_host ?? undefined,
-		sshPort: row.ssh_port ?? undefined,
-		sshAuth: (row.ssh_auth as Host["sshAuth"]) ?? undefined,
-		sshKeyPath: row.ssh_key_path ?? undefined,
 		iconType: row.icon_type as Host["iconType"],
-		iconValue: row.icon_value ?? undefined,
-		color: row.color ?? undefined,
-		profileJson: row.profile_json ?? undefined,
 		trustRemoteHints: row.trust_remote_hints as Host["trustRemoteHints"],
-		defaultShell: row.default_shell ?? undefined,
-		defaultCwd: row.default_cwd ?? undefined,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
+	if (row.ssh_host != null) host.sshHost = row.ssh_host;
+	if (row.ssh_port != null) host.sshPort = row.ssh_port;
+	if (row.ssh_auth != null) host.sshAuth = row.ssh_auth as SshAuthMethod;
+	if (row.ssh_key_path != null) host.sshKeyPath = row.ssh_key_path;
+	if (row.icon_value != null) host.iconValue = row.icon_value;
+	if (row.color != null) host.color = row.color;
+	if (row.profile_json != null) host.profileJson = row.profile_json;
+	if (row.default_shell != null) host.defaultShell = row.default_shell;
+	if (row.default_cwd != null) host.defaultCwd = row.default_cwd;
+	return host;
 }
 
 export class MetaDAL {

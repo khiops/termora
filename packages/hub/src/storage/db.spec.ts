@@ -113,4 +113,16 @@ describe("openTestDatabases", () => {
 		dbs = openTestDatabases();
 		expect(() => dbs.close()).not.toThrow();
 	});
+
+	it("meta.db: wal_autocheckpoint = 1000", () => {
+		dbs = openTestDatabases();
+		const val = dbs.meta.pragma("wal_autocheckpoint", { simple: true });
+		expect(val).toBe(1000);
+	});
+
+	it("spool.db: wal_autocheckpoint = 2000", () => {
+		dbs = openTestDatabases();
+		const val = dbs.spool.pragma("wal_autocheckpoint", { simple: true });
+		expect(val).toBe(2000);
+	});
 });

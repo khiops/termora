@@ -2,16 +2,16 @@
 
 ## In Progress
 
-(none)
+- [ ] 🟡 [Foundation] M0 — Review in progress
 
 ## Pending
 
 ### MVP — Foundation (M0)
-- [ ] [Foundation] Init pnpm monorepo + TypeScript strict + biome + vitest — Priority: H
-- [ ] [Foundation] Shared types: all protocol message types + ULID helper — Priority: H
-- [ ] [Foundation] MessagePack encode/decode + frame reader/writer — Priority: H
-- [ ] [Foundation] Storage layer: meta.db + spool.db schemas, migration runner — Priority: H
-- [ ] [Foundation] Dev tooling: `pnpm dev` concurrent, CI GitHub Actions — Priority: H
+- [x] ✅ [Foundation] Init pnpm monorepo + TypeScript strict + biome + vitest (2026-03-03)
+- [x] ✅ [Foundation] Shared types: all protocol message types + ULID helper (2026-03-03)
+- [x] ✅ [Foundation] MessagePack encode/decode + frame reader/writer (2026-03-03)
+- [x] ✅ [Foundation] Storage layer: meta.db + spool.db schemas, migration runner (2026-03-03)
+- [x] ✅ [Foundation] Dev tooling: `pnpm dev` concurrent, CI GitHub Actions (2026-03-03)
 
 ### MVP — Local Terminal (M1)
 - [ ] [Hub] Fastify HTTP server on 127.0.0.1:4100, health endpoint — Priority: H

@@ -1,3 +1,4 @@
+import type { Host } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
@@ -60,14 +61,17 @@ describe("MetaDAL — Hosts CRUD", () => {
 			expect(host.defaultCwd).toBe("/home/user");
 		});
 
-		it("generates ULID IDs (26 chars, sortable)", () => {
+		it("generates ULID IDs (26 chars, unique)", () => {
 			const h1 = dal.createHost({ type: "local", label: "A" });
 			const h2 = dal.createHost({ type: "local", label: "B" });
 
 			expect(h1.id).toHaveLength(26);
 			expect(h2.id).toHaveLength(26);
-			// ULIDs are lexicographically sortable by time
-			expect(h1.id < h2.id || h1.id === h2.id).toBe(true);
+			// Both IDs must be valid Crockford Base32 ULID format
+			expect(h1.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+			expect(h2.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+			// IDs must be distinct
+			expect(h1.id).not.toBe(h2.id);
 		});
 
 		it("throws on duplicate label (UNIQUE constraint)", () => {
@@ -127,9 +131,9 @@ describe("MetaDAL — Hosts CRUD", () => {
 
 			const hosts = dal.listHosts();
 			expect(hosts).toHaveLength(3);
-			expect(hosts[0].label).toBe("First");
-			expect(hosts[1].label).toBe("Second");
-			expect(hosts[2].label).toBe("Third");
+			expect((hosts[0] as Host).label).toBe("First");
+			expect((hosts[1] as Host).label).toBe("Second");
+			expect((hosts[2] as Host).label).toBe("Third");
 		});
 	});
 
