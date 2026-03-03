@@ -12,7 +12,9 @@
 		"@nexterm/shared": "workspace:*",
 		"vue": "catalog:",
 		"pinia": "catalog:",
-		"@msgpack/msgpack": "catalog:"
+		"@msgpack/msgpack": "catalog:",
+		"@xterm/xterm": "catalog:",
+		"@xterm/addon-fit": "catalog:"
 	},
 	"devDependencies": {
 		"typescript": "catalog:",
