@@ -14,6 +14,18 @@ import type {
 } from "@nexterm/shared";
 import { PtyManager } from "./pty.js";
 
+const SIGNAL_NAMES: Record<number, string> = {
+	1: "SIGHUP",
+	2: "SIGINT",
+	3: "SIGQUIT",
+	6: "SIGABRT",
+	9: "SIGKILL",
+	11: "SIGSEGV",
+	13: "SIGPIPE",
+	14: "SIGALRM",
+	15: "SIGTERM",
+};
+
 export class AgentHandler {
 	private reader = new FrameReader();
 	private ptyManager: PtyManager;
@@ -102,7 +114,7 @@ export class AgentHandler {
 								type: "CHANNEL_EXIT",
 								channelId,
 								exitCode: exit.exitCode,
-								signal: `SIG${exit.signal}`,
+								signal: SIGNAL_NAMES[exit.signal] ?? `SIG${exit.signal}`,
 							}
 						: { type: "CHANNEL_EXIT", channelId, exitCode: exit.exitCode };
 				this.sendMessage(exitMsg);

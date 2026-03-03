@@ -350,7 +350,7 @@ describe("AgentHandler", () => {
 		mock._triggerExit("chan-001", { exitCode: 1, signal: 15 });
 
 		const exit = sent.find((m) => m.type === "CHANNEL_EXIT") as { signal?: string } | undefined;
-		expect(exit?.signal).toBe("SIG15");
+		expect(exit?.signal).toBe("SIGTERM");
 	});
 
 	// -------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 ## In Progress
 
-- [ ] 🟡 [Foundation] M0 — Review in progress
+- [x] ✅ [Local Terminal] M1 — Complete (2026-03-03) — 131 tests, reviewed, findings fixed
 
 ## Pending
 
@@ -14,13 +14,13 @@
 - [x] ✅ [Foundation] Dev tooling: `pnpm dev` concurrent, CI GitHub Actions (2026-03-03)
 
 ### MVP — Local Terminal (M1)
-- [ ] [Hub] Fastify HTTP server on 127.0.0.1:4100, health endpoint — Priority: H
-- [ ] [Agent] Core: stdin/stdout framing, PTY spawn via node-pty, HELLO, SPAWN flow — Priority: H (moved from M2 — agent needed for local sessions)
-- [ ] [Agent] Multiplexing: multiple channels per agent — Priority: H (moved from M2)
-- [ ] [Hub] Local agent spawn via child_process (--stdio), HELLO handshake — Priority: H
-- [ ] [Hub] WS transport: upgrade on /ws, MessagePack frames, INPUT→Agent→PTY→OUTPUT pipeline — Priority: H
-- [ ] [UI] Vue 3 + Vite scaffold, 3-column layout shell — Priority: H
-- [ ] [UI] xterm.js integration, WS client, fit addon — Priority: H
+- [x] ✅ [Hub] Fastify HTTP server on 127.0.0.1:4100, health endpoint (2026-03-03)
+- [x] ✅ [Agent] Core: stdin/stdout framing, PTY spawn via node-pty, HELLO, SPAWN flow (2026-03-03)
+- [x] ✅ [Agent] Multiplexing: multiple channels per agent (2026-03-03)
+- [x] ✅ [Hub] Local agent spawn via child_process (--stdio), HELLO handshake (2026-03-03)
+- [x] ✅ [Hub] WS transport: upgrade on /ws, MessagePack frames, INPUT→Agent→PTY→OUTPUT pipeline (2026-03-03)
+- [x] ✅ [UI] Vue 3 + Vite scaffold, 3-column layout shell (2026-03-03)
+- [x] ✅ [UI] xterm.js integration, WS client, fit addon (2026-03-03)
 
 ### MVP — Remote Terminal (M2)
 - [ ] [Hub] SSH connector via ssh2, launch nexterm-agent --stdio — Priority: H
@@ -49,6 +49,13 @@
 - [ ] [Hub] CLI: start/stop, host add/list/test, pair, session list — Priority: H
 - [ ] [Root] Onboarding + npx nexterm packaging — Priority: H
 
+### Review Backlog (M1)
+- [ ] 🔧 [Hub] Session reuse: reuse sessionId for same host instead of new per SPAWN — Priority: M (F-001, fix in M2)
+- [ ] 🔧 [Hub] SPAWN: pass UI cols/rows to agent instead of hardcoded 80x24 — Priority: S (F-002, fix in M2)
+- [ ] 🔧 [Hub] WS handler: log malformed MessagePack messages — Priority: S (F-004, fix in M2)
+- [ ] 🔧 [Hub] WS input validation: channelId ULID, cols/rows range, data size, env count — Priority: M (F-009, fix before M4)
+- [ ] 🔧 [UI] TerminalPane: cleanup old channel on remount — Priority: S (F-008, fix in M5)
+
 ### Post-MVP
 - [ ] 💡 [UI] Tauri v2 desktop packaging — Priority: P1
 - [ ] 💡 [Hub] Search in scrollback (full-text index) — Priority: P1
@@ -61,7 +68,8 @@
 
 ## Completed
 
-(none)
+- [x] ✅ [Foundation] M0 — Foundation: monorepo, shared types, storage, dev tooling (2026-03-03)
+- [x] ✅ [Local Terminal] M1 — Hub HTTP, agent core+mux, local spawn, WS transport, Vue+xterm (2026-03-03)
 
 ## Blocked / Deferred
 
