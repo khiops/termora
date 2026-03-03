@@ -1,0 +1,128 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const MIGRATIONS_DIR = join(__dirname, "migrations");
+
+export interface DatabaseManager {
+	meta: Database.Database;
+	spool: Database.Database;
+	close(): void;
+}
+
+function applyCommonPragmas(db: Database.Database): void {
+	db.pragma("journal_mode = WAL");
+	db.pragma("synchronous = NORMAL");
+	db.pragma("foreign_keys = ON");
+	db.pragma("busy_timeout = 5000");
+	db.pragma("cache_size = -8000");
+	db.pragma("wal_autocheckpoint = 1000");
+}
+
+function applySpoolPragmas(db: Database.Database): void {
+	const currentAutoVacuum = db.pragma("auto_vacuum", { simple: true }) as number;
+	if (currentAutoVacuum !== 2) {
+		db.pragma("auto_vacuum = INCREMENTAL");
+	}
+	db.pragma("wal_autocheckpoint = 2000");
+}
+
+function runMigrations(db: Database.Database, migrationsDir: string): void {
+	const hasSchemaVersion =
+		db
+			.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
+			.get() !== undefined;
+
+	let currentVersion = 0;
+	if (hasSchemaVersion) {
+		const row = db.prepare("SELECT MAX(version) as v FROM schema_version").get() as {
+			v: number | null;
+		};
+		currentVersion = row.v ?? 0;
+	}
+
+	let files: string[];
+	try {
+		files = readdirSync(migrationsDir)
+			.filter((f) => /^\d{3}-.*\.sql$/.test(f))
+			.sort();
+	} catch {
+		return;
+	}
+
+	const parseNum = (filename: string): number => Number.parseInt(filename.slice(0, 3), 10);
+
+	const latestMigration = files.length > 0 ? parseNum(files[files.length - 1]) : 0;
+
+	if (currentVersion > latestMigration && latestMigration > 0) {
+		console.warn("[storage] DB schema version ahead of latest migration - skipping");
+		return;
+	}
+
+	for (const file of files) {
+		const num = parseNum(file);
+		if (num <= currentVersion) continue;
+
+		const sql = readFileSync(join(migrationsDir, file), "utf-8");
+
+		const applyMigration = db.transaction(() => {
+			db.exec(sql);
+			const versionAfter = db.prepare("SELECT MAX(version) as v FROM schema_version").get() as {
+				v: number | null;
+			};
+			if ((versionAfter.v ?? 0) < num) {
+				db.prepare(
+					"INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
+				).run(num);
+			}
+		});
+
+		applyMigration();
+		console.info(`[storage] Applied migration ${file}`);
+	}
+}
+
+export function openDatabases(dataDir: string): DatabaseManager {
+	const metaDb = new Database(join(dataDir, "meta.db"));
+	applyCommonPragmas(metaDb);
+
+	const spoolDb = new Database(join(dataDir, "spool.db"));
+	applySpoolPragmas(spoolDb);
+	applyCommonPragmas(spoolDb);
+
+	runMigrations(metaDb, join(MIGRATIONS_DIR, "meta"));
+	runMigrations(spoolDb, join(MIGRATIONS_DIR, "spool"));
+
+	return {
+		meta: metaDb,
+		spool: spoolDb,
+		close() {
+			metaDb.close();
+			spoolDb.close();
+		},
+	};
+}
+
+export function openTestDatabases(): DatabaseManager {
+	const metaDb = new Database(":memory:");
+	applyCommonPragmas(metaDb);
+
+	const spoolDb = new Database(":memory:");
+	applySpoolPragmas(spoolDb);
+	applyCommonPragmas(spoolDb);
+
+	runMigrations(metaDb, join(MIGRATIONS_DIR, "meta"));
+	runMigrations(spoolDb, join(MIGRATIONS_DIR, "spool"));
+
+	return {
+		meta: metaDb,
+		spool: spoolDb,
+		close() {
+			metaDb.close();
+			spoolDb.close();
+		},
+	};
+}
