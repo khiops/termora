@@ -13,6 +13,8 @@ interface MockPtyManager {
 	write: ReturnType<typeof vi.fn>;
 	resize: ReturnType<typeof vi.fn>;
 	nextSeq: ReturnType<typeof vi.fn>;
+	lastSeq: ReturnType<typeof vi.fn>;
+	snapshot: ReturnType<typeof vi.fn>;
 	onData: ReturnType<typeof vi.fn>;
 	onExit: ReturnType<typeof vi.fn>;
 	destroy: ReturnType<typeof vi.fn>;
@@ -27,11 +29,21 @@ function makeMockPtyManager(): MockPtyManager {
 	const dataCallbacks = new Map<string, (data: string) => void>();
 	const exitCallbacks = new Map<string, (exit: { exitCode: number; signal?: number }) => void>();
 
+	const defaultSnapshot = {
+		serialized: "\x1b[1;1Hhello world",
+		cols: 80,
+		rows: 24,
+		cursorX: 11,
+		cursorY: 0,
+	};
+
 	return {
 		spawn: vi.fn().mockReturnValue("chan-001"),
 		write: vi.fn(),
 		resize: vi.fn(),
 		nextSeq: vi.fn().mockReturnValue(1),
+		lastSeq: vi.fn().mockReturnValue(5),
+		snapshot: vi.fn().mockReturnValue(defaultSnapshot),
 		onData: vi.fn((channelId: string, cb: (data: string) => void) => {
 			dataCallbacks.set(channelId, cb);
 		}),
@@ -95,6 +107,7 @@ describe("AgentHandler", () => {
 		expect(msg.version).toBe(PROTOCOL_VERSION);
 		expect(msg.capabilities).toContain("multiplex");
 		expect(msg.capabilities).toContain("resize");
+		expect(msg.capabilities).toContain("snapshot");
 	});
 
 	// -------------------------------------------------------------------------
@@ -415,5 +428,78 @@ describe("AgentHandler", () => {
 		const { handler } = makeHandler(mock);
 		handler.shutdown();
 		expect(mock.destroyAll).toHaveBeenCalledOnce();
+	});
+
+	// -------------------------------------------------------------------------
+	// SNAPSHOT_REQ → SNAPSHOT_RES
+	// -------------------------------------------------------------------------
+
+	it("SNAPSHOT_REQ returns SNAPSHOT_RES with valid snapshot data", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, { type: "SNAPSHOT_REQ", channelId: "chan-001" });
+
+		expect(mock.snapshot).toHaveBeenCalledWith("chan-001");
+		expect(sent).toHaveLength(1);
+		const res = sent[0] as {
+			type: string;
+			channelId: string;
+			snapshot: {
+				serialized: string;
+				cols: number;
+				rows: number;
+				cursorX: number;
+				cursorY: number;
+			};
+			lastSeq: number;
+		};
+		expect(res.type).toBe("SNAPSHOT_RES");
+		expect(res.channelId).toBe("chan-001");
+		expect(res.snapshot.cols).toBe(80);
+		expect(res.snapshot.rows).toBe(24);
+		expect(res.snapshot.serialized).toBeTruthy();
+		expect(res.lastSeq).toBe(5);
+	});
+
+	it("SNAPSHOT_REQ for unknown channel is silently ignored", () => {
+		mock.snapshot.mockReturnValueOnce(null);
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, { type: "SNAPSHOT_REQ", channelId: "gone-channel" });
+
+		// No response emitted — hub reconciles on its own
+		expect(sent).toHaveLength(0);
+	});
+
+	// -------------------------------------------------------------------------
+	// ATTACH → ATTACH_OK
+	// -------------------------------------------------------------------------
+
+	it("ATTACH returns ATTACH_OK with snapshot when channel exists", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, { type: "ATTACH", channelId: "chan-001" });
+
+		expect(mock.snapshot).toHaveBeenCalledWith("chan-001");
+		expect(sent).toHaveLength(1);
+		const ok = sent[0] as {
+			type: string;
+			channelId: string;
+			snapshot: { serialized: string; cols: number; rows: number };
+			lastSeq: number;
+		};
+		expect(ok.type).toBe("ATTACH_OK");
+		expect(ok.channelId).toBe("chan-001");
+		expect(ok.snapshot).toBeDefined();
+		expect(ok.lastSeq).toBe(5);
+	});
+
+	it("ATTACH for unknown channel returns ERROR with CHANNEL_NOT_FOUND", () => {
+		mock.snapshot.mockReturnValueOnce(null);
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, { type: "ATTACH", channelId: "missing-chan" });
+
+		expect(sent).toHaveLength(1);
+		const err = sent[0] as { type: string; code: string; channelId: string };
+		expect(err.type).toBe("ERROR");
+		expect(err.code).toBe("CHANNEL_NOT_FOUND");
+		expect(err.channelId).toBe("missing-chan");
 	});
 });

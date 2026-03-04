@@ -13,7 +13,9 @@
 	"dependencies": {
 		"@nexterm/shared": "workspace:*",
 		"@msgpack/msgpack": "catalog:",
-		"node-pty": "catalog:"
+		"node-pty": "catalog:",
+		"@xterm/headless": "catalog:",
+		"@xterm/addon-serialize": "catalog:"
 	},
 	"devDependencies": {
 		"typescript": "catalog:"

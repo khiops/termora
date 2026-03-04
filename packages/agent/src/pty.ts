@@ -1,11 +1,14 @@
 import { generateId } from "@nexterm/shared";
+import type { SnapshotData } from "@nexterm/shared";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
+import { HeadlessTerminal } from "./headless.js";
 
 export interface PtyChannel {
 	id: string;
 	pty: IPty;
 	seq: number;
+	headless: HeadlessTerminal;
 }
 
 export interface SpawnOptions {
@@ -14,6 +17,7 @@ export interface SpawnOptions {
 	env: Record<string, string>;
 	cols: number;
 	rows: number;
+	scrollback?: number;
 }
 
 export class PtyManager {
@@ -30,7 +34,9 @@ export class PtyManager {
 			env: { ...process.env, ...options.env } as Record<string, string>,
 		});
 
-		this.channels.set(id, { id, pty: ptyProcess, seq: 0 });
+		const headless = new HeadlessTerminal(options.cols, options.rows, options.scrollback);
+
+		this.channels.set(id, { id, pty: ptyProcess, seq: 0, headless });
 		return id;
 	}
 
@@ -41,10 +47,11 @@ export class PtyManager {
 		channel.pty.write(Buffer.from(data).toString("binary"));
 	}
 
-	/** Resize a channel's PTY. */
+	/** Resize a channel's PTY and its headless mirror. */
 	resize(channelId: string, cols: number, rows: number): void {
 		const channel = this.getChannel(channelId);
 		channel.pty.resize(cols, rows);
+		channel.headless.resize(cols, rows);
 	}
 
 	/** Increment and return the next output sequence number for a channel. */
@@ -53,10 +60,23 @@ export class PtyManager {
 		return ++channel.seq;
 	}
 
-	/** Register an onData callback on a channel's PTY. */
+	/** Return the current sequence number for a channel without incrementing. */
+	lastSeq(channelId: string): number {
+		const channel = this.channels.get(channelId);
+		return channel?.seq ?? 0;
+	}
+
+	/**
+	 * Register an onData callback on a channel's PTY.
+	 * Also feeds each chunk into the headless terminal mirror.
+	 */
 	onData(channelId: string, callback: (data: string) => void): void {
 		const channel = this.getChannel(channelId);
-		channel.pty.onData(callback);
+		channel.pty.onData((rawData: string) => {
+			// Mirror output into the headless terminal (binary encoding round-trip)
+			channel.headless.write(Buffer.from(rawData, "binary"));
+			callback(rawData);
+		});
 	}
 
 	/** Register an onExit callback on a channel's PTY. */
@@ -65,11 +85,22 @@ export class PtyManager {
 		channel.pty.onExit(callback);
 	}
 
+	/**
+	 * Produce a serialized snapshot of a channel's headless terminal state.
+	 * Returns null if the channel does not exist.
+	 */
+	snapshot(channelId: string): SnapshotData | null {
+		const channel = this.channels.get(channelId);
+		if (!channel) return null;
+		return channel.headless.serialize();
+	}
+
 	/** Kill and remove a channel. No-op if the channel does not exist. */
 	destroy(channelId: string): void {
 		const channel = this.channels.get(channelId);
 		if (!channel) return;
 		channel.pty.kill();
+		channel.headless.dispose();
 		this.channels.delete(channelId);
 	}
 

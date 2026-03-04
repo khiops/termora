@@ -5,12 +5,14 @@ import {
 	PROTOCOL_VERSION,
 } from "@nexterm/shared";
 import type {
+	AgentAttachMessage,
 	AgentSpawnMessage,
 	DestroyMessage,
 	HeartbeatMessage,
 	InputMessage,
 	ProtocolMessage,
 	ResizeMessage,
+	SnapshotReqMessage,
 } from "@nexterm/shared";
 import { PtyManager } from "./pty.js";
 
@@ -52,8 +54,7 @@ export class AgentHandler {
 			type: "HELLO",
 			version: PROTOCOL_VERSION,
 			agentVersion: "0.1.0",
-			// "snapshot" capability added in M3 when xterm headless is integrated
-			capabilities: ["multiplex", "resize"],
+			capabilities: ["multiplex", "resize", "snapshot"],
 		});
 	}
 
@@ -85,7 +86,12 @@ export class AgentHandler {
 			case "HEARTBEAT":
 				this.handleHeartbeat(msg);
 				break;
-			// SNAPSHOT_REQ and ATTACH are handled in M3
+			case "SNAPSHOT_REQ":
+				this.handleSnapshotReq(msg as SnapshotReqMessage);
+				break;
+			case "ATTACH":
+				this.handleAttach(msg as AgentAttachMessage);
+				break;
 			default:
 				this.sendMessage({
 					type: "ERROR",
@@ -213,5 +219,45 @@ export class AgentHandler {
 
 	private handleHeartbeat(msg: HeartbeatMessage): void {
 		this.sendMessage({ type: "HEARTBEAT_ACK", ts: msg.ts });
+	}
+
+	/**
+	 * Handle SNAPSHOT_REQ: produce a snapshot of the channel's headless
+	 * terminal and reply with SNAPSHOT_RES.  Silently ignores unknown channels
+	 * (the hub may ask for a snapshot of a channel that just exited).
+	 */
+	private handleSnapshotReq(msg: SnapshotReqMessage): void {
+		const snapshot = this.ptyManager.snapshot(msg.channelId);
+		if (snapshot === null) return; // channel gone — hub will reconcile
+		this.sendMessage({
+			type: "SNAPSHOT_RES",
+			channelId: msg.channelId,
+			snapshot,
+			lastSeq: this.ptyManager.lastSeq(msg.channelId),
+		});
+	}
+
+	/**
+	 * Handle ATTACH: a client is reconnecting to an existing channel.
+	 * Reply with ATTACH_OK + snapshot when the channel exists, or ERROR when
+	 * the channel is gone (the hub must then SPAWN a new one).
+	 */
+	private handleAttach(msg: AgentAttachMessage): void {
+		const snapshot = this.ptyManager.snapshot(msg.channelId);
+		if (snapshot === null) {
+			this.sendMessage({
+				type: "ERROR",
+				code: "CHANNEL_NOT_FOUND",
+				message: `Channel not found: ${msg.channelId}`,
+				channelId: msg.channelId,
+			});
+			return;
+		}
+		this.sendMessage({
+			type: "ATTACH_OK",
+			channelId: msg.channelId,
+			snapshot,
+			lastSeq: this.ptyManager.lastSeq(msg.channelId),
+		});
 	}
 }
