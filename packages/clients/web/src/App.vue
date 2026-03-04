@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
@@ -88,6 +88,20 @@ const needsPairing = computed(
  * Cleared once the channel is open or if channels already exist.
  */
 const showWelcome = ref(false);
+
+/**
+ * On mount: if we have a token, connect the WebSocket and fetch hosts.
+ */
+onMounted(async () => {
+	if (authStore.token !== null) {
+		try {
+			await sessionStore.connect();
+			await hostsStore.fetchHosts();
+		} catch (err) {
+			console.error("[App] startup connect failed:", err);
+		}
+	}
+});
 
 /**
  * When the selected host changes, fetch the channel list for that host.

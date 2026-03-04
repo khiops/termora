@@ -18,7 +18,7 @@
 	},
 	"scripts": {
 		"dev": "tsx watch src/main.ts",
-		"build": "tsc -p tsconfig.json",
+		"build": "tsc -p tsconfig.json && cp -r src/storage/migrations dist/storage/",
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {

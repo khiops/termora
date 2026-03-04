@@ -45,13 +45,13 @@ export function loadRuntime(): RuntimeInfo | null {
 	}
 }
 
-function persistRuntime(info: RuntimeInfo): void {
+export function persistRuntime(info: RuntimeInfo): void {
 	const stateDir = getStateDir();
 	mkdirSync(stateDir, { recursive: true });
 	writeFileSync(join(stateDir, "runtime.json"), JSON.stringify(info, null, 2));
 }
 
-function deleteRuntime(): void {
+export function deleteRuntime(): void {
 	const p = join(getStateDir(), "runtime.json");
 	if (existsSync(p)) rmSync(p);
 }

@@ -37,9 +37,13 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			if (url === "/health" || url === "/api/health") return;
 			if (url === "/api/pair/verify") return;
 
+			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
+			// not at the HTTP upgrade level.
+			if (url.startsWith("/ws")) return;
+
 			// Static assets (index.html, JS bundles, etc.) do not require auth —
 			// the UI itself handles the pairing/auth flow on first load.
-			if (!url.startsWith("/api/") && !url.startsWith("/ws")) return;
+			if (!url.startsWith("/api/")) return;
 
 			const authHeader = request.headers.authorization;
 			if (!authHeader) {
