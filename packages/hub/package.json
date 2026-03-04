@@ -34,6 +34,7 @@
 	"devDependencies": {
 		"tsx": "catalog:",
 		"typescript": "catalog:",
+		"@types/node": "catalog:",
 		"@types/better-sqlite3": "catalog:",
 		"@types/ssh2": "catalog:"
 	}
