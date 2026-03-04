@@ -9,6 +9,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 
 	if (args.daemon) {
 		// Resolve the compiled main.js sibling path
-		const mainPath = new URL("./main.js", import.meta.url).pathname;
+		const mainPath = fileURLToPath(new URL("./main.js", import.meta.url));
 		const child = spawn(process.execPath, [mainPath], {
 			detached: true,
 			stdio: "ignore",

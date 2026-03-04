@@ -73,14 +73,18 @@ describe("openBrowser", () => {
 		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 		openBrowser("http://127.0.0.1:4100");
 		expect(execFile).toHaveBeenCalledOnce();
-		const [bin, args] = (execFile as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
+		const calls = vi.mocked(execFile).mock.calls;
+		expect(calls.length).toBeGreaterThan(0);
+		const bin = calls[0][0] as string;
+		const args = calls[0][1] as string[];
 		expect(bin).toBe("xdg-open");
 		expect(args).toEqual(["http://127.0.0.1:4100"]);
 	});
 
 	it("does not throw on execFile error (fire-and-forget)", () => {
 		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
-		(execFile as ReturnType<typeof vi.fn>).mockImplementation(
+		// biome-ignore lint/suspicious/noExplicitAny: execFile overloads make precise typing impractical
+		(vi.mocked(execFile) as any).mockImplementation(
 			(_bin: string, _args: string[], cb: (err: Error | null) => void) => {
 				cb(new Error("xdg-open not found"));
 			},

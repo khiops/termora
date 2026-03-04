@@ -199,7 +199,7 @@ export class SessionManager {
 
 		const requestId = generateId();
 		const shell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
-		const cwd = msg.cwd ?? process.env.HOME ?? "/";
+		const cwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
 
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
@@ -719,7 +719,7 @@ export class SessionManager {
 				type: "SPAWN",
 				requestId,
 				shell: ch.shell,
-				cwd: ch.cwd ?? process.env.HOME ?? "/",
+				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
 				env: {},
 				cols: 80,
 				rows: 24,

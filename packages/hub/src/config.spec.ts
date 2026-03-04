@@ -44,12 +44,15 @@ vi.mock("./session/ssh-agent.js", () => {
 
 describe("deepMerge", () => {
 	it("scalar override: later value wins", () => {
-		const result = deepMerge({ a: 1 }, { a: 2 });
+		const result = deepMerge<Record<string, unknown>>({ a: 1 }, { a: 2 });
 		expect(result).toEqual({ a: 2 });
 	});
 
 	it("nested object merge: keys merged recursively", () => {
-		const result = deepMerge({ a: { x: 1, y: 2 } }, { a: { y: 99, z: 3 } });
+		const result = deepMerge<Record<string, unknown>>(
+			{ a: { x: 1, y: 2 } },
+			{ a: { y: 99, z: 3 } },
+		);
 		expect(result).toEqual({ a: { x: 1, y: 99, z: 3 } });
 	});
 
@@ -65,23 +68,23 @@ describe("deepMerge", () => {
 	});
 
 	it("empty override: base is returned unchanged", () => {
-		const base = { fontFamily: "monospace", fontSize: 14 };
-		const result = deepMerge(base, {});
+		const base: Record<string, unknown> = { fontFamily: "monospace", fontSize: 14 };
+		const result = deepMerge<Record<string, unknown>>(base, {});
 		expect(result).toEqual(base);
 	});
 
 	it("undefined sources are skipped", () => {
-		const result = deepMerge({ a: 1 }, undefined, { b: 2 });
+		const result = deepMerge<Record<string, unknown>>({ a: 1 }, undefined, { b: 2 });
 		expect(result).toEqual({ a: 1, b: 2 });
 	});
 
 	it("null sources are skipped", () => {
-		const result = deepMerge({ a: 1 }, null, { b: 2 });
+		const result = deepMerge<Record<string, unknown>>({ a: 1 }, null, { b: 2 });
 		expect(result).toEqual({ a: 1, b: 2 });
 	});
 
 	it("multiple layers: last wins for scalars", () => {
-		const result = deepMerge(
+		const result = deepMerge<Record<string, unknown>>(
 			{ fontSize: 12, fontFamily: "monospace" },
 			{ fontSize: 13 },
 			{ fontSize: 14 },

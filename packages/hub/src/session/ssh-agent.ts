@@ -71,8 +71,8 @@ export class SshAgent extends AgentConnection {
 			host: hostname,
 			port,
 			username,
-			// For M2: accept all host keys, log the fingerprint for auditing.
-			// Known-hosts verification is scheduled for M4.
+			// Accept all host keys for now, log the fingerprint for auditing.
+			// Known-hosts verification is a planned hardening step (see docs/SECURITY.md).
 			hostVerifier: ((key: Buffer) => {
 				const fingerprint = key
 					.toString("hex")
