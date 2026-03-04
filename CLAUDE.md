@@ -228,3 +228,4 @@ Workspace (layout persistence)
 - MessagePack Uint8Array: use `@msgpack/msgpack` with `useBigInt64: false`
 - SQLite cross-DB: no FK between meta.db and spool.db — use cache_index for consistency
 - Auth token comparison: always `crypto.timingSafeEqual` (constant-time)
+- astix auto-indexes via file watcher — NEVER call `reindex_project` explicitly unless you get a stale index error after a `get_symbol`/`get_symbols` failure. Write → get_symbols works without reindex.

@@ -2,7 +2,8 @@
 
 ## In Progress
 
-- [x] ✅ [Local Terminal] M1 — Complete (2026-03-03) — 131 tests, reviewed, findings fixed
+- [x] ✅ [Local Terminal] M1 — Complete (2026-03-03) — 131 tests, reviewed
+- [x] ✅ [Remote Terminal] M2 — Complete (2026-03-04) — 190 tests, reviewed, findings fixed
 
 ## Pending
 
@@ -23,9 +24,9 @@
 - [x] ✅ [UI] xterm.js integration, WS client, fit addon (2026-03-03)
 
 ### MVP — Remote Terminal (M2)
-- [ ] [Hub] SSH connector via ssh2, launch nexterm-agent --stdio — Priority: H
-- [ ] [Hub] Session manager: state machine, DB persistence — Priority: H
-- [ ] [Hub] REST API: /hosts CRUD, /sessions, /hosts/:id/test — Priority: H
+- [x] ✅ [Hub] SSH connector via ssh2, launch nexterm-agent --stdio (2026-03-04)
+- [x] ✅ [Hub] Session manager: state machine, DB persistence (2026-03-04)
+- [x] ✅ [Hub] REST API: /hosts CRUD, /sessions, /hosts/:id/test (2026-03-04)
 
 ### MVP — Session Persistence (M3)
 - [ ] [Agent] xterm.js headless + DOM polyfill (SPIKE first) — Priority: H
@@ -70,6 +71,7 @@
 
 - [x] ✅ [Foundation] M0 — Foundation: monorepo, shared types, storage, dev tooling (2026-03-03)
 - [x] ✅ [Local Terminal] M1 — Hub HTTP, agent core+mux, local spawn, WS transport, Vue+xterm (2026-03-03)
+- [x] ✅ [Remote Terminal] M2 — SSH connector, session SM, REST API, review fixes (2026-03-04)
 
 ## Blocked / Deferred
 
