@@ -28,7 +28,7 @@ vi.mock("./local-agent.js", () => {
 		send = vi.fn((msg: ProtocolMessage) => {
 			if (msg.type === "SPAWN") {
 				const spawnMsg = msg as unknown as Record<string, string>;
-				const channelId = nextLocalChannelId();
+				const channelId = spawnMsg.channelId ?? nextLocalChannelId();
 				setImmediate(() => {
 					this.emit("message", {
 						type: "SPAWN_OK",
@@ -79,7 +79,7 @@ class MockSshAgent {
 	send = vi.fn((msg: ProtocolMessage) => {
 		if (msg.type === "SPAWN") {
 			const spawnMsg = msg as unknown as Record<string, string>;
-			const channelId = nextSshChannelId();
+			const channelId = spawnMsg.channelId ?? nextSshChannelId();
 			setImmediate(() => {
 				this._emit("message", {
 					type: "SPAWN_OK",
@@ -766,5 +766,192 @@ describe("SessionManager", () => {
 		const errMsg = received[0] as unknown as { type: string; code: string };
 		expect(errMsg.type).toBe("ERROR");
 		expect(errMsg.code).toBe("CHANNEL_NOT_FOUND");
+	});
+
+	it("handleAttach sends CHANNEL_DEAD error for a channel that is dead in the DB but not in memory", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({ type: "local", label: "dead-ch-host" });
+		const sessionId = "DEADCHSESS0000000000000000000";
+		dal.createSession({ id: sessionId, hostId: host.id, status: "closed" });
+		dal.createChannel({ id: "dead-channel-id", sessionId, status: "born" });
+		// Mark dead via raw SQL so the channel is in the DB but never in the SessionManager channels Map
+		const db = (
+			dal as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => void } } }
+		).db;
+		db.prepare("UPDATE channels SET status = 'dead' WHERE id = ?").run("dead-channel-id");
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Channel is dead in DB and absent from in-memory map
+		await sm.handleAttach("c1", "dead-channel-id");
+
+		expect(received).toHaveLength(1);
+		const errMsg = received[0] as unknown as { type: string; code: string };
+		expect(errMsg.type).toBe("ERROR");
+		expect(errMsg.code).toBe("CHANNEL_DEAD");
+	});
+
+	// ─── startup() sweep ─────────────────────────────────────────────────────
+
+	it("startup() marks alive channels dead when all sessions are already closed", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		// Pre-populate DB: channels alive but sessions already closed (no warm restart possible)
+		const host = dal.createHost({ type: "local", label: "startup-host" });
+		dal.createSession({ id: "STARTUPSESS01AAAAAAAAAAAAAAA", hostId: host.id, status: "closed" });
+
+		dal.createChannel({
+			id: "STARTUPCH01AAAAAAAAAAAAAAAAA",
+			sessionId: "STARTUPSESS01AAAAAAAAAAAAAAA",
+			status: "born",
+		});
+		dal.createChannel({
+			id: "STARTUPCH02AAAAAAAAAAAAAAAAA",
+			sessionId: "STARTUPSESS01AAAAAAAAAAAAAAA",
+			status: "live",
+		});
+
+		await sm.startup();
+
+		// Channels marked dead (no non-closed session to restore into)
+		expect(dal.getChannel("STARTUPCH01AAAAAAAAAAAAAAAAA")?.status).toBe("dead");
+		expect(dal.getChannel("STARTUPCH02AAAAAAAAAAAAAAAAA")?.status).toBe("dead");
+	});
+
+	// ─── Warm restart (Block 4) ───────────────────────────────────────────────
+
+	describe("startup() warm restart", () => {
+		it("is a no-op when there are no alive channels", async () => {
+			// Fresh SM with empty DB — nothing to restore
+			await sm.startup();
+
+			// No sessions or channels should be in memory
+			const { MetaDAL } = await import("../storage/meta.js");
+			const dal = new MetaDAL(dbManager.meta);
+			expect(dal.listSessions()).toHaveLength(0);
+			expect(dal.listChannels()).toHaveLength(0);
+		});
+
+		it("warm restarts local agent with same channel IDs", async () => {
+			const { MetaDAL } = await import("../storage/meta.js");
+			const dal = new MetaDAL(dbManager.meta);
+
+			// Set up: local host + active session + 2 live channels (simulating previous run)
+			const host = dal.createHost({ type: "local", label: "warm-local" });
+			const sessionId = "WARMSESS0000000000000000000001";
+			dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+			dal.createChannel({
+				id: "warm-ch-1",
+				sessionId,
+				status: "live",
+				shell: "/bin/bash",
+				cwd: "/home/user",
+			});
+			dal.createChannel({
+				id: "warm-ch-2",
+				sessionId,
+				status: "orphan",
+				shell: "/bin/sh",
+				cwd: null,
+			});
+
+			// startup() should warm-restart the local agent
+			await sm.startup();
+
+			// Wait for SPAWN_OK responses from MockLocalAgent (setImmediate-based)
+			await new Promise((r) => setImmediate(r));
+			await new Promise((r) => setImmediate(r));
+
+			// Session should be active in memory
+			const sessionState = (
+				sm as unknown as {
+					sessions: Map<string, { id: string; hostId: string; status: string }>;
+				}
+			).sessions.get(host.id);
+			expect(sessionState).toBeDefined();
+			expect(sessionState?.status).toBe("active");
+
+			// Both channels should be in memory
+			const channelsMap = (sm as unknown as { channels: Map<string, unknown> }).channels;
+			expect(channelsMap.has("warm-ch-1")).toBe(true);
+			expect(channelsMap.has("warm-ch-2")).toBe(true);
+
+			// Agent should have been spawned for this host
+			const agentsMap = (sm as unknown as { agents: Map<string, unknown> }).agents;
+			expect(agentsMap.has(host.id)).toBe(true);
+		});
+
+		it("marks channels dead when no non-closed session exists for a host", async () => {
+			const { MetaDAL } = await import("../storage/meta.js");
+			const dal = new MetaDAL(dbManager.meta);
+
+			// Channels exist but their session is closed
+			const host = dal.createHost({ type: "local", label: "orphan-host" });
+			const sessionId = "ORPHANSESS000000000000000000001";
+			dal.createSession({ id: sessionId, hostId: host.id, status: "closed" });
+			dal.createChannel({ id: "orphan-ch-1", sessionId, status: "live" });
+			dal.createChannel({ id: "orphan-ch-2", sessionId, status: "orphan" });
+
+			await sm.startup();
+
+			// Channels should be marked dead since their session is closed
+			expect(dal.getChannel("orphan-ch-1")?.status).toBe("dead");
+			expect(dal.getChannel("orphan-ch-2")?.status).toBe("dead");
+		});
+
+		it("populates restartTracking on warm restart", async () => {
+			const { MetaDAL } = await import("../storage/meta.js");
+			const dal = new MetaDAL(dbManager.meta);
+
+			const host = dal.createHost({ type: "local", label: "track-host" });
+			const sessionId = "TRACKSESS000000000000000000001";
+			dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+			dal.createChannel({ id: "track-ch-1", sessionId, status: "live" });
+
+			await sm.startup();
+
+			// Wait for SPAWN_OK responses from MockLocalAgent (setImmediate-based)
+			await new Promise((r) => setImmediate(r));
+
+			// restartTracking should have an entry for this host after warm restart
+			const tracking = (
+				sm as unknown as {
+					restartTracking: Map<string, { count: number; windowStart: number }>;
+				}
+			).restartTracking.get(host.id);
+			expect(tracking).toBeDefined();
+			expect(tracking?.count).toBe(1);
+		});
+
+		it("SSH host channels are marked orphan but no agent is spawned", async () => {
+			const { MetaDAL } = await import("../storage/meta.js");
+			const dal = new MetaDAL(dbManager.meta);
+
+			const host = dal.createHost({
+				type: "ssh",
+				label: "ssh-warm",
+				sshHost: "user@remote",
+				sshAuth: "key",
+				sshKeyPath: "/key",
+			});
+			const sessionId = "SSHWARMSESS00000000000000000001";
+			dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+			dal.createChannel({ id: "ssh-warm-ch-1", sessionId, status: "live" });
+
+			await sm.startup();
+
+			// No agent spawned for SSH (no auto-reconnect at startup)
+			const agentsMap = (sm as unknown as { agents: Map<string, unknown> }).agents;
+			expect(agentsMap.has(host.id)).toBe(false);
+
+			// Channel is in memory as orphan
+			const channelsMap = (sm as unknown as { channels: Map<string, { status: string }> }).channels;
+			expect(channelsMap.get("ssh-warm-ch-1")?.status).toBe("orphan");
+		});
 	});
 });

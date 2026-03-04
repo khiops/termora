@@ -71,6 +71,8 @@ export class SessionManager {
 	private clients = new Map<string, WsClient>();
 	/** hostId → pending reconnect timer */
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Crash-loop tracking for local agent restarts: hostId → { count, windowStart } */
+	private restartTracking = new Map<string, { count: number; windowStart: number }>();
 	private metaDal: MetaDAL;
 
 	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
@@ -102,6 +104,67 @@ export class SessionManager {
 		if (existing) return existing.id;
 		const host = this.metaDal.createHost({ type: "local", label: "local" });
 		return host.id;
+	}
+
+	/**
+	 * On hub start, restore sessions that were alive before the previous shutdown.
+	 * Local hosts get a warm restart (respawn agent + PTYs under same channel IDs).
+	 * SSH hosts get their channels marked orphan (future: schedule reconnect).
+	 * If no alive channels exist, this is a no-op (fresh start).
+	 */
+	async startup(): Promise<void> {
+		const alive = this.metaDal.listAliveChannelsWithHost();
+		if (alive.length === 0) return;
+
+		// Group by hostId
+		const byHost = new Map<string, typeof alive>();
+		for (const ch of alive) {
+			const group = byHost.get(ch.hostId) ?? [];
+			group.push(ch);
+			byHost.set(ch.hostId, group);
+		}
+
+		for (const [hostId, channels] of byHost) {
+			const first = channels[0];
+			if (!first) continue;
+			const hostType = first.hostType;
+			// Find the non-closed session for this host
+			const sessions = this.metaDal.listSessions(hostId);
+			const session = sessions.find((s) => s.status !== "closed");
+			if (!session) {
+				// No active session — mark channels dead
+				for (const ch of channels) {
+					this.metaDal.updateChannelStatus(ch.id, "dead");
+				}
+				continue;
+			}
+
+			// Mark session disconnected (agent is gone after hub restart)
+			this.metaDal.markHostSessionDisconnected(hostId);
+			this.sessions.set(hostId, {
+				id: session.id,
+				hostId,
+				status: "disconnected",
+			});
+
+			// Mark channels orphan + restore in-memory state
+			this.metaDal.markHostChannelsOrphan(hostId);
+			for (const ch of channels) {
+				this.channels.set(ch.id, {
+					sessionId: session.id,
+					hostId,
+					status: "orphan",
+					clients: new Set(),
+					shell: ch.shell,
+					...(ch.cwd !== null && { cwd: ch.cwd }),
+				});
+			}
+
+			if (hostType === "local") {
+				await this._warmRestartLocal(hostId, session.id);
+			}
+			// SSH: channels stay orphan — future enhancement could schedule reconnect
+		}
 	}
 
 	/** Expose MetaDAL for REST API route handlers. */
@@ -207,8 +270,8 @@ export class SessionManager {
 			shell,
 			cwd,
 			env: msg.env ?? {},
-			cols: 80,
-			rows: 24,
+			cols: msg.cols ?? 80,
+			rows: msg.rows ?? 24,
 		};
 		agent.send(agentSpawn);
 
@@ -291,10 +354,13 @@ export class SessionManager {
 
 		const channel = this.channels.get(channelId);
 		if (!channel) {
+			// Channel not in memory — check DB for dead channels
+			const dbChannel = this.metaDal.getChannel(channelId);
+			const code = dbChannel?.status === "dead" ? "CHANNEL_DEAD" : "CHANNEL_NOT_FOUND";
 			const errorMsg: ErrorMessage = {
 				type: "ERROR",
-				code: "CHANNEL_NOT_FOUND",
-				message: `Channel ${channelId} not found`,
+				code,
+				message: `Channel ${channelId} ${code === "CHANNEL_DEAD" ? "is dead" : "not found"}`,
 			};
 			client.send(errorMsg);
 			return false;
@@ -384,14 +450,16 @@ export class SessionManager {
 			// Store the fresh snapshot in spool.db
 			const snapshotJson = JSON.stringify(agentResponse.snapshot);
 			const dataBlob = Buffer.from(snapshotJson);
+			const maxSeq = this.spoolDal.getMaxSeq(channelId);
+			const snapshotSeq = Math.max(maxSeq, agentResponse.lastSeq) + 1;
 			const chunkId = this.spoolDal.insertChunk({
 				channelId,
-				seq: agentResponse.lastSeq + 1,
+				seq: snapshotSeq,
 				kind: "snapshot",
 				dataBlob,
 				uncompressedLen: dataBlob.length,
 			});
-			this.metaDal.updateCacheIndex(channelId, chunkId, agentResponse.lastSeq);
+			this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
 
 			// Tail = output chunks after the snapshot's lastSeq
 			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
@@ -622,14 +690,16 @@ export class SessionManager {
 				const res = msg as AgentSnapshotResMessage;
 				const snapshotJson = JSON.stringify(res.snapshot);
 				const dataBlob = Buffer.from(snapshotJson);
+				const maxSeq = this.spoolDal.getMaxSeq(res.channelId);
+				const snapshotSeq = Math.max(maxSeq, res.lastSeq) + 1;
 				const chunkId = this.spoolDal.insertChunk({
 					channelId: res.channelId,
-					seq: res.lastSeq + 1,
+					seq: snapshotSeq,
 					kind: "snapshot",
 					dataBlob,
 					uncompressedLen: dataBlob.length,
 				});
-				this.metaDal.updateCacheIndex(res.channelId, chunkId, res.lastSeq);
+				this.metaDal.updateCacheIndex(res.channelId, chunkId, snapshotSeq - 1);
 			} else if (msg.type === "CHANNEL_EXIT") {
 				const exitMsg = msg as ChannelExitMessage;
 				const channel = this.channels.get(exitMsg.channelId);
@@ -653,8 +723,10 @@ export class SessionManager {
 				this._updateSessionStatus(hostId, session.id, "disconnected");
 				this._scheduleReconnect(hostId, session.id, 0, Date.now());
 			} else {
-				// Local: close immediately
-				this._closeSession(hostId, session.id);
+				// Local: warm restart (respawn agent + PTYs)
+				this._warmRestartLocal(hostId, session.id).catch(() => {
+					this._closeSession(hostId, session.id);
+				});
 			}
 		});
 	}
@@ -713,11 +785,12 @@ export class SessionManager {
 		for (const [channelId, ch] of this.channels.entries()) {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
 
-			// Re-spawn channels that were alive before disconnect
+			// Re-spawn channels that were alive before disconnect, preserving the channel ID
 			const requestId = generateId();
 			const agentSpawn: AgentSpawnMessage = {
 				type: "SPAWN",
 				requestId,
+				channelId,
 				shell: ch.shell,
 				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
 				env: {},
@@ -726,37 +799,89 @@ export class SessionManager {
 			};
 			agent.send(agentSpawn);
 
-			// Listen for SPAWN_OK matching this requestId to re-map the channel
 			const handler = (incoming: ProtocolMessage): void => {
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					if (spawnOk.requestId !== requestId) return;
 					agent.off("message", handler);
 
-					// Map the new channelId back to the old one isn't straightforward;
-					// for now re-attach under the new channelId and notify clients
-					const newChannelId = spawnOk.channelId;
-					this.channels.set(newChannelId, {
-						...ch,
-						status: ch.clients.size > 0 ? "live" : "orphan",
-					});
-					this.channels.delete(channelId);
-
-					// Notify clients about the new channel
-					const stateMsg: ChannelStateMessage = {
-						type: "CHANNEL_STATE",
-						channelId: newChannelId,
-						sessionId,
-						status: "live",
-					};
-					for (const clientId of ch.clients) {
-						const client = this.clients.get(clientId);
-						if (client) {
-							client.attachedChannels.delete(channelId);
-							client.attachedChannels.add(newChannelId);
-							client.send(stateMsg);
-						}
+					// Channel ID is preserved — just update status
+					if (ch.clients.size > 0) {
+						this._updateChannelStatus(channelId, sessionId, "live");
 					}
+					this.scheduler.trackChannel(channelId);
+					this.chunker.trackChannel(channelId);
+				} else if (incoming.type === "SPAWN_ERR") {
+					const spawnErr = incoming as AgentSpawnErrMessage;
+					if (spawnErr.requestId !== requestId) return;
+					agent.off("message", handler);
+					this._updateChannelStatus(channelId, ch.sessionId, "dead");
+				}
+			};
+			agent.on("message", handler);
+		}
+	}
+
+	/**
+	 * Warm restart for local agent: respawn the agent process and re-create
+	 * PTYs under the SAME channel IDs so clients can reattach seamlessly.
+	 */
+	private async _warmRestartLocal(hostId: string, sessionId: string): Promise<void> {
+		// Crash-loop protection: max 3 restarts in 60s
+		const now = Date.now();
+		const tracking = this.restartTracking.get(hostId) ?? { count: 0, windowStart: now };
+		if (now - tracking.windowStart > 60_000) {
+			// Reset window
+			tracking.count = 0;
+			tracking.windowStart = now;
+		}
+		tracking.count++;
+		this.restartTracking.set(hostId, tracking);
+
+		if (tracking.count > 3) {
+			this._closeSession(hostId, sessionId);
+			return;
+		}
+
+		const agent = new LocalAgent(resolveAgentPath());
+		try {
+			await agent.start();
+		} catch {
+			this._closeSession(hostId, sessionId);
+			return;
+		}
+
+		this._wireAgentEvents(hostId, sessionId, agent);
+		this.agents.set(hostId, agent);
+		this._updateSessionStatus(hostId, sessionId, "active");
+
+		// Re-spawn PTYs for each orphan channel, using the SAME channel ID
+		for (const [channelId, ch] of this.channels.entries()) {
+			if (ch.hostId !== hostId || ch.status === "dead") continue;
+
+			const requestId = generateId();
+			agent.send({
+				type: "SPAWN",
+				requestId,
+				channelId,
+				shell: ch.shell,
+				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
+				env: {},
+				cols: 80,
+				rows: 24,
+			});
+
+			const handler = (msg: ProtocolMessage): void => {
+				if (msg.type === "SPAWN_OK" && (msg as AgentSpawnOkMessage).requestId === requestId) {
+					agent.off("message", handler);
+					this.scheduler.trackChannel(channelId);
+					this.chunker.trackChannel(channelId);
+				} else if (
+					msg.type === "SPAWN_ERR" &&
+					(msg as AgentSpawnErrMessage).requestId === requestId
+				) {
+					agent.off("message", handler);
+					this._updateChannelStatus(channelId, ch.sessionId, "dead");
 				}
 			};
 			agent.on("message", handler);

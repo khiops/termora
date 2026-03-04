@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
 import { WsClient } from "../services/ws-client.js";
 import { useAuthStore } from "./auth.js";
+import { useChannelsStore } from "./channels.js";
 import { useHostsStore } from "./hosts.js";
 import { useWriteLockStore } from "./writelock.js";
 
@@ -16,6 +17,8 @@ export const useSessionStore = defineStore("session", () => {
 	const authenticated = ref(false);
 	/** Set to true when AUTH_FAIL is received — triggers pairing screen. */
 	const authFailed = ref(false);
+	/** Incremented each time the WS reconnects and re-authenticates successfully. */
+	const reconnectCount = ref(0);
 
 	/**
 	 * Connect to hub WebSocket, send AUTH, then wait for AUTH_OK or AUTH_FAIL.
@@ -42,8 +45,33 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 
+		// Route CHANNEL_STATE messages to channels store for status dots
+		const channelsStore = useChannelsStore();
+		wsClient.on("CHANNEL_STATE", (msg) => {
+			if (msg.type === "CHANNEL_STATE") {
+				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
+			}
+		});
+
 		// Authenticate immediately after connecting
 		await _authenticate();
+
+		// Re-authenticate and refresh state after each WS auto-reconnect
+		wsClient.on("WS_RECONNECT", async () => {
+			try {
+				await _authenticate();
+				// Re-fetch state after reconnect
+				const hostsStore2 = useHostsStore();
+				await hostsStore2.fetchHosts();
+				const channelsStore2 = useChannelsStore();
+				if (channelsStore2.activeHostId) {
+					await channelsStore2.fetchChannels(channelsStore2.activeHostId);
+				}
+				reconnectCount.value++;
+			} catch (err) {
+				console.error("[session] Reconnect auth failed:", err);
+			}
+		});
 	}
 
 	/**
@@ -160,6 +188,7 @@ export const useSessionStore = defineStore("session", () => {
 		authenticated,
 		authFailed,
 		currentChannelId,
+		reconnectCount,
 		connect,
 		spawnTerminal,
 		disconnect,

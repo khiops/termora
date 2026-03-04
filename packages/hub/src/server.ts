@@ -5,10 +5,12 @@ import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { registerChannelRoutes } from "./api/channels.js";
 import { registerConfigRoutes } from "./api/config.js";
+import { registerFontRoutes } from "./api/fonts.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { validateToken } from "./auth.js";
+import { getConfigDir } from "./cli.js";
 import { ConfigResolver } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
@@ -19,7 +21,8 @@ export interface ServerOptions {
 	port?: number; // default: DEFAULT_PORT (4100)
 	logger?: boolean; // default: true
 	dbManager?: DatabaseManager; // when provided, WS routes are registered
-	authToken?: string; // when provided, Bearer auth is enforced on all routes except /health
+	authToken?: string; // when provided, Bearer auth is enforced on all routes except /api/health
+	configDir?: string; // override config directory (defaults to getConfigDir())
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -34,8 +37,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			const url = request.url;
 
 			// Unauthenticated endpoints
-			if (url === "/health" || url === "/api/health") return;
+			if (url === "/api/health") return;
 			if (url === "/api/pair/verify") return;
+			if (url === "/api/fonts") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -76,7 +80,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	}
 
 	// Health endpoint
-	server.get("/health", async () => {
+	server.get("/api/health", async () => {
 		return { status: "ok", version: "0.1.0", uptime: process.uptime() };
 	});
 
@@ -92,16 +96,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		if (wasNew) {
 			server.log.info("Created default local host");
 		}
+		await sessionManager.startup();
 
 		await registerWsRoutes(server, sessionManager, options.authToken);
+		const configDir = options.configDir ?? getConfigDir();
 		const configResolver = new ConfigResolver(metaDal);
+		configResolver.loadFromFile(configDir);
 		registerHostRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal);
 		registerConfigRoutes(server, metaDal, configResolver);
+		registerFontRoutes(server, configDir);
 		if (options.authToken) {
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}
+		await registerUserFonts(server, configDir);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
@@ -135,6 +144,30 @@ export async function startServer(
  * development, where Vite serves the UI on a separate port), we simply
  * skip registration without throwing.
  */
+
+/**
+ * Register a second @fastify/static instance to serve user-provided fonts
+ * from the config directory's `fonts/` subdirectory.
+ *
+ * The fonts directory is created on startup (mkdir -p) so users can just
+ * drop .woff2 files in there.
+ */
+async function registerUserFonts(server: FastifyInstance, configDir: string): Promise<void> {
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const fontsDir = join(configDir, "fonts");
+	mkdirSync(fontsDir, { recursive: true });
+
+	const fastifyStatic = (await import("@fastify/static")).default;
+	await server.register(fastifyStatic, {
+		root: fontsDir,
+		prefix: "/public/fonts/",
+		decorateReply: false, // required for multiple @fastify/static plugins
+	});
+
+	server.log.info({ fontsDir }, "serving user fonts from config dir");
+}
+
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
 	const { existsSync } = await import("node:fs");
 	const { join, dirname } = await import("node:path");

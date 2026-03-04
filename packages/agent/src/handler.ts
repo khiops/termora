@@ -104,6 +104,7 @@ export class AgentHandler {
 	private handleSpawn(msg: AgentSpawnMessage): void {
 		try {
 			const channelId = this.ptyManager.spawn({
+				...(msg.channelId !== undefined && { id: msg.channelId }),
 				shell: msg.shell,
 				cwd: msg.cwd,
 				env: msg.env,
@@ -181,8 +182,8 @@ export class AgentHandler {
 		};
 
 		this.ptyManager.onData(channelId, (rawData: string) => {
-			// node-pty delivers string; convert back to bytes preserving all values
-			const chunk = Buffer.from(rawData, "binary");
+			// node-pty delivers UTF-8 string; re-encode to bytes
+			const chunk = Buffer.from(rawData);
 			buffer.push(chunk);
 			bufferSize += chunk.length;
 

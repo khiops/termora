@@ -147,12 +147,34 @@ describe("AgentHandler", () => {
 		});
 
 		expect(mock.spawn).toHaveBeenCalledWith({
+			id: undefined,
 			shell: "/bin/sh",
 			cwd: "/home/user",
 			env: { TERM: "xterm-256color" },
 			cols: 120,
 			rows: 40,
 		});
+	});
+
+	it("SPAWN with channelId uses provided id for channel and SPAWN_OK", () => {
+		// Override spawn mock to return whatever id was passed in options
+		mock.spawn.mockImplementationOnce((opts: { id?: string }) => opts.id ?? "chan-fallback");
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-cid",
+			channelId: "custom-channel-123",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		expect(mock.spawn).toHaveBeenCalledWith(expect.objectContaining({ id: "custom-channel-123" }));
+		const ok = sent[0] as { type: string; requestId: string; channelId: string };
+		expect(ok.type).toBe("SPAWN_OK");
+		expect(ok.channelId).toBe("custom-channel-123");
 	});
 
 	it("SPAWN failure returns SPAWN_ERR with error details", () => {

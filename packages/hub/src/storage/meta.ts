@@ -380,6 +380,88 @@ export class MetaDAL {
 		return result.changes > 0;
 	}
 
+	markAllChannelsDead(): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET status = 'dead', updated_at = ? WHERE status != 'dead'")
+			.run(now);
+		return result.changes;
+	}
+
+	markAllSessionsClosed(): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE sessions SET status = 'closed', updated_at = ? WHERE status != 'closed'")
+			.run(now);
+		return result.changes;
+	}
+
+	// ─── Warm Restart ─────────────────────────────────────────────────────────
+
+	/** Channels that were alive (not dead) when the hub last exited, with host info. */
+	listAliveChannelsWithHost(): Array<{
+		id: string;
+		sessionId: string;
+		shell: string;
+		cwd: string | null;
+		status: string;
+		hostId: string;
+		hostType: string;
+	}> {
+		const rows = this.db
+			.prepare(
+				`SELECT c.id, c.session_id, c.shell, c.cwd, c.status,
+				        s.host_id, h.type AS host_type
+				 FROM channels c
+				 JOIN sessions s ON c.session_id = s.id
+				 JOIN hosts h ON s.host_id = h.id
+				 WHERE c.status != 'dead'`,
+			)
+			.all() as Array<{
+			id: string;
+			session_id: string;
+			shell: string;
+			cwd: string | null;
+			status: string;
+			host_id: string;
+			host_type: string;
+		}>;
+		return rows.map((r) => ({
+			id: r.id,
+			sessionId: r.session_id,
+			shell: r.shell,
+			cwd: r.cwd,
+			status: r.status,
+			hostId: r.host_id,
+			hostType: r.host_type,
+		}));
+	}
+
+	/** Mark all non-dead channels for a host as orphan. */
+	markHostChannelsOrphan(hostId: string): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare(
+				`UPDATE channels SET status = 'orphan', updated_at = ?
+				 WHERE status != 'dead'
+				   AND session_id IN (SELECT id FROM sessions WHERE host_id = ?)`,
+			)
+			.run(now, hostId);
+		return result.changes;
+	}
+
+	/** Mark non-closed sessions for a host as disconnected. */
+	markHostSessionDisconnected(hostId: string): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare(
+				`UPDATE sessions SET status = 'disconnected', updated_at = ?
+				 WHERE host_id = ? AND status != 'closed'`,
+			)
+			.run(now, hostId);
+		return result.changes;
+	}
+
 	// ─── Cache Index ─────────────────────────────────────────────────────────
 
 	updateCacheIndex(channelId: string, snapshotChunkId: string, lastSeq: number): void {

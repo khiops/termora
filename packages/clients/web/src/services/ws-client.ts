@@ -23,6 +23,9 @@ export interface IWsClient {
 export class WsClient implements IWsClient {
 	private ws: WebSocket | null = null;
 	private listeners = new Map<string, Set<MessageListener>>();
+	private reconnectUrl: string | null = null;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private reconnectAttempt = 0;
 
 	connect(url: string): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -31,6 +34,8 @@ export class WsClient implements IWsClient {
 
 			ws.onopen = () => {
 				this.ws = ws;
+				this.reconnectUrl = url;
+				this.reconnectAttempt = 0;
 				resolve();
 			};
 
@@ -50,6 +55,7 @@ export class WsClient implements IWsClient {
 
 			ws.onclose = () => {
 				this.ws = null;
+				this._scheduleReconnect();
 			};
 		});
 	}
@@ -64,7 +70,7 @@ export class WsClient implements IWsClient {
 
 	/**
 	 * Subscribe to messages of a specific type.
-	 * Use "*" to receive all messages.
+	 * Use \"*\" to receive all messages.
 	 * Returns an unsubscribe function.
 	 */
 	on(type: string, callback: MessageListener): () => void {
@@ -78,12 +84,35 @@ export class WsClient implements IWsClient {
 	}
 
 	close(): void {
+		this.reconnectUrl = null;
+		if (this.reconnectTimer !== null) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		this.ws?.close();
 		this.ws = null;
 	}
 
 	get isConnected(): boolean {
 		return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+	}
+
+	private _scheduleReconnect(): void {
+		const url = this.reconnectUrl;
+		if (!url) return;
+		const delays = [1000, 2000, 4000, 8000, 15000, 30000];
+		const delay = delays[Math.min(this.reconnectAttempt, delays.length - 1)];
+		this.reconnectTimer = setTimeout(async () => {
+			this.reconnectTimer = null;
+			this.reconnectAttempt++;
+			try {
+				await this.connect(url);
+				// Dispatch internal reconnect event so session store can re-auth
+				this._dispatch({ type: "WS_RECONNECT" } as unknown as ProtocolMessage);
+			} catch {
+				this._scheduleReconnect();
+			}
+		}, delay);
 	}
 
 	private _dispatch(msg: ProtocolMessage): void {

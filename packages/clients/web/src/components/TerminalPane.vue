@@ -1,7 +1,7 @@
 <template>
 	<div class="terminal-pane" @contextmenu.prevent="showContextMenu">
-		<!-- Pane header with channel info and write-lock indicator -->
-		<div v-if="ready" class="pane-header">
+		<!-- Pane header — always rendered so fitAddon.fit() calculates correct rows -->
+		<div class="pane-header">
 			<span class="pane-title">{{ paneTitle }}</span>
 			<WriteLockIndicator :channel-id="effectiveChannelId" class="pane-lock" />
 			<span
@@ -41,7 +41,9 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "../stores/session.js";
+import { useChannelsStore } from "../stores/channels.js";
 import { useWriteLockStore } from "../stores/writelock.js";
+import { useConfigStore } from "../stores/config.js";
 import { useTerminal } from "../composables/useTerminal.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 
@@ -65,6 +67,7 @@ const emit = defineEmits<{
 	(e: "split-right", channelId: string): void;
 	(e: "split-down", channelId: string): void;
 	(e: "close-pane", channelId: string): void;
+	(e: "channel-spawned", tempId: string, realId: string): void;
 }>();
 
 // ---------------------------------------------------------------------------
@@ -72,14 +75,17 @@ const emit = defineEmits<{
 // ---------------------------------------------------------------------------
 
 const sessionStore = useSessionStore();
+const channelsStore = useChannelsStore();
 const writeLockStore = useWriteLockStore();
+const configStore = useConfigStore();
 const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
 
-const { init, attachChannel, dispose, canWrite } = useTerminal(
+const { init, attachChannel, reattachChannel, suppressNextResize, dispose, canWrite } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
+	configStore.profile,
 );
 
 /**
@@ -124,17 +130,30 @@ onMounted(async () => {
 	try {
 		await sessionStore.connect();
 
-		init();
+		const { cols, rows } = init();
 
 		if (props.channelId !== null && props.channelId !== undefined) {
-			// Pane was opened for an existing channel — attach directly
-			attachChannel(props.channelId);
-			ready.value = true;
-		} else {
-			// Legacy mode: spawn a fresh channel
-			const channelId = await sessionStore.spawnTerminal();
-			internalChannelId.value = channelId;
-			attachChannel(channelId);
+			// Check if this is a pending spawn (temp ID created by App.vue)
+			const hostId = channelsStore.consumePendingSpawn(props.channelId);
+
+			if (hostId !== null) {
+				// Fresh spawn — PTY is created with actual terminal dimensions
+				// so no RESIZE is needed → no SIGWINCH → no duplicate prompt
+				const realId = await channelsStore.spawnChannel(hostId, {
+					cols,
+					rows,
+					select: false,
+				});
+				internalChannelId.value = realId;
+				// PTY was spawned at exact terminal dims — suppress the RESIZE
+				// that attachChannel would otherwise send (prevents SIGWINCH)
+				suppressNextResize();
+				attachChannel(realId);
+				emit("channel-spawned", props.channelId, realId);
+			} else {
+				// Existing channel — reattach (fetch snapshot + tail)
+				await reattachChannel(props.channelId);
+			}
 			ready.value = true;
 		}
 	} catch (err) {
@@ -143,12 +162,39 @@ onMounted(async () => {
 	}
 });
 
-// Re-attach when the channelId prop changes (e.g. pane reuse after tab switch)
+// Re-attach when the channelId prop changes (e.g. pane reuse after tab switch).
+// Skip when the new ID matches internalChannelId (happens after pending spawn
+// resolution — replaceChannelId updates the prop from tempId to realId but
+// the channel is already attached).
 watch(
 	() => props.channelId,
-	(newId) => {
+	async (newId) => {
 		if (newId !== null && newId !== undefined && ready.value) {
-			attachChannel(newId);
+			if (newId === internalChannelId.value) return;
+			try {
+				error.value = null;
+				await reattachChannel(newId);
+			} catch (err) {
+				error.value = err instanceof Error ? err.message : String(err);
+			}
+		}
+	},
+);
+
+// Re-attach terminal channels after hub reconnect (session persistence).
+// When the hub restarts, WS auto-reconnects and session store increments
+// reconnectCount. Each pane then re-attaches its channel to restore the
+// snapshot from spool.db + connect to the new PTY output stream.
+watch(
+	() => sessionStore.reconnectCount,
+	async () => {
+		if (effectiveChannelId.value && ready.value) {
+			try {
+				error.value = null;
+				await reattachChannel(effectiveChannelId.value);
+			} catch (err) {
+				error.value = err instanceof Error ? err.message : String(err);
+			}
 		}
 	},
 );
@@ -247,6 +293,7 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 .terminal-container {
 	flex: 1;
 	overflow: hidden;
+	background: #1e1e2e;
 }
 
 .terminal-loading,

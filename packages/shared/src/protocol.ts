@@ -41,6 +41,7 @@ export interface HelloMessage {
 export interface AgentSpawnMessage {
 	type: "SPAWN";
 	requestId: string;
+	channelId?: string;
 	shell: string;
 	cwd: string;
 	env: Record<string, string>;
@@ -179,6 +180,8 @@ export interface UiSpawnMessage {
 	cwd?: string;
 	env?: Record<string, string>;
 	groupId?: string;
+	cols?: number;
+	rows?: number;
 }
 
 /** Hub → UI: channel spawned successfully */

@@ -12,6 +12,7 @@ export interface PtyChannel {
 }
 
 export interface SpawnOptions {
+	id?: string;
 	shell: string;
 	cwd: string;
 	env: Record<string, string>;
@@ -25,7 +26,7 @@ export class PtyManager {
 
 	/** Spawn a new PTY. Returns the new channel ID. */
 	spawn(options: SpawnOptions): string {
-		const id = generateId();
+		const id = options.id ?? generateId();
 		const ptyProcess = pty.spawn(options.shell, [], {
 			name: "xterm-256color",
 			cols: options.cols,
@@ -73,8 +74,8 @@ export class PtyManager {
 	onData(channelId: string, callback: (data: string) => void): void {
 		const channel = this.getChannel(channelId);
 		channel.pty.onData((rawData: string) => {
-			// Mirror output into the headless terminal (binary encoding round-trip)
-			channel.headless.write(Buffer.from(rawData, "binary"));
+			// Mirror output into the headless terminal (UTF-8 re-encode)
+			channel.headless.write(Buffer.from(rawData));
 			callback(rawData);
 		});
 	}
