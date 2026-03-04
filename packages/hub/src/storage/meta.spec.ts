@@ -199,3 +199,199 @@ describe("MetaDAL — Hosts CRUD", () => {
 		});
 	});
 });
+
+describe("MetaDAL — Sessions CRUD", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+	let hostId: string;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+		const host = dal.createHost({ type: "local", label: "session-host" });
+		hostId = host.id;
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createSession and getSession round-trip", () => {
+		const id = "01AAAAAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id, hostId, status: "starting" });
+
+		const session = dal.getSession(id);
+		expect(session).toBeDefined();
+		expect(session?.id).toBe(id);
+		expect(session?.hostId).toBe(hostId);
+		expect(session?.status).toBe("starting");
+		expect(session?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(session?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+
+	it("getSession returns undefined for non-existent id", () => {
+		expect(dal.getSession("no-such-id")).toBeUndefined();
+	});
+
+	it("listSessions returns all sessions when no hostId filter", () => {
+		const host2 = dal.createHost({ type: "local", label: "session-host-2" });
+		dal.createSession({ id: "SES001AAAAAAAAAAAAAAAAAAAAAA", hostId, status: "active" });
+		dal.createSession({ id: "SES002AAAAAAAAAAAAAAAAAAAAAA", hostId: host2.id, status: "closed" });
+
+		const all = dal.listSessions();
+		expect(all).toHaveLength(2);
+	});
+
+	it("listSessions filters by hostId", () => {
+		const host2 = dal.createHost({ type: "local", label: "session-host-filter" });
+		dal.createSession({ id: "SES003AAAAAAAAAAAAAAAAAAAAAA", hostId, status: "active" });
+		dal.createSession({ id: "SES004AAAAAAAAAAAAAAAAAAAAAA", hostId: host2.id, status: "active" });
+
+		const filtered = dal.listSessions(hostId);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.hostId).toBe(hostId);
+	});
+
+	it("updateSessionStatus changes status and updatedAt", async () => {
+		const id = "SES005AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id, hostId, status: "starting" });
+		const before = dal.getSession(id);
+		expect(before).toBeDefined();
+
+		await new Promise((r) => setTimeout(r, 10));
+		dal.updateSessionStatus(id, "active");
+
+		const after = dal.getSession(id);
+		expect(after).toBeDefined();
+		expect(after?.status).toBe("active");
+		expect(after?.updatedAt).not.toBe(before?.updatedAt);
+	});
+
+	it("updateSessionStatus supports all valid statuses", () => {
+		const id = "SES006AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id, hostId, status: "starting" });
+
+		for (const status of ["active", "detached", "disconnected", "closed"] as const) {
+			expect(() => dal.updateSessionStatus(id, status)).not.toThrow();
+		}
+		expect(dal.getSession(id)?.status).toBe("closed");
+	});
+
+	it("deleteSession removes the record", () => {
+		const id = "SES007AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id, hostId, status: "active" });
+		dal.deleteSession(id);
+		expect(dal.getSession(id)).toBeUndefined();
+	});
+
+	it("listSessions returns empty array when none exist", () => {
+		expect(dal.listSessions()).toEqual([]);
+	});
+});
+
+describe("MetaDAL — Channels CRUD", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+	let sessionId: string;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+		const host = dal.createHost({ type: "local", label: "channel-host" });
+		sessionId = "SESSAAAAAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createChannel and getChannel round-trip", () => {
+		const id = "CHN001AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born", shell: "/bin/bash", cwd: "/home/user" });
+
+		const ch = dal.getChannel(id);
+		expect(ch).toBeDefined();
+		expect(ch?.id).toBe(id);
+		expect(ch?.sessionId).toBe(sessionId);
+		expect(ch?.status).toBe("born");
+		expect(ch?.shell).toBe("/bin/bash");
+		expect(ch?.cwd).toBe("/home/user");
+		expect(ch?.cols).toBe(80);
+		expect(ch?.rows).toBe(24);
+	});
+
+	it("createChannel uses defaults for shell and cwd", () => {
+		const id = "CHN002AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+
+		const ch = dal.getChannel(id);
+		expect(ch).toBeDefined();
+		expect(ch?.shell).toBe("/bin/sh");
+		expect(ch?.cwd).toBeUndefined();
+	});
+
+	it("getChannel returns undefined for non-existent id", () => {
+		expect(dal.getChannel("no-such-id")).toBeUndefined();
+	});
+
+	it("listChannels returns all channels when no filter", () => {
+		dal.createChannel({ id: "CHN003AAAAAAAAAAAAAAAAAAAAAA", sessionId, status: "born" });
+		dal.createChannel({ id: "CHN004AAAAAAAAAAAAAAAAAAAAAA", sessionId, status: "live" });
+
+		expect(dal.listChannels()).toHaveLength(2);
+	});
+
+	it("listChannels filters by sessionId", () => {
+		const host2 = dal.createHost({ type: "local", label: "ch-host-2" });
+		const sessionId2 = "SESS2AAAAAAAAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id: sessionId2, hostId: host2.id, status: "active" });
+
+		dal.createChannel({ id: "CHN005AAAAAAAAAAAAAAAAAAAAAA", sessionId, status: "born" });
+		dal.createChannel({
+			id: "CHN006AAAAAAAAAAAAAAAAAAAAAA",
+			sessionId: sessionId2,
+			status: "born",
+		});
+
+		const filtered = dal.listChannels(sessionId);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.sessionId).toBe(sessionId);
+	});
+
+	it("updateChannelStatus changes status", () => {
+		const id = "CHN007AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+
+		dal.updateChannelStatus(id, "live");
+		expect(dal.getChannel(id)?.status).toBe("live");
+
+		dal.updateChannelStatus(id, "orphan");
+		expect(dal.getChannel(id)?.status).toBe("orphan");
+
+		dal.updateChannelStatus(id, "dead");
+		expect(dal.getChannel(id)?.status).toBe("dead");
+	});
+
+	it("updateChannelStatus persists exitCode", () => {
+		const id = "CHN008AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "live" });
+
+		dal.updateChannelStatus(id, "dead", 42);
+		const ch = dal.getChannel(id);
+		expect(ch).toBeDefined();
+		expect(ch?.status).toBe("dead");
+		expect(ch?.exitCode).toBe(42);
+	});
+
+	it("deleteChannel removes the record", () => {
+		const id = "CHN009AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+		dal.deleteChannel(id);
+		expect(dal.getChannel(id)).toBeUndefined();
+	});
+
+	it("listChannels returns empty array when none exist", () => {
+		expect(dal.listChannels()).toEqual([]);
+	});
+});
