@@ -14,6 +14,13 @@ export function useTerminal(containerRef: Ref<HTMLElement | null>, wsClient: IWs
 	let resizeObserver: ResizeObserver | null = null;
 	let outputUnsubscribe: (() => void) | null = null;
 
+	/**
+	 * When false, keyboard input is suppressed (read-only mode).
+	 * Set to true once the caller confirms write-lock ownership.
+	 * Defaults to true so single-client setups work without auth.
+	 */
+	const canWrite = ref(true);
+
 	function init(): void {
 		if (!containerRef.value) {
 			console.error("[useTerminal] containerRef is null — cannot init");
@@ -52,9 +59,9 @@ export function useTerminal(containerRef: Ref<HTMLElement | null>, wsClient: IWs
 		fitAddon.fit();
 		terminal.value = term;
 
-		// Keyboard input → send INPUT to hub
+		// Keyboard input → send INPUT to hub (only when holding write lock)
 		term.onData((data: string) => {
-			if (channelId && wsClient.isConnected) {
+			if (channelId && wsClient.isConnected && canWrite.value) {
 				wsClient.send({
 					type: "INPUT",
 					channelId,
@@ -114,5 +121,5 @@ export function useTerminal(containerRef: Ref<HTMLElement | null>, wsClient: IWs
 
 	onUnmounted(dispose);
 
-	return { terminal, init, attachChannel, dispose, fitAddon };
+	return { terminal, canWrite, init, attachChannel, dispose, fitAddon };
 }

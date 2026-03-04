@@ -2,6 +2,8 @@ import { generateId } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
 import { WsClient } from "../services/ws-client.js";
+import { useAuthStore } from "./auth.js";
+import { useWriteLockStore } from "./writelock.js";
 
 export const useSessionStore = defineStore("session", () => {
 	// markRaw: prevent Pinia/Vue from making WsClient reactive,
@@ -9,13 +11,100 @@ export const useSessionStore = defineStore("session", () => {
 	const wsClient = markRaw(new WsClient());
 	const connected = ref(false);
 	const currentChannelId = ref<string | null>(null);
+	/** Set to true after AUTH_OK is received (not just WS open). */
+	const authenticated = ref(false);
+	/** Set to true when AUTH_FAIL is received — triggers pairing screen. */
+	const authFailed = ref(false);
 
+	/**
+	 * Connect to hub WebSocket, send AUTH, then wait for AUTH_OK or AUTH_FAIL.
+	 * On AUTH_OK: stores clientId and resolves.
+	 * On AUTH_FAIL: sets authFailed flag and rejects.
+	 */
 	async function connect(): Promise<void> {
 		if (wsClient.isConnected) return;
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 		const wsUrl = `${protocol}//${window.location.host}/ws`;
 		await wsClient.connect(wsUrl);
 		connected.value = true;
+
+		// Register write-lock message routing before authenticating
+		const writeLockStore = useWriteLockStore();
+		writeLockStore.setWsClient(wsClient);
+		_registerWriteLockHandlers(writeLockStore);
+
+		// Authenticate immediately after connecting
+		await _authenticate();
+	}
+
+	/**
+	 * Send AUTH and wait for AUTH_OK or AUTH_FAIL.
+	 * Resolves on success, rejects on failure.
+	 */
+	function _authenticate(): Promise<void> {
+		const authStore = useAuthStore();
+
+		return new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				unsubOk();
+				unsubFail();
+				reject(new Error("AUTH timeout — no response after 10s"));
+			}, 10_000);
+
+			const unsubOk = wsClient.on("AUTH_OK", (msg) => {
+				if (msg.type === "AUTH_OK") {
+					clearTimeout(timer);
+					unsubOk();
+					unsubFail();
+					authStore.setClientId(msg.clientId);
+					authenticated.value = true;
+					authFailed.value = false;
+					resolve();
+				}
+			});
+
+			const unsubFail = wsClient.on("AUTH_FAIL", (msg) => {
+				if (msg.type === "AUTH_FAIL") {
+					clearTimeout(timer);
+					unsubOk();
+					unsubFail();
+					authenticated.value = false;
+					authFailed.value = true;
+					reject(new Error(`AUTH_FAIL: ${msg.message}`));
+				}
+			});
+
+			wsClient.send({
+				type: "AUTH",
+				token: authStore.token ?? "",
+			});
+		});
+	}
+
+	/**
+	 * Wire up write-lock protocol message handlers to the write-lock store.
+	 */
+	function _registerWriteLockHandlers(writeLockStore: ReturnType<typeof useWriteLockStore>): void {
+		wsClient.on("WRITE_LOCK", (msg) => {
+			if (msg.type === "WRITE_LOCK") {
+				writeLockStore.handleWriteLock(msg.channelId, msg.holder);
+			}
+		});
+		wsClient.on("WRITE_REQUEST", (msg) => {
+			if (msg.type === "WRITE_REQUEST") {
+				writeLockStore.handleWriteRequest(msg.channelId, msg.fromClientId);
+			}
+		});
+		wsClient.on("WRITE_REVOKED", (msg) => {
+			if (msg.type === "WRITE_REVOKED") {
+				writeLockStore.handleWriteRevoked(msg.channelId);
+			}
+		});
+		wsClient.on("WRITE_DENY", (msg) => {
+			if (msg.type === "WRITE_DENY") {
+				writeLockStore.handleWriteDeny(msg.channelId);
+			}
+		});
 	}
 
 	/**
@@ -52,12 +141,15 @@ export const useSessionStore = defineStore("session", () => {
 	function disconnect(): void {
 		wsClient.close();
 		connected.value = false;
+		authenticated.value = false;
 		currentChannelId.value = null;
 	}
 
 	return {
 		wsClient,
 		connected,
+		authenticated,
+		authFailed,
 		currentChannelId,
 		connect,
 		spawnTerminal,
