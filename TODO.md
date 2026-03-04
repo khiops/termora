@@ -5,6 +5,7 @@
 - [x] ✅ [Local Terminal] M1 — Complete (2026-03-03) — 131 tests, reviewed
 - [x] ✅ [Remote Terminal] M2 — Complete (2026-03-04) — 190 tests, reviewed
 - [x] ✅ [Session Persistence] M3 — Complete (2026-03-04) — 244 tests, reviewed
+- [x] ✅ [Multi-Client] M4 — Complete (2026-03-04) — 306 tests, reviewed
 
 ## Pending
 
@@ -37,10 +38,10 @@
 - [x] ✅ [Hub] SSH reconnect: retry backoff, re-HELLO, re-ATTACH (done in M2, verified)
 
 ### MVP — Multi-Client (M4)
-- [ ] [Hub] Token auth: generate auth.json, Bearer header, WS AUTH — Priority: H
-- [ ] [Hub] Pairing flow: POST /pair + /pair/verify, rate limiting — Priority: H
-- [ ] [Hub] Write-lock 3-tier: claim/grant/deny/force/release/revoked — Priority: H
-- [ ] [UI] Multi-client UX: write-lock indicators, lock transfer UI — Priority: H
+- [x] ✅ [Hub] Token auth: generate auth.json, Bearer header, WS AUTH (2026-03-04)
+- [x] ✅ [Hub] Pairing flow: POST /pair + /pair/verify, rate limiting (2026-03-04)
+- [x] ✅ [Hub] Write-lock 3-tier: claim/grant/deny/force/release/revoked (2026-03-04)
+- [x] ✅ [UI] Multi-client UX: write-lock indicators, lock transfer UI (2026-03-04)
 
 ### MVP — Polish (M5)
 - [ ] [UI] Host rail: auto-icons, color hash, status dots — Priority: H
@@ -50,6 +51,14 @@
 - [ ] [Hub] Config cascade: 4-layer deep merge + settings API — Priority: H
 - [ ] [Hub] CLI: start/stop, host add/list/test, pair, session list — Priority: H
 - [ ] [Root] Onboarding + npx nexterm packaging — Priority: H
+
+### Review Backlog (M4)
+- [ ] 🔧 [Docs] Update STORAGE.md pairing_codes schema to match implementation — Priority: S (F-003)
+- [ ] 🔧 [UI] PairingCodeGenerator: parse expires_at from response instead of hardcoded 60 — Priority: S (F-004)
+- [ ] 🔧 [Hub] Pairing code collision: add retry loop — Priority: S (F-005)
+- [ ] 🔧 [Hub] ATTACH_OK: populate writeLockHolder from WriteLockManager — Priority: S (F-006)
+- [ ] 🔧 [UI] writelock store: wire setInitialHolder or remove dead code — Priority: S (F-007)
+- [ ] 🔧 [Hub] Auth hook: use pathname parsing for URL matching — Priority: S (F-008)
 
 ### Review Backlog (M3)
 - [ ] 🔧 [Hub] GC: add max-size-per-channel + dead-channel cleanup (steps 2+3) — Priority: M (F-002)
@@ -83,6 +92,7 @@
 - [x] ✅ [Local Terminal] M1 — Hub HTTP, agent core+mux, local spawn, WS transport, Vue+xterm (2026-03-03)
 - [x] ✅ [Remote Terminal] M2 — SSH connector, session SM, REST API, review fixes (2026-03-04)
 - [x] ✅ [Session Persistence] M3 — Headless xterm, snapshots, chunking, ATTACH restore, GC (2026-03-04)
+- [x] ✅ [Multi-Client] M4 — Token auth, pairing, write-lock 3-tier, multi-client UX (2026-03-04)
 
 ## Blocked / Deferred
 

@@ -109,6 +109,21 @@ export class SessionManager {
 		return this.metaDal;
 	}
 
+	/**
+	 * Returns all WsClient instances currently attached to a channel.
+	 * Used by WriteLockManager's broadcastToChannel callback.
+	 */
+	getClientsForChannel(channelId: string): WsClient[] {
+		const channel = this.channels.get(channelId);
+		if (!channel) return [];
+		const result: WsClient[] = [];
+		for (const clientId of channel.clients) {
+			const client = this.clients.get(clientId);
+			if (client) result.push(client);
+		}
+		return result;
+	}
+
 	addClient(client: WsClient): void {
 		this.clients.set(client.id, client);
 	}
@@ -128,9 +143,9 @@ export class SessionManager {
 	 * For local hosts: always active (local agent starts immediately).
 	 * For SSH hosts: session starts as 'starting', transitions to 'active' on HELLO.
 	 */
-	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<void> {
+	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
 		const client = this.clients.get(clientId);
-		if (!client) return;
+		if (!client) return null;
 
 		// Resolve host: if hostId is "local" or missing, use the local host
 		const hostId = await this._resolveHostId(msg.hostId);
@@ -142,7 +157,7 @@ export class SessionManager {
 				message: `Host ${hostId} not found`,
 			};
 			client.send(errorMsg);
-			return;
+			return null;
 		}
 
 		// Get or create session for this host
@@ -165,7 +180,7 @@ export class SessionManager {
 						message: err instanceof Error ? err.message : "SSH connection failed",
 					};
 					client.send(errorMsg);
-					return;
+					return null;
 				}
 				this._updateSessionStatus(hostId, session.id, "active");
 				this._wireAgentEvents(hostId, session.id, sshAgent);
@@ -197,7 +212,7 @@ export class SessionManager {
 		};
 		agent.send(agentSpawn);
 
-		return new Promise<void>((resolve, reject) => {
+		return new Promise<string | null>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				agent?.off("message", handler);
 				reject(new Error("Agent SPAWN timeout"));
@@ -250,7 +265,7 @@ export class SessionManager {
 						sessionId: session.id,
 					};
 					client.send(response);
-					resolve();
+					resolve(channelId);
 				} else if (incoming.type === "SPAWN_ERR") {
 					const spawnErr = incoming as AgentSpawnErrMessage;
 					if (spawnErr.requestId !== requestId) return;
@@ -270,9 +285,9 @@ export class SessionManager {
 		});
 	}
 
-	async handleAttach(clientId: string, channelId: string): Promise<void> {
+	async handleAttach(clientId: string, channelId: string): Promise<boolean> {
 		const client = this.clients.get(clientId);
-		if (!client) return;
+		if (!client) return false;
 
 		const channel = this.channels.get(channelId);
 		if (!channel) {
@@ -282,7 +297,7 @@ export class SessionManager {
 				message: `Channel ${channelId} not found`,
 			};
 			client.send(errorMsg);
-			return;
+			return false;
 		}
 
 		const wasOrphan = channel.status === "orphan";
@@ -336,7 +351,7 @@ export class SessionManager {
 				cached,
 			};
 			client.send(attachOk);
-			return;
+			return true;
 		}
 
 		// Case 2: orphan channel with reachable agent — get fresh snapshot via ATTACH
@@ -425,6 +440,7 @@ export class SessionManager {
 			};
 			client.send(attachOk);
 		}
+		return true;
 	}
 
 	handleDetach(clientId: string, channelId: string): void {

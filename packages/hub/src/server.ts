@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { registerChannelRoutes } from "./api/channels.js";
 import { registerHostRoutes } from "./api/hosts.js";
+import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { validateToken } from "./auth.js";
 import { SessionManager } from "./session/session-manager.js";
@@ -79,6 +80,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerHostRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal);
+		if (options.authToken) {
+			registerPairRoutes(server, { authToken: options.authToken, metaDal });
+		}
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});

@@ -1,6 +1,9 @@
 import type { SnapshotData } from "@nexterm/shared";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { Terminal } from "@xterm/headless";
+import xtermAddonSerialize from "@xterm/addon-serialize";
+import xtermHeadless from "@xterm/headless";
+
+const { SerializeAddon } = xtermAddonSerialize;
+const { Terminal } = xtermHeadless;
 
 /**
  * Wraps an xterm.js headless Terminal with a SerializeAddon so the agent can
@@ -13,8 +16,8 @@ import { Terminal } from "@xterm/headless";
  * negligible in practice.
  */
 export class HeadlessTerminal {
-	private readonly terminal: Terminal;
-	private readonly serializeAddon: SerializeAddon;
+	private readonly terminal: InstanceType<typeof Terminal>;
+	private readonly serializeAddon: InstanceType<typeof SerializeAddon>;
 
 	constructor(cols: number, rows: number, scrollback?: number) {
 		this.terminal = new Terminal({

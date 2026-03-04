@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
 import { MetaDAL } from "./meta.js";
+import type { PairingCodeRow } from "./meta.js";
 
 describe("MetaDAL — Hosts CRUD", () => {
 	let dbs: DatabaseManager;
@@ -393,5 +394,99 @@ describe("MetaDAL — Channels CRUD", () => {
 
 	it("listChannels returns empty array when none exist", () => {
 		expect(dal.listChannels()).toEqual([]);
+	});
+});
+
+// ─── PairingCodes ─────────────────────────────────────────────────────────────
+
+describe("MetaDAL — PairingCodes", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createPairingCode + getPairingCodeByCode round-trip", () => {
+		const id = "PAIR01AAAAAAAAAAAAAAAAAAAAAAAA";
+		const now = new Date().toISOString();
+		const exp = new Date(Date.now() + 60_000).toISOString();
+
+		dal.createPairingCode(id, "123456", now, exp);
+
+		const row = dal.getPairingCodeByCode("123456");
+		expect(row).toBeDefined();
+		expect(row?.id).toBe(id);
+		expect(row?.code).toBe("123456");
+		expect(row?.created_at).toBe(now);
+		expect(row?.expires_at).toBe(exp);
+		expect(row?.used).toBe(0);
+		expect(row?.used_at).toBeNull();
+		expect(row?.used_by_ip).toBeNull();
+	});
+
+	it("getPairingCodeByCode returns undefined for unknown code", () => {
+		expect(dal.getPairingCodeByCode("999999")).toBeUndefined();
+	});
+
+	it("markPairingCodeUsed updates used, used_at, used_by_ip", () => {
+		const id = "PAIR02AAAAAAAAAAAAAAAAAAAAAAAA";
+		const now = new Date().toISOString();
+		const exp = new Date(Date.now() + 60_000).toISOString();
+		dal.createPairingCode(id, "234567", now, exp);
+
+		const usedAt = new Date().toISOString();
+		dal.markPairingCodeUsed(id, usedAt, "127.0.0.1");
+
+		const row = dal.getPairingCodeByCode("234567") as PairingCodeRow;
+		expect(row.used).toBe(1);
+		expect(row.used_at).toBe(usedAt);
+		expect(row.used_by_ip).toBe("127.0.0.1");
+	});
+
+	it("countActivePairingCodes counts only non-expired, non-used codes", () => {
+		const future = new Date(Date.now() + 60_000).toISOString();
+		const past = new Date(Date.now() - 1000).toISOString();
+		const now = new Date().toISOString();
+
+		// Active (future expiry, not used)
+		dal.createPairingCode("PAIR03AAAAAAAAAAAAAAAAAAAAAAAA", "345678", now, future);
+		dal.createPairingCode("PAIR04AAAAAAAAAAAAAAAAAAAAAAAA", "456789", now, future);
+
+		// Expired (past expiry, not used) — should NOT count
+		dal.createPairingCode("PAIR05AAAAAAAAAAAAAAAAAAAAAAAA", "567890", now, past);
+
+		// Used (future expiry, used=1) — should NOT count
+		dal.createPairingCode("PAIR06AAAAAAAAAAAAAAAAAAAAAAAA", "678901", now, future);
+		dal.markPairingCodeUsed("PAIR06AAAAAAAAAAAAAAAAAAAAAAAA", now, "10.0.0.1");
+
+		expect(dal.countActivePairingCodes()).toBe(2);
+	});
+
+	it("cleanExpiredPairingCodes removes only expired non-used records", () => {
+		const future = new Date(Date.now() + 60_000).toISOString();
+		const past = new Date(Date.now() - 1000).toISOString();
+		const now = new Date().toISOString();
+
+		// Active — should survive
+		dal.createPairingCode("PAIR07AAAAAAAAAAAAAAAAAAAAAAAA", "789012", now, future);
+
+		// Expired non-used — should be removed
+		dal.createPairingCode("PAIR08AAAAAAAAAAAAAAAAAAAAAAAA", "890123", now, past);
+
+		// Expired but used — NOT cleaned (used = 1, audit trail)
+		dal.createPairingCode("PAIR09AAAAAAAAAAAAAAAAAAAAAAAA", "901234", now, past);
+		dal.markPairingCodeUsed("PAIR09AAAAAAAAAAAAAAAAAAAAAAAA", now, "10.0.0.2");
+
+		dal.cleanExpiredPairingCodes();
+
+		expect(dal.getPairingCodeByCode("789012")).toBeDefined(); // active — survives
+		expect(dal.getPairingCodeByCode("890123")).toBeUndefined(); // expired — removed
+		expect(dal.getPairingCodeByCode("901234")).toBeDefined(); // used+expired — survives
 	});
 });
