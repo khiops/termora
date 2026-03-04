@@ -1,4 +1,5 @@
 import type {
+	AgentSnapshotResMessage,
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
 	AgentSpawnOkMessage,
@@ -18,8 +19,10 @@ import type { ChannelStatus, SessionStatus } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
+import { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
 import { LocalAgent, resolveAgentPath } from "./local-agent.js";
+import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SshAgent } from "./ssh-agent.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
@@ -53,6 +56,8 @@ interface SessionState {
 export class SessionManager {
 	/** hostId → AgentConnection */
 	private agents = new Map<string, AgentConnection>();
+	/** Spool DAL for snapshot chunk storage */
+	private spoolDal: SpoolDAL;
 	/** hostId → SessionState */
 	private sessions = new Map<string, SessionState>();
 	/** channelId → ChannelState */
@@ -63,8 +68,17 @@ export class SessionManager {
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private metaDal: MetaDAL;
 
+	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
+	private scheduler: SnapshotScheduler;
+
 	constructor(private dbManager: DatabaseManager) {
 		this.metaDal = new MetaDAL(dbManager.meta);
+		this.spoolDal = new SpoolDAL(dbManager.spool);
+		this.scheduler = new SnapshotScheduler((channelId) => {
+			// Find the agent for this channel via the channel's hostId
+			const ch = this.channels.get(channelId);
+			return ch ? this.agents.get(ch.hostId) : undefined;
+		});
 	}
 
 	/**
@@ -204,6 +218,7 @@ export class SessionManager {
 						cwd,
 					});
 					this.metaDal.updateChannelStatus(channelId, "live");
+					this.scheduler.trackChannel(channelId);
 					client.attachedChannels.add(channelId);
 
 					// Notify all clients of the channel state change
@@ -335,6 +350,7 @@ export class SessionManager {
 			clearTimeout(timer);
 		}
 		this.reconnectTimers.clear();
+		this.scheduler.shutdown();
 		for (const agent of this.agents.values()) {
 			agent.close();
 		}
@@ -421,6 +437,7 @@ export class SessionManager {
 			// live → orphan when last client detaches (and channel is still live)
 			if (channel.clients.size === 0 && channel.status === "live") {
 				this._updateChannelStatus(channelId, channel.sessionId, "orphan");
+				this.scheduler.onDetach(channelId);
 				this._checkSessionDetached(channel.hostId);
 			}
 		}
@@ -444,13 +461,27 @@ export class SessionManager {
 		agent.on("message", (msg: ProtocolMessage) => {
 			if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
+				this.scheduler.onOutput(outputMsg.channelId);
 				this._broadcastToChannel(outputMsg.channelId, outputMsg);
+			} else if (msg.type === "SNAPSHOT_RES") {
+				const res = msg as AgentSnapshotResMessage;
+				const snapshotJson = JSON.stringify(res.snapshot);
+				const dataBlob = Buffer.from(snapshotJson);
+				const chunkId = this.spoolDal.insertChunk({
+					channelId: res.channelId,
+					seq: res.lastSeq + 1,
+					kind: "snapshot",
+					dataBlob,
+					uncompressedLen: dataBlob.length,
+				});
+				this.metaDal.updateCacheIndex(res.channelId, chunkId, res.lastSeq);
 			} else if (msg.type === "CHANNEL_EXIT") {
 				const exitMsg = msg as ChannelExitMessage;
 				const channel = this.channels.get(exitMsg.channelId);
 				if (channel) {
 					this._updateChannelStatus(exitMsg.channelId, channel.sessionId, "dead", exitMsg.exitCode);
 				}
+				this.scheduler.untrackChannel(exitMsg.channelId);
 			}
 		});
 
@@ -583,10 +614,11 @@ export class SessionManager {
 			clearTimeout(pendingTimer);
 			this.reconnectTimers.delete(hostId);
 		}
-		// Mark all channels for this session as dead
+		// Mark all channels for this session as dead and stop tracking them
 		for (const [channelId, ch] of this.channels.entries()) {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
 			this._updateChannelStatus(channelId, sessionId, "dead");
+			this.scheduler.untrackChannel(channelId);
 		}
 		this._updateSessionStatus(hostId, sessionId, "closed");
 		this.sessions.delete(hostId);

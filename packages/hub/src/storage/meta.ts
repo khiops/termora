@@ -337,4 +337,20 @@ export class MetaDAL {
 	deleteChannel(id: string): void {
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
+
+	// ─── Cache Index ─────────────────────────────────────────────────────────
+
+	updateCacheIndex(channelId: string, snapshotChunkId: string, lastSeq: number): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare(
+				`INSERT INTO cache_index (channel_id, last_snapshot_chunk_id, last_seq, last_seen_at)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(channel_id) DO UPDATE SET
+					last_snapshot_chunk_id = excluded.last_snapshot_chunk_id,
+					last_seq = excluded.last_seq,
+					last_seen_at = excluded.last_seen_at`,
+			)
+			.run(channelId, snapshotChunkId, lastSeq, now);
+	}
 }
