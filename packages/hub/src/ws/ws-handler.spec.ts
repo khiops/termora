@@ -2,8 +2,12 @@ import { decodeMessage, encodeMessage } from "@nexterm/shared";
 import type { ProtocolMessage } from "@nexterm/shared";
 import { describe, expect, it } from "vitest";
 
+/** Known token used across auth tests */
+const TEST_TOKEN = "a".repeat(64);
+
 // ws-handler is thin dispatch glue — core logic lives in SessionManager (tested separately).
-// These tests verify the MessagePack codec round-trips that ws-handler relies on.
+// These tests verify the MessagePack codec round-trips that ws-handler relies on,
+// plus the AUTH message protocol types.
 
 describe("ws-handler codec round-trips", () => {
 	it("SPAWN message (snake_case wire format) round-trips correctly", () => {
@@ -104,5 +108,44 @@ describe("ws-handler codec round-trips", () => {
 		expect(resizeMsg.channelId).toBe("ch-2");
 		expect(resizeMsg.cols).toBe(120);
 		expect(resizeMsg.rows).toBe(40);
+	});
+});
+
+describe("ws-handler AUTH protocol codec", () => {
+	it("AUTH message encodes and decodes correctly", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH",
+			token: TEST_TOKEN,
+		};
+
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded.type).toBe("AUTH");
+		const authMsg = decoded as unknown as Record<string, string>;
+		expect(authMsg.token).toBe(TEST_TOKEN);
+	});
+
+	it("AUTH_OK message encodes and decodes correctly", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_OK",
+			clientId: "01ABCDEF",
+		};
+
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded.type).toBe("AUTH_OK");
+		// clientId is camelCase in TS; wire may be snake_case depending on codec
+		const authOk = decoded as unknown as Record<string, string>;
+		expect(authOk.clientId ?? authOk.client_id).toBe("01ABCDEF");
+	});
+
+	it("AUTH_FAIL message encodes and decodes correctly", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_FAIL",
+			message: "Invalid token",
+		};
+
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded.type).toBe("AUTH_FAIL");
+		const failMsg = decoded as unknown as Record<string, string>;
+		expect(failMsg.message).toBe("Invalid token");
 	});
 });
