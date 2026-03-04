@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
 import { WsClient } from "../services/ws-client.js";
 import { useAuthStore } from "./auth.js";
+import { useHostsStore } from "./hosts.js";
 import { useWriteLockStore } from "./writelock.js";
 
 export const useSessionStore = defineStore("session", () => {
@@ -32,6 +33,14 @@ export const useSessionStore = defineStore("session", () => {
 		const writeLockStore = useWriteLockStore();
 		writeLockStore.setWsClient(wsClient);
 		_registerWriteLockHandlers(writeLockStore);
+
+		// Route SESSION_STATE messages to hosts store for rail status dots
+		const hostsStore = useHostsStore();
+		wsClient.on("SESSION_STATE", (msg) => {
+			if (msg.type === "SESSION_STATE") {
+				hostsStore.updateSessionStatus(msg.hostId, msg.status);
+			}
+		});
 
 		// Authenticate immediately after connecting
 		await _authenticate();

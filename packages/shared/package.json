@@ -1,7 +1,17 @@
 {
 	"name": "@nexterm/shared",
 	"version": "0.1.0",
+	"description": "Shared TypeScript types and codec for nexterm (wire protocol, entities)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/nexterm/nexterm.git"
+	},
+	"engines": {
+		"node": ">=20"
+	},
 	"type": "module",
+	"files": ["dist"],
 	"exports": {
 		".": {
 			"import": "./dist/index.js",

@@ -4,10 +4,12 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { registerChannelRoutes } from "./api/channels.js";
+import { registerConfigRoutes } from "./api/config.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { validateToken } from "./auth.js";
+import { ConfigResolver } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
@@ -34,6 +36,10 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints
 			if (url === "/health" || url === "/api/health") return;
 			if (url === "/api/pair/verify") return;
+
+			// Static assets (index.html, JS bundles, etc.) do not require auth —
+			// the UI itself handles the pairing/auth flow on first load.
+			if (!url.startsWith("/api/") && !url.startsWith("/ws")) return;
 
 			const authHeader = request.headers.authorization;
 			if (!authHeader) {
@@ -75,11 +81,20 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await server.register(websocket);
 		const sessionManager = new SessionManager(options.dbManager);
 		const metaDal = sessionManager.getMetaDal();
+
+		// First-run: ensure the built-in "local" host exists
+		const wasNew = !metaDal.getHostByLabel("local");
 		await sessionManager.ensureLocalHost();
+		if (wasNew) {
+			server.log.info("Created default local host");
+		}
+
 		await registerWsRoutes(server, sessionManager, options.authToken);
+		const configResolver = new ConfigResolver(metaDal);
 		registerHostRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal);
+		registerConfigRoutes(server, metaDal, configResolver);
 		if (options.authToken) {
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}
@@ -87,6 +102,10 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			await sessionManager.shutdown();
 		});
 	}
+
+	// Serve the embedded web client from the static/ directory.
+	// Graceful degradation: skip if the directory does not exist (dev mode uses Vite).
+	await registerStaticIfExists(server);
 
 	return server;
 }
@@ -100,4 +119,46 @@ export async function startServer(
 
 	const address = await server.listen({ host, port });
 	return address;
+}
+
+// ─── Static file helper ────────────────────────────────────────────────────────
+
+/**
+ * Register @fastify/static to serve the embedded web client from the
+ * `static/` directory adjacent to this module.
+ *
+ * Graceful degradation: if the directory does not exist (i.e. during
+ * development, where Vite serves the UI on a separate port), we simply
+ * skip registration without throwing.
+ */
+async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
+	const { existsSync } = await import("node:fs");
+	const { join, dirname } = await import("node:path");
+	const { fileURLToPath } = await import("node:url");
+
+	// Resolve static/ relative to this source file:
+	// - In the compiled dist/ tree: dist/server.js → ../../static/ (i.e. package root/static/)
+	// - In source under src/: src/server.ts → ../../static/ (same result)
+	const thisFile = fileURLToPath(import.meta.url);
+	const staticDir = join(dirname(thisFile), "..", "static");
+
+	if (!existsSync(staticDir)) {
+		server.log.debug(
+			{ staticDir },
+			"static dir not found — skipping static file serving (dev mode)",
+		);
+		return;
+	}
+
+	// Lazy import so @fastify/static is not loaded when the dir is absent
+	const fastifyStatic = (await import("@fastify/static")).default;
+	await server.register(fastifyStatic, {
+		root: staticDir,
+		prefix: "/",
+		// SPA fallback: serve index.html for any path not matching a real file
+		// so that Vue Router client-side routes work after a hard refresh.
+		wildcard: false,
+	});
+
+	server.log.info({ staticDir }, "serving web UI from static dir");
 }

@@ -6,6 +6,7 @@
 - [x] ✅ [Remote Terminal] M2 — Complete (2026-03-04) — 190 tests, reviewed
 - [x] ✅ [Session Persistence] M3 — Complete (2026-03-04) — 244 tests, reviewed
 - [x] ✅ [Multi-Client] M4 — Complete (2026-03-04) — 306 tests, reviewed
+- [ ] 🟡 [Polish] M5 — Awaiting review (2026-03-04) — 370 tests
 
 ## Pending
 
@@ -44,13 +45,13 @@
 - [x] ✅ [UI] Multi-client UX: write-lock indicators, lock transfer UI (2026-03-04)
 
 ### MVP — Polish (M5)
-- [ ] [UI] Host rail: auto-icons, color hash, status dots — Priority: H
-- [ ] [UI] Channel sidebar: groups, drag reorder, unread indicators — Priority: H
-- [ ] [UI] Tabs + split panes + workspace layout persistence — Priority: H
-- [ ] [UI] Command palette (Ctrl+P): fuzzy search hosts/channels/actions — Priority: M
-- [ ] [Hub] Config cascade: 4-layer deep merge + settings API — Priority: H
-- [ ] [Hub] CLI: start/stop, host add/list/test, pair, session list — Priority: H
-- [ ] [Root] Onboarding + npx nexterm packaging — Priority: H
+- [x] ✅ [UI] Host rail: auto-icons, color hash, status dots (2026-03-04)
+- [x] ✅ [UI] Channel sidebar: groups, drag reorder, unread indicators (2026-03-04)
+- [x] ✅ [UI] Tabs + split panes + workspace layout persistence (2026-03-04)
+- [x] ✅ [UI] Command palette (Ctrl+P): fuzzy search hosts/channels/actions (2026-03-04)
+- [x] ✅ [Hub] Config cascade: 4-layer deep merge + settings API (2026-03-04)
+- [x] ✅ [Hub] CLI: start/stop, host add/list/test, pair, session list (2026-03-04)
+- [x] ✅ [Root] Onboarding + npx nexterm packaging (2026-03-04)
 
 ### Review Backlog (M4)
 - [ ] 🔧 [Docs] Update STORAGE.md pairing_codes schema to match implementation — Priority: S (F-003)
@@ -93,6 +94,7 @@
 - [x] ✅ [Remote Terminal] M2 — SSH connector, session SM, REST API, review fixes (2026-03-04)
 - [x] ✅ [Session Persistence] M3 — Headless xterm, snapshots, chunking, ATTACH restore, GC (2026-03-04)
 - [x] ✅ [Multi-Client] M4 — Token auth, pairing, write-lock 3-tier, multi-client UX (2026-03-04)
+- [x] ✅ [Polish] M5 — Host rail, sidebar, tabs/panes, command palette, config, CLI, onboarding (2026-03-04)
 
 ## Blocked / Deferred
 

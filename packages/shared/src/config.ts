@@ -4,9 +4,11 @@ import { isPlainObject } from "./utils.js";
 export interface TerminalProfile {
 	fontFamily?: string;
 	fontSize?: number;
-	theme?: Record<string, string>;
+	theme?: string;
+	themeOverrides?: Record<string, string>;
 	cursorStyle?: "block" | "underline" | "bar";
 	scrollback?: number;
+	bellSound?: boolean;
 	[key: string]: unknown;
 }
 
@@ -71,3 +73,13 @@ export function deepMerge<T extends Record<string, unknown>>(
 
 	return result as T;
 }
+
+/** Layer 1 built-in defaults for the terminal profile cascade. */
+export const DEFAULT_PROFILE: TerminalProfile = {
+	fontFamily: "monospace",
+	fontSize: 14,
+	theme: "catppuccin-mocha",
+	cursorStyle: "block",
+	scrollback: 5000,
+	bellSound: false,
+};

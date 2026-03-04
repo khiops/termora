@@ -348,6 +348,38 @@ export class MetaDAL {
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
 
+	// ─── Profile JSON helpers ─────────────────────────────────────────────────
+
+	getHostProfile(id: string): string | null {
+		const row = this.db.prepare("SELECT profile_json FROM hosts WHERE id = ?").get(id) as
+			| { profile_json: string | null }
+			| undefined;
+		return row?.profile_json ?? null;
+	}
+
+	updateHostProfile(id: string, profileJson: string | null): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE hosts SET profile_json = ?, updated_at = ? WHERE id = ?")
+			.run(profileJson, now, id);
+		return result.changes > 0;
+	}
+
+	getChannelProfile(id: string): string | null {
+		const row = this.db.prepare("SELECT profile_json FROM channels WHERE id = ?").get(id) as
+			| { profile_json: string | null }
+			| undefined;
+		return row?.profile_json ?? null;
+	}
+
+	updateChannelProfile(id: string, profileJson: string | null): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET profile_json = ?, updated_at = ? WHERE id = ?")
+			.run(profileJson, now, id);
+		return result.changes > 0;
+	}
+
 	// ─── Cache Index ─────────────────────────────────────────────────────────
 
 	updateCacheIndex(channelId: string, snapshotChunkId: string, lastSeq: number): void {

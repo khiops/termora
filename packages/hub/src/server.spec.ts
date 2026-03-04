@@ -54,19 +54,19 @@ describe("Hub Server — Bearer auth", () => {
 		expect(response.statusCode).not.toBe(401);
 	});
 
-	it("authenticated route without Authorization header → 401 AUTH_REQUIRED", async () => {
+	it("API route without Authorization header → 401 AUTH_REQUIRED", async () => {
 		server = await createServer({ logger: false, authToken: TEST_TOKEN });
-		const response = await server.inject({ method: "GET", url: "/unknown" });
+		const response = await server.inject({ method: "GET", url: "/api/unknown" });
 		expect(response.statusCode).toBe(401);
 		const body = response.json();
 		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 
-	it("authenticated route with wrong token → 401 AUTH_INVALID", async () => {
+	it("API route with wrong token → 401 AUTH_INVALID", async () => {
 		server = await createServer({ logger: false, authToken: TEST_TOKEN });
 		const response = await server.inject({
 			method: "GET",
-			url: "/unknown",
+			url: "/api/unknown",
 			headers: { authorization: `Bearer ${"b".repeat(64)}` },
 		});
 		expect(response.statusCode).toBe(401);
@@ -74,11 +74,11 @@ describe("Hub Server — Bearer auth", () => {
 		expect(body.error).toBe("AUTH_INVALID");
 	});
 
-	it("authenticated route with malformed Authorization header → 401", async () => {
+	it("API route with malformed Authorization header → 401", async () => {
 		server = await createServer({ logger: false, authToken: TEST_TOKEN });
 		const response = await server.inject({
 			method: "GET",
-			url: "/unknown",
+			url: "/api/unknown",
 			headers: { authorization: "Token abc123" },
 		});
 		expect(response.statusCode).toBe(401);
@@ -86,11 +86,11 @@ describe("Hub Server — Bearer auth", () => {
 		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 
-	it("authenticated route with correct token → passes auth (404 from missing route, not 401)", async () => {
+	it("API route with correct token → passes auth (404 from missing route, not 401)", async () => {
 		server = await createServer({ logger: false, authToken: TEST_TOKEN });
 		const response = await server.inject({
 			method: "GET",
-			url: "/unknown",
+			url: "/api/unknown",
 			headers: { authorization: `Bearer ${TEST_TOKEN}` },
 		});
 		expect(response.statusCode).toBe(404);

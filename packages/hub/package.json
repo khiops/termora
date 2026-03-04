@@ -1,7 +1,21 @@
 {
 	"name": "@nexterm/hub",
 	"version": "0.1.0",
+	"description": "nexterm hub — Fastify daemon, session management, SSH transport, REST + WebSocket API",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/nexterm/nexterm.git"
+	},
+	"engines": {
+		"node": ">=20"
+	},
 	"type": "module",
+	"files": ["dist", "src/storage/migrations"],
+	"exports": {
+		".": "./dist/index.js",
+		"./cli": "./dist/cli.js"
+	},
 	"scripts": {
 		"dev": "tsx watch src/main.ts",
 		"build": "tsc -p tsconfig.json",
@@ -13,6 +27,7 @@
 		"better-sqlite3": "catalog:",
 		"fastify": "catalog:",
 		"@fastify/websocket": "catalog:",
+		"@fastify/static": "catalog:",
 		"ssh2": "catalog:",
 		"@iarna/toml": "catalog:"
 	},

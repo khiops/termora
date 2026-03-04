@@ -3,13 +3,23 @@
 	"version": "0.1.0",
 	"private": false,
 	"type": "module",
-	"description": "Local-first session terminal platform",
-	"bin": {
-		"nexterm": "./dist/cli.js"
+	"description": "Local-first session terminal platform — hub daemon + agent + SSH + PWA UI",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/nexterm/nexterm.git"
 	},
+	"engines": {
+		"node": ">=20"
+	},
+	"bin": {
+		"nexterm": "./bin/nexterm.js"
+	},
+	"files": ["bin"],
 	"scripts": {
 		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @nexterm/hub dev\" \"pnpm -F @nexterm/web dev\"",
 		"build": "pnpm -r build",
+		"build:embed": "pnpm -F @nexterm/web build && node scripts/embed-web.js",
 		"test": "vitest",
 		"test:run": "vitest run",
 		"lint": "biome check .",

@@ -1,11 +1,11 @@
 <template>
-	<div class="terminal-pane">
+	<div class="terminal-pane" @contextmenu.prevent="showContextMenu">
 		<!-- Pane header with channel info and write-lock indicator -->
 		<div v-if="ready" class="pane-header">
-			<span class="pane-title">Terminal</span>
-			<WriteLockIndicator :channel-id="sessionStore.currentChannelId" class="pane-lock" />
+			<span class="pane-title">{{ paneTitle }}</span>
+			<WriteLockIndicator :channel-id="effectiveChannelId" class="pane-lock" />
 			<span
-				v-if="sessionStore.currentChannelId && !isWriter"
+				v-if="effectiveChannelId && !isWriter"
 				class="readonly-badge"
 				title="You are in read-only mode"
 			>
@@ -20,15 +20,56 @@
 			<span>Connecting…</span>
 		</div>
 		<div ref="terminalContainer" class="terminal-container" />
+
+		<!-- Context menu -->
+		<div
+			v-if="contextMenuVisible"
+			class="context-menu"
+			:style="{ top: `${contextMenuY}px`, left: `${contextMenuX}px` }"
+			@mouseleave="contextMenuVisible = false"
+		>
+			<button class="context-menu__item" @click="onSplitRight">Split Right</button>
+			<button class="context-menu__item" @click="onSplitDown">Split Down</button>
+			<hr class="context-menu__divider" />
+			<button class="context-menu__item context-menu__item--danger" @click="onClosePane">
+				Close Pane
+			</button>
+		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { computed, ref, watch, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "../stores/session.js";
 import { useWriteLockStore } from "../stores/writelock.js";
 import { useTerminal } from "../composables/useTerminal.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
+
+// ---------------------------------------------------------------------------
+// Props + emits
+// ---------------------------------------------------------------------------
+
+const props = withDefaults(
+	defineProps<{
+		/**
+		 * If provided, this pane manages an already-spawned channel (e.g. when
+		 * routed from a tab or split). If null/undefined, the pane spawns its
+		 * own channel on mount (legacy single-pane behaviour).
+		 */
+		channelId?: string | null;
+	}>(),
+	{ channelId: null },
+);
+
+const emit = defineEmits<{
+	(e: "split-right", channelId: string): void;
+	(e: "split-down", channelId: string): void;
+	(e: "close-pane", channelId: string): void;
+}>();
+
+// ---------------------------------------------------------------------------
+// Stores + terminal composable
+// ---------------------------------------------------------------------------
 
 const sessionStore = useSessionStore();
 const writeLockStore = useWriteLockStore();
@@ -41,34 +82,120 @@ const { init, attachChannel, dispose, canWrite } = useTerminal(
 	sessionStore.wsClient,
 );
 
+/**
+ * The channel this pane is currently showing. When channelId prop is set,
+ * we use that; otherwise we fall back to the channel we spawned internally.
+ */
+const internalChannelId = ref<string | null>(null);
+
+const effectiveChannelId = computed<string | null>(
+	() => props.channelId ?? internalChannelId.value,
+);
+
+const paneTitle = computed(() => {
+	const ch = effectiveChannelId.value;
+	if (ch === null) return "Terminal";
+	// Show the last 8 chars of the ULID as a short identifier
+	return `Terminal ${ch.slice(-8)}`;
+});
+
+// ---------------------------------------------------------------------------
+// Write-lock awareness
+// ---------------------------------------------------------------------------
+
 const isWriter = computed(() => {
-	const chId = sessionStore.currentChannelId;
+	const chId = effectiveChannelId.value;
 	return chId ? writeLockStore.isWriter(chId) : false;
 });
 
-// Sync write-lock state into the composable's canWrite gate.
-watch(isWriter, (writerNow) => {
-	canWrite.value = writerNow;
-}, { immediate: true });
+watch(
+	isWriter,
+	(writerNow) => {
+		canWrite.value = writerNow;
+	},
+	{ immediate: true },
+);
+
+// ---------------------------------------------------------------------------
+// Lifecycle: init terminal + attach/reattach channel
+// ---------------------------------------------------------------------------
 
 onMounted(async () => {
 	try {
 		await sessionStore.connect();
-		const channelId = await sessionStore.spawnTerminal();
 
-		// init() must happen after the container is in the DOM (onMounted guarantees this)
 		init();
-		attachChannel(channelId);
-		ready.value = true;
+
+		if (props.channelId !== null && props.channelId !== undefined) {
+			// Pane was opened for an existing channel — attach directly
+			attachChannel(props.channelId);
+			ready.value = true;
+		} else {
+			// Legacy mode: spawn a fresh channel
+			const channelId = await sessionStore.spawnTerminal();
+			internalChannelId.value = channelId;
+			attachChannel(channelId);
+			ready.value = true;
+		}
 	} catch (err) {
 		error.value = err instanceof Error ? err.message : String(err);
 		console.error("[TerminalPane] Initialization failed:", err);
 	}
 });
 
+// Re-attach when the channelId prop changes (e.g. pane reuse after tab switch)
+watch(
+	() => props.channelId,
+	(newId) => {
+		if (newId !== null && newId !== undefined && ready.value) {
+			attachChannel(newId);
+		}
+	},
+);
+
 onUnmounted(() => {
 	dispose();
 });
+
+// ---------------------------------------------------------------------------
+// Context menu
+// ---------------------------------------------------------------------------
+
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+
+function showContextMenu(event: MouseEvent): void {
+	contextMenuX.value = event.offsetX;
+	contextMenuY.value = event.offsetY;
+	contextMenuVisible.value = true;
+}
+
+function onSplitRight(): void {
+	contextMenuVisible.value = false;
+	const chId = effectiveChannelId.value;
+	if (chId !== null) emit("split-right", chId);
+}
+
+function onSplitDown(): void {
+	contextMenuVisible.value = false;
+	const chId = effectiveChannelId.value;
+	if (chId !== null) emit("split-down", chId);
+}
+
+function onClosePane(): void {
+	contextMenuVisible.value = false;
+	const chId = effectiveChannelId.value;
+	if (chId !== null) emit("close-pane", chId);
+}
+
+// Dismiss context menu on any outside click
+function onDocumentClick(): void {
+	contextMenuVisible.value = false;
+}
+
+onMounted(() => document.addEventListener("click", onDocumentClick));
+onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 </script>
 
 <style scoped>
@@ -137,5 +264,45 @@ onUnmounted(() => {
 
 .terminal-error {
 	color: #f38ba8;
+}
+
+/* Context menu */
+.context-menu {
+	position: absolute;
+	background: #1e1e2e;
+	border: 1px solid #45475a;
+	border-radius: 6px;
+	padding: 4px 0;
+	min-width: 140px;
+	z-index: 100;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.context-menu__item {
+	display: block;
+	width: 100%;
+	padding: 6px 12px;
+	background: none;
+	border: none;
+	color: #cdd6f4;
+	font-size: 12px;
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.1s;
+}
+
+.context-menu__item:hover {
+	background: #313244;
+}
+
+.context-menu__item--danger {
+	color: #f38ba8;
+}
+
+.context-menu__divider {
+	border: none;
+	border-top: 1px solid #313244;
+	margin: 4px 0;
 }
 </style>
