@@ -188,6 +188,46 @@ describe("SpoolDAL", () => {
 		expect(dal.getChunk(id)).toBeDefined();
 	});
 
+	it("deleteChunksOlderThan preserves the last snapshot per channel regardless of age", () => {
+		setup();
+		// Insert output + two snapshots — all with old-enough timestamps so the
+		// future cutoff would normally delete them all.
+		const idOut = dal.insertChunk(makeChunkInput("ch-gc", 1, "output"));
+		const idSnap1 = dal.insertChunk(makeChunkInput("ch-gc", 2, "snapshot"));
+		const idSnap2 = dal.insertChunk(makeChunkInput("ch-gc", 3, "snapshot"));
+
+		// Sanity: all three exist before GC
+		expect(dal.getChunk(idOut)).toBeDefined();
+		expect(dal.getChunk(idSnap1)).toBeDefined();
+		expect(dal.getChunk(idSnap2)).toBeDefined();
+
+		// GC with a future cutoff — all chunks are "old"
+		const future = new Date(Date.now() + 60_000).toISOString();
+		const deleted = dal.deleteChunksOlderThan(future);
+
+		// Output chunk + first (non-last) snapshot deleted; last snapshot kept
+		expect(deleted).toBe(2);
+		expect(dal.getChunk(idOut)).toBeUndefined();
+		expect(dal.getChunk(idSnap1)).toBeUndefined();
+		// Last snapshot (highest seq) must survive
+		expect(dal.getChunk(idSnap2)).toBeDefined();
+	});
+
+	it("deleteChunksOlderThan preserves last snapshot independently per channel", () => {
+		setup();
+		// Two channels each with one snapshot — both snapshots must survive GC
+		const snapA = dal.insertChunk(makeChunkInput("ch-gcA", 1, "snapshot"));
+		const snapB = dal.insertChunk(makeChunkInput("ch-gcB", 1, "snapshot"));
+
+		const future = new Date(Date.now() + 60_000).toISOString();
+		const deleted = dal.deleteChunksOlderThan(future);
+
+		// No output chunks — nothing to delete (both snapshots are last for their channel)
+		expect(deleted).toBe(0);
+		expect(dal.getChunk(snapA)).toBeDefined();
+		expect(dal.getChunk(snapB)).toBeDefined();
+	});
+
 	// -------------------------------------------------------------------------
 	// getChannelChunkCount
 	// -------------------------------------------------------------------------

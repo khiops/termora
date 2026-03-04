@@ -1,6 +1,7 @@
 import type { ProtocolMessage } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openTestDatabases } from "../storage/db.js";
+import { SpoolDAL } from "../storage/spool.js";
 import { SessionManager, type WsClient } from "./session-manager.js";
 
 // ─── Mock channel ID helpers ──────────────────────────────────────────────────
@@ -33,6 +34,22 @@ vi.mock("./local-agent.js", () => {
 						type: "SPAWN_OK",
 						requestId: spawnMsg.requestId,
 						channelId,
+					});
+				});
+			} else if (msg.type === "ATTACH") {
+				const attachMsg = msg as unknown as { channelId: string };
+				setImmediate(() => {
+					this.emit("message", {
+						type: "ATTACH_OK",
+						channelId: attachMsg.channelId,
+						snapshot: {
+							serialized: "<mock-snapshot>",
+							cols: 80,
+							rows: 24,
+							cursorX: 0,
+							cursorY: 0,
+						},
+						lastSeq: 0,
 					});
 				});
 			}
@@ -68,6 +85,22 @@ class MockSshAgent {
 					type: "SPAWN_OK",
 					requestId: spawnMsg.requestId,
 					channelId,
+				});
+			});
+		} else if (msg.type === "ATTACH") {
+			const attachMsg = msg as unknown as { channelId: string };
+			setImmediate(() => {
+				this._emit("message", {
+					type: "ATTACH_OK",
+					channelId: attachMsg.channelId,
+					snapshot: {
+						serialized: "<mock-snapshot>",
+						cols: 80,
+						rows: 24,
+						cursorX: 0,
+						cursorY: 0,
+					},
+					lastSeq: 0,
 				});
 			});
 		}
@@ -212,7 +245,7 @@ describe("SessionManager", () => {
 		const client2Received: ProtocolMessage[] = [];
 		const client2 = makeClient("c2", client2Received);
 		sm.addClient(client2);
-		sm.handleAttach("c2", "local-ch-1");
+		await sm.handleAttach("c2", "local-ch-1");
 
 		expect(client2Received).toHaveLength(1);
 		const firstAttach = client2Received[0] as ProtocolMessage;
@@ -232,12 +265,12 @@ describe("SessionManager", () => {
 		expect(attachOk.cached).toBe(false);
 	});
 
-	it("handleAttach sends ERROR for unknown channel", () => {
+	it("handleAttach sends ERROR for unknown channel", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);
 		sm.addClient(client);
 
-		sm.handleAttach("c1", "nonexistent-channel");
+		await sm.handleAttach("c1", "nonexistent-channel");
 
 		expect(received).toHaveLength(1);
 		const errMsg = received[0] as ProtocolMessage;
@@ -372,7 +405,7 @@ describe("SessionManager", () => {
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
 
 		sm.handleDetach("c1", "local-ch-1");
-		sm.handleAttach("c1", "local-ch-1");
+		await sm.handleAttach("c1", "local-ch-1");
 
 		const { MetaDAL } = await import("../storage/meta.js");
 		const dal = new MetaDAL(dbManager.meta);
@@ -533,5 +566,205 @@ describe("SessionManager", () => {
 		const sessions = dal.listSessions();
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0]?.status).toBe("active");
+	});
+
+	// ─── Block 3.4: ATTACH with Snapshot Restore ────────────────────────────
+
+	it("handleAttach on live channel (first attach after SPAWN): ATTACH_OK with no snapshot", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const client2Received: ProtocolMessage[] = [];
+		const client2 = makeClient("c2", client2Received);
+		sm.addClient(client2);
+
+		await sm.handleAttach("c2", "local-ch-1");
+
+		const attachOk = client2Received.find((m) => m.type === "ATTACH_OK") as unknown as {
+			channelId: string;
+			snapshot: null;
+			tail: unknown[];
+			writeLockHolder: null;
+			cached: boolean;
+		};
+		expect(attachOk).toBeTruthy();
+		expect(attachOk.channelId).toBe("local-ch-1");
+		// First attach on a just-spawned channel: no snapshot stored yet
+		expect(attachOk.snapshot).toBeNull();
+		expect(attachOk.tail).toEqual([]);
+		expect(attachOk.cached).toBe(false);
+	});
+
+	it("handleAttach on orphan channel with reachable SSH agent: sends ATTACH to agent, stores snapshot, ATTACH_OK with snapshot+tail", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-attach",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+		// Channel is now ssh-ch-1, status live
+
+		// Detach so channel becomes orphan
+		sm.handleDetach("c1", "ssh-ch-1");
+
+		// Pre-insert an output chunk so tail is non-empty
+		const spoolDal = new SpoolDAL(dbManager.spool);
+		spoolDal.insertChunk({
+			channelId: "ssh-ch-1",
+			seq: 0,
+			kind: "output",
+			dataBlob: Buffer.from("hello"),
+			uncompressedLen: 5,
+		});
+
+		// Re-attach c1: agent is reachable (MockSshAgent responds to ATTACH)
+		const client2Received: ProtocolMessage[] = [];
+		const client2 = makeClient("c2", client2Received);
+		sm.addClient(client2);
+
+		await sm.handleAttach("c2", "ssh-ch-1");
+
+		expect(mockSshAgentInstance).not.toBeNull();
+		// MockSshAgent should have received an ATTACH message
+		// biome-ignore lint/style/noNonNullAssertion: asserted not null above
+		const sendCalls = mockSshAgentInstance!.send.mock.calls.map(
+			(c) => (c[0] as ProtocolMessage).type,
+		);
+		expect(sendCalls).toContain("ATTACH");
+
+		const attachOk = client2Received.find((m) => m.type === "ATTACH_OK") as unknown as {
+			channelId: string;
+			snapshot: { serialized: string } | null;
+			tail: Uint8Array[];
+			cached: boolean;
+		};
+		expect(attachOk).toBeTruthy();
+		expect(attachOk.channelId).toBe("ssh-ch-1");
+		// Agent returned a fresh snapshot
+		expect(attachOk.snapshot).not.toBeNull();
+		expect(attachOk.snapshot?.serialized).toBe("<mock-snapshot>");
+		// The tail has the pre-inserted output chunk (seq 0, which is ≤ lastSeq=0 from mock)
+		// Mock agent returns lastSeq=0, so tail = chunks with seq > 0 → empty
+		expect(attachOk.cached).toBe(false);
+
+		// Snapshot was persisted to spool.db
+		const stored = spoolDal.getLatestSnapshot("ssh-ch-1");
+		expect(stored).toBeTruthy();
+		if (!stored) throw new Error("snapshot chunk should exist");
+		const parsed = JSON.parse(stored.dataBlob.toString("utf8")) as { serialized: string };
+		expect(parsed.serialized).toBe("<mock-snapshot>");
+	});
+
+	it("handleAttach on orphan channel with disconnected agent: serves cached snapshot with cached=true", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-cached",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+
+		// Detach → orphan
+		sm.handleDetach("c1", "ssh-ch-1");
+
+		// Pre-seed a snapshot chunk in spool.db (simulates a previously saved snapshot)
+		const spoolDal = new SpoolDAL(dbManager.spool);
+		const snapshotData = {
+			serialized: "<cached-snap>",
+			cols: 80,
+			rows: 24,
+			cursorX: 5,
+			cursorY: 2,
+		};
+		spoolDal.insertChunk({
+			channelId: "ssh-ch-1",
+			seq: 10,
+			kind: "snapshot",
+			dataBlob: Buffer.from(JSON.stringify(snapshotData)),
+			uncompressedLen: JSON.stringify(snapshotData).length,
+		});
+
+		// Add output chunks after the snapshot
+		spoolDal.insertChunk({
+			channelId: "ssh-ch-1",
+			seq: 11,
+			kind: "output",
+			dataBlob: Buffer.from("tail-data"),
+			uncompressedLen: 9,
+		});
+
+		// Simulate agent disconnection
+		if (mockSshAgentInstance) {
+			mockSshAgentInstance.simulateClose();
+		}
+		// Flush close event
+		await new Promise((r) => setImmediate(r));
+
+		// Verify session went to disconnected
+		const sessions = dal.listSessions(host.id);
+		expect(sessions[0]?.status).toBe("disconnected");
+
+		// Now attach with a fresh client — agent is gone
+		const client2Received: ProtocolMessage[] = [];
+		const client2 = makeClient("c2", client2Received);
+		sm.addClient(client2);
+
+		await sm.handleAttach("c2", "ssh-ch-1");
+
+		const attachOk = client2Received.find((m) => m.type === "ATTACH_OK") as unknown as {
+			channelId: string;
+			snapshot: {
+				serialized: string;
+				cols: number;
+				rows: number;
+				cursorX: number;
+				cursorY: number;
+			} | null;
+			tail: Uint8Array[];
+			cached: boolean;
+		};
+		expect(attachOk).toBeTruthy();
+		expect(attachOk.channelId).toBe("ssh-ch-1");
+		expect(attachOk.cached).toBe(true);
+		expect(attachOk.snapshot?.serialized).toBe("<cached-snap>");
+		expect(attachOk.snapshot?.cols).toBe(80);
+		expect(attachOk.snapshot?.cursorX).toBe(5);
+		// Tail chunk after seq 10
+		expect(attachOk.tail).toHaveLength(1);
+		const tailChunk = attachOk.tail[0];
+		expect(tailChunk).toBeDefined();
+		expect(Buffer.from(tailChunk ?? new Uint8Array()).toString()).toBe("tail-data");
+	});
+
+	it("handleAttach sends ERROR for unknown channel (async path)", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleAttach("c1", "no-such-channel");
+
+		expect(received).toHaveLength(1);
+		const errMsg = received[0] as unknown as { type: string; code: string };
+		expect(errMsg.type).toBe("ERROR");
+		expect(errMsg.code).toBe("CHANNEL_NOT_FOUND");
 	});
 });

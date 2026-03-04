@@ -1,4 +1,6 @@
 import type {
+	AgentAttachMessage,
+	AgentAttachOkMessage,
 	AgentSnapshotResMessage,
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
@@ -22,10 +24,13 @@ import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
 import { LocalAgent, resolveAgentPath } from "./local-agent.js";
+import { OutputChunker } from "./output-chunker.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
+import { SpoolGarbageCollector } from "./spool-gc.js";
 import { SshAgent } from "./ssh-agent.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
+const ATTACH_TIMEOUT_MS = 5_000;
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
 const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
@@ -70,6 +75,10 @@ export class SessionManager {
 
 	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
 	private scheduler: SnapshotScheduler;
+	/** Output chunker — buffers OUTPUT data and flushes to spool.db */
+	private chunker: OutputChunker;
+	/** Spool GC — periodically deletes old chunks and runs incremental vacuum */
+	private gc: SpoolGarbageCollector;
 
 	constructor(private dbManager: DatabaseManager) {
 		this.metaDal = new MetaDAL(dbManager.meta);
@@ -79,6 +88,9 @@ export class SessionManager {
 			const ch = this.channels.get(channelId);
 			return ch ? this.agents.get(ch.hostId) : undefined;
 		});
+		this.chunker = new OutputChunker(this.spoolDal);
+		this.gc = new SpoolGarbageCollector(this.spoolDal, this.metaDal);
+		this.gc.start();
 	}
 
 	/**
@@ -219,6 +231,7 @@ export class SessionManager {
 					});
 					this.metaDal.updateChannelStatus(channelId, "live");
 					this.scheduler.trackChannel(channelId);
+					this.chunker.trackChannel(channelId);
 					client.attachedChannels.add(channelId);
 
 					// Notify all clients of the channel state change
@@ -257,7 +270,7 @@ export class SessionManager {
 		});
 	}
 
-	handleAttach(clientId: string, channelId: string): void {
+	async handleAttach(clientId: string, channelId: string): Promise<void> {
 		const client = this.clients.get(clientId);
 		if (!client) return;
 
@@ -281,16 +294,137 @@ export class SessionManager {
 			this._updateChannelStatus(channelId, channel.sessionId, "live");
 		}
 
-		// M1: no snapshot, no tail, no write-lock
-		const attachOk: UiAttachOkMessage = {
-			type: "ATTACH_OK",
-			channelId,
-			snapshot: null,
-			tail: [],
-			writeLockHolder: null,
-			cached: false,
-		};
-		client.send(attachOk);
+		const agent = this.agents.get(channel.hostId);
+
+		// Case 1: newly spawned channel (born → live) — no snapshot yet
+		// Case 2: agent connected — request fresh snapshot via ATTACH
+		// Case 3: agent disconnected — serve cached snapshot from spool.db
+
+		if (!wasOrphan || !agent?.connected) {
+			// Case 1 (born/live, not a re-attach) or Case 3 (cached mode)
+			const cached = wasOrphan && !agent?.connected;
+
+			let snapshot: UiAttachOkMessage["snapshot"] = null;
+			let tail: Uint8Array[] = [];
+
+			if (cached) {
+				// Read latest snapshot from spool.db
+				const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
+				if (snapshotChunk) {
+					try {
+						snapshot = JSON.parse(
+							snapshotChunk.dataBlob.toString("utf8"),
+						) as UiAttachOkMessage["snapshot"];
+					} catch {
+						snapshot = null;
+					}
+					// Tail = output chunks after the snapshot seq
+					const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+						kind: "output",
+						afterSeq: snapshotChunk.seq,
+					});
+					tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+				}
+			}
+
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot,
+				tail,
+				writeLockHolder: null,
+				cached,
+			};
+			client.send(attachOk);
+			return;
+		}
+
+		// Case 2: orphan channel with reachable agent — get fresh snapshot via ATTACH
+		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
+		agent.send(agentAttach);
+
+		try {
+			const agentResponse = await new Promise<AgentAttachOkMessage>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					agent.off("message", handler);
+					reject(new Error("Agent ATTACH timeout"));
+				}, ATTACH_TIMEOUT_MS);
+
+				const handler = (incoming: ProtocolMessage): void => {
+					if (incoming.type === "ATTACH_OK") {
+						const attachOkMsg = incoming as AgentAttachOkMessage;
+						if (attachOkMsg.channelId !== channelId) return;
+						clearTimeout(timer);
+						agent.off("message", handler);
+						resolve(attachOkMsg);
+					} else if (incoming.type === "ERROR") {
+						clearTimeout(timer);
+						agent.off("message", handler);
+						reject(new Error("Agent ATTACH error"));
+					}
+				};
+				agent.on("message", handler);
+			});
+
+			// Store the fresh snapshot in spool.db
+			const snapshotJson = JSON.stringify(agentResponse.snapshot);
+			const dataBlob = Buffer.from(snapshotJson);
+			const chunkId = this.spoolDal.insertChunk({
+				channelId,
+				seq: agentResponse.lastSeq + 1,
+				kind: "snapshot",
+				dataBlob,
+				uncompressedLen: dataBlob.length,
+			});
+			this.metaDal.updateCacheIndex(channelId, chunkId, agentResponse.lastSeq);
+
+			// Tail = output chunks after the snapshot's lastSeq
+			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+				kind: "output",
+				afterSeq: agentResponse.lastSeq,
+			});
+			const tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot: agentResponse.snapshot,
+				tail,
+				writeLockHolder: null,
+				cached: false,
+			};
+			client.send(attachOk);
+		} catch {
+			// Agent ATTACH failed — fall back to cached snapshot
+			const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
+			let snapshot: UiAttachOkMessage["snapshot"] = null;
+			let tail: Uint8Array[] = [];
+
+			if (snapshotChunk) {
+				try {
+					snapshot = JSON.parse(
+						snapshotChunk.dataBlob.toString("utf8"),
+					) as UiAttachOkMessage["snapshot"];
+				} catch {
+					snapshot = null;
+				}
+				const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+					kind: "output",
+					afterSeq: snapshotChunk.seq,
+				});
+				tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+			}
+
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot,
+				tail,
+				writeLockHolder: null,
+				cached: true,
+			};
+			client.send(attachOk);
+		}
 	}
 
 	handleDetach(clientId: string, channelId: string): void {
@@ -351,6 +485,8 @@ export class SessionManager {
 		}
 		this.reconnectTimers.clear();
 		this.scheduler.shutdown();
+		this.chunker.shutdown();
+		this.gc.stop();
 		for (const agent of this.agents.values()) {
 			agent.close();
 		}
@@ -461,8 +597,11 @@ export class SessionManager {
 		agent.on("message", (msg: ProtocolMessage) => {
 			if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
-				this.scheduler.onOutput(outputMsg.channelId);
+				// Broadcast to clients first (real-time, no delay)
 				this._broadcastToChannel(outputMsg.channelId, outputMsg);
+				// Then notify scheduler and chunker (persistence, async)
+				this.scheduler.onOutput(outputMsg.channelId);
+				this.chunker.onOutput(outputMsg.channelId, outputMsg.data);
 			} else if (msg.type === "SNAPSHOT_RES") {
 				const res = msg as AgentSnapshotResMessage;
 				const snapshotJson = JSON.stringify(res.snapshot);
@@ -482,6 +621,7 @@ export class SessionManager {
 					this._updateChannelStatus(exitMsg.channelId, channel.sessionId, "dead", exitMsg.exitCode);
 				}
 				this.scheduler.untrackChannel(exitMsg.channelId);
+				this.chunker.untrackChannel(exitMsg.channelId);
 			}
 		});
 
@@ -619,6 +759,7 @@ export class SessionManager {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
 			this._updateChannelStatus(channelId, sessionId, "dead");
 			this.scheduler.untrackChannel(channelId);
+			this.chunker.untrackChannel(channelId);
 		}
 		this._updateSessionStatus(hostId, sessionId, "closed");
 		this.sessions.delete(hostId);

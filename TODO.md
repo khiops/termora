@@ -3,7 +3,8 @@
 ## In Progress
 
 - [x] ✅ [Local Terminal] M1 — Complete (2026-03-03) — 131 tests, reviewed
-- [x] ✅ [Remote Terminal] M2 — Complete (2026-03-04) — 190 tests, reviewed, findings fixed
+- [x] ✅ [Remote Terminal] M2 — Complete (2026-03-04) — 190 tests, reviewed
+- [x] ✅ [Session Persistence] M3 — Complete (2026-03-04) — 244 tests, reviewed
 
 ## Pending
 
@@ -29,11 +30,11 @@
 - [x] ✅ [Hub] REST API: /hosts CRUD, /sessions, /hosts/:id/test (2026-03-04)
 
 ### MVP — Session Persistence (M3)
-- [ ] [Agent] xterm.js headless + DOM polyfill (SPIKE first) — Priority: H
-- [ ] [Hub] Snapshot scheduler: idle 3s / forced 5s / on-detach — Priority: H
-- [ ] [Hub] Output chunking (256KB/1s) + spool writes + GC — Priority: H
-- [ ] [Hub] ATTACH with snapshot restore + tail replay — Priority: H
-- [ ] [Hub] SSH reconnect: retry backoff, re-HELLO, re-ATTACH — Priority: H
+- [x] ✅ [Agent] xterm.js headless — no polyfill needed, serialize ~67ms (2026-03-04)
+- [x] ✅ [Hub] Snapshot scheduler: idle 3s / forced 5s / on-detach (2026-03-04)
+- [x] ✅ [Hub] Output chunking (256KB/1s) + spool writes + GC (2026-03-04)
+- [x] ✅ [Hub] ATTACH with snapshot restore + tail replay (2026-03-04)
+- [x] ✅ [Hub] SSH reconnect: retry backoff, re-HELLO, re-ATTACH (done in M2, verified)
 
 ### MVP — Multi-Client (M4)
 - [ ] [Hub] Token auth: generate auth.json, Bearer header, WS AUTH — Priority: H
@@ -50,12 +51,21 @@
 - [ ] [Hub] CLI: start/stop, host add/list/test, pair, session list — Priority: H
 - [ ] [Root] Onboarding + npx nexterm packaging — Priority: H
 
+### Review Backlog (M3)
+- [ ] 🔧 [Hub] GC: add max-size-per-channel + dead-channel cleanup (steps 2+3) — Priority: M (F-002)
+- [ ] 🔧 [Hub] DRY handleAttach: extract shared snapshot+tail logic — Priority: S (F-003)
+- [ ] 🔧 [Hub] SnapshotScheduler: add max concurrent snapshots guard — Priority: S (F-004)
+- [ ] 🔧 [Hub] OutputChunker: validate seq monotonicity in tests — Priority: S (F-005)
+- [ ] 🔧 [Hub] ATTACH: add channelId ULID validation — Priority: S (F-007)
+- [ ] 🔧 [Hub] SnapshotScheduler+OutputChunker: add edge case tests — Priority: S (F-008/F-009)
+
 ### Review Backlog (M1)
 - [ ] 🔧 [Hub] Session reuse: reuse sessionId for same host instead of new per SPAWN — Priority: M (F-001, fix in M2)
 - [ ] 🔧 [Hub] SPAWN: pass UI cols/rows to agent instead of hardcoded 80x24 — Priority: S (F-002, fix in M2)
 - [ ] 🔧 [Hub] WS handler: log malformed MessagePack messages — Priority: S (F-004, fix in M2)
 - [ ] 🔧 [Hub] WS input validation: channelId ULID, cols/rows range, data size, env count — Priority: M (F-009, fix before M4)
 - [ ] 🔧 [UI] TerminalPane: cleanup old channel on remount — Priority: S (F-008, fix in M5)
+- [ ] 🔧 [UI] Reconnecting overlay on SESSION_STATE disconnected — Priority: S (M3 cosmetic, fix in M5)
 
 ### Post-MVP
 - [ ] 💡 [UI] Tauri v2 desktop packaging — Priority: P1
@@ -72,7 +82,8 @@
 - [x] ✅ [Foundation] M0 — Foundation: monorepo, shared types, storage, dev tooling (2026-03-03)
 - [x] ✅ [Local Terminal] M1 — Hub HTTP, agent core+mux, local spawn, WS transport, Vue+xterm (2026-03-03)
 - [x] ✅ [Remote Terminal] M2 — SSH connector, session SM, REST API, review fixes (2026-03-04)
+- [x] ✅ [Session Persistence] M3 — Headless xterm, snapshots, chunking, ATTACH restore, GC (2026-03-04)
 
 ## Blocked / Deferred
 
-- [ ] ⏸️ [Agent] xterm.js headless feasibility — needs spike to validate DOM polyfill size (before M3)
+- [x] ⏭️ [Agent] xterm.js headless feasibility — RESOLVED: @xterm/headless works natively, no polyfill needed

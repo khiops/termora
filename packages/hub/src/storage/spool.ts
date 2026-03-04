@@ -116,7 +116,19 @@ export class SpoolDAL {
 	}
 
 	deleteChunksOlderThan(before: string): number {
-		const result = this.db.prepare("DELETE FROM chunks WHERE ts < ?").run(before);
+		const result = this.db
+			.prepare(
+				`DELETE FROM chunks WHERE ts < ?
+  AND id NOT IN (
+    SELECT c2.id FROM chunks c2
+    WHERE c2.kind = 'snapshot'
+    AND c2.seq = (
+      SELECT MAX(c3.seq) FROM chunks c3
+      WHERE c3.channel_id = c2.channel_id AND c3.kind = 'snapshot'
+    )
+  )`,
+			)
+			.run(before);
 		return result.changes;
 	}
 
@@ -125,5 +137,9 @@ export class SpoolDAL {
 			.prepare("SELECT COUNT(*) as count FROM chunks WHERE channel_id = ?")
 			.get(channelId) as { count: number };
 		return row.count;
+	}
+
+	incrementalVacuum(pages?: number): void {
+		this.db.pragma(`incremental_vacuum(${pages ?? 0})`);
 	}
 }

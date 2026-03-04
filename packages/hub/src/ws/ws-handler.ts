@@ -46,7 +46,11 @@ export async function registerWsRoutes(
 					break;
 				}
 				case "ATTACH": {
-					sessionManager.handleAttach(clientId, (msg as UiAttachMessage).channelId);
+					sessionManager
+						.handleAttach(clientId, (msg as UiAttachMessage).channelId)
+						.catch((err: unknown) => {
+							server.log.error({ err }, "ATTACH handling failed");
+						});
 					break;
 				}
 				case "DETACH": {
