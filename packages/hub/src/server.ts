@@ -2,6 +2,9 @@ import websocket from "@fastify/websocket";
 import { DEFAULT_PORT } from "@nexterm/shared";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
+import { registerChannelRoutes } from "./api/channels.js";
+import { registerHostRoutes } from "./api/hosts.js";
+import { registerSessionRoutes } from "./api/sessions.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
@@ -27,8 +30,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	if (options?.dbManager) {
 		await server.register(websocket);
 		const sessionManager = new SessionManager(options.dbManager);
+		const metaDal = sessionManager.getMetaDal();
 		await sessionManager.ensureLocalHost();
 		await registerWsRoutes(server, sessionManager);
+		registerHostRoutes(server, metaDal);
+		registerSessionRoutes(server, metaDal, sessionManager);
+		registerChannelRoutes(server, metaDal);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
