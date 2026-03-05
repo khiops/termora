@@ -29,15 +29,22 @@
 					@rename-tab="onRenameTab"
 				/>
 				<div class="pane-area">
-					<PaneLayout
-						v-if="layout.layout.value !== null"
-						:node="layout.layout.value"
-						@split="onSplit"
-						@close-pane="onClosePane"
-						@update-ratio="layout.updateRatio"
-						@channel-spawned="onChannelSpawned"
-					/>
-					<div v-else class="pane-empty">
+					<div
+						v-for="(tab, idx) in layout.tabs.value"
+						:key="tab.channelId"
+						v-show="idx === layout.activeTabIndex.value"
+						class="pane-tab-container"
+					>
+						<PaneLayout
+							v-if="layout.layouts.value[tab.channelId]"
+							:node="layout.layouts.value[tab.channelId]!"
+							@split="onSplit"
+							@close-pane="onClosePane"
+							@update-ratio="layout.updateRatio"
+							@channel-spawned="onChannelSpawned"
+						/>
+					</div>
+					<div v-if="layout.tabs.value.length === 0" class="pane-empty">
 						Select a channel or click + to open a terminal.
 					</div>
 				</div>
@@ -309,6 +316,16 @@ body,
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
+	position: relative;
+}
+
+.pane-tab-container {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	position: absolute;
+	inset: 0;
 }
 
 .pane-empty {

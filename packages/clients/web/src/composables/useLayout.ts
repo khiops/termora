@@ -413,6 +413,7 @@ export function useLayout() {
 		activeTabIndex,
 		activeTab,
 		layout,
+		layouts,
 		openTab,
 		closeTab,
 		setActiveTab,
