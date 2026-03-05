@@ -155,7 +155,7 @@ export function useTerminal(
 	 * Dead channels are respawned by the hub under the same channel ID, so
 	 * the caller always uses the original ID after this returns.
 	 */
-	async function reattachChannel(id: string): Promise<void> {
+	async function reattachChannel(id: string): Promise<{ writeLockHolder: string | null }> {
 		// Clean up previous OUTPUT subscription
 		outputUnsubscribe?.();
 
@@ -167,6 +167,7 @@ export function useTerminal(
 		const result = await new Promise<{
 			snapshot: unknown;
 			tail: Uint8Array[];
+			writeLockHolder: string | null;
 		}>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				unsubOk();
@@ -184,6 +185,7 @@ export function useTerminal(
 					resolve({
 						snapshot: uiMsg.snapshot,
 						tail: uiMsg.tail ?? [],
+						writeLockHolder: uiMsg.writeLockHolder ?? null,
 					});
 				}
 			});
@@ -237,6 +239,8 @@ export function useTerminal(
 		if (terminal.value) {
 			sendResize(terminal.value.cols, terminal.value.rows);
 		}
+
+		return { writeLockHolder: result.writeLockHolder };
 	}
 
 	/**

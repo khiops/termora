@@ -152,7 +152,8 @@ onMounted(async () => {
 				emit("channel-spawned", props.channelId, realId);
 			} else {
 				// Existing channel — reattach (fetch snapshot + tail).
-				await reattachChannel(props.channelId);
+				const { writeLockHolder } = await reattachChannel(props.channelId);
+				writeLockStore.setInitialHolder(props.channelId, writeLockHolder);
 			}
 			ready.value = true;
 			applyProfile(configStore.profile);
@@ -174,7 +175,8 @@ watch(
 			if (newId === internalChannelId.value) return;
 			try {
 				error.value = null;
-				await reattachChannel(newId);
+				const { writeLockHolder } = await reattachChannel(newId);
+				writeLockStore.setInitialHolder(newId, writeLockHolder);
 			} catch (err) {
 				error.value = err instanceof Error ? err.message : String(err);
 			}
@@ -192,7 +194,8 @@ watch(
 		if (effectiveChannelId.value && ready.value) {
 			try {
 				error.value = null;
-				await reattachChannel(effectiveChannelId.value);
+				const { writeLockHolder } = await reattachChannel(effectiveChannelId.value);
+				writeLockStore.setInitialHolder(effectiveChannelId.value, writeLockHolder);
 			} catch (err) {
 				error.value = err instanceof Error ? err.message : String(err);
 			}

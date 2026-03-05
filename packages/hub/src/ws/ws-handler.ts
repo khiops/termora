@@ -41,6 +41,9 @@ export async function registerWsRoutes(
 		},
 	});
 
+	// Provide write-lock holder lookup so ATTACH_OK includes the current holder
+	sessionManager.setGetWriteLockHolder((channelId) => writeLockManager.getHolder(channelId));
+
 	server.get("/ws", { websocket: true }, (socket, _req) => {
 		const clientId = generateId();
 		let authenticated = !authToken; // skip auth gate when no token configured

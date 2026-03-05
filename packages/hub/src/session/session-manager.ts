@@ -82,6 +82,16 @@ export class SessionManager {
 	/** Spool GC — periodically deletes old chunks and runs incremental vacuum */
 	private gc: SpoolGarbageCollector;
 
+	/**
+	 * Optional callback to resolve the current write-lock holder for a channel.
+	 * Injected by ws-handler.ts after WriteLockManager is created.
+	 */
+	private _getWriteLockHolder: ((channelId: string) => string | null) | null = null;
+
+	setGetWriteLockHolder(fn: (channelId: string) => string | null): void {
+		this._getWriteLockHolder = fn;
+	}
+
 	constructor(private dbManager: DatabaseManager) {
 		this.metaDal = new MetaDAL(dbManager.meta);
 		this.spoolDal = new SpoolDAL(dbManager.spool);
@@ -418,7 +428,7 @@ export class SessionManager {
 				channelId,
 				snapshot,
 				tail,
-				writeLockHolder: null,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 			};
 			client.send(attachOk);
@@ -467,7 +477,7 @@ export class SessionManager {
 				channelId,
 				snapshot: agentResponse.snapshot,
 				tail,
-				writeLockHolder: null,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: false,
 			};
 			client.send(attachOk);
@@ -497,7 +507,7 @@ export class SessionManager {
 				channelId,
 				snapshot,
 				tail,
-				writeLockHolder: null,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 			};
 			client.send(attachOk);
@@ -985,7 +995,7 @@ export class SessionManager {
 			channelId: deadChannelId,
 			snapshot,
 			tail,
-			writeLockHolder: null,
+			writeLockHolder: this._getWriteLockHolder?.(deadChannelId) ?? null,
 			cached: false,
 		};
 		client.send(attachOk);
