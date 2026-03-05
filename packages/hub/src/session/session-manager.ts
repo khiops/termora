@@ -291,8 +291,7 @@ export class SessionManager {
 					const { channelId } = spawnOk;
 
 					// Persist channel as 'born' then immediately 'live' (first client attaches)
-					const maxNum = this.metaDal.maxChannelNumberForSession(session.id);
-					const title = `Shell #${maxNum + 1}`;
+					const title = "Terminal";
 					this.metaDal.createChannel({
 						id: channelId,
 						sessionId: session.id,

@@ -75,7 +75,7 @@ const emit = defineEmits<{
 }>();
 
 const displayLabel = computed(
-	() => props.channel.title ?? `Shell #${props.index}`,
+	() => props.channel.title ?? "Terminal",
 );
 
 // -------------------------------------------------------------------------

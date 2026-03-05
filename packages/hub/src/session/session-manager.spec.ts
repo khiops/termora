@@ -353,26 +353,23 @@ describe("SessionManager", () => {
 		expect(channels).toHaveLength(1);
 		expect(channels[0]?.id).toBe("local-ch-1");
 		expect(channels[0]?.status).toBe("live");
-		expect(channels[0]?.title).toBe("Shell #1");
+		expect(channels[0]?.title).toBe("Terminal");
 	});
 
-	it("assigns sequential default titles to spawned channels", async () => {
+	it("assigns default title to all spawned channels", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);
 		sm.addClient(client);
 
-		// First spawn → "Shell #1"
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
-
-		// Second spawn → "Shell #2"
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
 
 		const { MetaDAL } = await import("../storage/meta.js");
 		const dal = new MetaDAL(dbManager.meta);
 		const ch1 = dal.getChannel("local-ch-1");
 		const ch2 = dal.getChannel("local-ch-2");
-		expect(ch1?.title).toBe("Shell #1");
-		expect(ch2?.title).toBe("Shell #2");
+		expect(ch1?.title).toBe("Terminal");
+		expect(ch2?.title).toBe("Terminal");
 	});
 
 	it("second SPAWN for same local host reuses existing session", async () => {

@@ -385,17 +385,6 @@ export class MetaDAL {
 		return row.count;
 	}
 
-	maxChannelNumberForSession(sessionId: string): number {
-		const row = this.db
-			.prepare(
-				`SELECT MAX(CAST(SUBSTR(title, 8) AS INTEGER)) as max_num
-				 FROM channels
-				 WHERE session_id = ? AND title LIKE 'Shell #%'`,
-			)
-			.get(sessionId) as { max_num: number | null };
-		return row.max_num ?? 0;
-	}
-
 	deleteChannel(id: string): void {
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
