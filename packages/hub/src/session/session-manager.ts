@@ -19,6 +19,7 @@ import type {
 } from "@nexterm/shared";
 import type { ChannelStatus, SessionStatus } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
+import type { GcConfig } from "../config.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
@@ -92,7 +93,10 @@ export class SessionManager {
 		this._getWriteLockHolder = fn;
 	}
 
-	constructor(private dbManager: DatabaseManager) {
+	constructor(
+		private dbManager: DatabaseManager,
+		gcConfig?: GcConfig,
+	) {
 		this.metaDal = new MetaDAL(dbManager.meta);
 		this.spoolDal = new SpoolDAL(dbManager.spool);
 		this.scheduler = new SnapshotScheduler((channelId) => {
@@ -101,7 +105,7 @@ export class SessionManager {
 			return ch ? this.agents.get(ch.hostId) : undefined;
 		});
 		this.chunker = new OutputChunker(this.spoolDal);
-		this.gc = new SpoolGarbageCollector(this.spoolDal, this.metaDal);
+		this.gc = new SpoolGarbageCollector(this.spoolDal, this.metaDal, gcConfig);
 		this.gc.start();
 	}
 
@@ -775,12 +779,37 @@ export class SessionManager {
 	}
 
 	private _reAttachChannels(hostId: string, sessionId: string, agent: AgentConnection): void {
+		this._spawnChannelsForHost(
+			hostId,
+			agent,
+			(channelId, ch) => {
+				if (ch.clients.size > 0) {
+					this._updateChannelStatus(channelId, sessionId, "live");
+				}
+				this.scheduler.trackChannel(channelId);
+				this.chunker.trackChannel(channelId);
+			},
+			(channelId, ch) => {
+				this._updateChannelStatus(channelId, ch.sessionId, "dead");
+			},
+		);
+	}
+
+	/**
+	 * Send SPAWN messages for every alive channel belonging to a host.
+	 * Extracted from _reAttachChannels and _warmRestartLocal to eliminate duplication.
+	 */
+	private _spawnChannelsForHost(
+		hostId: string,
+		agent: AgentConnection,
+		onSpawnOk: (channelId: string, ch: ChannelState) => void,
+		onSpawnErr: (channelId: string, ch: ChannelState) => void,
+	): void {
 		for (const [channelId, ch] of this.channels.entries()) {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
 
-			// Re-spawn channels that were alive before disconnect, preserving the channel ID
 			const requestId = generateId();
-			const agentSpawn: AgentSpawnMessage = {
+			agent.send({
 				type: "SPAWN",
 				requestId,
 				channelId,
@@ -789,26 +818,19 @@ export class SessionManager {
 				env: {},
 				cols: 80,
 				rows: 24,
-			};
-			agent.send(agentSpawn);
+			});
 
 			const handler = (incoming: ProtocolMessage): void => {
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					if (spawnOk.requestId !== requestId) return;
 					agent.off("message", handler);
-
-					// Channel ID is preserved — just update status
-					if (ch.clients.size > 0) {
-						this._updateChannelStatus(channelId, sessionId, "live");
-					}
-					this.scheduler.trackChannel(channelId);
-					this.chunker.trackChannel(channelId);
+					onSpawnOk(channelId, ch);
 				} else if (incoming.type === "SPAWN_ERR") {
 					const spawnErr = incoming as AgentSpawnErrMessage;
 					if (spawnErr.requestId !== requestId) return;
 					agent.off("message", handler);
-					this._updateChannelStatus(channelId, ch.sessionId, "dead");
+					onSpawnErr(channelId, ch);
 				}
 			};
 			agent.on("message", handler);
@@ -849,36 +871,17 @@ export class SessionManager {
 		this._updateSessionStatus(hostId, sessionId, "active");
 
 		// Re-spawn PTYs for each orphan channel, using the SAME channel ID
-		for (const [channelId, ch] of this.channels.entries()) {
-			if (ch.hostId !== hostId || ch.status === "dead") continue;
-
-			const requestId = generateId();
-			agent.send({
-				type: "SPAWN",
-				requestId,
-				channelId,
-				shell: ch.shell,
-				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
-				env: {},
-				cols: 80,
-				rows: 24,
-			});
-
-			const handler = (msg: ProtocolMessage): void => {
-				if (msg.type === "SPAWN_OK" && (msg as AgentSpawnOkMessage).requestId === requestId) {
-					agent.off("message", handler);
-					this.scheduler.trackChannel(channelId);
-					this.chunker.trackChannel(channelId);
-				} else if (
-					msg.type === "SPAWN_ERR" &&
-					(msg as AgentSpawnErrMessage).requestId === requestId
-				) {
-					agent.off("message", handler);
-					this._updateChannelStatus(channelId, ch.sessionId, "dead");
-				}
-			};
-			agent.on("message", handler);
-		}
+		this._spawnChannelsForHost(
+			hostId,
+			agent,
+			(channelId) => {
+				this.scheduler.trackChannel(channelId);
+				this.chunker.trackChannel(channelId);
+			},
+			(channelId, ch) => {
+				this._updateChannelStatus(channelId, ch.sessionId, "dead");
+			},
+		);
 	}
 
 	/**

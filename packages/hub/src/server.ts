@@ -11,7 +11,7 @@ import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { validateToken } from "./auth.js";
 import { getConfigDir } from "./cli.js";
-import { ConfigResolver } from "./config.js";
+import { ConfigResolver, loadGcConfig } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
@@ -87,7 +87,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
 		await server.register(websocket);
-		const sessionManager = new SessionManager(options.dbManager);
+
+		// Load GC config from config.toml before creating SessionManager
+		const configDir = options.configDir ?? getConfigDir();
+		const gcConfig = loadGcConfig(configDir);
+
+		const sessionManager = new SessionManager(options.dbManager, gcConfig);
 		const metaDal = sessionManager.getMetaDal();
 
 		// First-run: ensure the built-in "local" host exists
@@ -99,7 +104,6 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await sessionManager.startup();
 
 		await registerWsRoutes(server, sessionManager, options.authToken);
-		const configDir = options.configDir ?? getConfigDir();
 		const configResolver = new ConfigResolver(metaDal);
 		configResolver.loadFromFile(configDir);
 		registerHostRoutes(server, metaDal);

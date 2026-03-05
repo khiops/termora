@@ -269,4 +269,119 @@ describe("SpoolDAL", () => {
 		const chunk = dal.getChunk(id);
 		expect(chunk?.channelId).toBe("arbitrary-channel-id-xyz");
 	});
+
+	// -------------------------------------------------------------------------
+	// getChannelSize
+	// -------------------------------------------------------------------------
+
+	it("getChannelSize returns total data_blob size for a channel", () => {
+		setup();
+		dal.insertChunk(makeChunkInput("ch-sz", 1, "output")); // "data-1" → 6 bytes
+		dal.insertChunk(makeChunkInput("ch-sz", 2, "output")); // "data-2" → 6 bytes
+		dal.insertChunk(makeChunkInput("ch-sz", 3, "snapshot")); // "data-3" → 6 bytes
+
+		expect(dal.getChannelSize("ch-sz")).toBe(18);
+	});
+
+	it("getChannelSize returns 0 for unknown channel", () => {
+		setup();
+		expect(dal.getChannelSize("ch-nope")).toBe(0);
+	});
+
+	// -------------------------------------------------------------------------
+	// deleteChunksForChannel
+	// -------------------------------------------------------------------------
+
+	it("deleteChunksForChannel removes all chunks and returns count", () => {
+		setup();
+		dal.insertChunk(makeChunkInput("ch-del", 1, "output"));
+		dal.insertChunk(makeChunkInput("ch-del", 2, "snapshot"));
+		dal.insertChunk(makeChunkInput("ch-other2", 1, "output"));
+
+		const deleted = dal.deleteChunksForChannel("ch-del");
+		expect(deleted).toBe(2);
+		expect(dal.getChannelChunkCount("ch-del")).toBe(0);
+		// Other channel unaffected
+		expect(dal.getChannelChunkCount("ch-other2")).toBe(1);
+	});
+
+	it("deleteChunksForChannel returns 0 for unknown channel", () => {
+		setup();
+		expect(dal.deleteChunksForChannel("ch-nope")).toBe(0);
+	});
+
+	// -------------------------------------------------------------------------
+	// listChannelIds
+	// -------------------------------------------------------------------------
+
+	it("listChannelIds returns distinct channel ids with chunks", () => {
+		setup();
+		dal.insertChunk(makeChunkInput("ch-a", 1, "output"));
+		dal.insertChunk(makeChunkInput("ch-a", 2, "output"));
+		dal.insertChunk(makeChunkInput("ch-b", 1, "output"));
+
+		const ids = dal.listChannelIds();
+		expect(ids).toHaveLength(2);
+		expect(ids.sort()).toEqual(["ch-a", "ch-b"]);
+	});
+
+	it("listChannelIds returns empty array when no chunks exist", () => {
+		setup();
+		expect(dal.listChannelIds()).toEqual([]);
+	});
+
+	// -------------------------------------------------------------------------
+	// evictOldestChunks
+	// -------------------------------------------------------------------------
+
+	it("evictOldestChunks deletes oldest output chunks until under target", () => {
+		setup();
+		// Each "data-N" blob is 6 bytes; 3 output chunks = 18 bytes
+		dal.insertChunk(makeChunkInput("ch-ev", 1, "output"));
+		dal.insertChunk(makeChunkInput("ch-ev", 2, "output"));
+		dal.insertChunk(makeChunkInput("ch-ev", 3, "output"));
+
+		// Target 12 bytes → need to delete 1 chunk (18-6=12)
+		const deleted = dal.evictOldestChunks("ch-ev", 12);
+		expect(deleted).toBe(1);
+		expect(dal.getChannelSize("ch-ev")).toBe(12);
+
+		// Oldest (seq=1) deleted, seq 2 and 3 remain
+		const remaining = dal.getChunksByChannel("ch-ev");
+		expect(remaining.map((c) => c.seq)).toEqual([2, 3]);
+	});
+
+	it("evictOldestChunks preserves snapshots even if over target", () => {
+		setup();
+		// 1 output (6 bytes) + 1 snapshot (6 bytes) = 12 bytes
+		dal.insertChunk(makeChunkInput("ch-ev2", 1, "output"));
+		dal.insertChunk(makeChunkInput("ch-ev2", 2, "snapshot"));
+
+		// Target 6 bytes → evict output, but snapshot stays
+		const deleted = dal.evictOldestChunks("ch-ev2", 6);
+		expect(deleted).toBe(1);
+		// Only snapshot remains (6 bytes) — at target
+		expect(dal.getChannelSize("ch-ev2")).toBe(6);
+		expect(dal.getChunksByChannel("ch-ev2")).toHaveLength(1);
+		expect(dal.getChunksByChannel("ch-ev2")[0]?.kind).toBe("snapshot");
+	});
+
+	it("evictOldestChunks stops when only snapshots remain even if still over target", () => {
+		setup();
+		// 2 snapshots = 12 bytes, no output
+		dal.insertChunk(makeChunkInput("ch-ev3", 1, "snapshot"));
+		dal.insertChunk(makeChunkInput("ch-ev3", 2, "snapshot"));
+
+		// Target 0 → can't delete snapshots
+		const deleted = dal.evictOldestChunks("ch-ev3", 0);
+		expect(deleted).toBe(0);
+		expect(dal.getChannelChunkCount("ch-ev3")).toBe(2);
+	});
+
+	it("evictOldestChunks returns 0 when already under target", () => {
+		setup();
+		dal.insertChunk(makeChunkInput("ch-ev4", 1, "output")); // 6 bytes
+		const deleted = dal.evictOldestChunks("ch-ev4", 100);
+		expect(deleted).toBe(0);
+	});
 });

@@ -1,5 +1,6 @@
 import { decodeMessage, encodeMessage } from "@nexterm/shared";
 import type { ProtocolMessage } from "@nexterm/shared";
+import { isValidDimensions, isValidEnv, isValidInputData, isValidUlid } from "@nexterm/shared";
 import { describe, expect, it } from "vitest";
 
 /** Known token used across auth tests */
@@ -147,5 +148,110 @@ describe("ws-handler AUTH protocol codec", () => {
 		expect(decoded.type).toBe("AUTH_FAIL");
 		const failMsg = decoded as unknown as Record<string, string>;
 		expect(failMsg.message).toBe("Invalid token");
+	});
+});
+
+// Input validation tests — verify the validators that ws-handler applies before dispatch.
+// The validators themselves are tested exhaustively in packages/shared/src/validation.spec.ts.
+// These tests confirm the validation rules match ws-handler's usage patterns.
+describe("ws-handler input validation", () => {
+	const VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+	describe("channelId validation (ATTACH, DETACH, INPUT, RESIZE, WRITE_*)", () => {
+		it("rejects non-ULID channelId", () => {
+			expect(isValidUlid("not-a-ulid")).toBe(false);
+			expect(isValidUlid("")).toBe(false);
+			expect(isValidUlid(123)).toBe(false);
+		});
+
+		it("accepts valid ULID channelId", () => {
+			expect(isValidUlid(VALID_ULID)).toBe(true);
+		});
+	});
+
+	describe("SPAWN hostId validation", () => {
+		it("rejects non-ULID hostId", () => {
+			expect(isValidUlid("bad-host-id")).toBe(false);
+		});
+
+		it("accepts valid ULID hostId", () => {
+			expect(isValidUlid(VALID_ULID)).toBe(true);
+		});
+	});
+
+	describe("INPUT data validation", () => {
+		it("rejects oversized input data", () => {
+			const oversized = new Uint8Array(65_537);
+			expect(isValidInputData(oversized)).toBe(false);
+		});
+
+		it("accepts normal-sized input data", () => {
+			const normal = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]);
+			expect(isValidInputData(normal)).toBe(true);
+		});
+
+		it("rejects non-Uint8Array data", () => {
+			expect(isValidInputData("hello")).toBe(false);
+		});
+	});
+
+	describe("RESIZE dimensions validation", () => {
+		it("rejects zero dimensions", () => {
+			expect(isValidDimensions(0, 24)).toBe(false);
+			expect(isValidDimensions(80, 0)).toBe(false);
+		});
+
+		it("rejects dimensions above 500", () => {
+			expect(isValidDimensions(501, 24)).toBe(false);
+			expect(isValidDimensions(80, 501)).toBe(false);
+		});
+
+		it("rejects non-integer dimensions", () => {
+			expect(isValidDimensions(80.5, 24)).toBe(false);
+		});
+
+		it("accepts valid dimensions", () => {
+			expect(isValidDimensions(80, 24)).toBe(true);
+			expect(isValidDimensions(1, 1)).toBe(true);
+			expect(isValidDimensions(500, 500)).toBe(true);
+		});
+	});
+
+	describe("SPAWN env validation", () => {
+		it("rejects env with non-string values", () => {
+			expect(isValidEnv({ KEY: 123 })).toBe(false);
+		});
+
+		it("rejects env with too many entries", () => {
+			const bigEnv: Record<string, string> = {};
+			for (let i = 0; i <= 256; i++) {
+				bigEnv[`K${i}`] = "v";
+			}
+			expect(isValidEnv(bigEnv)).toBe(false);
+		});
+
+		it("accepts valid env", () => {
+			expect(isValidEnv({ PATH: "/usr/bin" })).toBe(true);
+		});
+
+		it("accepts undefined env (optional)", () => {
+			expect(isValidEnv(undefined)).toBe(true);
+		});
+	});
+
+	describe("INVALID_INPUT error message format", () => {
+		it("INVALID_INPUT error round-trips through codec", () => {
+			const msg: ProtocolMessage = {
+				type: "ERROR",
+				code: "INVALID_INPUT",
+				message: "Invalid channelId",
+			};
+
+			const decoded = decodeMessage(encodeMessage(msg));
+			expect(decoded.type).toBe("ERROR");
+			const errMsg = decoded as unknown as Record<string, string>;
+			expect(errMsg.code).toBe("INVALID_INPUT");
+			expect(errMsg.message).toBe("Invalid channelId");
+		});
 	});
 });

@@ -40,8 +40,9 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { ref, watch } from "vue";
 import type { Tab } from "../composables/useLayout.js";
+import { useRename } from "../composables/useRename.js";
 
 const props = defineProps<{
 	tabs: Tab[];
@@ -61,29 +62,26 @@ const emit = defineEmits<{
 // -------------------------------------------------------------------------
 
 const editingTabIndex = ref<number | null>(null);
-const editValue = ref("");
-const editInput = ref<HTMLInputElement | null>(null);
+
+const { editValue, editInput, isEditing, startRename: startRenameRaw, commitRename, cancelRename } = useRename({
+	onCommit: (newValue) => {
+		if (editingTabIndex.value === null) return;
+		const tab = props.tabs[editingTabIndex.value];
+		if (tab !== undefined) {
+			emit("rename-tab", tab.channelId, newValue);
+		}
+	},
+});
+
+watch(isEditing, (editing) => {
+	if (!editing) editingTabIndex.value = null;
+});
 
 function startRename(idx: number): void {
 	const tab = props.tabs[idx];
 	if (tab === undefined) return;
 	editingTabIndex.value = idx;
-	editValue.value = props.getTabLabel(tab.channelId);
-	nextTick(() => editInput.value?.select());
-}
-
-function commitRename(): void {
-	if (editingTabIndex.value === null) return;
-	const tab = props.tabs[editingTabIndex.value];
-	const trimmed = editValue.value.trim();
-	editingTabIndex.value = null;
-	if (tab !== undefined && trimmed.length > 0 && trimmed !== props.getTabLabel(tab.channelId)) {
-		emit("rename-tab", tab.channelId, trimmed);
-	}
-}
-
-function cancelRename(): void {
-	editingTabIndex.value = null;
+	startRenameRaw(props.getTabLabel(tab.channelId));
 }
 </script>
 

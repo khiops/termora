@@ -6,6 +6,8 @@
  * Layer 3: host.profile_json (per-host overrides from meta.db)
  * Layer 3.5: agent visual hints (from HELLO message, ephemeral, keyed by sessionId)
  * Layer 4: channel.profile_json (per-channel overrides from meta.db)
+ *
+ * Also parses the [gc] section for spool garbage collector configuration.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -14,6 +16,57 @@ import TOML from "@iarna/toml";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
 import type { TerminalProfile } from "@nexterm/shared";
 import type { MetaDAL } from "./storage/meta.js";
+
+// ─── GC configuration ──────────────────────────────────────────────────────────
+
+/** Spool garbage collector configuration (from [gc] in config.toml). */
+export interface GcConfig {
+	/** Hours before dead channel spool data is purged (0 = immediate). Default: 24. */
+	deadRetentionHours: number;
+	/** Max spool size per channel in MB. Default: 10. */
+	maxSizePerChannelMb: number;
+}
+
+export const DEFAULT_GC_CONFIG: GcConfig = {
+	deadRetentionHours: 24,
+	maxSizePerChannelMb: 10,
+};
+
+/**
+ * Extract GcConfig from a parsed TOML map's [gc] section.
+ * Returns a new GcConfig with defaults overridden by any valid values found.
+ */
+function extractGcConfig(parsed: TOML.JsonMap): GcConfig {
+	const config: GcConfig = { ...DEFAULT_GC_CONFIG };
+	const gcSection = parsed.gc;
+	if (gcSection != null && typeof gcSection === "object") {
+		const gcRaw = gcSection as Record<string, unknown>;
+		if (typeof gcRaw.dead_retention_hours === "number") {
+			config.deadRetentionHours = Math.max(0, gcRaw.dead_retention_hours);
+		}
+		if (typeof gcRaw.max_size_per_channel_mb === "number") {
+			config.maxSizePerChannelMb = Math.max(0, gcRaw.max_size_per_channel_mb);
+		}
+	}
+	return config;
+}
+
+/**
+ * Standalone loader: parse the [gc] section from config.toml and return a GcConfig.
+ * Returns defaults if the file is missing, malformed, or has no [gc] section.
+ * Used by server.ts to provide GC config before SessionManager is created.
+ */
+export function loadGcConfig(configDir: string): GcConfig {
+	const configPath = join(configDir, "config.toml");
+	if (!existsSync(configPath)) return { ...DEFAULT_GC_CONFIG };
+
+	try {
+		const content = readFileSync(configPath, "utf8");
+		return extractGcConfig(TOML.parse(content));
+	} catch {
+		return { ...DEFAULT_GC_CONFIG };
+	}
+}
 
 // ─── TOML snake_case → camelCase ─────────────────────────────────────────────
 
@@ -43,12 +96,18 @@ function tomlSectionToProfile(section: Record<string, unknown>): Partial<Termina
 export class ConfigResolver {
 	private fileConfig: Partial<TerminalProfile> | null = null;
 	private agentHints = new Map<string, Partial<TerminalProfile>>();
+	private _gcConfig: GcConfig = { ...DEFAULT_GC_CONFIG };
 
 	constructor(private metaDal: MetaDAL) {}
 
+	/** Returns the resolved GC configuration (defaults merged with [gc] from config.toml). */
+	get gcConfig(): GcConfig {
+		return this._gcConfig;
+	}
+
 	/**
-	 * Load the [terminal] section from config.toml at the given config directory.
-	 * Silently no-ops if the file does not exist or has no [terminal] section.
+	 * Load [terminal] and [gc] sections from config.toml at the given config directory.
+	 * Silently no-ops if the file does not exist or is malformed.
 	 */
 	loadFromFile(configDir: string): void {
 		const configPath = join(configDir, "config.toml");
@@ -63,20 +122,24 @@ export class ConfigResolver {
 			return;
 		}
 
+		// ── [terminal] section ──────────────────────────────────────────────
 		const terminalSection = parsed.terminal;
-		if (terminalSection == null || typeof terminalSection !== "object") return;
-
-		// Separate nested theme_overrides from flat keys
-		const flat: Record<string, unknown> = {};
-		for (const [key, val] of Object.entries(terminalSection as Record<string, unknown>)) {
-			if (key === "theme_overrides" && val !== null && typeof val === "object") {
-				flat.themeOverrides = val as Record<string, string>;
-			} else {
-				flat[snakeToCamel(key)] = val;
+		if (terminalSection != null && typeof terminalSection === "object") {
+			// Separate nested theme_overrides from flat keys
+			const flat: Record<string, unknown> = {};
+			for (const [key, val] of Object.entries(terminalSection as Record<string, unknown>)) {
+				if (key === "theme_overrides" && val !== null && typeof val === "object") {
+					flat.themeOverrides = val as Record<string, string>;
+				} else {
+					flat[snakeToCamel(key)] = val;
+				}
 			}
+
+			this.fileConfig = flat as Partial<TerminalProfile>;
 		}
 
-		this.fileConfig = flat as Partial<TerminalProfile>;
+		// ── [gc] section ────────────────────────────────────────────────────
+		this._gcConfig = extractGcConfig(parsed);
 	}
 
 	/**

@@ -493,3 +493,86 @@ describe("PATCH /api/channels/:id", () => {
 		expect(body.error.code).toBe("NOT_FOUND");
 	});
 });
+
+// ─── Auth enforcement ─────────────────────────────────────────────────────────
+
+describe("Auth enforcement", () => {
+	const TEST_TOKEN = "a".repeat(64); // 32 bytes hex
+	let authServer: FastifyInstance;
+	let authDbs: DatabaseManager;
+
+	beforeEach(async () => {
+		authDbs = openTestDatabases();
+		authServer = await createServer({
+			logger: false,
+			dbManager: authDbs,
+			authToken: TEST_TOKEN,
+		});
+	});
+
+	afterEach(async () => {
+		await authServer.close();
+		authDbs.close();
+	});
+
+	it("rejects protected route without Authorization header", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/hosts" });
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects protected route with wrong token", async () => {
+		const res = await authServer.inject({
+			method: "GET",
+			url: "/api/hosts",
+			headers: { authorization: "Bearer wrong-token" },
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_INVALID");
+	});
+
+	it("accepts protected route with valid token", async () => {
+		const res = await authServer.inject({
+			method: "GET",
+			url: "/api/hosts",
+			headers: { authorization: `Bearer ${TEST_TOKEN}` },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("bypasses auth for /api/health", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/health" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ status: string }>();
+		expect(body.status).toBe("ok");
+	});
+
+	it("bypasses auth for /api/pair/verify", async () => {
+		// POST with empty body → should get a validation/bad-request error, NOT 401
+		const res = await authServer.inject({
+			method: "POST",
+			url: "/api/pair/verify",
+			payload: {},
+		});
+		expect(res.statusCode).not.toBe(401);
+	});
+
+	it("bypasses auth for /api/fonts", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/fonts" });
+		// May be 200 or 404 depending on fonts dir existence, but never 401
+		expect(res.statusCode).not.toBe(401);
+	});
+
+	it("rejects PATCH /api/channels/:id without auth", async () => {
+		const res = await authServer.inject({
+			method: "PATCH",
+			url: "/api/channels/some-id",
+			payload: { title: "No Auth" },
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+});

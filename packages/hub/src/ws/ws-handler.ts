@@ -13,7 +13,15 @@ import type {
 	WriteGrantMessage,
 	WriteReleaseMessage,
 } from "@nexterm/shared";
-import { decodeMessage, encodeMessage, generateId } from "@nexterm/shared";
+import {
+	decodeMessage,
+	encodeMessage,
+	generateId,
+	isValidDimensions,
+	isValidEnv,
+	isValidInputData,
+	isValidUlid,
+} from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { validateToken } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
@@ -101,8 +109,45 @@ export async function registerWsRoutes(
 
 			switch (msg.type) {
 				case "SPAWN": {
+					const spawnMsg = msg as UiSpawnMessage;
+					if (!isValidUlid(spawnMsg.hostId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
+						break;
+					}
+					if (spawnMsg.cols !== undefined || spawnMsg.rows !== undefined) {
+						if (!isValidDimensions(spawnMsg.cols, spawnMsg.rows)) {
+							client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid dimensions" });
+							break;
+						}
+					}
+					if (
+						spawnMsg.shell !== undefined &&
+						(typeof spawnMsg.shell !== "string" || spawnMsg.shell.length > 4096)
+					) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "shell must be a string ≤ 4096 chars",
+						});
+						break;
+					}
+					if (
+						spawnMsg.cwd !== undefined &&
+						(typeof spawnMsg.cwd !== "string" || spawnMsg.cwd.length > 4096)
+					) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "cwd must be a string ≤ 4096 chars",
+						});
+						break;
+					}
+					if (!isValidEnv(spawnMsg.env)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid env" });
+						break;
+					}
 					sessionManager
-						.handleSpawn(clientId, msg as UiSpawnMessage)
+						.handleSpawn(clientId, spawnMsg)
 						.then((channelId) => {
 							if (channelId) {
 								writeLockManager.attach(channelId, clientId);
@@ -115,6 +160,10 @@ export async function registerWsRoutes(
 				}
 				case "ATTACH": {
 					const attachChannelId = (msg as UiAttachMessage).channelId;
+					if (!isValidUlid(attachChannelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
 					sessionManager
 						.handleAttach(clientId, attachChannelId)
 						.then((ok) => {
@@ -129,12 +178,28 @@ export async function registerWsRoutes(
 				}
 				case "DETACH": {
 					const detachChannelId = (msg as DetachMessage).channelId;
+					if (!isValidUlid(detachChannelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
 					writeLockManager.detach(detachChannelId, clientId);
 					sessionManager.handleDetach(clientId, detachChannelId);
 					break;
 				}
 				case "INPUT": {
 					const inputMsg = msg as InputMessage;
+					if (!isValidUlid(inputMsg.channelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
+					if (!isValidInputData(inputMsg.data)) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "Invalid or oversized input data",
+						});
+						break;
+					}
 					if (!writeLockManager.isHolder(inputMsg.channelId, clientId)) {
 						const errMsg: ErrorMessage = {
 							type: "ERROR",
@@ -150,6 +215,14 @@ export async function registerWsRoutes(
 				}
 				case "RESIZE": {
 					const resizeMsg = msg as ResizeMessage;
+					if (!isValidUlid(resizeMsg.channelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
+					if (!isValidDimensions(resizeMsg.cols, resizeMsg.rows)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid dimensions" });
+						break;
+					}
 					sessionManager.handleResize(
 						clientId,
 						resizeMsg.channelId,
@@ -159,25 +232,48 @@ export async function registerWsRoutes(
 					break;
 				}
 				case "WRITE_CLAIM": {
-					writeLockManager.claim((msg as WriteClaimMessage).channelId, clientId);
+					const claimChannelId = (msg as WriteClaimMessage).channelId;
+					if (!isValidUlid(claimChannelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
+					writeLockManager.claim(claimChannelId, clientId);
 					break;
 				}
 				case "WRITE_RELEASE": {
-					writeLockManager.release((msg as WriteReleaseMessage).channelId, clientId);
+					const releaseChannelId = (msg as WriteReleaseMessage).channelId;
+					if (!isValidUlid(releaseChannelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
+					writeLockManager.release(releaseChannelId, clientId);
 					break;
 				}
 				case "WRITE_FORCE": {
-					writeLockManager.force((msg as WriteForceMessage).channelId, clientId);
+					const forceChannelId = (msg as WriteForceMessage).channelId;
+					if (!isValidUlid(forceChannelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
+					writeLockManager.force(forceChannelId, clientId);
 					break;
 				}
 				case "WRITE_GRANT": {
 					const grantMsg = msg as WriteGrantMessage;
+					if (!isValidUlid(grantMsg.channelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
 					writeLockManager.grant(grantMsg.channelId, clientId, grantMsg.toClientId);
 					break;
 				}
 				case "WRITE_DENY": {
 					// WriteDenyMessage shares the toClientId field shape with WriteGrantMessage
 					const denyMsg = msg as WriteDenyMessage;
+					if (!isValidUlid(denyMsg.channelId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
+						break;
+					}
 					writeLockManager.deny(denyMsg.channelId, clientId, denyMsg.toClientId);
 					break;
 				}

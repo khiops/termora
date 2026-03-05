@@ -493,6 +493,16 @@ export class MetaDAL {
 		return result.changes;
 	}
 
+	// ─── GC helpers ─────────────────────────────────────────────────────────
+
+	/** Dead channels whose updated_at is older than `before` (ISO 8601). */
+	listStaleDeadChannelIds(before: string): string[] {
+		return this.db
+			.prepare("SELECT id FROM channels WHERE status = 'dead' AND updated_at < ?")
+			.all(before)
+			.map((r) => (r as { id: string }).id);
+	}
+
 	// ─── Cache Index ─────────────────────────────────────────────────────────
 
 	updateCacheIndex(channelId: string, snapshotChunkId: string, lastSeq: number): void {

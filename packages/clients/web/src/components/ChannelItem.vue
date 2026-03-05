@@ -55,8 +55,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, onUnmounted } from "vue";
+import { computed, ref, onUnmounted } from "vue";
 import type { Channel, ChannelGroup } from "@nexterm/shared";
+import { useRename } from "../composables/useRename.js";
 
 const props = defineProps<{
 	channel: Channel;
@@ -82,27 +83,12 @@ const displayLabel = computed(
 // Inline rename
 // -------------------------------------------------------------------------
 
-const isEditing = ref(false);
-const editValue = ref("");
-const editInput = ref<HTMLInputElement | null>(null);
+const { isEditing, editValue, editInput, startRename: startRenameRaw, commitRename, cancelRename } = useRename({
+	onCommit: (newValue) => emit("rename", props.channel.id, newValue),
+});
 
 function startRename(): void {
-	isEditing.value = true;
-	editValue.value = displayLabel.value;
-	nextTick(() => editInput.value?.select());
-}
-
-function commitRename(): void {
-	if (!isEditing.value) return;
-	const trimmed = editValue.value.trim();
-	if (trimmed.length > 0 && trimmed !== displayLabel.value) {
-		emit("rename", props.channel.id, trimmed);
-	}
-	isEditing.value = false;
-}
-
-function cancelRename(): void {
-	isEditing.value = false;
+	startRenameRaw(displayLabel.value);
 }
 
 // -------------------------------------------------------------------------

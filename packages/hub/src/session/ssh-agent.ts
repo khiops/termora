@@ -4,9 +4,9 @@ import type { HelloMessage } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
+import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
-const SEND_QUEUE_WARN = 1000;
 
 /**
  * Parse the username and hostname from an sshHost string.
@@ -42,8 +42,7 @@ export class SshAgent extends AgentConnection {
 	private client: Client | null = null;
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
-	private sendQueue: Buffer[] = [];
-	private draining = false;
+	private readonly sendQueue = new SendQueue("ssh-agent");
 
 	constructor(private readonly host: Host) {
 		super();
@@ -148,8 +147,7 @@ export class SshAgent extends AgentConnection {
 					});
 
 					stream.on("close", () => {
-						this.sendQueue.length = 0;
-						this.draining = false;
+						this.sendQueue.clear();
 						this.channel = null;
 						this.channelOpen = false;
 						client.end();
@@ -159,9 +157,7 @@ export class SshAgent extends AgentConnection {
 						this.emit("error", err);
 					});
 
-					stream.on("drain", () => {
-						this.flushSendQueue();
-					});
+					this.sendQueue.attach(stream);
 
 					// Wait for HELLO — emitted by AgentConnection.handleData once HELLO is decoded
 					this.once("ready", (msg: HelloMessage) => {
@@ -179,15 +175,7 @@ export class SshAgent extends AgentConnection {
 		if (!this.channel || !this.channelOpen) {
 			throw new Error("SSH agent not connected");
 		}
-		const frame = Buffer.from(encodeFrame(msg));
-		if (this.draining) {
-			this.enqueueSend(frame);
-			return;
-		}
-		const ok = this.channel.write(frame);
-		if (!ok) {
-			this.draining = true;
-		}
+		this.sendQueue.send(Buffer.from(encodeFrame(msg)));
 	}
 
 	/** Close the SSH channel and the underlying SSH connection. */
@@ -200,8 +188,7 @@ export class SshAgent extends AgentConnection {
 	}
 
 	private cleanup(): void {
-		this.sendQueue.length = 0;
-		this.draining = false;
+		this.sendQueue.clear();
 		if (this.channel) {
 			try {
 				this.channel.close();
@@ -218,28 +205,6 @@ export class SshAgent extends AgentConnection {
 				// ignore errors during cleanup
 			}
 			this.client = null;
-		}
-	}
-
-	private enqueueSend(frame: Buffer): void {
-		if (this.sendQueue.length >= SEND_QUEUE_WARN) {
-			if (this.sendQueue.length === SEND_QUEUE_WARN) {
-				console.warn(`[ssh-agent] send queue reached ${SEND_QUEUE_WARN} messages, dropping oldest`);
-			}
-			this.sendQueue.shift();
-		}
-		this.sendQueue.push(frame);
-	}
-
-	private flushSendQueue(): void {
-		this.draining = false;
-		let frame = this.sendQueue.shift();
-		while (frame && !this.draining) {
-			const ok = this.channel?.write(frame) ?? false;
-			if (!ok) {
-				this.draining = true;
-			}
-			frame = this.draining ? undefined : this.sendQueue.shift();
 		}
 	}
 }

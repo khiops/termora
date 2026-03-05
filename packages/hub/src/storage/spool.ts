@@ -146,6 +146,46 @@ export class SpoolDAL {
 		return row.count;
 	}
 
+	/** Sum of data_blob sizes for a channel. */
+	getChannelSize(channelId: string): number {
+		const row = this.db
+			.prepare(
+				"SELECT COALESCE(SUM(LENGTH(data_blob)), 0) AS total FROM chunks WHERE channel_id = ?",
+			)
+			.get(channelId) as { total: number };
+		return row.total;
+	}
+
+	/** Delete all chunks for a channel. Returns deleted count. */
+	deleteChunksForChannel(channelId: string): number {
+		return this.db.prepare("DELETE FROM chunks WHERE channel_id = ?").run(channelId).changes;
+	}
+
+	/** List distinct channel_ids that have chunks. */
+	listChannelIds(): string[] {
+		return this.db
+			.prepare("SELECT DISTINCT channel_id FROM chunks")
+			.all()
+			.map((r) => (r as { channel_id: string }).channel_id);
+	}
+
+	/** Delete oldest output chunks for channel until size <= target.
+	 *  Preserves snapshots (kind != 'output'). Returns deleted count. */
+	evictOldestChunks(channelId: string, targetSize: number): number {
+		let deleted = 0;
+		while (this.getChannelSize(channelId) > targetSize) {
+			const oldest = this.db
+				.prepare(
+					"SELECT id FROM chunks WHERE channel_id = ? AND kind = 'output' ORDER BY seq ASC LIMIT 1",
+				)
+				.get(channelId) as { id: string } | undefined;
+			if (!oldest) break; // only snapshots left
+			this.db.prepare("DELETE FROM chunks WHERE id = ?").run(oldest.id);
+			deleted++;
+		}
+		return deleted;
+	}
+
 	incrementalVacuum(pages?: number): void {
 		this.db.pragma(`incremental_vacuum(${pages ?? 0})`);
 	}

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConfigResolver } from "./config.js";
+import { ConfigResolver, DEFAULT_GC_CONFIG, loadGcConfig } from "./config.js";
 import { createServer } from "./server.js";
 import { openTestDatabases } from "./storage/db.js";
 import type { DatabaseManager } from "./storage/db.js";
@@ -227,6 +227,108 @@ describe("ConfigResolver.resolve", () => {
 		resolver.clearAgentHints("ses-x");
 		const result = resolver.resolve(undefined, undefined, "ses-x");
 		expect(result.fontSize).toBe(DEFAULT_PROFILE.fontSize);
+	});
+});
+
+// ─── loadGcConfig + ConfigResolver.gcConfig ──────────────────────────────────
+
+describe("loadGcConfig", () => {
+	it("returns defaults when config.toml does not exist", () => {
+		const config = loadGcConfig("/nonexistent/path");
+		expect(config).toEqual(DEFAULT_GC_CONFIG);
+	});
+
+	it("returns defaults when config.toml has no [gc] section", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[terminal]\nfont_size = 16\n");
+
+		const config = loadGcConfig(dir);
+		expect(config).toEqual(DEFAULT_GC_CONFIG);
+	});
+
+	it("parses dead_retention_hours from [gc] section", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[gc]\ndead_retention_hours = 48\n");
+
+		const config = loadGcConfig(dir);
+		expect(config.deadRetentionHours).toBe(48);
+		expect(config.maxSizePerChannelMb).toBe(DEFAULT_GC_CONFIG.maxSizePerChannelMb);
+	});
+
+	it("parses max_size_per_channel_mb from [gc] section", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[gc]\nmax_size_per_channel_mb = 50\n");
+
+		const config = loadGcConfig(dir);
+		expect(config.maxSizePerChannelMb).toBe(50);
+		expect(config.deadRetentionHours).toBe(DEFAULT_GC_CONFIG.deadRetentionHours);
+	});
+
+	it("parses both gc keys together", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			"[gc]\ndead_retention_hours = 0\nmax_size_per_channel_mb = 100\n",
+		);
+
+		const config = loadGcConfig(dir);
+		expect(config.deadRetentionHours).toBe(0);
+		expect(config.maxSizePerChannelMb).toBe(100);
+	});
+
+	it("ignores non-number values in [gc] section", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[gc]\ndead_retention_hours = "not-a-number"\n');
+
+		const config = loadGcConfig(dir);
+		expect(config.deadRetentionHours).toBe(DEFAULT_GC_CONFIG.deadRetentionHours);
+	});
+
+	it("returns defaults for malformed TOML", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[gc\nbroken");
+
+		const config = loadGcConfig(dir);
+		expect(config).toEqual(DEFAULT_GC_CONFIG);
+	});
+});
+
+describe("ConfigResolver.gcConfig", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns defaults when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.gcConfig).toEqual(DEFAULT_GC_CONFIG);
+	});
+
+	it("returns overridden values after loadFromFile with [gc] section", () => {
+		const dir = join(tmpdir(), `nexterm-gc-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			"[gc]\ndead_retention_hours = 72\nmax_size_per_channel_mb = 25\n",
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.gcConfig.deadRetentionHours).toBe(72);
+		expect(resolver.gcConfig.maxSizePerChannelMb).toBe(25);
 	});
 });
 

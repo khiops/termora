@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
 import { AgentConnection } from "./agent-connection.js";
+import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
 
@@ -31,12 +32,9 @@ export function resolveAgentPath(): string {
  *   agent.on("message", (msg) => { ... });
  *   agent.close();
  */
-const SEND_QUEUE_WARN = 1000;
-
 export class LocalAgent extends AgentConnection {
 	private process: ChildProcess | null = null;
-	private sendQueue: Buffer[] = [];
-	private draining = false;
+	private readonly sendQueue = new SendQueue("local-agent");
 
 	constructor(private readonly agentPath: string) {
 		super();
@@ -55,13 +53,12 @@ export class LocalAgent extends AgentConnection {
 			this.handleData(data);
 		});
 
-		this.process.stdin?.on("drain", () => {
-			this.flushSendQueue();
-		});
+		if (this.process.stdin) {
+			this.sendQueue.attach(this.process.stdin);
+		}
 
 		this.process.on("close", (code) => {
-			this.sendQueue.length = 0;
-			this.draining = false;
+			this.sendQueue.clear();
 			this.process = null;
 			this.emit("close", code);
 		});
@@ -87,21 +84,12 @@ export class LocalAgent extends AgentConnection {
 		if (!this.process?.stdin?.writable) {
 			throw new Error("Agent not connected");
 		}
-		const frame = Buffer.from(encodeFrame(msg));
-		if (this.draining) {
-			this.enqueueSend(frame);
-			return;
-		}
-		const ok = this.process.stdin.write(frame);
-		if (!ok) {
-			this.draining = true;
-		}
+		this.sendQueue.send(Buffer.from(encodeFrame(msg)));
 	}
 
 	/** Terminate the agent process with SIGTERM. */
 	close(): void {
-		this.sendQueue.length = 0;
-		this.draining = false;
+		this.sendQueue.clear();
 		if (this.process) {
 			this.process.kill("SIGTERM");
 			this.process = null;
@@ -110,29 +98,5 @@ export class LocalAgent extends AgentConnection {
 
 	get connected(): boolean {
 		return this.process !== null && !this.process.killed;
-	}
-
-	private enqueueSend(frame: Buffer): void {
-		if (this.sendQueue.length >= SEND_QUEUE_WARN) {
-			if (this.sendQueue.length === SEND_QUEUE_WARN) {
-				console.warn(
-					`[local-agent] send queue reached ${SEND_QUEUE_WARN} messages, dropping oldest`,
-				);
-			}
-			this.sendQueue.shift();
-		}
-		this.sendQueue.push(frame);
-	}
-
-	private flushSendQueue(): void {
-		this.draining = false;
-		let frame = this.sendQueue.shift();
-		while (frame && !this.draining) {
-			const ok = this.process?.stdin?.write(frame) ?? false;
-			if (!ok) {
-				this.draining = true;
-			}
-			frame = this.draining ? undefined : this.sendQueue.shift();
-		}
 	}
 }

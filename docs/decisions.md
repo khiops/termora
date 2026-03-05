@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## m-backlog-sweep — Fix all M-priority review backlog items (2026-03-05)
+
+- GC dead_retention_hours and max_size_per_channel_mb configurable via config.toml [gc] section
+- SendQueue extracted to shared class with pending/isDraining/frames getters
+- Session reuse already implemented — backlog item was obsolete
+- WS input validation in shared/validation.ts (ULID, dimensions, data size, env)
+- useRename composable with onCommit callback pattern
+
+---
+
 ## editable-channel-names — Editable channel names + backpressure + font fix (2026-03-05)
 
 - channels.title column already exists in DB (nullable) — leverage existing schema
