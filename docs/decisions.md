@@ -4,6 +4,19 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## editable-channel-names — Editable channel names + backpressure + font fix (2026-03-05)
+
+- channels.title column already exists in DB (nullable) — leverage existing schema
+- Default channel name: "Terminal" (simplified from Shell #N counting approach)
+- PATCH /api/channels/:id for rename with 1-128 char validation
+- Optimistic UI update with rollback on PATCH failure
+- Double-click to rename in both sidebar ChannelItem and TabBar
+- v-show keep-alive for tabs: prevents terminal replay/destruction on tab switch
+- Backpressure across agent→hub pipeline: pause/drain in agent, send queues in LocalAgent/SshAgent
+- Font watcher race fix: removed ready.value guard, apply profile unconditionally
+
+---
+
 ## MVP-NEXTERM — Implement full nexterm MVP (2026-03-03)
 
 - Plan-provided mode: specs in docs/

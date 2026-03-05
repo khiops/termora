@@ -101,8 +101,8 @@ const effectiveChannelId = computed<string | null>(
 const paneTitle = computed(() => {
 	const ch = effectiveChannelId.value;
 	if (ch === null) return "Terminal";
-	// Show the last 8 chars of the ULID as a short identifier
-	return `Terminal ${ch.slice(-8)}`;
+	const channel = channelsStore.channels.find((c) => c.id === ch);
+	return channel?.title ?? "Terminal";
 });
 
 // ---------------------------------------------------------------------------
@@ -151,10 +151,11 @@ onMounted(async () => {
 				attachChannel(realId);
 				emit("channel-spawned", props.channelId, realId);
 			} else {
-				// Existing channel — reattach (fetch snapshot + tail)
+				// Existing channel — reattach (fetch snapshot + tail).
 				await reattachChannel(props.channelId);
 			}
 			ready.value = true;
+			applyProfile(configStore.profile);
 		}
 	} catch (err) {
 		error.value = err instanceof Error ? err.message : String(err);
@@ -204,7 +205,7 @@ watch(
 watch(
 	() => configStore.profile,
 	(p) => {
-		if (ready.value) applyProfile(p);
+		applyProfile(p);
 	},
 	{ deep: true },
 );

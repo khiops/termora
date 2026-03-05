@@ -148,6 +148,13 @@ export function useTerminal(
 	 * Re-attach to an existing channel: send ATTACH, wait for ATTACH_OK,
 	 * restore snapshot + replay tail, then subscribe to live OUTPUT.
 	 */
+	/**
+	 * Re-attach to an existing channel: send ATTACH, wait for ATTACH_OK,
+	 * restore snapshot + replay tail, then subscribe to live OUTPUT.
+	 *
+	 * Dead channels are respawned by the hub under the same channel ID, so
+	 * the caller always uses the original ID after this returns.
+	 */
 	async function reattachChannel(id: string): Promise<void> {
 		// Clean up previous OUTPUT subscription
 		outputUnsubscribe?.();
@@ -157,39 +164,44 @@ export function useTerminal(
 		// which would cause the shell to redraw the prompt multiple times.
 
 		// Send ATTACH and wait for ATTACH_OK or ERROR
-		const result = await new Promise<{ snapshot: unknown; tail: Uint8Array[] }>(
-			(resolve, reject) => {
-				const timer = setTimeout(() => {
+		const result = await new Promise<{
+			snapshot: unknown;
+			tail: Uint8Array[];
+		}>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				unsubOk();
+				unsubErr();
+				reject(new Error("ATTACH timeout — no response after 10s"));
+			}, 10_000);
+
+			const unsubOk = wsClient.on("ATTACH_OK", (msg) => {
+				if (msg.type === "ATTACH_OK") {
+					const uiMsg = msg as UiAttachOkMessage;
+					if (uiMsg.channelId !== id) return;
+					clearTimeout(timer);
 					unsubOk();
 					unsubErr();
-					reject(new Error("ATTACH timeout — no response after 10s"));
-				}, 10_000);
+					resolve({
+						snapshot: uiMsg.snapshot,
+						tail: uiMsg.tail ?? [],
+					});
+				}
+			});
 
-				const unsubOk = wsClient.on("ATTACH_OK", (msg) => {
-					if (msg.type === "ATTACH_OK" && msg.channelId === id) {
-						clearTimeout(timer);
-						unsubOk();
-						unsubErr();
-						const uiMsg = msg as UiAttachOkMessage;
-						resolve({ snapshot: uiMsg.snapshot, tail: uiMsg.tail ?? [] });
-					}
-				});
+			const unsubErr = wsClient.on("ERROR", (msg) => {
+				if (
+					msg.type === "ERROR" &&
+					(msg.code === "CHANNEL_NOT_FOUND" || msg.code === "CHANNEL_DEAD")
+				) {
+					clearTimeout(timer);
+					unsubOk();
+					unsubErr();
+					reject(new Error(msg.message ?? msg.code));
+				}
+			});
 
-				const unsubErr = wsClient.on("ERROR", (msg) => {
-					if (
-						msg.type === "ERROR" &&
-						(msg.code === "CHANNEL_NOT_FOUND" || msg.code === "CHANNEL_DEAD")
-					) {
-						clearTimeout(timer);
-						unsubOk();
-						unsubErr();
-						reject(new Error(msg.message ?? msg.code));
-					}
-				});
-
-				wsClient.send({ type: "ATTACH", channelId: id });
-			},
-		);
+			wsClient.send({ type: "ATTACH", channelId: id });
+		});
 
 		// Restore snapshot if present (channelId still unset → no RESIZE sent)
 		if (terminal.value && result.snapshot) {
@@ -208,7 +220,7 @@ export function useTerminal(
 			}
 		}
 
-		// NOW set channelId — future resizes (window resize etc.) will send RESIZE
+		// Set channelId — same ID always (respawn reuses the same channel ID)
 		channelId = id;
 
 		// Subscribe to live OUTPUT
@@ -244,8 +256,9 @@ export function useTerminal(
 	function applyProfile(p: TerminalProfile): void {
 		const term = terminal.value;
 		if (!term) return;
-		term.options.fontFamily = p.fontFamily;
-		term.options.fontSize = p.fontSize;
+		term.options.fontFamily =
+			p.fontFamily ?? '"Consolas", "Liberation Mono", "Courier New", monospace';
+		term.options.fontSize = p.fontSize ?? 14;
 		term.options.cursorStyle = p.cursorStyle ?? "block";
 		term.options.scrollback = p.scrollback ?? 5000;
 		fitAddon.fit();
