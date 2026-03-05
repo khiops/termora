@@ -37,6 +37,7 @@ export interface CreateChannelInput {
 	status: ChannelStatus;
 	shell?: string;
 	cwd?: string;
+	title?: string;
 }
 
 interface HostRow {
@@ -299,14 +300,15 @@ export class MetaDAL {
 		this.db
 			.prepare(
 				`INSERT INTO channels (
-					id, session_id, shell, cwd, status, cols, rows, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, 80, 24, ?, ?)`,
+					id, session_id, shell, cwd, title, status, cols, rows, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, 80, 24, ?, ?)`,
 			)
 			.run(
 				input.id,
 				input.sessionId,
 				input.shell ?? "/bin/sh",
 				input.cwd ?? null,
+				input.title ?? null,
 				input.status,
 				now,
 				now,
@@ -318,6 +320,27 @@ export class MetaDAL {
 			| ChannelRow
 			| undefined;
 		return row ? rowToChannel(row) : undefined;
+	}
+
+	/** Look up a channel along with its host info (needed for respawn). */
+	getChannelWithHost(
+		channelId: string,
+	): { channel: Channel; hostId: string; hostType: string } | null {
+		const row = this.db
+			.prepare(
+				`SELECT c.*, s.host_id, h.type AS host_type
+				 FROM channels c
+				 JOIN sessions s ON c.session_id = s.id
+				 JOIN hosts h ON s.host_id = h.id
+				 WHERE c.id = ?`,
+			)
+			.get(channelId) as (ChannelRow & { host_id: string; host_type: string }) | undefined;
+		if (!row) return null;
+		return {
+			channel: rowToChannel(row),
+			hostId: row.host_id,
+			hostType: row.host_type,
+		};
 	}
 
 	listChannels(sessionId?: string): Channel[] {
@@ -342,6 +365,21 @@ export class MetaDAL {
 				.prepare("UPDATE channels SET status = ?, updated_at = ? WHERE id = ?")
 				.run(status, now, id);
 		}
+	}
+
+	updateChannelTitle(id: string, title: string | null): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET title = ?, updated_at = ? WHERE id = ?")
+			.run(title, now, id);
+		return result.changes > 0;
+	}
+
+	countChannelsForSession(sessionId: string): number {
+		const row = this.db
+			.prepare("SELECT COUNT(*) as count FROM channels WHERE session_id = ?")
+			.get(sessionId) as { count: number };
+		return row.count;
 	}
 
 	deleteChannel(id: string): void {

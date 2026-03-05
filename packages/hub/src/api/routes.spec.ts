@@ -381,3 +381,103 @@ describe("GET /api/channels/:id", () => {
 		expect(body.error.code).toBe("NOT_FOUND");
 	});
 });
+
+describe("PATCH /api/channels/:id", () => {
+	async function createTestChannel(label: string): Promise<{ channelId: string }> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		const sessionId = `01TESTPATCH${label.slice(0, 14).padEnd(14, "0")}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		const channelId = `01TESTCHAN${label.slice(0, 15).padEnd(15, "0")}`;
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+
+		return { channelId };
+	}
+
+	it("renames a channel", async () => {
+		const { channelId } = await createTestChannel("patch-rename");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "My Shell" },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: string }>();
+		expect(body.title).toBe("My Shell");
+	});
+
+	it("trims whitespace from title before saving", async () => {
+		const { channelId } = await createTestChannel("patch-trim");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "  Trimmed  " },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: string }>();
+		expect(body.title).toBe("Trimmed");
+	});
+
+	it("resets title to null", async () => {
+		const { channelId } = await createTestChannel("patch-null");
+
+		// First give it a title
+		await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "Temporary" },
+		});
+
+		// Now reset to null
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: null },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: unknown }>();
+		expect(body.title).toBeUndefined();
+	});
+
+	it("rejects empty string", async () => {
+		const { channelId } = await createTestChannel("patch-empty");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("rejects title longer than 128 characters", async () => {
+		const { channelId } = await createTestChannel("patch-toolong");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "x".repeat(129) },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 404 for non-existent channel", async () => {
+		const res = await server.inject({
+			method: "PATCH",
+			url: "/api/channels/nonexistent",
+			payload: { title: "Ghost" },
+		});
+		expect(res.statusCode).toBe(404);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("NOT_FOUND");
+	});
+});

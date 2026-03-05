@@ -1,5 +1,6 @@
 import { generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
+import { useChannelsStore } from "../stores/channels.js";
 
 // ---------------------------------------------------------------------------
 // Pane tree types
@@ -361,10 +362,8 @@ export function useLayout() {
 	 * so Vue reuses the TerminalPane component (no destroy/recreate).
 	 */
 	function replaceChannelId(oldId: string, newId: string): void {
-		// 1. Update tabs
-		tabs.value = tabs.value.map((t) =>
-			t.channelId === oldId ? { ...t, channelId: newId, label: `Terminal ${newId.slice(-8)}` } : t,
-		);
+		// 1. Update tabs (label is NOT overwritten — getTabLabel() resolves from server title)
+		tabs.value = tabs.value.map((t) => (t.channelId === oldId ? { ...t, channelId: newId } : t));
 
 		// 2. Update all layout trees (key + inner nodes)
 		const newLayouts: Record<string, PaneNode | null> = {};
@@ -374,11 +373,11 @@ export function useLayout() {
 		}
 		layouts.value = newLayouts;
 
-		// 3. Update pane labels
+		// 3. Update pane labels (carry over without overwriting)
 		const oldLabel = _paneLabels.value[oldId];
 		if (oldLabel !== undefined) {
 			const { [oldId]: _, ...rest } = _paneLabels.value;
-			_paneLabels.value = { ...rest, [newId]: `Terminal ${newId.slice(-8)}` };
+			_paneLabels.value = { ...rest, [newId]: oldLabel };
 		}
 	}
 
@@ -397,6 +396,18 @@ export function useLayout() {
 		return _paneLabels.value[channelId] ?? "Terminal";
 	}
 
+	/**
+	 * Resolve the display label for a tab/pane. Prefers the server-side
+	 * channel title, falls back to the tab label, then "Terminal".
+	 */
+	function getTabLabel(channelId: string): string {
+		const channelsStore = useChannelsStore();
+		const channel = channelsStore.channels.find((c) => c.id === channelId);
+		if (channel?.title) return channel.title;
+		const tab = tabs.value.find((t) => t.channelId === channelId);
+		return tab?.label ?? "Terminal";
+	}
+
 	return {
 		tabs,
 		activeTabIndex,
@@ -411,5 +422,6 @@ export function useLayout() {
 		updateRatio,
 		replaceChannelId,
 		getPaneLabel,
+		getTabLabel,
 	};
 }

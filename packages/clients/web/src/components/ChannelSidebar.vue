@@ -63,6 +63,7 @@
 							@select="channelsStore.selectChannel(ch.id)"
 							@close-channel="onCloseChannel"
 							@move-to-group="channelsStore.moveChannelToGroup"
+							@rename="onRenameChannel"
 						/>
 					</template>
 				</template>
@@ -87,6 +88,7 @@
 						@select="channelsStore.selectChannel(ch.id)"
 						@close-channel="onCloseChannel"
 						@move-to-group="channelsStore.moveChannelToGroup"
+						@rename="onRenameChannel"
 					/>
 				</template>
 			</template>
@@ -181,6 +183,10 @@ function onCloseChannel(channelId: string): void {
 	// For now, remove from sidebar. The auto-close watcher in App.vue
 	// will close any associated tab via the channels deep watcher.
 	channelsStore.removeChannel(channelId);
+}
+
+function onRenameChannel(channelId: string, title: string): void {
+	channelsStore.renameChannel(channelId, title);
 }
 
 function onAddGroup(): void {

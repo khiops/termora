@@ -10,7 +10,16 @@
 		@contextmenu.prevent="onContextMenu"
 	>
 		<span class="channel-item__status" :class="`channel-item__status--${channel.status}`"></span>
-		<span class="channel-item__label">{{ displayLabel }}</span>
+		<input
+			v-if="isEditing"
+			ref="editInput"
+			v-model="editValue"
+			class="channel-rename-input"
+			@keydown.enter="commitRename"
+			@keydown.escape="cancelRename"
+			@blur="commitRename"
+		/>
+		<span v-else class="channel-item__label" @dblclick="startRename">{{ displayLabel }}</span>
 		<span v-if="isUnread" class="channel-item__unread" aria-label="Unread output"></span>
 	</div>
 
@@ -46,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from "vue";
+import { computed, nextTick, ref, onUnmounted } from "vue";
 import type { Channel, ChannelGroup } from "@nexterm/shared";
 
 const props = defineProps<{
@@ -62,11 +71,39 @@ const emit = defineEmits<{
 	select: [];
 	closeChannel: [channelId: string];
 	moveToGroup: [channelId: string, groupId: string | null];
+	rename: [channelId: string, title: string];
 }>();
 
 const displayLabel = computed(
 	() => props.channel.title ?? `Shell #${props.index}`,
 );
+
+// -------------------------------------------------------------------------
+// Inline rename
+// -------------------------------------------------------------------------
+
+const isEditing = ref(false);
+const editValue = ref("");
+const editInput = ref<HTMLInputElement | null>(null);
+
+function startRename(): void {
+	isEditing.value = true;
+	editValue.value = displayLabel.value;
+	nextTick(() => editInput.value?.select());
+}
+
+function commitRename(): void {
+	if (!isEditing.value) return;
+	const trimmed = editValue.value.trim();
+	if (trimmed.length > 0 && trimmed !== displayLabel.value) {
+		emit("rename", props.channel.id, trimmed);
+	}
+	isEditing.value = false;
+}
+
+function cancelRename(): void {
+	isEditing.value = false;
+}
 
 // -------------------------------------------------------------------------
 // Context menu
@@ -167,6 +204,18 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.channel-rename-input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid #555;
+	color: inherit;
+	font: inherit;
+	outline: none;
+	width: 100%;
+	padding: 0;
 }
 
 /* Unread indicator dot */

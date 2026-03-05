@@ -276,6 +276,49 @@ export const useChannelsStore = defineStore("channels", () => {
 		saveGroupsToStorage(next);
 	}
 
+	/**
+	 * Rename a channel (optimistic update with rollback on failure).
+	 * Pass `null` to clear the custom title.
+	 */
+	async function renameChannel(channelId: string, title: string | null): Promise<void> {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		const oldChannel = existing;
+
+		// Optimistic update — rebuild to satisfy exactOptionalPropertyTypes
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		const { title: _removed, ...rest } = existing;
+		const updated: Channel = title !== null ? { ...rest, title } : (rest as Channel);
+		const next = [...channels.value];
+		next[idx] = updated;
+		channels.value = next;
+
+		try {
+			const res = await fetch(`/api/channels/${channelId}`, {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token}`,
+				},
+				body: JSON.stringify({ title }),
+			});
+			if (!res.ok) throw new Error("Failed to rename");
+		} catch {
+			// Rollback
+			const rollbackIdx = channels.value.findIndex((c) => c.id === channelId);
+			if (rollbackIdx !== -1) {
+				const rollback = [...channels.value];
+				rollback[rollbackIdx] = oldChannel;
+				channels.value = rollback;
+			}
+			if (activeHostId.value !== null) {
+				await fetchChannels(activeHostId.value);
+			}
+		}
+	}
+
 	function moveChannelToGroup(channelId: string, groupId: string | null): void {
 		channels.value = channels.value.map((ch) => {
 			if (ch.id !== channelId) return ch;
@@ -311,6 +354,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		removeGroup,
 		renameGroup,
 		toggleGroupCollapsed,
+		renameChannel,
 		moveChannelToGroup,
 	};
 });

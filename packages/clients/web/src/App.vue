@@ -22,9 +22,11 @@
 				<TabBar
 					:tabs="layout.tabs.value"
 					:active-tab-index="layout.activeTabIndex.value"
+					:get-tab-label="layout.getTabLabel"
 					@select-tab="layout.setActiveTab"
 					@close-tab="layout.closeTab"
 					@add-tab="onAddTab"
+					@rename-tab="onRenameTab"
 				/>
 				<div class="pane-area">
 					<PaneLayout
@@ -83,7 +85,7 @@ const needsPairing = computed(
 function openPendingTab(hostId: string): void {
 	const tempId = generateId();
 	channelsStore.registerPendingSpawn(tempId, hostId);
-	layout.openTab(tempId, `Terminal ${tempId.slice(-8)}`);
+	layout.openTab(tempId, "Starting\u2026");
 }
 
 /**
@@ -142,12 +144,9 @@ watch(
 	() => channelsStore.selectedChannelId,
 	(channelId) => {
 		if (channelId === null) return;
-		const channel = channelsStore.channels.find((c) => c.id === channelId);
-		// Don't open tabs for dead channels (but allow unknown channels —
-		// spawnChannel selects before fetchChannels resolves)
-		if (channel?.status === "dead") return;
-		const label = channel?.title ?? `Terminal ${channelId.slice(-8)}`;
-		layout.openTab(channelId, label);
+		// Allow dead channels — the hub will transparently respawn them on ATTACH.
+		// Unknown channels (spawnChannel selects before fetchChannels resolves) also pass through.
+		layout.openTab(channelId, layout.getTabLabel(channelId));
 	},
 );
 
@@ -164,25 +163,6 @@ watch(
 	},
 );
 
-/**
- * Auto-close tabs when their backing channel dies (sidebar "Close channel",
- * hub-side CHANNEL_STATE, etc.).
- */
-watch(
-	() => channelsStore.channels,
-	(channels) => {
-		const deadIds = new Set(
-			channels.filter((c) => c.status === "dead").map((c) => c.id),
-		);
-		for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
-			const tab = layout.tabs.value[i];
-			if (tab !== undefined && deadIds.has(tab.channelId)) {
-				layout.closeTab(i);
-			}
-		}
-	},
-	{ deep: true },
-);
 
 /**
  * Global keydown handler attached to the app root.
@@ -220,6 +200,13 @@ function onAddTab(): void {
 }
 
 /**
+ * Rename a tab (and its channel) via inline edit in the tab bar.
+ */
+function onRenameTab(channelId: string, title: string): void {
+	channelsStore.renameChannel(channelId, title);
+}
+
+/**
  * Split a pane. Creates a pending-spawn pane in the split — TerminalPane
  * will handle the actual SPAWN with correct terminal dimensions.
  * onChannelSpawned then patches the layout with the real channelId.
@@ -233,7 +220,7 @@ function onSplit(
 
 	const tempId = generateId();
 	channelsStore.registerPendingSpawn(tempId, hostId);
-	layout.splitPane(existingChannelId, direction, tempId, `Terminal ${tempId.slice(-8)}`);
+	layout.splitPane(existingChannelId, direction, tempId, "Starting\u2026");
 }
 
 /**
@@ -244,6 +231,10 @@ function onSplit(
 function onChannelSpawned(tempId: string, realId: string): void {
 	layout.replaceChannelId(tempId, realId);
 	channelsStore.selectChannel(realId);
+	// Refresh channel list so the new channel (after respawn) appears in the sidebar.
+	if (channelsStore.activeHostId) {
+		void channelsStore.fetchChannels(channelsStore.activeHostId);
+	}
 }
 
 /**

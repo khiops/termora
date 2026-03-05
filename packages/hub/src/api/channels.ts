@@ -34,4 +34,35 @@ export function registerChannelRoutes(server: FastifyInstance, metaDal: MetaDAL)
 		}
 		return toSnakeCase(channel);
 	});
+
+	// PATCH /api/channels/:id
+	server.patch<{ Params: { id: string }; Body: { title: string | null } }>(
+		"/api/channels/:id",
+		async (request, reply) => {
+			const { id } = request.params;
+			const { title } = request.body;
+
+			if (title !== null) {
+				if (typeof title !== "string" || title.length === 0 || title.length > 128) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "title must be a string of 1–128 characters, or null",
+						},
+					});
+				}
+			}
+
+			const channel = metaDal.getChannel(id);
+			if (!channel) {
+				return reply.code(404).send({
+					error: { code: "NOT_FOUND", message: "Channel not found" },
+				});
+			}
+
+			metaDal.updateChannelTitle(id, title?.trim() ?? null);
+			const updated = metaDal.getChannel(id);
+			return reply.code(200).send(toSnakeCase(updated));
+		},
+	);
 }

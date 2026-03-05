@@ -253,13 +253,14 @@ describe("SessionManager", () => {
 
 		const attachOk = firstAttach as unknown as {
 			channelId: string;
-			snapshot: null;
+			snapshot: { serialized: string } | null;
 			tail: unknown[];
 			writeLockHolder: null;
 			cached: boolean;
 		};
 		expect(attachOk.channelId).toBe("local-ch-1");
-		expect(attachOk.snapshot).toBeNull();
+		// Agent is connected — handleAttach always requests a fresh snapshot
+		expect(attachOk.snapshot).toBeTruthy();
 		expect(attachOk.tail).toEqual([]);
 		expect(attachOk.writeLockHolder).toBeNull();
 		expect(attachOk.cached).toBe(false);
@@ -352,6 +353,26 @@ describe("SessionManager", () => {
 		expect(channels).toHaveLength(1);
 		expect(channels[0]?.id).toBe("local-ch-1");
 		expect(channels[0]?.status).toBe("live");
+		expect(channels[0]?.title).toBe("Shell #1");
+	});
+
+	it("assigns sequential default titles to spawned channels", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// First spawn → "Shell #1"
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		// Second spawn → "Shell #2"
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const ch1 = dal.getChannel("local-ch-1");
+		const ch2 = dal.getChannel("local-ch-2");
+		expect(ch1?.title).toBe("Shell #1");
+		expect(ch2?.title).toBe("Shell #2");
 	});
 
 	it("second SPAWN for same local host reuses existing session", async () => {
@@ -584,15 +605,15 @@ describe("SessionManager", () => {
 
 		const attachOk = client2Received.find((m) => m.type === "ATTACH_OK") as unknown as {
 			channelId: string;
-			snapshot: null;
+			snapshot: { serialized: string } | null;
 			tail: unknown[];
 			writeLockHolder: null;
 			cached: boolean;
 		};
 		expect(attachOk).toBeTruthy();
 		expect(attachOk.channelId).toBe("local-ch-1");
-		// First attach on a just-spawned channel: no snapshot stored yet
-		expect(attachOk.snapshot).toBeNull();
+		// Agent is connected — handleAttach always requests a fresh snapshot
+		expect(attachOk.snapshot).toBeTruthy();
 		expect(attachOk.tail).toEqual([]);
 		expect(attachOk.cached).toBe(false);
 	});
@@ -793,6 +814,146 @@ describe("SessionManager", () => {
 		const errMsg = received[0] as unknown as { type: string; code: string };
 		expect(errMsg.type).toBe("ERROR");
 		expect(errMsg.code).toBe("CHANNEL_DEAD");
+	});
+
+	// ─── Dead channel respawn (Block 3) ─────────────────────────────────────
+
+	it("handleAttach on dead channel respawns when agent is active", async () => {
+		// First, spawn a normal channel to establish local host + session + agent
+		const received1: ProtocolMessage[] = [];
+		const c1 = makeClient("c1", received1);
+		sm.addClient(c1);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		// Create a dead channel in DB (as if it died before)
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const hosts = dal.listHosts();
+		const localHost = hosts.find((h) => h.type === "local");
+		if (!localHost) throw new Error("expected local host");
+		const sessions = dal.listSessions(localHost.id);
+		const session = sessions.find((s) => s.status !== "closed");
+		if (!session) throw new Error("expected non-closed session");
+
+		const deadId = "DEADRESPAWN01AAAAAAAAAAAAAAAA";
+		dal.createChannel({
+			id: deadId,
+			sessionId: session.id,
+			status: "dead",
+			shell: "/bin/zsh",
+			cwd: "/tmp",
+		});
+
+		// Now ATTACH to the dead channel — should respawn
+		const received2: ProtocolMessage[] = [];
+		const c2 = makeClient("c2", received2);
+		sm.addClient(c2);
+
+		await sm.handleAttach("c2", deadId);
+		// MockLocalAgent responds async via setImmediate
+		await new Promise((r) => setImmediate(r));
+
+		const attachOk = received2.find((m) => m.type === "ATTACH_OK");
+		expect(attachOk).toBeTruthy();
+		const ok = attachOk as unknown as { channelId: string };
+		expect(ok.channelId).toBe(deadId); // same channel ID reused
+	});
+
+	it("handleAttach on dead channel returns CHANNEL_DEAD when no active session", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({ type: "local", label: "offline-host" });
+		const sessionId = "NOSESS0000000000000000000000";
+		dal.createSession({ id: sessionId, hostId: host.id, status: "closed" });
+		dal.createChannel({ id: "dead-no-session", sessionId, status: "dead", shell: "/bin/sh" });
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleAttach("c1", "dead-no-session");
+
+		const errMsg = received[0] as unknown as { type: string; code: string };
+		expect(errMsg.type).toBe("ERROR");
+		expect(errMsg.code).toBe("CHANNEL_DEAD");
+	});
+
+	it("respawned channel is tracked in memory", async () => {
+		const received1: ProtocolMessage[] = [];
+		const c1 = makeClient("c1", received1);
+		sm.addClient(c1);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const hosts = dal.listHosts();
+		const localHost = hosts.find((h) => h.type === "local");
+		if (!localHost) throw new Error("expected local host");
+		const sessions = dal.listSessions(localHost.id);
+		const session = sessions.find((s) => s.status !== "closed");
+		if (!session) throw new Error("expected non-closed session");
+
+		const deadId = "DEADTRACK01AAAAAAAAAAAAAAAAAA";
+		dal.createChannel({
+			id: deadId,
+			sessionId: session.id,
+			status: "dead",
+			shell: "/bin/bash",
+			cwd: "/home",
+		});
+
+		const received2: ProtocolMessage[] = [];
+		const c2 = makeClient("c2", received2);
+		sm.addClient(c2);
+		await sm.handleAttach("c2", deadId);
+		await new Promise((r) => setImmediate(r));
+
+		const attachOk = received2.find((m) => m.type === "ATTACH_OK") as unknown as {
+			channelId: string;
+		};
+		expect(attachOk).toBeTruthy();
+
+		// The dead channel should be updated to live status (same ID reused)
+		expect(attachOk.channelId).toBe(deadId);
+		const ch = dal.getChannel(deadId);
+		expect(ch).toBeDefined();
+		expect(ch?.status).toBe("live");
+	});
+
+	it("respawn broadcasts CHANNEL_STATE for the new channel", async () => {
+		const received1: ProtocolMessage[] = [];
+		const c1 = makeClient("c1", received1);
+		sm.addClient(c1);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const hosts = dal.listHosts();
+		const localHost = hosts.find((h) => h.type === "local");
+		if (!localHost) throw new Error("expected local host");
+		const sessions = dal.listSessions(localHost.id);
+		const session = sessions.find((s) => s.status !== "closed");
+		if (!session) throw new Error("expected non-closed session");
+
+		const deadId = "DEADBCAST01AAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id: deadId, sessionId: session.id, status: "dead", shell: "/bin/sh" });
+
+		// Clear c1's received to only see messages from the respawn
+		received1.length = 0;
+
+		const received2: ProtocolMessage[] = [];
+		const c2 = makeClient("c2", received2);
+		sm.addClient(c2);
+		await sm.handleAttach("c2", deadId);
+		await new Promise((r) => setImmediate(r));
+
+		// c1 (bystander) should receive CHANNEL_STATE broadcast for the same channel ID
+		const stateMsg = received1.find((m) => m.type === "CHANNEL_STATE");
+		expect(stateMsg).toBeTruthy();
+		const state = stateMsg as unknown as { channelId: string; status: string };
+		expect(state.channelId).toBe(deadId);
+		expect(state.status).toBe("live");
 	});
 
 	// ─── startup() sweep ─────────────────────────────────────────────────────

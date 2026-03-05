@@ -6,15 +6,25 @@
 			role="tab"
 			:aria-selected="idx === activeTabIndex"
 			:class="['tab', { 'tab--active': idx === activeTabIndex }]"
-			:title="tab.label"
+			:title="getTabLabel(tab.channelId)"
 			@click="emit('select-tab', idx)"
 			@mousedown.middle.prevent="emit('close-tab', idx)"
 		>
-			<span class="tab__label">{{ tab.label }}</span>
+			<input
+				v-if="editingTabIndex === idx"
+				ref="editInput"
+				v-model="editValue"
+				class="tab-rename-input"
+				@keydown.enter="commitRename"
+				@keydown.escape="cancelRename"
+				@blur="commitRename"
+				@click.stop
+			/>
+			<span v-else class="tab__label" @dblclick="startRename(idx)">{{ getTabLabel(tab.channelId) }}</span>
 			<span
 				class="tab__close"
 				role="button"
-				:aria-label="`Close ${tab.label}`"
+				:aria-label="`Close ${getTabLabel(tab.channelId)}`"
 				title="Close tab"
 				@click.stop="emit('close-tab', idx)"
 			>×</span>
@@ -30,18 +40,51 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, ref } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 
-defineProps<{
+const props = defineProps<{
 	tabs: Tab[];
 	activeTabIndex: number;
+	getTabLabel: (channelId: string) => string;
 }>();
 
 const emit = defineEmits<{
 	(e: "select-tab", index: number): void;
 	(e: "close-tab", index: number): void;
 	(e: "add-tab"): void;
+	(e: "rename-tab", channelId: string, title: string): void;
 }>();
+
+// -------------------------------------------------------------------------
+// Inline rename
+// -------------------------------------------------------------------------
+
+const editingTabIndex = ref<number | null>(null);
+const editValue = ref("");
+const editInput = ref<HTMLInputElement | null>(null);
+
+function startRename(idx: number): void {
+	const tab = props.tabs[idx];
+	if (tab === undefined) return;
+	editingTabIndex.value = idx;
+	editValue.value = props.getTabLabel(tab.channelId);
+	nextTick(() => editInput.value?.select());
+}
+
+function commitRename(): void {
+	if (editingTabIndex.value === null) return;
+	const tab = props.tabs[editingTabIndex.value];
+	const trimmed = editValue.value.trim();
+	editingTabIndex.value = null;
+	if (tab !== undefined && trimmed.length > 0 && trimmed !== props.getTabLabel(tab.channelId)) {
+		emit("rename-tab", tab.channelId, trimmed);
+	}
+}
+
+function cancelRename(): void {
+	editingTabIndex.value = null;
+}
 </script>
 
 <style scoped>
@@ -128,6 +171,19 @@ const emit = defineEmits<{
 .tab__close:hover {
 	background: #45475a;
 	color: #f38ba8;
+}
+
+.tab-rename-input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid #555;
+	color: inherit;
+	font: inherit;
+	outline: none;
+	width: 100%;
+	padding: 0;
+	min-width: 0;
 }
 
 .tab-bar__add {

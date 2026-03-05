@@ -291,12 +291,15 @@ export class SessionManager {
 					const { channelId } = spawnOk;
 
 					// Persist channel as 'born' then immediately 'live' (first client attaches)
+					const count = this.metaDal.countChannelsForSession(session.id);
+					const title = `Shell #${count + 1}`;
 					this.metaDal.createChannel({
 						id: channelId,
 						sessionId: session.id,
 						status: "born",
 						shell,
 						cwd,
+						title,
 					});
 
 					this.channels.set(channelId, {
@@ -354,8 +357,14 @@ export class SessionManager {
 
 		const channel = this.channels.get(channelId);
 		if (!channel) {
-			// Channel not in memory — check DB for dead channels
+			// Channel not in memory — check DB for dead/not-found
 			const dbChannel = this.metaDal.getChannel(channelId);
+			if (dbChannel?.status === "dead") {
+				// Dead channel — attempt transparent respawn under the same ID
+				const respawned = await this._respawnDeadChannel(channelId, client, clientId);
+				if (respawned) return true;
+				// Respawn failed — fall through to error
+			}
 			const code = dbChannel?.status === "dead" ? "CHANNEL_DEAD" : "CHANNEL_NOT_FOUND";
 			const errorMsg: ErrorMessage = {
 				type: "ERROR",
@@ -377,35 +386,32 @@ export class SessionManager {
 
 		const agent = this.agents.get(channel.hostId);
 
-		// Case 1: newly spawned channel (born → live) — no snapshot yet
-		// Case 2: agent connected — request fresh snapshot via ATTACH
-		// Case 3: agent disconnected — serve cached snapshot from spool.db
+		// handleAttach is only called for RE-attaches (tab switch, reconnect,
+		// sidebar click). The initial attach after SPAWN goes through
+		// handleSpawn + attachChannel. So every call here needs a snapshot.
+		//
+		// Case 1: agent connected — request fresh snapshot via ATTACH
+		// Case 2: agent disconnected — serve cached snapshot from spool.db
 
-		if (!wasOrphan || !agent?.connected) {
-			// Case 1 (born/live, not a re-attach) or Case 3 (cached mode)
-			const cached = wasOrphan && !agent?.connected;
-
+		if (!agent?.connected) {
+			// Agent disconnected — serve cached snapshot from spool.db
 			let snapshot: UiAttachOkMessage["snapshot"] = null;
 			let tail: Uint8Array[] = [];
 
-			if (cached) {
-				// Read latest snapshot from spool.db
-				const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
-				if (snapshotChunk) {
-					try {
-						snapshot = JSON.parse(
-							snapshotChunk.dataBlob.toString("utf8"),
-						) as UiAttachOkMessage["snapshot"];
-					} catch {
-						snapshot = null;
-					}
-					// Tail = output chunks after the snapshot seq
-					const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
-						kind: "output",
-						afterSeq: snapshotChunk.seq,
-					});
-					tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+			const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
+			if (snapshotChunk) {
+				try {
+					snapshot = JSON.parse(
+						snapshotChunk.dataBlob.toString("utf8"),
+					) as UiAttachOkMessage["snapshot"];
+				} catch {
+					snapshot = null;
 				}
+				const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+					kind: "output",
+					afterSeq: snapshotChunk.seq,
+				});
+				tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
 			}
 
 			const attachOk: UiAttachOkMessage = {
@@ -414,13 +420,13 @@ export class SessionManager {
 				snapshot,
 				tail,
 				writeLockHolder: null,
-				cached,
+				cached: true,
 			};
 			client.send(attachOk);
 			return true;
 		}
 
-		// Case 2: orphan channel with reachable agent — get fresh snapshot via ATTACH
+		// Agent connected — request fresh snapshot via ATTACH
 		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
 		agent.send(agentAttach);
 
@@ -866,6 +872,128 @@ export class SessionManager {
 		}
 	}
 
+	/**
+	 * Attempt to transparently respawn a dead channel under the same ID.
+	 * Spawns a new PTY reusing deadChannelId, loads old spool snapshot,
+	 * and sends ATTACH_OK. Returns true on success, false if not possible.
+	 */
+	private async _respawnDeadChannel(
+		deadChannelId: string,
+		client: WsClient,
+		clientId: string,
+	): Promise<boolean> {
+		// 1. Look up dead channel in DB
+		const info = this.metaDal.getChannelWithHost(deadChannelId);
+		if (!info) return false;
+		const { channel: deadChannel, hostId } = info;
+
+		// 2. Find active session + agent
+		const sessionEntry = this.sessions.get(hostId);
+		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		const agent = this.agents.get(hostId);
+		if (!agent?.connected) return false;
+
+		// 3. Send SPAWN to agent reusing the same channel ID
+		const requestId = generateId();
+		const shell = deadChannel.shell ?? process.env.SHELL ?? "/bin/sh";
+		const cwd = deadChannel.cwd ?? process.env.HOME ?? "/";
+		const agentSpawn: AgentSpawnMessage = {
+			type: "SPAWN",
+			requestId,
+			channelId: deadChannelId,
+			shell,
+			cwd,
+			env: {},
+			cols: 80,
+			rows: 24,
+		};
+		agent.send(agentSpawn);
+
+		// 4. Wait for SPAWN_OK
+		const spawnOk = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				agent.off("message", handler);
+				resolve(false);
+			}, SPAWN_TIMEOUT_MS);
+
+			const handler = (incoming: ProtocolMessage) => {
+				if (incoming.type === "SPAWN_OK") {
+					const ok = incoming as AgentSpawnOkMessage;
+					if (ok.requestId !== requestId) return;
+					clearTimeout(timer);
+					agent.off("message", handler);
+					resolve(true);
+				} else if (incoming.type === "SPAWN_ERR") {
+					const err = incoming as AgentSpawnErrMessage;
+					if (err.requestId !== requestId) return;
+					clearTimeout(timer);
+					agent.off("message", handler);
+					resolve(false);
+				}
+			};
+			agent.on("message", handler);
+		});
+
+		if (!spawnOk) return false;
+
+		// 5. Update existing channel — no new channel created, same ID reused
+		this.metaDal.updateChannelStatus(deadChannelId, "live");
+
+		this.channels.set(deadChannelId, {
+			sessionId: sessionEntry.id,
+			hostId,
+			status: "live",
+			clients: new Set([clientId]),
+			shell,
+			cwd,
+		});
+
+		this.scheduler.trackChannel(deadChannelId);
+		this.chunker.trackChannel(deadChannelId);
+		client.attachedChannels.add(deadChannelId);
+
+		// 6. Broadcast CHANNEL_STATE for the same channel ID
+		const channelStateMsg: ChannelStateMessage = {
+			type: "CHANNEL_STATE",
+			channelId: deadChannelId,
+			sessionId: sessionEntry.id,
+			status: "live",
+		};
+		this._broadcastToAllClients(channelStateMsg);
+
+		// 7. Load snapshot from spool (same channel ID — no change needed)
+		let snapshot: UiAttachOkMessage["snapshot"] = null;
+		let tail: Uint8Array[] = [];
+		const snapshotChunk = this.spoolDal.getLatestSnapshot(deadChannelId);
+		if (snapshotChunk) {
+			try {
+				snapshot = JSON.parse(
+					snapshotChunk.dataBlob.toString("utf8"),
+				) as UiAttachOkMessage["snapshot"];
+			} catch {
+				snapshot = null;
+			}
+			const tailChunks = this.spoolDal.getChunksByChannel(deadChannelId, {
+				kind: "output",
+				afterSeq: snapshotChunk.seq,
+			});
+			tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+		}
+
+		// 8. Send ATTACH_OK with same channel ID (no respawnedFrom needed)
+		const attachOk: UiAttachOkMessage = {
+			type: "ATTACH_OK",
+			channelId: deadChannelId,
+			snapshot,
+			tail,
+			writeLockHolder: null,
+			cached: false,
+		};
+		client.send(attachOk);
+
+		return true;
+	}
+
 	private _closeSession(hostId: string, sessionId: string): void {
 		// Cancel any pending reconnect timer for this host
 		const pendingTimer = this.reconnectTimers.get(hostId);
@@ -904,7 +1032,7 @@ export class SessionManager {
 	 * bumps the chunker past it, and updates the cache index.
 	 * Returns the assigned chunkId.
 	 */
-	private _storeSnapshot(channelId: string, snapshot: unknown, agentLastSeq: number): number {
+	private _storeSnapshot(channelId: string, snapshot: unknown, agentLastSeq: number): string {
 		const snapshotJson = JSON.stringify(snapshot);
 		const dataBlob = Buffer.from(snapshotJson);
 		this.chunker.flush(channelId);
