@@ -1,4 +1,4 @@
-import { generateId } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
 import { useChannelsStore } from "../stores/channels.js";
 
@@ -133,6 +133,53 @@ function replaceInTree(node: PaneNode, oldId: string, newId: string): PaneNode {
 		first: replaceInTree(node.first, oldId, newId),
 		second: replaceInTree(node.second, oldId, newId),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper: resolve tab label
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the display label for a channel in a tab or pane.
+ * Prefers the server-side channel title, falls back to the tab label,
+ * then DEFAULT_CHANNEL_NAME.
+ *
+ * Extracted as a standalone function for testability — no Vue/Pinia deps.
+ */
+export function resolveTabLabel(
+	channelId: string,
+	channels: ReadonlyArray<{ id: string; title?: string }>,
+	tabs: ReadonlyArray<{ channelId: string; label: string }>,
+): string {
+	const channel = channels.find((c) => c.id === channelId);
+	if (channel?.title) return channel.title;
+	const tab = tabs.find((t) => t.channelId === channelId);
+	return tab?.label ?? DEFAULT_CHANNEL_NAME;
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper: purge dead tabs
+// ---------------------------------------------------------------------------
+
+/**
+ * Close tabs whose channels have a "dead" status.
+ * Iterates in reverse so that index-based closeTab remains valid as items
+ * are removed.
+ *
+ * Extracted as a standalone function for testability — no Vue/Pinia deps.
+ */
+export function purgeDeadTabs(
+	channels: ReadonlyArray<{ id: string; status: string }>,
+	tabs: ReadonlyArray<{ channelId: string }>,
+	closeTab: (index: number) => void,
+): void {
+	const deadIds = new Set(channels.filter((c) => c.status === "dead").map((c) => c.id));
+	for (let i = tabs.length - 1; i >= 0; i--) {
+		const tab = tabs[i];
+		if (tab !== undefined && deadIds.has(tab.channelId)) {
+			closeTab(i);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -393,19 +440,16 @@ export function useLayout() {
 		const tab = tabs.value.find((t) => t.channelId === channelId);
 		if (tab !== undefined) return tab.label;
 		// Fall back to split-pane labels
-		return _paneLabels.value[channelId] ?? "Terminal";
+		return _paneLabels.value[channelId] ?? DEFAULT_CHANNEL_NAME;
 	}
 
 	/**
-	 * Resolve the display label for a tab/pane. Prefers the server-side
-	 * channel title, falls back to the tab label, then "Terminal".
+	 * Resolve the display label for a tab/pane. Delegates to the pure
+	 * `resolveTabLabel` helper, passing in the channels store data.
 	 */
 	function getTabLabel(channelId: string): string {
 		const channelsStore = useChannelsStore();
-		const channel = channelsStore.channels.find((c) => c.id === channelId);
-		if (channel?.title) return channel.title;
-		const tab = tabs.value.find((t) => t.channelId === channelId);
-		return tab?.label ?? "Terminal";
+		return resolveTabLabel(channelId, channelsStore.channels, tabs.value);
 	}
 
 	return {

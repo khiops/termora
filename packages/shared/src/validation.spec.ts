@@ -178,6 +178,28 @@ describe("isValidEnv", () => {
 		expect(isValidEnv({ [key]: "value" })).toBe(true);
 	});
 
+	// ── Prototype pollution keys: document accepted behavior ────────────
+	// These keys look dangerous (prototype pollution vectors) but are safe here:
+	// isValidEnv validates the shape of env vars passed to node-pty's spawn(),
+	// which creates a new process with a fresh environment. The object is never
+	// used as a prototype or merged into an existing object, so __proto__,
+	// constructor, and toString keys are harmless string env var names.
+
+	// In JS, { __proto__: "value" } sets the prototype, not an own property.
+	// Object.entries() returns [] for such objects, so isValidEnv sees an empty env and returns true.
+	// This is acceptable: the key never reaches child_process.
+	it("accepts __proto__ as an env key (sets prototype, not own property — Object.entries is empty)", () => {
+		expect(isValidEnv({ __proto__: "value" })).toBe(true);
+	});
+
+	it("accepts constructor as an env key (safe: no prototype chain manipulation)", () => {
+		expect(isValidEnv({ constructor: "value" })).toBe(true);
+	});
+
+	it("accepts toString as an env key (safe: object is consumed as key-value pairs only)", () => {
+		expect(isValidEnv({ toString: "value" })).toBe(true);
+	});
+
 	it("rejects values longer than 8192 characters", () => {
 		const longValue = "V".repeat(8193);
 		expect(isValidEnv({ KEY: longValue })).toBe(false);

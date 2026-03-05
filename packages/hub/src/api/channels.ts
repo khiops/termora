@@ -38,19 +38,38 @@ export function registerChannelRoutes(server: FastifyInstance, metaDal: MetaDAL)
 	// PATCH /api/channels/:id
 	server.patch<{ Params: { id: string }; Body: { title: string | null } }>(
 		"/api/channels/:id",
+		{
+			schema: {
+				body: {
+					type: "object",
+					required: ["title"],
+					properties: {
+						title: { type: ["string", "null"], minLength: 1, maxLength: 128 },
+					},
+					additionalProperties: false,
+				},
+				params: {
+					type: "object",
+					required: ["id"],
+					properties: {
+						id: { type: "string" },
+					},
+				},
+			},
+		},
 		async (request, reply) => {
 			const { id } = request.params;
 			const { title } = request.body;
 
-			if (title !== null) {
-				if (typeof title !== "string" || title.trim().length === 0 || title.trim().length > 128) {
-					return reply.code(400).send({
-						error: {
-							code: "VALIDATION_ERROR",
-							message: "title must be a string of 1–128 characters, or null",
-						},
-					});
-				}
+			// Schema handles type, required, minLength, maxLength, and additionalProperties.
+			// Whitespace-only titles still need a manual check (schema can't validate trimmed length).
+			if (title !== null && title.trim().length === 0) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "title must be a string of 1\u2013128 characters, or null",
+					},
+				});
 			}
 
 			const channel = metaDal.getChannel(id);

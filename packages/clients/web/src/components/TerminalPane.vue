@@ -21,6 +21,11 @@
 		</div>
 		<div ref="terminalContainer" class="terminal-container" />
 
+		<!-- Reconnecting overlay — shown when WS drops after terminal was initialized -->
+		<div v-if="ready && !sessionStore.connected" class="reconnecting-overlay">
+			<span class="reconnecting-text">Reconnecting<span class="reconnecting-dots" /></span>
+		</div>
+
 		<!-- Context menu -->
 		<div
 			v-if="contextMenuVisible"
@@ -39,6 +44,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { computed, ref, watch, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
@@ -100,9 +106,9 @@ const effectiveChannelId = computed<string | null>(
 
 const paneTitle = computed(() => {
 	const ch = effectiveChannelId.value;
-	if (ch === null) return "Terminal";
+	if (ch === null) return DEFAULT_CHANNEL_NAME;
 	const channel = channelsStore.channels.find((c) => c.id === ch);
-	return channel?.title ?? "Terminal";
+	return channel?.title ?? DEFAULT_CHANNEL_NAME;
 });
 
 // ---------------------------------------------------------------------------
@@ -365,5 +371,43 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	border: none;
 	border-top: 1px solid #313244;
 	margin: 4px 0;
+}
+
+/* Reconnecting overlay */
+.reconnecting-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.7);
+	z-index: 10;
+	pointer-events: none;
+}
+
+.reconnecting-text {
+	color: #cdd6f4;
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.reconnecting-dots::after {
+	content: "";
+	animation: dots 1.4s steps(4, end) infinite;
+}
+
+@keyframes dots {
+	0% {
+		content: "";
+	}
+	25% {
+		content: ".";
+	}
+	50% {
+		content: "..";
+	}
+	75% {
+		content: "...";
+	}
 }
 </style>

@@ -18,7 +18,7 @@ import type {
 	UiSpawnOkMessage,
 } from "@nexterm/shared";
 import type { ChannelStatus, SessionStatus } from "@nexterm/shared";
-import { generateId } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
 import type { GcConfig } from "../config.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
@@ -51,6 +51,8 @@ interface ChannelState {
 	clients: Set<string>;
 	shell: string;
 	cwd?: string;
+	cols: number;
+	rows: number;
 }
 
 interface SessionState {
@@ -170,6 +172,8 @@ export class SessionManager {
 					status: "orphan",
 					clients: new Set(),
 					shell: ch.shell,
+					cols: ch.cols,
+					rows: ch.rows,
 					...(ch.cwd !== null && { cwd: ch.cwd }),
 				});
 			}
@@ -277,6 +281,8 @@ export class SessionManager {
 		const requestId = generateId();
 		const shell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
 		const cwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
+		const cols = msg.cols ?? 80;
+		const rows = msg.rows ?? 24;
 
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
@@ -284,8 +290,8 @@ export class SessionManager {
 			shell,
 			cwd,
 			env: msg.env ?? {},
-			cols: msg.cols ?? 80,
-			rows: msg.rows ?? 24,
+			cols,
+			rows,
 		};
 		agent.send(agentSpawn);
 
@@ -305,7 +311,7 @@ export class SessionManager {
 					const { channelId } = spawnOk;
 
 					// Persist channel as 'born' then immediately 'live' (first client attaches)
-					const title = "Terminal";
+					const title = DEFAULT_CHANNEL_NAME;
 					this.metaDal.createChannel({
 						id: channelId,
 						sessionId: session.id,
@@ -313,6 +319,8 @@ export class SessionManager {
 						shell,
 						cwd,
 						title,
+						cols,
+						rows,
 					});
 
 					this.channels.set(channelId, {
@@ -322,6 +330,8 @@ export class SessionManager {
 						clients: new Set([clientId]),
 						shell,
 						cwd,
+						cols,
+						rows,
 					});
 					this.metaDal.updateChannelStatus(channelId, "live");
 					this.scheduler.trackChannel(channelId);
@@ -408,25 +418,7 @@ export class SessionManager {
 
 		if (!agent?.connected) {
 			// Agent disconnected — serve cached snapshot from spool.db
-			let snapshot: UiAttachOkMessage["snapshot"] = null;
-			let tail: Uint8Array[] = [];
-
-			const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
-			if (snapshotChunk) {
-				try {
-					snapshot = JSON.parse(
-						snapshotChunk.dataBlob.toString("utf8"),
-					) as UiAttachOkMessage["snapshot"];
-				} catch {
-					snapshot = null;
-				}
-				const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
-					kind: "output",
-					afterSeq: snapshotChunk.seq,
-				});
-				tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
-			}
-
+			const { snapshot, tail } = this._buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
 				type: "ATTACH_OK",
 				channelId,
@@ -487,25 +479,7 @@ export class SessionManager {
 			client.send(attachOk);
 		} catch {
 			// Agent ATTACH failed — fall back to cached snapshot
-			const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
-			let snapshot: UiAttachOkMessage["snapshot"] = null;
-			let tail: Uint8Array[] = [];
-
-			if (snapshotChunk) {
-				try {
-					snapshot = JSON.parse(
-						snapshotChunk.dataBlob.toString("utf8"),
-					) as UiAttachOkMessage["snapshot"];
-				} catch {
-					snapshot = null;
-				}
-				const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
-					kind: "output",
-					afterSeq: snapshotChunk.seq,
-				});
-				tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
-			}
-
+			const { snapshot, tail } = this._buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
 				type: "ATTACH_OK",
 				channelId,
@@ -539,6 +513,10 @@ export class SessionManager {
 		if (!agent) return;
 		const resizeMsg: ResizeMessage = { type: "RESIZE", channelId, cols, rows };
 		agent.send(resizeMsg);
+		// Persist last-known dimensions for warm restart
+		channel.cols = cols;
+		channel.rows = rows;
+		this.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
 	/**
@@ -696,6 +674,7 @@ export class SessionManager {
 				this.chunker.onOutput(outputMsg.channelId, outputMsg.data);
 			} else if (msg.type === "SNAPSHOT_RES") {
 				const res = msg as AgentSnapshotResMessage;
+				this.scheduler.onSnapshotResponse(res.channelId);
 				this._storeSnapshot(res.channelId, res.snapshot, res.lastSeq);
 			} else if (msg.type === "CHANNEL_EXIT") {
 				const exitMsg = msg as ChannelExitMessage;
@@ -816,19 +795,29 @@ export class SessionManager {
 				shell: ch.shell,
 				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
 				env: {},
-				cols: 80,
-				rows: 24,
+				cols: ch.cols,
+				rows: ch.rows,
 			});
+
+			const timeout = setTimeout(() => {
+				agent.off("message", handler);
+				console.warn(
+					`[session-manager] SPAWN timeout for channel ${channelId} (request ${requestId})`,
+				);
+				onSpawnErr(channelId, ch);
+			}, SPAWN_TIMEOUT_MS);
 
 			const handler = (incoming: ProtocolMessage): void => {
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					if (spawnOk.requestId !== requestId) return;
+					clearTimeout(timeout);
 					agent.off("message", handler);
 					onSpawnOk(channelId, ch);
 				} else if (incoming.type === "SPAWN_ERR") {
 					const spawnErr = incoming as AgentSpawnErrMessage;
 					if (spawnErr.requestId !== requestId) return;
+					clearTimeout(timeout);
 					agent.off("message", handler);
 					onSpawnErr(channelId, ch);
 				}
@@ -909,6 +898,8 @@ export class SessionManager {
 		const requestId = generateId();
 		const shell = deadChannel.shell ?? process.env.SHELL ?? "/bin/sh";
 		const cwd = deadChannel.cwd ?? process.env.HOME ?? "/";
+		const cols = deadChannel.cols;
+		const rows = deadChannel.rows;
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
@@ -916,8 +907,8 @@ export class SessionManager {
 			shell,
 			cwd,
 			env: {},
-			cols: 80,
-			rows: 24,
+			cols,
+			rows,
 		};
 		agent.send(agentSpawn);
 
@@ -958,6 +949,8 @@ export class SessionManager {
 			clients: new Set([clientId]),
 			shell,
 			cwd,
+			cols,
+			rows,
 		});
 
 		this.scheduler.trackChannel(deadChannelId);
@@ -974,23 +967,7 @@ export class SessionManager {
 		this._broadcastToAllClients(channelStateMsg);
 
 		// 7. Load snapshot from spool (same channel ID — no change needed)
-		let snapshot: UiAttachOkMessage["snapshot"] = null;
-		let tail: Uint8Array[] = [];
-		const snapshotChunk = this.spoolDal.getLatestSnapshot(deadChannelId);
-		if (snapshotChunk) {
-			try {
-				snapshot = JSON.parse(
-					snapshotChunk.dataBlob.toString("utf8"),
-				) as UiAttachOkMessage["snapshot"];
-			} catch {
-				snapshot = null;
-			}
-			const tailChunks = this.spoolDal.getChunksByChannel(deadChannelId, {
-				kind: "output",
-				afterSeq: snapshotChunk.seq,
-			});
-			tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
-		}
+		const { snapshot, tail } = this._buildAttachPayload(deadChannelId);
 
 		// 8. Send ATTACH_OK with same channel ID (no respawnedFrom needed)
 		const attachOk: UiAttachOkMessage = {
@@ -1036,6 +1013,36 @@ export class SessionManager {
 		for (const client of this.clients.values()) {
 			client.send(msg);
 		}
+	}
+
+	/**
+	 * Build the snapshot + tail payload for ATTACH_OK from spool.db.
+	 * Used by handleAttach (cached path, agent-error fallback) and _respawnDeadChannel.
+	 */
+	private _buildAttachPayload(channelId: string): {
+		snapshot: UiAttachOkMessage["snapshot"];
+		tail: Uint8Array[];
+	} {
+		let snapshot: UiAttachOkMessage["snapshot"] = null;
+		let tail: Uint8Array[] = [];
+
+		const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
+		if (snapshotChunk) {
+			try {
+				snapshot = JSON.parse(
+					snapshotChunk.dataBlob.toString("utf8"),
+				) as UiAttachOkMessage["snapshot"];
+			} catch {
+				snapshot = null;
+			}
+			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+				kind: "output",
+				afterSeq: snapshotChunk.seq,
+			});
+			tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+		}
+
+		return { snapshot, tail };
 	}
 
 	/**

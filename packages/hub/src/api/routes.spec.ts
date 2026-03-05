@@ -454,8 +454,9 @@ describe("PATCH /api/channels/:id", () => {
 			payload: { title: "" },
 		});
 		expect(res.statusCode).toBe(400);
-		const body = res.json<{ error: { code: string } }>();
-		expect(body.error.code).toBe("VALIDATION_ERROR");
+		// Fastify schema validation: minLength: 1 rejects empty string
+		const body = res.json<{ statusCode: number; message: string }>();
+		expect(body.statusCode).toBe(400);
 	});
 
 	it("rejects whitespace-only string", async () => {
@@ -478,8 +479,74 @@ describe("PATCH /api/channels/:id", () => {
 			payload: { title: "x".repeat(129) },
 		});
 		expect(res.statusCode).toBe(400);
-		const body = res.json<{ error: { code: string } }>();
-		expect(body.error.code).toBe("VALIDATION_ERROR");
+		// Fastify schema validation: maxLength: 128 rejects > 128 chars
+		const body = res.json<{ statusCode: number; message: string }>();
+		expect(body.statusCode).toBe(400);
+	});
+
+	it("rejects empty body (missing title field)", async () => {
+		const { channelId } = await createTestChannel("patch-nobody");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: {},
+		});
+		expect(res.statusCode).toBe(400);
+	});
+
+	it("coerces non-string title (number) to string via Fastify schema coercion", async () => {
+		// Fastify's default ajv config coerces numbers to strings before validation.
+		// This documents the behavior: { title: 123 } becomes { title: "123" } and succeeds.
+		const { channelId } = await createTestChannel("patch-numtitle");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: 123 },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: string }>();
+		expect(body.title).toBe("123");
+	});
+
+	it("strips additional properties via Fastify removeAdditional (additionalProperties: false)", async () => {
+		// Fastify's default ajv config with removeAdditional strips unknown fields
+		// rather than rejecting them. This documents that behavior.
+		const { channelId } = await createTestChannel("patch-extra");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "valid", extra: "field" },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: string }>();
+		expect(body.title).toBe("valid");
+	});
+
+	it("coerces boolean title to string via Fastify/ajv coerceTypes", async () => {
+		// Fastify's default ajv config (coerceTypes: true) coerces true → "true".
+		// Same behavior as number coercion above.
+		const { channelId } = await createTestChannel("patch-bool");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: true },
+		});
+		expect(res.statusCode).toBe(200); // Fastify/ajv coerces true to "true"
+		const body = res.json<{ title: string }>();
+		expect(body.title).toBe("true");
+	});
+
+	it("accepts null title (resets to default)", async () => {
+		const { channelId } = await createTestChannel("patch-nullok");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: null },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ title: unknown }>();
+		// title null → stored as null → serialized without the key (or as null/undefined)
+		expect(body.title === null || body.title === undefined).toBe(true);
 	});
 
 	it("returns 404 for non-existent channel", async () => {

@@ -79,7 +79,14 @@ export async function registerWsRoutes(
 			try {
 				msg = decodeMessage(new Uint8Array(raw));
 			} catch {
-				// Malformed message — drop silently
+				console.warn(
+					`[ws] malformed MessagePack message from client ${clientId} (${raw.byteLength} bytes)`,
+				);
+				client.send({
+					type: "ERROR",
+					code: "MALFORMED_MESSAGE",
+					message: "Failed to decode MessagePack message",
+				});
 				return;
 			}
 

@@ -2,7 +2,7 @@ import type { TerminalProfile, UiAttachOkMessage } from "@nexterm/shared";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
-import { type Ref, onUnmounted, ref } from "vue";
+import { type Ref, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";
 
 /**
@@ -279,8 +279,6 @@ export function useTerminal(
 		terminal.value = null;
 		channelId = null;
 	}
-
-	onUnmounted(dispose);
 
 	return {
 		terminal,

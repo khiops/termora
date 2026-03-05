@@ -181,6 +181,51 @@ describe("SpoolGarbageCollector", () => {
 		expect(spoolDal.evictOldestChunks).toHaveBeenCalledWith("ch-big", 50 * 1024 * 1024);
 	});
 
+	// ── Combined Phase 2+3 integration ─────────────────────────────────────
+
+	it("collect() handles Phase 2 (size cap) and Phase 3 (dead cleanup) together in one call", () => {
+		// Setup: a live channel over the size cap, and two dead channels past retention
+		const overSize = 12 * 1024 * 1024;
+		vi.mocked(spoolDal.listChannelIds).mockReturnValue(["ch-live-big", "ch-dead-1", "ch-dead-2"]);
+		vi.mocked(spoolDal.getChannelSize).mockImplementation((id) =>
+			id === "ch-live-big" ? overSize : 500,
+		);
+		vi.mocked(metaDal.listStaleDeadChannelIds).mockReturnValue(["ch-dead-1", "ch-dead-2"]);
+
+		gc.collect();
+
+		// Phase 2: live channel was evicted down to size cap
+		expect(spoolDal.evictOldestChunks).toHaveBeenCalledTimes(1);
+		expect(spoolDal.evictOldestChunks).toHaveBeenCalledWith("ch-live-big", 10 * 1024 * 1024);
+
+		// Phase 3: dead channels had their spool data deleted
+		expect(spoolDal.deleteChunksForChannel).toHaveBeenCalledTimes(2);
+		expect(spoolDal.deleteChunksForChannel).toHaveBeenCalledWith("ch-dead-1");
+		expect(spoolDal.deleteChunksForChannel).toHaveBeenCalledWith("ch-dead-2");
+
+		// Phase 1 also ran (age-based deletion)
+		expect(spoolDal.deleteChunksOlderThan).toHaveBeenCalledTimes(1);
+
+		// Vacuum ran once at the end
+		expect(spoolDal.incrementalVacuum).toHaveBeenCalledTimes(1);
+	});
+
+	it("collect() does not evict dead channels in Phase 2 if they are under the size cap", () => {
+		// Dead channels under size cap should not trigger eviction — Phase 3 handles them
+		vi.mocked(spoolDal.listChannelIds).mockReturnValue(["ch-dead-small"]);
+		vi.mocked(spoolDal.getChannelSize).mockReturnValue(100);
+		vi.mocked(metaDal.listStaleDeadChannelIds).mockReturnValue(["ch-dead-small"]);
+
+		gc.collect();
+
+		// Phase 2: no eviction (under size cap)
+		expect(spoolDal.evictOldestChunks).not.toHaveBeenCalled();
+
+		// Phase 3: dead channel cleaned up
+		expect(spoolDal.deleteChunksForChannel).toHaveBeenCalledTimes(1);
+		expect(spoolDal.deleteChunksForChannel).toHaveBeenCalledWith("ch-dead-small");
+	});
+
 	it("deadRetentionHours = 0 uses current time as cutoff (immediate purge)", () => {
 		const customGc = new SpoolGarbageCollector(spoolDal, metaDal, {
 			deadRetentionHours: 0,

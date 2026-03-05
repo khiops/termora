@@ -56,6 +56,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onUnmounted } from "vue";
+import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import type { Channel, ChannelGroup } from "@nexterm/shared";
 import { useRename } from "../composables/useRename.js";
 
@@ -76,7 +77,7 @@ const emit = defineEmits<{
 }>();
 
 const displayLabel = computed(
-	() => props.channel.title ?? "Terminal",
+	() => props.channel.title ?? DEFAULT_CHANNEL_NAME,
 );
 
 // -------------------------------------------------------------------------

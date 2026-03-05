@@ -23,6 +23,7 @@ export const CHUNK_FLUSH_MS = 1000;
 export const PAIRING_CODE_LENGTH = 6;
 export const PAIRING_CODE_EXPIRY_MS = 60_000;
 export const MAX_ENV_ENTRIES = 100;
+export const DEFAULT_CHANNEL_NAME = "Terminal";
 
 export const ErrorCode = {
 	AUTH_REQUIRED: "AUTH_REQUIRED",

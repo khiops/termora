@@ -4,6 +4,19 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## s-backlog-sweep — Fix all S-priority review backlog items (2026-03-05)
+
+- DEFAULT_CHANNEL_NAME constant in shared/constants.ts replaces all hardcoded "Terminal"
+- purgeDeadTabs and resolveTabLabel as pure functions in useLayout (DI, no store dependency)
+- WS_RECONNECT refactored to dedicated onReconnect/onDisconnect lifecycle events on WsClient
+- Auth hook uses URL pathname parsing for exact path matching
+- Pairing code retry loop (5 attempts) with SQLite UNIQUE constraint catch
+- cols/rows stored in meta.db channels table, passed through SPAWN and warm restart
+- SnapshotScheduler max 4 concurrent snapshots with inFlight counter
+- _spawnChannelsForHost 10s per-channel SPAWN timeout
+
+---
+
 ## m-backlog-sweep — Fix all M-priority review backlog items (2026-03-05)
 
 - GC dead_retention_hours and max_size_per_channel_mb configurable via config.toml [gc] section
@@ -27,6 +40,33 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## [backfill] Channel lifecycle & session persistence (2026-03-04)
+
+- On hub restart: mark all channels dead + sessions closed via startup sweep (markAllChannelsDead)
+- ATTACH protocol: TerminalPane sends ATTACH → hub replies ATTACH_OK with snapshot + tail → xterm restore
+- Three ATTACH cases: new channel (empty), orphan with live agent (fresh snapshot), orphan with dead agent (cached from spool.db)
+- Warm restart: respawn agent with same channel IDs to restore content (optional channelId in SPAWN message)
+- CHANNEL_DEAD error code distinguishes "never existed" from "stale after restart"
+- CHANNEL_STATE listener moved from App.vue watch to SessionStore.connect() — fixes race condition
+- Terminal RESIZE deduplication: track lastSentCols/Rows, debounce 50ms, skip if unchanged
+- canWrite ref in useTerminal: default true (single-client), set false until auth confirms ownership
+
+---
+
+## [backfill] Custom fonts & config cascade wiring (2026-03-04)
+
+- Cross-platform font stack: Consolas → Liberation Mono → Courier New → monospace (no embedding, licensing)
+- User fonts: drop .woff2/.woff/.ttf/.otf in ~/.config/nexterm/fonts/, auto-discovered
+- Font serving: second @fastify/static at /public/fonts/ (decorateReply: false for multi-static)
+- Font filename heuristic: family slug from first segment, camelCase→spaces, suffixes→weight (Regular=400, Bold=700)
+- GET /api/fonts unauthenticated (font list is non-sensitive metadata)
+- Dynamic @font-face injection: <style> element appended to <head> at startup
+- Config load bug: ConfigResolver.loadFromFile() was never called — instantiated but not invoked
+- Config store: Pinia useConfigStore.load() fetches /api/fonts + /api/config/resolved in parallel
+- Profile propagation: useTerminal(containerRef, wsClient, profile?) — optional param, defaults to DEFAULT_PROFILE
+
+---
+
 ## MVP-NEXTERM — Implement full nexterm MVP (2026-03-03)
 
 - Plan-provided mode: specs in docs/
@@ -45,3 +85,26 @@ Decisions archived from workflow — newest first.
 - WriteLockManager: standalone class with DI callbacks
 - @xterm/headless CJS: default import + destructure
 - Auth hook skips /health and /pair/verify
+
+---
+
+## [backfill] Foundational architecture — Stack & design decisions (2026-03-03)
+
+- HTTP server: Fastify (perf + TS-first + plugin ecosystem)
+- Database: SQLite via better-sqlite3 with WAL mode — meta.db (state) + spool.db (output chunks/snapshots)
+- PTY: node-pty for local spawn, agent-only PTY control (hub never touches PTY directly)
+- SSH: ssh2 library, agent launched via `nexterm-agent --stdio` over SSH
+- WebSocket codec: MessagePack binary serialization (snake_case on wire, camelCase in TS)
+- UI: Vue 3 + Vite SPA with Pinia state management
+- Terminal: xterm.js (browser rendering) + @xterm/headless (snapshot capture without DOM)
+- IDs: ULID everywhere (sortable, monotonic, better DB indexing than UUID)
+- Monorepo: pnpm workspaces — packages: agent, hub, web, shared, cli
+- Protocol: unified protocol.ts — single source of truth for all message schemas (HELLO, SPAWN, ATTACH, AUTH, SNAPSHOT, LOCK...)
+- Entity model: Host (permanent) → Session (runtime) → Channel (PTY instance)
+- Session state machine: STARTING → ACTIVE → DISCONNECTED → CLOSED, persisted in meta.db
+- Architecture: local-first hub daemon, agents spawned as children (local) or via SSH (remote)
+- REST API: all routes under /api/ prefix, WebSocket at /ws (no /api)
+- Default port: 4100 with zero-conf auto-increment fallback
+- Snapshot: event-driven scheduler → chunks in spool.db with cache_index, GC preserves last per channel
+- Formatting: biome with tabs
+- Tests: vitest, colocated *.spec.ts

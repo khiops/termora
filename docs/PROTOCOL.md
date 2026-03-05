@@ -107,11 +107,12 @@ First message, sent immediately on start.
 {
   type: "SPAWN",
   request_id: string,
+  channel_id?: string,  // hub-provided ID for warm restart; if omitted, agent generates one
   shell: string,        // "/bin/bash"
   cwd: string,
   env: Record<string, string>,
-  cols: number,
-  rows: number
+  cols: number,         // terminal columns; defaults to 80
+  rows: number          // terminal rows; defaults to 24
 }
 
 // Agent → Hub (success)

@@ -34,24 +34,25 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	if (options?.authToken) {
 		const expectedToken = options.authToken;
 		server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
-			const url = request.url;
+			// Parse pathname from the raw URL to avoid query-string or path-traversal bypasses.
+			const pathname = new URL(request.url, "http://localhost").pathname;
 
-			// Unauthenticated endpoints
-			if (url === "/api/health") return;
-			if (url === "/api/pair/verify") return;
-			if (url === "/api/fonts") return;
+			// Unauthenticated endpoints — exact pathname match
+			if (pathname === "/api/health") return;
+			if (pathname === "/api/pair/verify") return;
+			if (pathname === "/api/fonts") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
-			if (url.startsWith("/ws")) return;
+			if (pathname === "/ws" || pathname.startsWith("/ws/")) return;
 
 			// Static assets (index.html, JS bundles, etc.) do not require auth —
 			// the UI itself handles the pairing/auth flow on first load.
-			if (!url.startsWith("/api/")) return;
+			if (!pathname.startsWith("/api/")) return;
 
 			const authHeader = request.headers.authorization;
 			if (!authHeader) {
-				server.log.warn({ url }, "auth: missing Authorization header");
+				server.log.warn({ url: pathname }, "auth: missing Authorization header");
 				return reply.code(401).send({
 					error: "AUTH_REQUIRED",
 					message: "Authorization header required",
@@ -60,7 +61,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 			const [scheme, token] = authHeader.split(" ");
 			if (scheme !== "Bearer" || !token) {
-				server.log.warn({ url }, "auth: malformed Authorization header");
+				server.log.warn({ url: pathname }, "auth: malformed Authorization header");
 				return reply.code(401).send({
 					error: "AUTH_REQUIRED",
 					message: "Authorization header must be: Bearer <token>",
@@ -68,14 +69,14 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			}
 
 			if (!validateToken(token, expectedToken)) {
-				server.log.warn({ url }, "auth: invalid token");
+				server.log.warn({ url: pathname }, "auth: invalid token");
 				return reply.code(401).send({
 					error: "AUTH_INVALID",
 					message: "Invalid token",
 				});
 			}
 
-			server.log.debug({ url }, "auth: accepted");
+			server.log.debug({ url: pathname }, "auth: accepted");
 		});
 	}
 

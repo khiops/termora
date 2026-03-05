@@ -1,4 +1,4 @@
-import type { ProtocolMessage } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME, type ProtocolMessage } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openTestDatabases } from "../storage/db.js";
 import { SpoolDAL } from "../storage/spool.js";
@@ -311,6 +311,13 @@ describe("SessionManager", () => {
 		expect(() => {
 			sm.handleResize("c1", "local-ch-1", 120, 40);
 		}).not.toThrow();
+
+		// Verify cols/rows were persisted to meta.db
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const row = dal.getChannel("local-ch-1");
+		expect(row?.cols).toBe(120);
+		expect(row?.rows).toBe(40);
 	});
 
 	it("removeClient cleans up all channel attachments", async () => {
@@ -353,7 +360,7 @@ describe("SessionManager", () => {
 		expect(channels).toHaveLength(1);
 		expect(channels[0]?.id).toBe("local-ch-1");
 		expect(channels[0]?.status).toBe("live");
-		expect(channels[0]?.title).toBe("Terminal");
+		expect(channels[0]?.title).toBe(DEFAULT_CHANNEL_NAME);
 	});
 
 	it("assigns default title to all spawned channels", async () => {
@@ -368,8 +375,8 @@ describe("SessionManager", () => {
 		const dal = new MetaDAL(dbManager.meta);
 		const ch1 = dal.getChannel("local-ch-1");
 		const ch2 = dal.getChannel("local-ch-2");
-		expect(ch1?.title).toBe("Terminal");
-		expect(ch2?.title).toBe("Terminal");
+		expect(ch1?.title).toBe(DEFAULT_CHANNEL_NAME);
+		expect(ch2?.title).toBe(DEFAULT_CHANNEL_NAME);
 	});
 
 	it("second SPAWN for same local host reuses existing session", async () => {
@@ -1084,6 +1091,204 @@ describe("SessionManager", () => {
 			).restartTracking.get(host.id);
 			expect(tracking).toBeDefined();
 			expect(tracking?.count).toBe(1);
+		});
+
+		it("marks channel dead on SPAWN timeout during warm restart", async () => {
+			vi.useFakeTimers();
+			try {
+				const { MetaDAL } = await import("../storage/meta.js");
+				const dal = new MetaDAL(dbManager.meta);
+
+				const host = dal.createHost({
+					type: "ssh",
+					label: "ssh-timeout",
+					sshHost: "user@timeout",
+					sshAuth: "key",
+					sshKeyPath: "/key",
+				});
+				const sessionId = "TIMEOUTSESS0000000000000000001";
+				dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+				dal.createChannel({
+					id: "timeout-ch-1",
+					sessionId,
+					status: "live",
+					shell: "/bin/sh",
+				});
+
+				// startup() restores the channel as orphan for SSH hosts
+				await sm.startup();
+
+				const channelsMap = (
+					sm as unknown as {
+						channels: Map<string, { status: string }>;
+					}
+				).channels;
+				expect(channelsMap.get("timeout-ch-1")?.status).toBe("orphan");
+
+				// Now simulate SSH reconnect: create a non-responding mock agent
+				// that accepts SPAWN but never replies with SPAWN_OK or SPAWN_ERR
+				const silentAgent = {
+					connected: true,
+					send: vi.fn(),
+					start: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn(),
+					on: vi.fn().mockReturnThis(),
+					off: vi.fn().mockReturnThis(),
+					once: vi.fn().mockReturnThis(),
+				};
+
+				// Manually wire _spawnChannelsForHost via the private method
+				const smAny = sm as unknown as {
+					_spawnChannelsForHost: (
+						hostId: string,
+						agent: unknown,
+						onOk: (id: string, ch: unknown) => void,
+						onErr: (id: string, ch: unknown) => void,
+					) => void;
+				};
+
+				let errChannelId: string | null = null;
+				smAny._spawnChannelsForHost(
+					host.id,
+					silentAgent,
+					() => {
+						/* not called */
+					},
+					(chId) => {
+						errChannelId = chId;
+					},
+				);
+
+				// Agent got the SPAWN but never replies
+				expect(silentAgent.send).toHaveBeenCalledTimes(1);
+				expect(errChannelId).toBeNull();
+
+				// Advance past the 10s SPAWN timeout
+				vi.advanceTimersByTime(10_001);
+
+				// onSpawnErr should have been called with the timed-out channel
+				expect(errChannelId).toBe("timeout-ch-1");
+				// Handler should have been removed
+				expect(silentAgent.off).toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("crash-loop protection: 4th restart within 60s closes the session", async () => {
+			vi.useFakeTimers();
+			try {
+				const { MetaDAL } = await import("../storage/meta.js");
+				const dal = new MetaDAL(dbManager.meta);
+
+				const host = dal.createHost({ type: "local", label: "crash-loop-host" });
+				const sessionId = "CRASHLOOP00000000000000000001";
+				dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+				dal.createChannel({
+					id: "crash-ch-1",
+					sessionId,
+					status: "live",
+					shell: "/bin/sh",
+				});
+
+				// startup() triggers the first warm restart (count=1)
+				await sm.startup();
+				await vi.advanceTimersByTimeAsync(0);
+
+				// Verify session is active after 1st restart
+				const sessionState = (
+					sm as unknown as {
+						sessions: Map<string, { id: string; status: string }>;
+					}
+				).sessions.get(host.id);
+				expect(sessionState).toBeDefined();
+				expect(sessionState?.status).toBe("active");
+
+				// Access the private _warmRestartLocal to trigger additional restarts
+				const smAny = sm as unknown as {
+					_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
+				};
+
+				// 2nd restart (count=2)
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+				expect(sessionState?.status).toBe("active");
+
+				// 3rd restart (count=3)
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+				expect(sessionState?.status).toBe("active");
+
+				// 4th restart (count=4 > 3) — should trigger _closeSession
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+
+				// Session should be closed
+				const sessions = (
+					sm as unknown as {
+						sessions: Map<string, { id: string; status: string }>;
+					}
+				).sessions;
+				// _closeSession deletes from sessions map
+				expect(sessions.has(host.id)).toBe(false);
+				expect(dal.getSession(sessionId)?.status).toBe("closed");
+				expect(dal.getChannel("crash-ch-1")?.status).toBe("dead");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("crash-loop protection: window resets after 60s", async () => {
+			vi.useFakeTimers();
+			try {
+				const { MetaDAL } = await import("../storage/meta.js");
+				const dal = new MetaDAL(dbManager.meta);
+
+				const host = dal.createHost({ type: "local", label: "crash-window-host" });
+				const sessionId = "CRASHWINDOW000000000000000001";
+				dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+				dal.createChannel({
+					id: "crash-win-ch-1",
+					sessionId,
+					status: "live",
+					shell: "/bin/sh",
+				});
+
+				// startup() triggers 1st warm restart (count=1)
+				await sm.startup();
+				await vi.advanceTimersByTimeAsync(0);
+
+				const smAny = sm as unknown as {
+					_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
+					restartTracking: Map<string, { count: number; windowStart: number }>;
+				};
+
+				// 2nd and 3rd restarts (count=2, count=3)
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+
+				expect(smAny.restartTracking.get(host.id)?.count).toBe(3);
+
+				// Advance past the 60s window
+				vi.advanceTimersByTime(61_000);
+
+				// 4th restart — but window has reset, so count becomes 1 again
+				await smAny._warmRestartLocal(host.id, sessionId);
+				await vi.advanceTimersByTimeAsync(0);
+
+				expect(smAny.restartTracking.get(host.id)?.count).toBe(1);
+				// Session should still be active (not closed)
+				const sessions = (
+					sm as unknown as {
+						sessions: Map<string, { id: string; status: string }>;
+					}
+				).sessions;
+				expect(sessions.get(host.id)?.status).toBe("active");
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it("SSH host channels are marked orphan but no agent is spawned", async () => {

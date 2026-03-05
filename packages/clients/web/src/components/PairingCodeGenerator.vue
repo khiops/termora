@@ -15,7 +15,7 @@
 			<div class="countdown-bar-wrap" :title="`Expires in ${secondsLeft}s`">
 				<div
 					class="countdown-bar"
-					:style="{ width: `${(secondsLeft / 60) * 100}%` }"
+					:style="{ width: `${totalSeconds > 0 ? (secondsLeft / totalSeconds) * 100 : 0}%` }"
 					:class="{ urgent: secondsLeft <= 10 }"
 				/>
 			</div>
@@ -35,6 +35,7 @@ const authStore = useAuthStore();
 const loading = ref(false);
 const activeCode = ref<string | null>(null);
 const secondsLeft = ref(60);
+const totalSeconds = ref(60);
 const copied = ref(false);
 const errorMsg = ref<string | null>(null);
 
@@ -58,6 +59,7 @@ async function generate(): Promise<void> {
 	errorMsg.value = null;
 	activeCode.value = null;
 	secondsLeft.value = 60;
+	totalSeconds.value = 60;
 	clearCountdown();
 
 	try {
@@ -76,9 +78,16 @@ async function generate(): Promise<void> {
 			throw new Error(body.message ?? `HTTP ${res.status}`);
 		}
 
-		const data = (await res.json()) as { code: string; expiresIn?: number };
+		const data = (await res.json()) as { code: string; expires_at?: string };
 		activeCode.value = data.code;
-		secondsLeft.value = data.expiresIn ?? 60;
+
+		if (data.expires_at) {
+			const remaining = Math.floor(
+				(new Date(data.expires_at).getTime() - Date.now()) / 1_000,
+			);
+			secondsLeft.value = Math.max(remaining, 0);
+		}
+		totalSeconds.value = secondsLeft.value;
 
 		countdown = setInterval(() => {
 			secondsLeft.value--;

@@ -3,6 +3,9 @@ import type { ProtocolMessage } from "@nexterm/shared";
 
 type MessageListener = (msg: ProtocolMessage) => void;
 
+/** Callback for client-side lifecycle events (not protocol messages). */
+type LifecycleListener = () => void;
+
 /**
  * Public interface for WsClient — used by composables to avoid
  * Pinia reactive proxy stripping private class members.
@@ -11,6 +14,8 @@ export interface IWsClient {
 	connect(url: string): Promise<void>;
 	send(msg: ProtocolMessage): void;
 	on(type: string, callback: MessageListener): () => void;
+	onReconnect(callback: LifecycleListener): () => void;
+	onDisconnect(callback: LifecycleListener): () => void;
 	close(): void;
 	readonly isConnected: boolean;
 }
@@ -23,6 +28,8 @@ export interface IWsClient {
 export class WsClient implements IWsClient {
 	private ws: WebSocket | null = null;
 	private listeners = new Map<string, Set<MessageListener>>();
+	private reconnectListeners = new Set<LifecycleListener>();
+	private disconnectListeners = new Set<LifecycleListener>();
 	private reconnectUrl: string | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempt = 0;
@@ -55,6 +62,9 @@ export class WsClient implements IWsClient {
 
 			ws.onclose = () => {
 				this.ws = null;
+				for (const listener of this.disconnectListeners) {
+					listener();
+				}
 				this._scheduleReconnect();
 			};
 		});
@@ -83,6 +93,31 @@ export class WsClient implements IWsClient {
 		};
 	}
 
+	/**
+	 * Subscribe to client-side reconnect events.
+	 * Unlike `on()`, this is NOT a protocol message — it fires when the WS
+	 * auto-reconnects after a drop, so consumers can re-authenticate / refresh.
+	 * Returns an unsubscribe function.
+	 */
+	onReconnect(callback: LifecycleListener): () => void {
+		this.reconnectListeners.add(callback);
+		return () => {
+			this.reconnectListeners.delete(callback);
+		};
+	}
+
+	/**
+	 * Subscribe to client-side disconnect events.
+	 * Fires when the WS connection drops (before auto-reconnect begins).
+	 * Returns an unsubscribe function.
+	 */
+	onDisconnect(callback: LifecycleListener): () => void {
+		this.disconnectListeners.add(callback);
+		return () => {
+			this.disconnectListeners.delete(callback);
+		};
+	}
+
 	close(): void {
 		this.reconnectUrl = null;
 		if (this.reconnectTimer !== null) {
@@ -107,8 +142,10 @@ export class WsClient implements IWsClient {
 			this.reconnectAttempt++;
 			try {
 				await this.connect(url);
-				// Dispatch internal reconnect event so session store can re-auth
-				this._dispatch({ type: "WS_RECONNECT" } as unknown as ProtocolMessage);
+				// Notify reconnect listeners (client-side event, not a protocol message)
+				for (const listener of this.reconnectListeners) {
+					listener();
+				}
 			} catch {
 				this._scheduleReconnect();
 			}

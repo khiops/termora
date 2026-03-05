@@ -218,7 +218,74 @@ describe("SnapshotScheduler", () => {
 		});
 	});
 
-	// ── 7. No snapshot when agent is disconnected ─────────────────────────────
+	// ── 7. Max concurrent snapshots guard ────────────────────────────────────
+
+	describe("max concurrent snapshots", () => {
+		it("defers snapshot when max in-flight reached", () => {
+			const maxConcurrent = 2;
+			const localScheduler = new SnapshotScheduler(
+				() => agent as unknown as AgentConnection,
+				maxConcurrent,
+			);
+
+			// Track two channels — their idle timers will fire at 3s
+			localScheduler.trackChannel("ch-a");
+			localScheduler.trackChannel("ch-b");
+
+			// Fire idle timers for both → 2 in-flight
+			vi.advanceTimersByTime(3_001);
+			expect(agent.sent.filter((m) => m.type === "SNAPSHOT_REQ")).toHaveLength(2);
+			expect(localScheduler.inFlightSnapshots).toBe(2);
+
+			// Track a third channel and trigger its idle
+			localScheduler.trackChannel("ch-c");
+			vi.advanceTimersByTime(3_001);
+
+			// ch-c should be deferred — still only 2 SNAPSHOT_REQs total for ch-a/ch-b
+			// (ch-a and ch-b may get additional forced triggers, so we check ch-c specifically)
+			const chCSent = agent.sent.filter(
+				(m) => m.type === "SNAPSHOT_REQ" && (m as { channelId: string }).channelId === "ch-c",
+			);
+			expect(chCSent).toHaveLength(0);
+
+			localScheduler.shutdown();
+		});
+
+		it("allows new snapshot after onSnapshotResponse frees a slot", () => {
+			const maxConcurrent = 1;
+			const localScheduler = new SnapshotScheduler(
+				() => agent as unknown as AgentConnection,
+				maxConcurrent,
+			);
+
+			localScheduler.trackChannel("ch-a");
+			vi.advanceTimersByTime(3_001);
+			expect(localScheduler.inFlightSnapshots).toBe(1);
+
+			// Mark response received — frees the slot
+			localScheduler.onSnapshotResponse("ch-a");
+			expect(localScheduler.inFlightSnapshots).toBe(0);
+
+			// Now trigger another snapshot — should succeed
+			localScheduler.onDetach("ch-a");
+			expect(agent.sent.filter((m) => m.type === "SNAPSHOT_REQ")).toHaveLength(2);
+			expect(localScheduler.inFlightSnapshots).toBe(1);
+
+			localScheduler.shutdown();
+		});
+
+		it("onSnapshotResponse does not underflow below zero", () => {
+			const localScheduler = new SnapshotScheduler(() => agent as unknown as AgentConnection);
+
+			// Call without any in-flight — should not go negative
+			localScheduler.onSnapshotResponse("ch-any");
+			expect(localScheduler.inFlightSnapshots).toBe(0);
+
+			localScheduler.shutdown();
+		});
+	});
+
+	// ── 8. No snapshot when agent is disconnected ──────────────────────────────
 
 	describe("disconnected agent", () => {
 		it("skips SNAPSHOT_REQ when agent is not connected", () => {
@@ -235,7 +302,7 @@ describe("SnapshotScheduler", () => {
 		});
 	});
 
-	// ── 8. SNAPSHOT_RES → stored in spool.db + cache_index updated ───────────
+	// ── 9. SNAPSHOT_RES → stored in spool.db + cache_index updated ───────────
 
 	describe("SNAPSHOT_RES storage (via MetaDAL + SpoolDAL)", () => {
 		it("insertChunk stores a snapshot chunk with kind=snapshot", () => {

@@ -2,6 +2,7 @@ import type { AgentConnection } from "./agent-connection.js";
 
 const SNAPSHOT_IDLE_MS = 3_000; // 3s idle trigger
 const SNAPSHOT_FORCED_MS = 5_000; // 5s forced trigger
+const DEFAULT_MAX_CONCURRENT_SNAPSHOTS = 4;
 
 interface ChannelTimers {
 	lastOutputAt: number;
@@ -12,8 +13,16 @@ interface ChannelTimers {
 
 export class SnapshotScheduler {
 	private channels = new Map<string, ChannelTimers>();
+	/** Number of snapshots currently in-flight (awaiting SNAPSHOT_RES) */
+	private _inFlightSnapshots = 0;
+	private _maxConcurrentSnapshots: number;
 
-	constructor(private getAgent: (channelId: string) => AgentConnection | undefined) {}
+	constructor(
+		private getAgent: (channelId: string) => AgentConnection | undefined,
+		maxConcurrentSnapshots = DEFAULT_MAX_CONCURRENT_SNAPSHOTS,
+	) {
+		this._maxConcurrentSnapshots = maxConcurrentSnapshots;
+	}
 
 	/** Start tracking a channel for snapshot scheduling */
 	trackChannel(channelId: string): void {
@@ -82,7 +91,29 @@ export class SnapshotScheduler {
 		this._requestSnapshot(channelId);
 	}
 
+	/**
+	 * Called when a SNAPSHOT_RES is received for a channel.
+	 * Decrements the in-flight counter so the concurrency slot is freed.
+	 */
+	onSnapshotResponse(_channelId: string): void {
+		if (this._inFlightSnapshots > 0) {
+			this._inFlightSnapshots--;
+		}
+	}
+
+	/** Exposed for testing only */
+	get inFlightSnapshots(): number {
+		return this._inFlightSnapshots;
+	}
+
 	private _requestSnapshot(channelId: string): void {
+		if (this._inFlightSnapshots >= this._maxConcurrentSnapshots) {
+			console.warn(
+				`[snapshot-scheduler] max concurrent snapshots (${this._maxConcurrentSnapshots}) reached — deferring snapshot for channel ${channelId}`,
+			);
+			return;
+		}
+
 		const state = this.channels.get(channelId);
 		if (state) {
 			state.lastSnapshotAt = Date.now();
@@ -91,6 +122,7 @@ export class SnapshotScheduler {
 		const agent = this.getAgent(channelId);
 		if (!agent?.connected) return;
 
+		this._inFlightSnapshots++;
 		agent.send({ type: "SNAPSHOT_REQ", channelId });
 	}
 }

@@ -165,6 +165,82 @@ describe("OutputChunker", () => {
 		expect(chunker.getNextSeq("ch1")).toBe(6);
 	});
 
+	it("seq values written to spool.db are strictly monotonically increasing starting at 1", () => {
+		chunker.trackChannel("ch1");
+
+		// Feed 5 separate chunks, flushing each time
+		for (let i = 0; i < 5; i++) {
+			chunker.onOutput("ch1", new Uint8Array([i]));
+			chunker.flush("ch1");
+		}
+
+		expect(dal.insertChunk).toHaveBeenCalledTimes(5);
+
+		const seqs: number[] = [];
+		for (let i = 0; i < 5; i++) {
+			seqs.push(getMockCall(vi.mocked(dal.insertChunk), i).seq);
+		}
+
+		// Starts at 1
+		expect(seqs[0]).toBe(1);
+
+		// Strictly monotonically increasing
+		for (let i = 1; i < seqs.length; i++) {
+			expect(seqs[i]).toBeGreaterThan(seqs[i - 1] as number);
+		}
+
+		// Consecutive (no gaps)
+		expect(seqs).toEqual([1, 2, 3, 4, 5]);
+	});
+
+	it("seq monotonicity holds across timer-triggered and manual flushes", () => {
+		chunker.trackChannel("ch1");
+
+		// Timer-triggered flush
+		chunker.onOutput("ch1", new Uint8Array([1]));
+		vi.advanceTimersByTime(1_000);
+
+		// Manual flush
+		chunker.onOutput("ch1", new Uint8Array([2]));
+		chunker.flush("ch1");
+
+		// Size-triggered flush (256 KB)
+		chunker.onOutput("ch1", new Uint8Array(256 * 1024));
+
+		expect(dal.insertChunk).toHaveBeenCalledTimes(3);
+		const seqs = [
+			getMockCall(vi.mocked(dal.insertChunk), 0).seq,
+			getMockCall(vi.mocked(dal.insertChunk), 1).seq,
+			getMockCall(vi.mocked(dal.insertChunk), 2).seq,
+		];
+
+		for (let i = 1; i < seqs.length; i++) {
+			expect(seqs[i]).toBeGreaterThan(seqs[i - 1] as number);
+		}
+	});
+
+	it("bumpSeq preserves monotonicity after external snapshot insertion", () => {
+		chunker.trackChannel("ch1");
+
+		// Normal output: seq 1
+		chunker.onOutput("ch1", new Uint8Array([1]));
+		chunker.flush("ch1");
+
+		// Simulate external snapshot insertion at seq 10
+		chunker.bumpSeq("ch1", 11);
+
+		// Next output must be at seq >= 11
+		chunker.onOutput("ch1", new Uint8Array([2]));
+		chunker.flush("ch1");
+
+		expect(dal.insertChunk).toHaveBeenCalledTimes(2);
+		const seq1 = getMockCall(vi.mocked(dal.insertChunk), 0).seq;
+		const seq2 = getMockCall(vi.mocked(dal.insertChunk), 1).seq;
+		expect(seq1).toBe(1);
+		expect(seq2).toBe(11);
+		expect(seq2).toBeGreaterThan(seq1);
+	});
+
 	it("concatenates multiple output chunks into a single blob on flush", () => {
 		chunker.trackChannel("ch1");
 		chunker.onOutput("ch1", new Uint8Array([1, 2]));

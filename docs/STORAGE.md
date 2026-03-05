@@ -155,11 +155,16 @@ CREATE TABLE cache_index (
 
 ```sql
 CREATE TABLE pairing_codes (
-  code       TEXT PRIMARY KEY,                           -- 6-digit string
-  token      TEXT NOT NULL,                              -- the auth token to grant
+  id         TEXT PRIMARY KEY,                           -- ULID
+  code       TEXT NOT NULL UNIQUE,                       -- 6-digit string
+  created_at TEXT NOT NULL,                              -- ISO 8601
   expires_at TEXT NOT NULL,                              -- ISO 8601 (60s from creation)
-  used       INTEGER NOT NULL DEFAULT 0                  -- boolean
+  used       INTEGER NOT NULL DEFAULT 0,                 -- boolean
+  used_at    TEXT,                                       -- ISO 8601, set when redeemed
+  used_by_ip TEXT                                        -- IP of the client that redeemed
 );
+
+CREATE INDEX idx_pairing_codes_code ON pairing_codes(code);
 ```
 
 ### 3.8 Schema version

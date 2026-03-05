@@ -53,19 +53,25 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 			});
 		}
 
-		// Generate a unique 6-digit code (collision extremely rare, one retry)
-		let code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-		if (metaDal.getPairingCodeByCode(code)) {
-			code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-		}
-
 		const now = new Date();
 		const expiresAt = new Date(now.getTime() + 60_000).toISOString();
 		const id = generateId();
 
-		metaDal.createPairingCode(id, code, now.toISOString(), expiresAt);
-
-		return reply.code(201).send({ code, expires_at: expiresAt });
+		// Generate a unique 6-digit code with retry on collision (UNIQUE constraint).
+		const maxAttempts = 5;
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+			try {
+				metaDal.createPairingCode(id, code, now.toISOString(), expiresAt);
+				return reply.code(201).send({ code, expires_at: expiresAt });
+			} catch (err: unknown) {
+				const msg = err instanceof Error ? err.message : "";
+				const isUniqueViolation =
+					msg.includes("UNIQUE constraint failed") || msg.includes("SQLITE_CONSTRAINT_UNIQUE");
+				if (isUniqueViolation && attempt < maxAttempts - 1) continue;
+				throw err;
+			}
+		}
 	});
 
 	// POST /api/pair/verify — unauthenticated, exchanges code for token

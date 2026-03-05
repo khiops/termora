@@ -38,6 +38,8 @@ export interface CreateChannelInput {
 	shell?: string;
 	cwd?: string;
 	title?: string;
+	cols?: number;
+	rows?: number;
 }
 
 interface HostRow {
@@ -301,7 +303,7 @@ export class MetaDAL {
 			.prepare(
 				`INSERT INTO channels (
 					id, session_id, shell, cwd, title, status, cols, rows, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, 80, 24, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				input.id,
@@ -310,6 +312,8 @@ export class MetaDAL {
 				input.cwd ?? null,
 				input.title ?? null,
 				input.status,
+				input.cols ?? 80,
+				input.rows ?? 24,
 				now,
 				now,
 			);
@@ -365,6 +369,14 @@ export class MetaDAL {
 				.prepare("UPDATE channels SET status = ?, updated_at = ? WHERE id = ?")
 				.run(status, now, id);
 		}
+	}
+
+	updateChannelDimensions(id: string, cols: number, rows: number): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET cols = ?, rows = ?, updated_at = ? WHERE id = ?")
+			.run(cols, rows, now, id);
+		return result.changes > 0;
 	}
 
 	updateChannelTitle(id: string, title: string | null): boolean {
@@ -435,13 +447,15 @@ export class MetaDAL {
 		sessionId: string;
 		shell: string;
 		cwd: string | null;
+		cols: number;
+		rows: number;
 		status: string;
 		hostId: string;
 		hostType: string;
 	}> {
 		const rows = this.db
 			.prepare(
-				`SELECT c.id, c.session_id, c.shell, c.cwd, c.status,
+				`SELECT c.id, c.session_id, c.shell, c.cwd, c.cols, c.rows, c.status,
 				        s.host_id, h.type AS host_type
 				 FROM channels c
 				 JOIN sessions s ON c.session_id = s.id
@@ -453,6 +467,8 @@ export class MetaDAL {
 			session_id: string;
 			shell: string;
 			cwd: string | null;
+			cols: number;
+			rows: number;
 			status: string;
 			host_id: string;
 			host_type: string;
@@ -462,6 +478,8 @@ export class MetaDAL {
 			sessionId: r.session_id,
 			shell: r.shell,
 			cwd: r.cwd,
+			cols: r.cols,
+			rows: r.rows,
 			status: r.status,
 			hostId: r.host_id,
 			hostType: r.host_type,

@@ -20,6 +20,11 @@ export const useSessionStore = defineStore("session", () => {
 	const authFailed = ref(false);
 	/** Incremented each time the WS reconnects and re-authenticates successfully. */
 	const reconnectCount = ref(0);
+	/** Lifecycle unsubscribers — called in disconnect() to clean up. */
+	const _unsubs: { disconnect: (() => void) | null; reconnect: (() => void) | null } = {
+		disconnect: null,
+		reconnect: null,
+	};
 
 	/**
 	 * Connect to hub WebSocket, send AUTH, then wait for AUTH_OK or AUTH_FAIL.
@@ -57,9 +62,15 @@ export const useSessionStore = defineStore("session", () => {
 		// Authenticate immediately after connecting
 		await _authenticate();
 
+		// Track WS disconnection so UI can show reconnecting overlay
+		_unsubs.disconnect = wsClient.onDisconnect(() => {
+			connected.value = false;
+		});
+
 		// Re-authenticate and refresh state after each WS auto-reconnect
-		wsClient.on("WS_RECONNECT", async () => {
+		_unsubs.reconnect = wsClient.onReconnect(async () => {
 			try {
+				connected.value = true;
 				await _authenticate();
 				// Re-fetch state after reconnect
 				const hostsStore2 = useHostsStore();
@@ -179,6 +190,10 @@ export const useSessionStore = defineStore("session", () => {
 	}
 
 	function disconnect(): void {
+		_unsubs.disconnect?.();
+		_unsubs.disconnect = null;
+		_unsubs.reconnect?.();
+		_unsubs.reconnect = null;
 		wsClient.close();
 		connected.value = false;
 		authenticated.value = false;

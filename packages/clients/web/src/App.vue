@@ -60,7 +60,7 @@ import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
 import { useChannelsStore } from "./stores/channels.js";
 import { useConfigStore } from "./stores/config.js";
-import { useLayout } from "./composables/useLayout.js";
+import { purgeDeadTabs, useLayout } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { generateId } from "@nexterm/shared";
 import HostRail from "./components/HostRail.vue";
@@ -124,16 +124,7 @@ watch(
 	async (hostId) => {
 		if (hostId === null) return;
 		await channelsStore.fetchChannels(hostId);
-		// Purge tabs whose channels are dead (e.g. after hub restart)
-		const deadIds = new Set(
-			channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
-		);
-		for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
-			const tab = layout.tabs.value[i];
-			if (tab !== undefined && deadIds.has(tab.channelId)) {
-				layout.closeTab(i);
-			}
-		}
+		purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab);
 		// Auto-spawn if no live channels exist (all dead after hub restart, or first run).
 		// Opens a pending tab — TerminalPane handles the actual SPAWN with correct dimensions.
 		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== "dead");
