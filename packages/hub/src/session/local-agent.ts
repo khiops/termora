@@ -31,8 +31,12 @@ export function resolveAgentPath(): string {
  *   agent.on("message", (msg) => { ... });
  *   agent.close();
  */
+const SEND_QUEUE_WARN = 1000;
+
 export class LocalAgent extends AgentConnection {
 	private process: ChildProcess | null = null;
+	private sendQueue: Buffer[] = [];
+	private draining = false;
 
 	constructor(private readonly agentPath: string) {
 		super();
@@ -51,7 +55,13 @@ export class LocalAgent extends AgentConnection {
 			this.handleData(data);
 		});
 
+		this.process.stdin?.on("drain", () => {
+			this.flushSendQueue();
+		});
+
 		this.process.on("close", (code) => {
+			this.sendQueue.length = 0;
+			this.draining = false;
 			this.process = null;
 			this.emit("close", code);
 		});
@@ -72,17 +82,26 @@ export class LocalAgent extends AgentConnection {
 		});
 	}
 
-	/** Send a protocol message to the agent via its stdin. */
+	/** Send a protocol message to the agent via its stdin (with backpressure). */
 	send(msg: ProtocolMessage): void {
 		if (!this.process?.stdin?.writable) {
 			throw new Error("Agent not connected");
 		}
-		const frame = encodeFrame(msg);
-		this.process.stdin.write(Buffer.from(frame));
+		const frame = Buffer.from(encodeFrame(msg));
+		if (this.draining) {
+			this.enqueueSend(frame);
+			return;
+		}
+		const ok = this.process.stdin.write(frame);
+		if (!ok) {
+			this.draining = true;
+		}
 	}
 
 	/** Terminate the agent process with SIGTERM. */
 	close(): void {
+		this.sendQueue.length = 0;
+		this.draining = false;
 		if (this.process) {
 			this.process.kill("SIGTERM");
 			this.process = null;
@@ -91,5 +110,29 @@ export class LocalAgent extends AgentConnection {
 
 	get connected(): boolean {
 		return this.process !== null && !this.process.killed;
+	}
+
+	private enqueueSend(frame: Buffer): void {
+		if (this.sendQueue.length >= SEND_QUEUE_WARN) {
+			if (this.sendQueue.length === SEND_QUEUE_WARN) {
+				console.warn(
+					`[local-agent] send queue reached ${SEND_QUEUE_WARN} messages, dropping oldest`,
+				);
+			}
+			this.sendQueue.shift();
+		}
+		this.sendQueue.push(frame);
+	}
+
+	private flushSendQueue(): void {
+		this.draining = false;
+		let frame = this.sendQueue.shift();
+		while (frame && !this.draining) {
+			const ok = this.process?.stdin?.write(frame) ?? false;
+			if (!ok) {
+				this.draining = true;
+			}
+			frame = this.draining ? undefined : this.sendQueue.shift();
+		}
 	}
 }
