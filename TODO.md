@@ -9,11 +9,15 @@
 ### Review Backlog (Warm Restart)
 - [ ] 🔧 [Hub] DRY: extract shared SPAWN-sending loop from _warmRestartLocal and _reAttachChannels — Priority: M (F-001)
 - [ ] 🔧 [Docs] Update PROTOCOL.md §3.2 and §4.4 with new optional channelId/cols/rows fields — Priority: S (F-002)
-- [ ] 🔧 [Hub] DRY: extract _computeSnapshotSeq helper from handleAttach + _wireAgentEvents — Priority: S (F-003)
+- [x] ✅ [Hub] DRY: extract _computeSnapshotSeq helper from handleAttach + _wireAgentEvents — Priority: S (F-003) (2026-03-05)
 - [ ] 🔧 [UI] DRY: extract purgeDeadTabs helper in App.vue — Priority: S (F-004)
 - [ ] 🔧 [Hub] Add crash-loop limit test (4th restart within 60s triggers _closeSession) — Priority: S (F-005)
 - [ ] 🔧 [Hub] Store last-known cols/rows in meta.db for warm restart (instead of hardcoded 80x24) — Priority: S (F-006)
 - [ ] 🔧 [UI] WS_RECONNECT: use separate event channel instead of ProtocolMessage cast — Priority: S (F-007)
+
+### Review Backlog (Channel Names)
+- [ ] 🔧 [UI] DRY: extract useRename composable from ChannelItem + TabBar — Priority: M (F-004)
+- [ ] 🔧 [UI] Decouple getTabLabel from useChannelsStore in useLayout — Priority: S (F-005)
 
 ### Review Backlog (M5)
 - [ ] 🔧 [UI] Add unit tests for composables (useLayout, useCommandPalette, useHostIcon) — Priority: M (F-005)
