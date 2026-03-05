@@ -458,6 +458,18 @@ describe("PATCH /api/channels/:id", () => {
 		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 
+	it("rejects whitespace-only string", async () => {
+		const { channelId } = await createTestChannel("patch-ws");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { title: "   " },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
 	it("rejects title longer than 128 characters", async () => {
 		const { channelId } = await createTestChannel("patch-toolong");
 		const res = await server.inject({

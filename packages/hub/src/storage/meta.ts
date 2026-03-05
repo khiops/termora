@@ -375,16 +375,6 @@ export class MetaDAL {
 		return result.changes > 0;
 	}
 
-	countChannelsForSession(sessionId: string): number {
-		const row = this.db
-			.prepare(
-				`SELECT COUNT(*) as count FROM channels
-				 WHERE session_id = ? AND status != 'dead'`,
-			)
-			.get(sessionId) as { count: number };
-		return row.count;
-	}
-
 	deleteChannel(id: string): void {
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}

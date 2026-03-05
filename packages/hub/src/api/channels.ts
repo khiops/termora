@@ -43,7 +43,7 @@ export function registerChannelRoutes(server: FastifyInstance, metaDal: MetaDAL)
 			const { title } = request.body;
 
 			if (title !== null) {
-				if (typeof title !== "string" || title.length === 0 || title.length > 128) {
+				if (typeof title !== "string" || title.trim().length === 0 || title.trim().length > 128) {
 					return reply.code(400).send({
 						error: {
 							code: "VALIDATION_ERROR",

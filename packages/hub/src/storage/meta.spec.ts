@@ -482,60 +482,6 @@ describe("MetaDAL — updateChannelTitle", () => {
 	});
 });
 
-describe("MetaDAL — countChannelsForSession", () => {
-	let dbs: DatabaseManager;
-	let dal: MetaDAL;
-
-	beforeEach(() => {
-		dbs = openTestDatabases();
-		dal = new MetaDAL(dbs.meta);
-	});
-
-	afterEach(() => {
-		dbs.close();
-	});
-
-	it("counts channels for a session", () => {
-		const host = dal.createHost({ type: "local", label: "count-host" });
-		const sessionId = "COUNTSESS01AAAAAAAAAAAAAAAAAA";
-		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
-
-		expect(dal.countChannelsForSession(sessionId)).toBe(0);
-
-		dal.createChannel({ id: "COUNTCH01AAAAAAAAAAAAAAAAAAA", sessionId, status: "born" });
-		dal.createChannel({ id: "COUNTCH02AAAAAAAAAAAAAAAAAAA", sessionId, status: "born" });
-
-		expect(dal.countChannelsForSession(sessionId)).toBe(2);
-	});
-
-	it("does not count channels from other sessions", () => {
-		const host = dal.createHost({ type: "local", label: "count-host-2" });
-		const sessionId1 = "COUNTSESS02AAAAAAAAAAAAAAAAAA";
-		const sessionId2 = "COUNTSESS03AAAAAAAAAAAAAAAAAA";
-		dal.createSession({ id: sessionId1, hostId: host.id, status: "active" });
-		dal.createSession({ id: sessionId2, hostId: host.id, status: "active" });
-
-		dal.createChannel({
-			id: "COUNTCH03AAAAAAAAAAAAAAAAAAA",
-			sessionId: sessionId1,
-			status: "born",
-		});
-		dal.createChannel({
-			id: "COUNTCH04AAAAAAAAAAAAAAAAAAA",
-			sessionId: sessionId2,
-			status: "born",
-		});
-		dal.createChannel({
-			id: "COUNTCH05AAAAAAAAAAAAAAAAAAA",
-			sessionId: sessionId2,
-			status: "born",
-		});
-
-		expect(dal.countChannelsForSession(sessionId1)).toBe(1);
-		expect(dal.countChannelsForSession(sessionId2)).toBe(2);
-	});
-});
-
 // ─── Sweep methods ────────────────────────────────────────────────────────────
 
 describe("MetaDAL — markAllChannelsDead", () => {

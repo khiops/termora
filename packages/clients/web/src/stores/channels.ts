@@ -288,7 +288,6 @@ export const useChannelsStore = defineStore("channels", () => {
 		const oldChannel = existing;
 
 		// Optimistic update — rebuild to satisfy exactOptionalPropertyTypes
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		const { title: _removed, ...rest } = existing;
 		const updated: Channel = title !== null ? { ...rest, title } : (rest as Channel);
 		const next = [...channels.value];
