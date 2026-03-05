@@ -15,7 +15,8 @@
 		"pinia": "catalog:",
 		"@msgpack/msgpack": "catalog:",
 		"@xterm/xterm": "catalog:",
-		"@xterm/addon-fit": "catalog:"
+		"@xterm/addon-fit": "catalog:",
+		"@xterm/addon-unicode11": "catalog:"
 	},
 	"devDependencies": {
 		"typescript": "catalog:",

@@ -169,7 +169,7 @@ describe("ConfigResolver.resolve", () => {
 
 		expect(result.fontSize).toBe(20); // host overrides toml layer 2
 		expect(result.scrollback).toBe(9999);
-		expect(result.fontFamily).toBe("monospace"); // layer 1 default still present
+		expect(result.fontFamily).toBe('"Consolas", "Liberation Mono", "Courier New", monospace'); // layer 1 default still present
 	});
 
 	it("layer 3.5: agent hints override host profile", () => {
@@ -262,7 +262,8 @@ describe("GET /api/config/resolved", () => {
 
 	beforeEach(async () => {
 		dbs = openTestDatabases();
-		server = await createServer({ logger: false, dbManager: dbs });
+		// Use tmpdir as configDir to avoid loading the real ~/.config/nexterm/config.toml
+		server = await createServer({ logger: false, dbManager: dbs, configDir: tmpdir() });
 	});
 
 	afterEach(async () => {

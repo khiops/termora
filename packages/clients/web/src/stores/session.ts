@@ -4,6 +4,7 @@ import { markRaw, ref } from "vue";
 import { WsClient } from "../services/ws-client.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
+import { useConfigStore } from "./config.js";
 import { useHostsStore } from "./hosts.js";
 import { useWriteLockStore } from "./writelock.js";
 
@@ -67,6 +68,8 @@ export const useSessionStore = defineStore("session", () => {
 				if (channelsStore2.activeHostId) {
 					await channelsStore2.fetchChannels(channelsStore2.activeHostId);
 				}
+				// Reload resolved profile (font, cursor, scrollback settings)
+				await useConfigStore().loadProfile();
 				reconnectCount.value++;
 			} catch (err) {
 				console.error("[session] Reconnect auth failed:", err);

@@ -17,9 +17,9 @@ describe("Hub Server", () => {
 		expect(server).toBeDefined();
 	});
 
-	it("GET /health returns ok status", async () => {
+	it("GET /api/health returns ok status", async () => {
 		server = await createServer({ logger: false });
-		const response = await server.inject({ method: "GET", url: "/health" });
+		const response = await server.inject({ method: "GET", url: "/api/health" });
 		expect(response.statusCode).toBe(200);
 		const body = response.json();
 		expect(body.status).toBe("ok");
@@ -41,9 +41,9 @@ describe("Hub Server — Bearer auth", () => {
 		if (server) await server.close();
 	});
 
-	it("GET /health is accessible without token", async () => {
+	it("GET /api/health is accessible without token", async () => {
 		server = await createServer({ logger: false, authToken: TEST_TOKEN });
-		const response = await server.inject({ method: "GET", url: "/health" });
+		const response = await server.inject({ method: "GET", url: "/api/health" });
 		expect(response.statusCode).toBe(200);
 	});
 

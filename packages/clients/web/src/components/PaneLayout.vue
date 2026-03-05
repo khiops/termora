@@ -3,10 +3,12 @@
 		<!-- Terminal leaf node -->
 		<template v-if="node.type === 'terminal'">
 			<TerminalPane
+				:key="node.paneId ?? node.channelId"
 				:channel-id="node.channelId"
 				@split-right="(chId) => emit('split', chId, 'vertical')"
 				@split-down="(chId) => emit('split', chId, 'horizontal')"
 				@close-pane="(chId) => emit('close-pane', chId)"
+				@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
 			/>
 		</template>
 
@@ -20,6 +22,7 @@
 				@split="(chId, dir) => emit('split', chId, dir)"
 				@close-pane="(chId) => emit('close-pane', chId)"
 				@update-ratio="(path, ratio) => emit('update-ratio', path, ratio)"
+				@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
 			/>
 
 			<!-- Drag handle between the two panes -->
@@ -38,6 +41,7 @@
 				@split="(chId, dir) => emit('split', chId, dir)"
 				@close-pane="(chId) => emit('close-pane', chId)"
 				@update-ratio="(path, ratio) => emit('update-ratio', path, ratio)"
+				@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
 			/>
 		</template>
 	</div>
@@ -66,6 +70,7 @@ const emit = defineEmits<{
 	(e: "split", channelId: string, direction: "horizontal" | "vertical"): void;
 	(e: "close-pane", channelId: string): void;
 	(e: "update-ratio", nodePath: NodePath, ratio: number): void;
+	(e: "channel-spawned", tempId: string, realId: string): void;
 }>();
 
 const containerEl = ref<HTMLElement | null>(null);

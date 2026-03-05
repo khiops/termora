@@ -177,20 +177,10 @@ async function onNewChannel(): Promise<void> {
 }
 
 function onCloseChannel(channelId: string): void {
-	// TODO: send DESTROY message via wsClient (Block 5.3+)
-	// For now, just mark channel as dead locally to reflect UI intent
-	channelsStore.updateChannelStatus(channelId, "dead");
-	if (channelsStore.selectedChannelId === channelId) {
-		// Select the first live channel, if any
-		const fallback = channelsStore.channels.find(
-			(c) => c.id !== channelId && c.status === "live",
-		);
-		if (fallback) {
-			channelsStore.selectChannel(fallback.id);
-		} else {
-			channelsStore.selectChannel(channelId); // keep selection until refetch
-		}
-	}
+	// TODO: send DESTROY message via wsClient to kill the PTY (Block 5.3+)
+	// For now, remove from sidebar. The auto-close watcher in App.vue
+	// will close any associated tab via the channels deep watcher.
+	channelsStore.removeChannel(channelId);
 }
 
 function onAddGroup(): void {

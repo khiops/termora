@@ -104,6 +104,13 @@ export class SpoolDAL {
 		return rows.map(rowToChunk);
 	}
 
+	getMaxSeq(channelId: string): number {
+		const row = this.db
+			.prepare("SELECT MAX(seq) as max_seq FROM chunks WHERE channel_id = ?")
+			.get(channelId) as { max_seq: number | null } | undefined;
+		return row?.max_seq ?? 0;
+	}
+
 	getLatestSnapshot(channelId: string): Chunk | undefined {
 		const row = this.db
 			.prepare(

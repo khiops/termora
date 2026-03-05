@@ -18,11 +18,15 @@ export class OutputChunker {
 	/** Start tracking a channel for output chunking */
 	trackChannel(channelId: string, startSeq?: number): void {
 		if (this.channels.has(channelId)) return;
+		// Resume from the last seq in spool.db to avoid UNIQUE constraint
+		// violations after hot-reload (tsx watch resets in-memory state but
+		// spool.db retains old chunks).
+		const resumeSeq = startSeq ?? this.spoolDal.getMaxSeq(channelId) + 1;
 		this.channels.set(channelId, {
 			chunks: [],
 			totalBytes: 0,
 			timer: null,
-			nextSeq: startSeq ?? 1,
+			nextSeq: resumeSeq,
 		});
 	}
 
@@ -94,6 +98,14 @@ export class OutputChunker {
 	/** Get the current next seq for a channel (useful for SNAPSHOT_RES handling) */
 	getNextSeq(channelId: string): number {
 		return this.channels.get(channelId)?.nextSeq ?? 1;
+	}
+
+	/** Ensure nextSeq is at least `minSeq` (used after external snapshot insertions) */
+	bumpSeq(channelId: string, minSeq: number): void {
+		const buf = this.channels.get(channelId);
+		if (buf && buf.nextSeq < minSeq) {
+			buf.nextSeq = minSeq;
+		}
 	}
 
 	private _concatChunks(chunks: Uint8Array[], totalBytes: number): Buffer {

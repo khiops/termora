@@ -149,6 +149,18 @@ export const useChannelsStore = defineStore("channels", () => {
 	}
 
 	/**
+	 * Remove a channel from the local list (sidebar). Does NOT kill the PTY —
+	 * a DESTROY message to the hub is a future enhancement.
+	 */
+	function removeChannel(channelId: string): void {
+		channels.value = channels.value.filter((c) => c.id !== channelId);
+		if (selectedChannelId.value === channelId) {
+			const fallback = channels.value.find((c) => c.status !== "dead");
+			selectedChannelId.value = fallback?.id ?? null;
+		}
+	}
+
+	/**
 	 * Called when a SPAWN_OK arrives so the new channel appears immediately
 	 * without requiring a full refetch.
 	 */
@@ -159,10 +171,35 @@ export const useChannelsStore = defineStore("channels", () => {
 	}
 
 	// -------------------------------------------------------------------------
-	// WS: spawn a new channel on the active host
+	// Pending spawns: map tempId → hostId for deferred spawn flow
 	// -------------------------------------------------------------------------
 
-	function spawnChannel(hostId: string): Promise<string> {
+	const pendingSpawns = ref<Map<string, string>>(new Map());
+
+	function registerPendingSpawn(tempId: string, hostId: string): void {
+		const next = new Map(pendingSpawns.value);
+		next.set(tempId, hostId);
+		pendingSpawns.value = next;
+	}
+
+	function consumePendingSpawn(tempId: string): string | null {
+		const hostId = pendingSpawns.value.get(tempId) ?? null;
+		if (hostId !== null) {
+			const next = new Map(pendingSpawns.value);
+			next.delete(tempId);
+			pendingSpawns.value = next;
+		}
+		return hostId;
+	}
+
+	// -------------------------------------------------------------------------
+	// WS: spawn a new channel on a host
+	// -------------------------------------------------------------------------
+
+	function spawnChannel(
+		hostId: string,
+		opts?: { cols?: number; rows?: number; select?: boolean },
+	): Promise<string> {
 		const sessionStore = useSessionStore();
 		return new Promise<string>((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -174,9 +211,10 @@ export const useChannelsStore = defineStore("channels", () => {
 				if (msg.type === "SPAWN_OK") {
 					clearTimeout(timer);
 					unsub();
-					// Add channel optimistically; fetchChannels will reconcile
 					void fetchChannels(hostId);
-					selectChannel(msg.channelId);
+					if (opts?.select !== false) {
+						selectChannel(msg.channelId);
+					}
 					resolve(msg.channelId);
 				}
 			});
@@ -184,6 +222,9 @@ export const useChannelsStore = defineStore("channels", () => {
 			sessionStore.wsClient.send({
 				type: "SPAWN",
 				hostId,
+				...(opts?.cols !== undefined && opts?.rows !== undefined
+					? { cols: opts.cols, rows: opts.rows }
+					: {}),
 			});
 		});
 	}
@@ -261,8 +302,11 @@ export const useChannelsStore = defineStore("channels", () => {
 		selectChannel,
 		markUnread,
 		updateChannelStatus,
+		removeChannel,
 		addChannel,
 		spawnChannel,
+		registerPendingSpawn,
+		consumePendingSpawn,
 		addGroup,
 		removeGroup,
 		renameGroup,

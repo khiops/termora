@@ -27,19 +27,13 @@
 					@add-tab="onAddTab"
 				/>
 				<div class="pane-area">
-					<!-- First-run welcome banner: shown while auto-spawning the first terminal -->
-					<div v-if="showWelcome" class="pane-welcome">
-						<div class="pane-welcome-content">
-							<div class="pane-welcome-title">Welcome to nexterm!</div>
-							<div class="pane-welcome-subtitle">Your local terminal is ready. Opening it now…</div>
-						</div>
-					</div>
 					<PaneLayout
-						v-else-if="layout.layout.value !== null"
+						v-if="layout.layout.value !== null"
 						:node="layout.layout.value"
 						@split="onSplit"
 						@close-pane="onClosePane"
 						@update-ratio="layout.updateRatio"
+						@channel-spawned="onChannelSpawned"
 					/>
 					<div v-else class="pane-empty">
 						Select a channel or click + to open a terminal.
@@ -51,11 +45,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
 import { useChannelsStore } from "./stores/channels.js";
+import { useConfigStore } from "./stores/config.js";
 import { useLayout } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { generateId } from "@nexterm/shared";
@@ -71,6 +66,7 @@ const authStore = useAuthStore();
 const sessionStore = useSessionStore();
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
+const configStore = useConfigStore();
 const layout = useLayout();
 const commandPalette = useCommandPalette();
 
@@ -83,19 +79,25 @@ const needsPairing = computed(
 	() => authStore.token === null || sessionStore.authFailed,
 );
 
-/**
- * First-run welcome banner: shown while we auto-spawn the initial terminal.
- * Cleared once the channel is open or if channels already exist.
- */
-const showWelcome = ref(false);
+/** Helper: open a tab backed by a pending spawn (TerminalPane handles the actual SPAWN). */
+function openPendingTab(hostId: string): void {
+	const tempId = generateId();
+	channelsStore.registerPendingSpawn(tempId, hostId);
+	layout.openTab(tempId, `Terminal ${tempId.slice(-8)}`);
+}
 
 /**
  * On mount: if we have a token, connect the WebSocket and fetch hosts.
  */
 onMounted(async () => {
+	// Load fonts before terminals are created (no auth needed)
+	await configStore.loadFonts();
+
 	if (authStore.token !== null) {
 		try {
 			await sessionStore.connect();
+			// Load resolved profile now that auth is established
+			await configStore.loadProfile();
 			await hostsStore.fetchHosts();
 		} catch (err) {
 			console.error("[App] startup connect failed:", err);
@@ -113,34 +115,22 @@ watch(
 	async (hostId) => {
 		if (hostId === null) return;
 		await channelsStore.fetchChannels(hostId);
-		// First-run: if no channels exist after the first fetch, auto-spawn one
-		if (channelsStore.channels.length === 0 && layout.tabs.value.length === 0) {
-			showWelcome.value = true;
-			try {
-				await channelsStore.spawnChannel(hostId);
-			} catch (err) {
-				console.error("[App] first-run auto-spawn failed:", err);
-			} finally {
-				showWelcome.value = false;
+		// Purge tabs whose channels are dead (e.g. after hub restart)
+		const deadIds = new Set(
+			channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
+		);
+		for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
+			const tab = layout.tabs.value[i];
+			if (tab !== undefined && deadIds.has(tab.channelId)) {
+				layout.closeTab(i);
 			}
 		}
-	},
-	{ immediate: true },
-);
-
-/**
- * Route CHANNEL_STATE WebSocket messages to the channels store so that
- * status changes (live → orphan → dead) are reflected in real time.
- */
-watch(
-	() => sessionStore.authenticated,
-	(authed) => {
-		if (!authed) return;
-		sessionStore.wsClient.on("CHANNEL_STATE", (msg) => {
-			if (msg.type === "CHANNEL_STATE") {
-				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
-			}
-		});
+		// Auto-spawn if no live channels exist (all dead after hub restart, or first run).
+		// Opens a pending tab — TerminalPane handles the actual SPAWN with correct dimensions.
+		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== "dead");
+		if (!hasAliveChannels && layout.tabs.value.length === 0) {
+			openPendingTab(hostId);
+		}
 	},
 	{ immediate: true },
 );
@@ -153,9 +143,45 @@ watch(
 	(channelId) => {
 		if (channelId === null) return;
 		const channel = channelsStore.channels.find((c) => c.id === channelId);
+		// Don't open tabs for dead channels (but allow unknown channels —
+		// spawnChannel selects before fetchChannels resolves)
+		if (channel?.status === "dead") return;
 		const label = channel?.title ?? `Terminal ${channelId.slice(-8)}`;
 		layout.openTab(channelId, label);
 	},
+);
+
+/**
+ * Reverse sync: when the active tab changes (e.g. user clicks a tab),
+ * update the sidebar selection to match.
+ */
+watch(
+	() => layout.activeTab.value,
+	(tab) => {
+		if (tab !== null && tab.channelId !== channelsStore.selectedChannelId) {
+			channelsStore.selectChannel(tab.channelId);
+		}
+	},
+);
+
+/**
+ * Auto-close tabs when their backing channel dies (sidebar "Close channel",
+ * hub-side CHANNEL_STATE, etc.).
+ */
+watch(
+	() => channelsStore.channels,
+	(channels) => {
+		const deadIds = new Set(
+			channels.filter((c) => c.status === "dead").map((c) => c.id),
+		);
+		for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
+			const tab = layout.tabs.value[i];
+			if (tab !== undefined && deadIds.has(tab.channelId)) {
+				layout.closeTab(i);
+			}
+		}
+	},
+	{ deep: true },
 );
 
 /**
@@ -184,61 +210,40 @@ function onAuthenticated(): void {
 }
 
 /**
- * "+" button in the tab bar: spawn a new channel on the active host.
+ * "+" button in the tab bar: open a pending tab whose TerminalPane
+ * will handle the actual SPAWN with correct terminal dimensions.
  */
-async function onAddTab(): Promise<void> {
+function onAddTab(): void {
 	const hostId = channelsStore.activeHostId;
 	if (hostId === null) return;
-	try {
-		await channelsStore.spawnChannel(hostId);
-		// spawnChannel calls selectChannel internally, which triggers the
-		// watch above to openTab.
-	} catch (err) {
-		console.error("[App] spawn for new tab failed:", err);
-	}
+	openPendingTab(hostId);
 }
 
 /**
- * Split a pane. We generate a new channelId for the new pane, then
- * call spawnChannel so the hub creates the backing channel. Once SPAWN_OK
- * arrives, the tab/pane layout is already set; we wire the new channelId.
+ * Split a pane. Creates a pending-spawn pane in the split — TerminalPane
+ * will handle the actual SPAWN with correct terminal dimensions.
+ * onChannelSpawned then patches the layout with the real channelId.
  */
-async function onSplit(
+function onSplit(
 	existingChannelId: string,
 	direction: "horizontal" | "vertical",
-): Promise<void> {
+): void {
 	const hostId = channelsStore.activeHostId;
 	if (hostId === null) return;
 
-	// Optimistically pre-allocate an ID for the new pane before spawning
-	// so we can insert it in the layout immediately. The real SPAWN_OK will
-	// arrive and addChannel will register it in the store.
 	const tempId = generateId();
-	const tempLabel = `Terminal ${tempId.slice(-8)}`;
+	channelsStore.registerPendingSpawn(tempId, hostId);
+	layout.splitPane(existingChannelId, direction, tempId, `Terminal ${tempId.slice(-8)}`);
+}
 
-	layout.splitPane(existingChannelId, direction, tempId, tempLabel);
-
-	try {
-		// Spawn the real channel; the SPAWN_OK will call addChannel + selectChannel
-		const realId = await channelsStore.spawnChannel(hostId);
-
-		// If the real ID differs from our temp ID, patch the layout tree
-		if (realId !== tempId) {
-			// Find the temp node in the layout and replace it with the real ID.
-			// The simplest way: re-run unsplitPane on tempId then split again,
-			// but that would reset the ratio. Instead we do an in-place tree walk
-			// by updating via the store directly.
-			//
-			// For simplicity we close the temp pane and re-split with the real ID.
-			// The terminal that was spawned will attach when PaneLayout renders it.
-			layout.unsplitPane(tempId);
-			layout.splitPane(existingChannelId, direction, realId, `Terminal ${realId.slice(-8)}`);
-		}
-	} catch (err) {
-		// If spawn fails, remove the optimistic pane
-		layout.unsplitPane(tempId);
-		console.error("[App] split spawn failed:", err);
-	}
+/**
+ * Called by PaneLayout when a TerminalPane completes a deferred spawn.
+ * Patches the layout tree to replace the temp ID with the real channel ID,
+ * then selects the new channel in the sidebar.
+ */
+function onChannelSpawned(tempId: string, realId: string): void {
+	layout.replaceChannelId(tempId, realId);
+	channelsStore.selectChannel(realId);
 }
 
 /**
@@ -325,29 +330,4 @@ body,
 	font-style: italic;
 }
 
-.pane-welcome {
-	flex: 1;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: #1e1e2e;
-}
-
-.pane-welcome-content {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-}
-
-.pane-welcome-title {
-	color: #cdd6f4;
-	font-size: 18px;
-	font-weight: 600;
-}
-
-.pane-welcome-subtitle {
-	color: #6c7086;
-	font-size: 13px;
-}
 </style>

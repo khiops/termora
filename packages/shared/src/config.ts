@@ -76,7 +76,7 @@ export function deepMerge<T extends Record<string, unknown>>(
 
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
-	fontFamily: "monospace",
+	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',
 	fontSize: 14,
 	theme: "catppuccin-mocha",
 	cursorStyle: "block",

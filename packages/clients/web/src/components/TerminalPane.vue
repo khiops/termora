@@ -82,7 +82,7 @@ const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
 
-const { init, attachChannel, reattachChannel, suppressNextResize, dispose, canWrite } = useTerminal(
+const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
 	configStore.profile,
@@ -197,6 +197,16 @@ watch(
 			}
 		}
 	},
+);
+
+// Re-apply profile when config store updates (covers initial load + reconnect reload).
+// loadProfile() runs async — terminal may already be initialized with DEFAULT_PROFILE.
+watch(
+	() => configStore.profile,
+	(p) => {
+		if (ready.value) applyProfile(p);
+	},
+	{ deep: true },
 );
 
 onUnmounted(() => {

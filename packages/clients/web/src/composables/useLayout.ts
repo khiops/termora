@@ -1,3 +1,4 @@
+import { generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
 
 // ---------------------------------------------------------------------------
@@ -5,7 +6,7 @@ import { computed, ref, watch } from "vue";
 // ---------------------------------------------------------------------------
 
 export type PaneNode =
-	| { type: "terminal"; channelId: string }
+	| { type: "terminal"; channelId: string; paneId: string }
 	| {
 			type: "split";
 			direction: "horizontal" | "vertical";
@@ -31,11 +32,25 @@ interface PersistedState {
 	layouts: Record<string, PaneNode | null>;
 }
 
+/** Ensure all terminal nodes have a paneId (backward compat with old persisted state). */
+function ensurePaneIds(node: PaneNode): PaneNode {
+	if (node.type === "terminal") {
+		return node.paneId ? node : { ...node, paneId: generateId() };
+	}
+	return { ...node, first: ensurePaneIds(node.first), second: ensurePaneIds(node.second) };
+}
+
 function loadFromStorage(): PersistedState | null {
 	try {
 		const raw = localStorage.getItem(LAYOUT_KEY);
 		if (raw === null) return null;
-		return JSON.parse(raw) as PersistedState;
+		const state = JSON.parse(raw) as PersistedState;
+		// Migrate old layouts that lack paneId
+		for (const key of Object.keys(state.layouts)) {
+			const tree = state.layouts[key];
+			if (tree !== null && tree !== undefined) state.layouts[key] = ensurePaneIds(tree);
+		}
+		return state;
 	} catch {
 		return null;
 	}
@@ -102,6 +117,21 @@ function getNodeAtPath(root: PaneNode, path: NodePath): PaneNode | null {
 	if (root.type !== "split") return null;
 	const [head, ...rest] = path;
 	return getNodeAtPath(head === "first" ? root.first : root.second, rest);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: replace channelId in a tree (preserving paneId)
+// ---------------------------------------------------------------------------
+
+function replaceInTree(node: PaneNode, oldId: string, newId: string): PaneNode {
+	if (node.type === "terminal") {
+		return node.channelId === oldId ? { ...node, channelId: newId } : node;
+	}
+	return {
+		...node,
+		first: replaceInTree(node.first, oldId, newId),
+		second: replaceInTree(node.second, oldId, newId),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +205,7 @@ export function useLayout() {
 		if (!(channelId in layouts.value)) {
 			layouts.value = {
 				...layouts.value,
-				[channelId]: { type: "terminal", channelId },
+				[channelId]: { type: "terminal", channelId, paneId: generateId() },
 			};
 		}
 	}
@@ -254,7 +284,7 @@ export function useLayout() {
 			direction,
 			ratio: 0.5,
 			first: existingNode,
-			second: { type: "terminal", channelId: newChannelId },
+			second: { type: "terminal", channelId: newChannelId, paneId: generateId() },
 		};
 
 		const newRoot = setNodeAtPath(root, path, splitNode);
@@ -322,6 +352,37 @@ export function useLayout() {
 	}
 
 	// ------------------------------------------------------------------
+	// Channel ID replacement (pending spawn → real channel)
+	// ------------------------------------------------------------------
+
+	/**
+	 * Replace a temporary channelId with the real one after a deferred spawn.
+	 * Updates tabs, layout tree keys, and pane labels. The paneId stays stable
+	 * so Vue reuses the TerminalPane component (no destroy/recreate).
+	 */
+	function replaceChannelId(oldId: string, newId: string): void {
+		// 1. Update tabs
+		tabs.value = tabs.value.map((t) =>
+			t.channelId === oldId ? { ...t, channelId: newId, label: `Terminal ${newId.slice(-8)}` } : t,
+		);
+
+		// 2. Update all layout trees (key + inner nodes)
+		const newLayouts: Record<string, PaneNode | null> = {};
+		for (const [key, tree] of Object.entries(layouts.value)) {
+			const newKey = key === oldId ? newId : key;
+			newLayouts[newKey] = tree !== null ? replaceInTree(tree, oldId, newId) : null;
+		}
+		layouts.value = newLayouts;
+
+		// 3. Update pane labels
+		const oldLabel = _paneLabels.value[oldId];
+		if (oldLabel !== undefined) {
+			const { [oldId]: _, ...rest } = _paneLabels.value;
+			_paneLabels.value = { ...rest, [newId]: `Terminal ${newId.slice(-8)}` };
+		}
+	}
+
+	// ------------------------------------------------------------------
 	// Internal label map for split panes (not top-level tabs)
 	// ------------------------------------------------------------------
 
@@ -348,6 +409,7 @@ export function useLayout() {
 		splitPane,
 		unsplitPane,
 		updateRatio,
+		replaceChannelId,
 		getPaneLabel,
 	};
 }

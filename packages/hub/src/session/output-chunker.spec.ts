@@ -5,6 +5,7 @@ import { OutputChunker } from "./output-chunker.js";
 function makeSpoolDal(): SpoolDAL {
 	return {
 		insertChunk: vi.fn().mockReturnValue("chunk-id-1"),
+		getMaxSeq: vi.fn().mockReturnValue(0),
 	} as unknown as SpoolDAL;
 }
 
