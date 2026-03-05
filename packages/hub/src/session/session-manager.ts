@@ -447,23 +447,8 @@ export class SessionManager {
 				agent.on("message", handler);
 			});
 
-			// Store the fresh snapshot in spool.db
-			const snapshotJson = JSON.stringify(agentResponse.snapshot);
-			const dataBlob = Buffer.from(snapshotJson);
-			// Flush pending output so spool maxSeq is up to date
-			this.chunker.flush(channelId);
-			const maxSeq = this.spoolDal.getMaxSeq(channelId);
-			const snapshotSeq = Math.max(maxSeq, agentResponse.lastSeq) + 1;
-			const chunkId = this.spoolDal.insertChunk({
-				channelId,
-				seq: snapshotSeq,
-				kind: "snapshot",
-				dataBlob,
-				uncompressedLen: dataBlob.length,
-			});
-			// Keep chunker's nextSeq past the snapshot
-			this.chunker.bumpSeq(channelId, snapshotSeq + 1);
-			this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
+			// Store the fresh snapshot in spool.db (flush + seq coordination)
+			this._storeSnapshot(channelId, agentResponse.snapshot, agentResponse.lastSeq);
 
 			// Tail = output chunks after the snapshot's lastSeq
 			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
@@ -692,22 +677,7 @@ export class SessionManager {
 				this.chunker.onOutput(outputMsg.channelId, outputMsg.data);
 			} else if (msg.type === "SNAPSHOT_RES") {
 				const res = msg as AgentSnapshotResMessage;
-				const snapshotJson = JSON.stringify(res.snapshot);
-				const dataBlob = Buffer.from(snapshotJson);
-				// Flush any pending output so spool maxSeq reflects all buffered data
-				this.chunker.flush(res.channelId);
-				const maxSeq = this.spoolDal.getMaxSeq(res.channelId);
-				const snapshotSeq = Math.max(maxSeq, res.lastSeq) + 1;
-				const chunkId = this.spoolDal.insertChunk({
-					channelId: res.channelId,
-					seq: snapshotSeq,
-					kind: "snapshot",
-					dataBlob,
-					uncompressedLen: dataBlob.length,
-				});
-				// Keep chunker's nextSeq past the snapshot to prevent collisions
-				this.chunker.bumpSeq(res.channelId, snapshotSeq + 1);
-				this.metaDal.updateCacheIndex(res.channelId, chunkId, snapshotSeq - 1);
+				this._storeSnapshot(res.channelId, res.snapshot, res.lastSeq);
 			} else if (msg.type === "CHANNEL_EXIT") {
 				const exitMsg = msg as ChannelExitMessage;
 				const channel = this.channels.get(exitMsg.channelId);
@@ -926,5 +896,29 @@ export class SessionManager {
 		for (const client of this.clients.values()) {
 			client.send(msg);
 		}
+	}
+
+	/**
+	 * Persist a snapshot to spool.db with correct seq coordination.
+	 * Flushes the chunker first, computes next seq, inserts the snapshot,
+	 * bumps the chunker past it, and updates the cache index.
+	 * Returns the assigned chunkId.
+	 */
+	private _storeSnapshot(channelId: string, snapshot: unknown, agentLastSeq: number): number {
+		const snapshotJson = JSON.stringify(snapshot);
+		const dataBlob = Buffer.from(snapshotJson);
+		this.chunker.flush(channelId);
+		const maxSeq = this.spoolDal.getMaxSeq(channelId);
+		const snapshotSeq = Math.max(maxSeq, agentLastSeq) + 1;
+		const chunkId = this.spoolDal.insertChunk({
+			channelId,
+			seq: snapshotSeq,
+			kind: "snapshot",
+			dataBlob,
+			uncompressedLen: dataBlob.length,
+		});
+		this.chunker.bumpSeq(channelId, snapshotSeq + 1);
+		this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
+		return chunkId;
 	}
 }
