@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -107,6 +107,27 @@ describe("DaemonServer", () => {
 			const helloIdx = types.indexOf("HELLO");
 			const endIdx = types.indexOf("CHANNEL_STATE_END");
 			expect(helloIdx).toBeLessThan(endIdx);
+		});
+	});
+
+	describe("socket directory permissions", () => {
+		it("creates socket directory with mode 0700", async () => {
+			// Shut down the default server so we can test with a nested path
+			await server.shutdown();
+
+			const nestedDir = path.join(tmpDir, "nested", "run");
+			const nestedSocket = path.join(nestedDir, "agent.sock");
+			const nestedServer = new DaemonServer(nestedSocket, DEFAULT_CONFIG);
+
+			try {
+				await nestedServer.listen();
+
+				const dirStat = await stat(nestedDir);
+				// mode includes file-type bits; mask with 0o777 to get permission bits only
+				expect(dirStat.mode & 0o777).toBe(0o700);
+			} finally {
+				await nestedServer.shutdown();
+			}
 		});
 	});
 

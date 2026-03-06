@@ -94,15 +94,15 @@ export class NextermAgent extends AgentConnection {
 	 * @returns Array of channel state messages (empty when no channels exist).
 	 */
 	waitForChannelState(timeoutMs = 5_000): Promise<AgentChannelStateMessage[]> {
-		return new Promise<AgentChannelStateMessage[]>((resolve, reject) => {
-			const timer = setTimeout(() => {
+		let timer: ReturnType<typeof setTimeout>;
+		const timeout = new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => {
 				reject(new Error("CHANNEL_STATE timeout"));
 			}, timeoutMs);
+		});
 
-			this.channelStatePromise.then((states) => {
-				clearTimeout(timer);
-				resolve(states);
-			});
+		return Promise.race([this.channelStatePromise, timeout]).finally(() => {
+			clearTimeout(timer);
 		});
 	}
 

@@ -3,7 +3,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { PROTOCOL_VERSION, type ProtocolMessage, encodeFrame } from "@nexterm/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextermAgent } from "./nexterm-agent.js";
 
 const TEST_TIMEOUT = 10_000;
@@ -402,6 +402,38 @@ describe("NextermAgent", () => {
 					agent = await NextermAgent.connectLocal(socketPath);
 
 					await expect(agent.waitForChannelState(200)).rejects.toThrow("CHANNEL_STATE timeout");
+				},
+				TEST_TIMEOUT,
+			);
+
+			it(
+				"cleans up the timer on timeout (no dangling handles)",
+				async () => {
+					const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+					// Daemon that sends HELLO but no CHANNEL_STATE_END
+					await new Promise<void>((resolve) => {
+						const server = net.createServer((socket) => {
+							const hello = encodeFrame({
+								type: "HELLO",
+								version: PROTOCOL_VERSION,
+								agentVersion: "0.1.0",
+								capabilities: ["multiplex", "resize", "snapshot"],
+							});
+							socket.write(Buffer.from(hello));
+						});
+						daemon = { server, connections: [] };
+						server.listen(socketPath, () => resolve());
+					});
+
+					agent = await NextermAgent.connectLocal(socketPath);
+
+					await expect(agent.waitForChannelState(100)).rejects.toThrow("CHANNEL_STATE timeout");
+
+					// The .finally() handler should have called clearTimeout
+					expect(clearTimeoutSpy).toHaveBeenCalled();
+
+					clearTimeoutSpy.mockRestore();
 				},
 				TEST_TIMEOUT,
 			);

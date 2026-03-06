@@ -127,4 +127,22 @@ describe("probeSocket", () => {
 			expect(result).toBe(false);
 		});
 	});
+
+	describe("Given EACCES (permission denied)", () => {
+		it("rejects with an error instead of resolving", async () => {
+			const socketPath = path.join(tmpDir, "forbidden.sock");
+			const eaccesError: NodeJS.ErrnoException = new Error("connect EACCES");
+			eaccesError.code = "EACCES";
+
+			const fakeSocket = new net.Socket();
+			vi.spyOn(net, "connect").mockImplementation((() => {
+				process.nextTick(() => fakeSocket.emit("error", eaccesError));
+				return fakeSocket;
+			}) as typeof net.connect);
+
+			await expect(probeSocket(socketPath)).rejects.toThrow(/Permission denied probing socket/);
+
+			vi.restoreAllMocks();
+		});
+	});
 });

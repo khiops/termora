@@ -7,13 +7,13 @@
 ## Pending
 
 ### Review Findings
-- [ ] 🐛 [UI] Fix pre-existing typecheck failure in useCommandPalette.spec.ts (hostId on Channel type) — Priority: S (from /review F-003)
-- [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized: race window ~50ms, waitForSocket retries cover it)
-- [ ] 🔧 [Hub] waitForChannelState() listener cleanup on timeout — Priority: S (from /review F-004)
-- [ ] 🔧 [Hub] DRY: extract shared daemon attach logic from _reconnectDaemon/_connectDaemonAgent — Priority: S (from /review F-005)
-- [ ] 🔧 [Shared] Add EACCES test for probeSocket() — Priority: S (from /review F-006)
-- [ ] 🔧 [Hub] Add waitForSocket() timeout test — Priority: S (from /review F-007)
-- [ ] 🔧 [Agent] Add stat() assertion for 0700 socket dir permissions — Priority: S (from /review F-009)
+- [x] ✅ [Hub] waitForChannelState() listener cleanup on timeout (2026-03-06) — Promise.race + clearTimeout
+- [x] ✅ [Hub] DRY: extract shared daemon attach logic (2026-03-06) — _attachDaemon helper
+- [x] ✅ [Shared] Add EACCES test for probeSocket() (2026-03-06)
+- [x] ✅ [Hub] Add waitForSocket() timeout test (2026-03-06)
+- [x] ✅ [Agent] Add stat() assertion for 0700 socket dir permissions (2026-03-06)
+- [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
+- [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 
 ### Deferred from /adversarial + /llm
 - [ ] 💡 [Agent] Configurable socket bind timeout (currently hardcoded 5s) — Priority: L (from /adversarial C-07)

@@ -202,6 +202,24 @@ describe("connectOrLaunch", () => {
 		);
 	});
 
+	describe("Given agent spawned but socket never becomes available", () => {
+		it(
+			"rejects with timeout error after AGENT_SOCKET_TIMEOUT",
+			async () => {
+				const dummyBinary = path.join(tmpDir, "fake-agent.js");
+				await writeFile(dummyBinary, "// placeholder");
+
+				// Spawn succeeds but never creates a real daemon — socket stays unavailable
+				mockSpawnImpl = () => ({ unref: vi.fn(), pid: 77777 });
+
+				await expect(connectOrLaunch(socketPath, config, dummyBinary)).rejects.toThrow(
+					/Agent socket did not become available/,
+				);
+			},
+			TEST_TIMEOUT,
+		);
+	});
+
 	describe("Given agent binary does not exist", () => {
 		it(
 			"throws with descriptive error",

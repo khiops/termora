@@ -940,12 +940,7 @@ export class SessionManager {
 		return promise;
 	}
 
-	/**
-	 * Connect to (or launch) a local agent daemon.
-	 * Returns a NextermAgent that's ready to receive commands.
-	 * Performs channel state reconciliation after connecting.
-	 */
-	private async _connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
+	private async _attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
 		const socketPath = getSocketPath(this.agentConfig.socketPath);
 		const agent = await connectOrLaunch(socketPath, this.agentConfig);
 
@@ -958,6 +953,15 @@ export class SessionManager {
 		this._updateSessionStatus(hostId, sessionId, "active");
 
 		return agent;
+	}
+
+	/**
+	 * Connect to (or launch) a local agent daemon.
+	 * Returns a NextermAgent that's ready to receive commands.
+	 * Performs channel state reconciliation after connecting.
+	 */
+	private async _connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
+		return this._attachDaemon(hostId, sessionId);
 	}
 
 	/**
@@ -992,16 +996,7 @@ export class SessionManager {
 	 * If the daemon is still running, reconnect. If not, connectOrLaunch will spawn a new one.
 	 */
 	private async _reconnectDaemon(hostId: string, sessionId: string): Promise<void> {
-		const socketPath = getSocketPath(this.agentConfig.socketPath);
-		const agent = await connectOrLaunch(socketPath, this.agentConfig);
-
-		this._wireAgentEvents(hostId, sessionId, agent);
-
-		const states = await agent.waitForChannelState();
-		this._reconcileChannelState(hostId, states);
-
-		this.agents.set(hostId, agent);
-		this._updateSessionStatus(hostId, sessionId, "active");
+		await this._attachDaemon(hostId, sessionId);
 	}
 
 	/**
