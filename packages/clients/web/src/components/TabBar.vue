@@ -1,5 +1,5 @@
 <template>
-	<div class="tab-bar" role="tablist" aria-label="Open terminals">
+	<div ref="tabBarEl" class="tab-bar" role="tablist" aria-label="Open terminals" @wheel.prevent="onWheel">
 		<button
 			v-for="(tab, idx) in tabs"
 			:key="tab.channelId"
@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, nextTick } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 import { useRename } from "../composables/useRename.js";
 
@@ -56,6 +56,30 @@ const emit = defineEmits<{
 	(e: "add-tab"): void;
 	(e: "rename-tab", channelId: string, title: string): void;
 }>();
+
+// -------------------------------------------------------------------------
+// Horizontal scroll
+// -------------------------------------------------------------------------
+
+const tabBarEl = ref<HTMLElement | null>(null);
+
+function onWheel(e: WheelEvent): void {
+	if (tabBarEl.value) {
+		tabBarEl.value.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX;
+	}
+}
+
+/** Scroll the active tab into view whenever it changes. */
+watch(
+	() => props.activeTabIndex,
+	async () => {
+		await nextTick();
+		const el = tabBarEl.value;
+		if (!el) return;
+		const tab = el.children[props.activeTabIndex] as HTMLElement | undefined;
+		tab?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+	},
+);
 
 // -------------------------------------------------------------------------
 // Inline rename
@@ -95,11 +119,21 @@ function startRename(idx: number): void {
 	overflow-y: hidden;
 	flex-shrink: 0;
 	min-height: 32px;
-	scrollbar-width: none;
+	scrollbar-width: thin;
+	scrollbar-color: #313244 transparent;
 }
 
 .tab-bar::-webkit-scrollbar {
-	display: none;
+	height: 3px;
+}
+
+.tab-bar::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.tab-bar::-webkit-scrollbar-thumb {
+	background: #313244;
+	border-radius: 2px;
 }
 
 .tab {

@@ -1,7 +1,7 @@
 import type { Channel, ChannelGroup } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useAuthStore } from "./auth.js";
 import { useSessionStore } from "./session.js";
 
@@ -149,10 +149,33 @@ export const useChannelsStore = defineStore("channels", () => {
 	}
 
 	/**
-	 * Remove a channel from the local list (sidebar). Does NOT kill the PTY —
-	 * a DESTROY message to the hub is a future enhancement.
+	 * Destroy a channel on the hub (kills its PTY) and remove it from the
+	 * local sidebar. Best-effort: if the DELETE request fails the channel is
+	 * still removed from the local list.
 	 */
-	function removeChannel(channelId: string): void {
+	async function removeChannel(channelId: string): Promise<void> {
+		try {
+			await fetch(`/api/channels/${channelId}`, {
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${authStore.token}` },
+			});
+		} catch {
+			// Best-effort: even if DELETE fails (channel already dead, hub
+			// unreachable), still remove from local sidebar below.
+		}
+		// Mark dead so the App.vue dead-channel watcher can close the tab
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx !== -1) {
+			const existing = channels.value[idx];
+			if (existing && existing.status !== "dead") {
+				const next = [...channels.value];
+				next[idx] = { ...existing, status: "dead" as const };
+				channels.value = next;
+			}
+		}
+		// Wait for watchers to process the status change (closes tab)
+		await nextTick();
+		// Then remove from sidebar list
 		channels.value = channels.value.filter((c) => c.id !== channelId);
 		if (selectedChannelId.value === channelId) {
 			const fallback = channels.value.find((c) => c.status !== "dead");

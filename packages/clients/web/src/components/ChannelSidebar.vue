@@ -179,9 +179,6 @@ async function onNewChannel(): Promise<void> {
 }
 
 function onCloseChannel(channelId: string): void {
-	// TODO: send DESTROY message via wsClient to kill the PTY (Block 5.3+)
-	// For now, remove from sidebar. The auto-close watcher in App.vue
-	// will close any associated tab via the channels deep watcher.
 	channelsStore.removeChannel(channelId);
 }
 

@@ -561,6 +561,83 @@ describe("PATCH /api/channels/:id", () => {
 	});
 });
 
+describe("DELETE /api/channels/:id", () => {
+	let delCounter = 0;
+
+	async function createTestChannel(label: string): Promise<{ channelId: string }> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		delCounter++;
+		const n = String(delCounter).padStart(3, "0");
+		const sessionId = `01TSTRMVSESS00000000000${n}`;
+		const channelId = `01TSTRMVCHAN00000000000${n}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+
+		return { channelId };
+	}
+
+	it("returns 404 for unknown channel", async () => {
+		const res = await server.inject({
+			method: "DELETE",
+			url: "/api/channels/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		});
+		expect(res.statusCode).toBe(404);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("NOT_FOUND");
+	});
+
+	it("returns 400 for invalid channel ID", async () => {
+		const res = await server.inject({
+			method: "DELETE",
+			url: "/api/channels/not-a-ulid",
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("marks a live channel as dead", async () => {
+		const { channelId } = await createTestChannel("del-live");
+
+		const res = await server.inject({
+			method: "DELETE",
+			url: `/api/channels/${channelId}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+
+		// Verify the channel is now dead in DB
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		const channel = dal.getChannel(channelId);
+		expect(channel?.status).toBe("dead");
+	});
+
+	it("returns 200 for already-dead channel (idempotent)", async () => {
+		const { channelId } = await createTestChannel("del-dead");
+
+		// First delete
+		await server.inject({ method: "DELETE", url: `/api/channels/${channelId}` });
+		// Second delete — channel is now dead
+		const res = await server.inject({
+			method: "DELETE",
+			url: `/api/channels/${channelId}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+	});
+});
+
 // ─── Auth enforcement ─────────────────────────────────────────────────────────
 
 describe("Auth enforcement", () => {
@@ -642,6 +719,16 @@ describe("Auth enforcement", () => {
 			method: "PATCH",
 			url: "/api/channels/some-id",
 			payload: { title: "No Auth" },
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects DELETE /api/channels/:id without auth", async () => {
+		const res = await authServer.inject({
+			method: "DELETE",
+			url: "/api/channels/01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		});
 		expect(res.statusCode).toBe(401);
 		const body = res.json<{ error: string }>();

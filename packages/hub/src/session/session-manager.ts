@@ -7,6 +7,7 @@ import type {
 	AgentSpawnOkMessage,
 	ChannelExitMessage,
 	ChannelStateMessage,
+	DestroyMessage,
 	ErrorMessage,
 	InputMessage,
 	OutputMessage,
@@ -557,6 +558,34 @@ export class SessionManager {
 		}
 
 		this._closeSession(hostId, sessionId);
+	}
+
+	/**
+	 * Destroy a single channel: send DESTROY to the agent, mark dead in DB,
+	 * untrack from scheduler/chunker, and remove from in-memory map.
+	 * Returns true if the channel was found and destroyed.
+	 */
+	destroyChannel(channelId: string): boolean {
+		const ch = this.channels.get(channelId);
+		if (!ch) return false;
+
+		// Send DESTROY to the agent (if connected)
+		const agent = this.agents.get(ch.hostId);
+		if (agent?.connected) {
+			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
+		}
+
+		// Mark dead in DB + broadcast CHANNEL_STATE to clients
+		this._updateChannelStatus(channelId, ch.sessionId, "dead");
+
+		// Untrack from scheduler and chunker
+		this.scheduler.untrackChannel(channelId);
+		this.chunker.untrackChannel(channelId);
+
+		// Remove from in-memory map
+		this.channels.delete(channelId);
+
+		return true;
 	}
 
 	async shutdown(): Promise<void> {

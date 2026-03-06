@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## channel-delete-flow — DELETE endpoint + dead channel UI + tab scroll (2026-03-06)
+
+- DELETE /api/channels/:id: sends DESTROY to agent, marks dead in DB, broadcasts CHANNEL_STATE
+- SessionManager.destroyChannel(): centralizes PTY kill + scheduler/chunker untrack + channel map cleanup
+- UI removeChannel: calls DELETE API, marks dead + nextTick (for watcher to close tab), then filters
+- WriteLockIndicator isDead prop: hides Force Take / Request Write on dead AND orphan channels
+- Tab bar horizontal scroll: visible thin scrollbar, mouse wheel→horizontal, auto-scroll to active tab on selection
+
+---
+
 ## host-dot-dead-tab — Fix host status dot + configurable dead channel tab behavior (2026-03-06)
 
 - New [ui] section in config.toml for UI behavioral config (separate from terminal profile)

@@ -109,7 +109,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		configResolver.loadFromFile(configDir);
 		registerHostRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
-		registerChannelRoutes(server, metaDal);
+		registerChannelRoutes(server, metaDal, sessionManager);
 		registerConfigRoutes(server, metaDal, configResolver);
 		registerFontRoutes(server, configDir);
 		if (options.authToken) {

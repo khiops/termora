@@ -3,7 +3,7 @@
 		<!-- Pane header — always rendered so fitAddon.fit() calculates correct rows -->
 		<div class="pane-header">
 			<span class="pane-title">{{ paneTitle }}</span>
-			<WriteLockIndicator :channel-id="effectiveChannelId" class="pane-lock" />
+			<WriteLockIndicator :channel-id="effectiveChannelId" :is-dead="isDead" class="pane-lock" />
 			<span v-if="isDead" class="dead-badge" title="Channel has exited">
 				Closed
 			</span>
@@ -139,7 +139,7 @@ const isDead = computed(() => {
 	const chId = effectiveChannelId.value;
 	if (!chId) return false;
 	const channel = channelsStore.channels.find((c) => c.id === chId);
-	return channel?.status === "dead";
+	return channel?.status === "dead" || channel?.status === "orphan";
 });
 
 watch(isDead, (dead) => {

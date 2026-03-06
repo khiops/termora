@@ -4,7 +4,7 @@
 		<span class="wl-label">{{ label }}</span>
 
 		<button
-			v-if="isReader && channelId"
+			v-if="isReader && channelId && !isDead"
 			class="wl-action-btn"
 			@click="handleClaim"
 			title="Request write access"
@@ -13,7 +13,7 @@
 		</button>
 
 		<button
-			v-if="isReader && channelId"
+			v-if="isReader && channelId && !isDead"
 			class="wl-action-btn wl-force"
 			@click="handleForce"
 			title="Force-take write lock immediately"
@@ -39,6 +39,7 @@ import { useAuthStore } from "../stores/auth.js";
 
 const props = defineProps<{
 	channelId: string | null;
+	isDead?: boolean;
 }>();
 
 const writeLockStore = useWriteLockStore();
