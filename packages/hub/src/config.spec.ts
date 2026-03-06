@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConfigResolver, DEFAULT_GC_CONFIG, loadGcConfig } from "./config.js";
+import {
+	ConfigResolver,
+	DEFAULT_GC_CONFIG,
+	DEFAULT_UI_CONFIG,
+	extractUiConfig,
+	loadGcConfig,
+	loadUiConfig,
+} from "./config.js";
 import { createServer } from "./server.js";
 import { openTestDatabases } from "./storage/db.js";
 import type { DatabaseManager } from "./storage/db.js";
@@ -492,5 +499,120 @@ describe("PATCH /api/channels/:id/profile", () => {
 			payload: { profile: { fontSize: 14 } },
 		});
 		expect(res.statusCode).toBe(404);
+	});
+});
+
+// ─── extractUiConfig unit tests ──────────────────────────────────────────────
+
+describe("extractUiConfig", () => {
+	it("returns defaults when no [ui] section", () => {
+		const config = extractUiConfig({});
+		expect(config).toEqual(DEFAULT_UI_CONFIG);
+	});
+
+	it('parses on_channel_dead = "close"', () => {
+		const config = extractUiConfig({ ui: { on_channel_dead: "close" } });
+		expect(config.onChannelDead).toBe("close");
+	});
+
+	it('parses on_channel_dead = "readonly"', () => {
+		const config = extractUiConfig({ ui: { on_channel_dead: "readonly" } });
+		expect(config.onChannelDead).toBe("readonly");
+	});
+
+	it("falls back to default for invalid on_channel_dead value", () => {
+		const config = extractUiConfig({ ui: { on_channel_dead: "invalid" } });
+		expect(config.onChannelDead).toBe(DEFAULT_UI_CONFIG.onChannelDead);
+	});
+});
+
+// ─── loadUiConfig ────────────────────────────────────────────────────────────
+
+describe("loadUiConfig", () => {
+	it("returns defaults when config.toml does not exist", () => {
+		const config = loadUiConfig("/nonexistent/path");
+		expect(config).toEqual(DEFAULT_UI_CONFIG);
+	});
+
+	it("returns defaults when config.toml has no [ui] section", () => {
+		const dir = join(tmpdir(), `nexterm-ui-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[terminal]\nfont_size = 16\n");
+
+		const config = loadUiConfig(dir);
+		expect(config).toEqual(DEFAULT_UI_CONFIG);
+	});
+
+	it('parses on_channel_dead = "readonly" from [ui] section', () => {
+		const dir = join(tmpdir(), `nexterm-ui-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[ui]\non_channel_dead = "readonly"\n');
+
+		const config = loadUiConfig(dir);
+		expect(config.onChannelDead).toBe("readonly");
+	});
+
+	it("returns defaults for malformed TOML", () => {
+		const dir = join(tmpdir(), `nexterm-ui-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[ui\nbroken");
+
+		const config = loadUiConfig(dir);
+		expect(config).toEqual(DEFAULT_UI_CONFIG);
+	});
+});
+
+// ─── ConfigResolver.uiConfig ────────────────────────────────────────────────
+
+describe("ConfigResolver.uiConfig", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns defaults when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.uiConfig).toEqual(DEFAULT_UI_CONFIG);
+	});
+
+	it("returns overridden values after loadFromFile with [ui] section", () => {
+		const dir = join(tmpdir(), `nexterm-ui-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[ui]\non_channel_dead = "readonly"\n');
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.uiConfig.onChannelDead).toBe("readonly");
+	});
+});
+
+// ─── GET /api/config/ui integration test ─────────────────────────────────────
+
+describe("GET /api/config/ui", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+
+	beforeEach(async () => {
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs, configDir: tmpdir() });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("returns default UiConfig", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/config/ui" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ onChannelDead: string }>();
+		expect(body.onChannelDead).toBe("close");
 	});
 });

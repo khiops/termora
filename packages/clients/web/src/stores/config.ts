@@ -57,10 +57,15 @@ function injectFontFaces(families: FontFamily[]): void {
  * Config store — holds the resolved terminal profile and available fonts.
  * Fetches both from the hub on load.
  */
+interface UiConfig {
+	onChannelDead: "close" | "readonly";
+}
+
 export const useConfigStore = defineStore("config", () => {
 	const profile = ref<TerminalProfile>({ ...DEFAULT_PROFILE });
 	const fonts = ref<FontFamily[]>([]);
 	const loaded = ref(false);
+	const uiConfig = ref<UiConfig>({ onChannelDead: "close" });
 
 	/**
 	 * Load fonts from the hub (no auth needed).
@@ -111,11 +116,31 @@ export const useConfigStore = defineStore("config", () => {
 		loaded.value = true;
 	}
 
+	/**
+	 * Load UI behaviour config from the hub (requires auth).
+	 * Controls how the client reacts to dead channels, etc.
+	 */
+	async function loadUiConfig(): Promise<void> {
+		try {
+			const authStore = useAuthStore();
+			const resp = await fetch("/api/config/ui", {
+				headers: { Authorization: `Bearer ${authStore.token}` },
+			});
+			if (resp.ok) {
+				uiConfig.value = await resp.json();
+			}
+		} catch (err) {
+			console.warn("[config] failed to load UI config:", err);
+		}
+	}
+
 	return {
 		profile,
 		fonts,
 		loaded,
+		uiConfig,
 		loadFonts,
 		loadProfile,
+		loadUiConfig,
 	};
 });

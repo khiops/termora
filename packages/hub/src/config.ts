@@ -68,6 +68,53 @@ export function loadGcConfig(configDir: string): GcConfig {
 	}
 }
 
+// ─── UI configuration ───────────────────────────────────────────────────────
+
+/** UI behavioral configuration (from [ui] in config.toml). */
+export interface UiConfig {
+	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "close". */
+	onChannelDead: "close" | "readonly";
+}
+
+export const DEFAULT_UI_CONFIG: UiConfig = {
+	onChannelDead: "close",
+};
+
+/**
+ * Extract UiConfig from a parsed TOML map's [ui] section.
+ * Returns a new UiConfig with defaults overridden by any valid values found.
+ */
+export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
+	const config: UiConfig = { ...DEFAULT_UI_CONFIG };
+	const uiSection = parsed.ui;
+	if (uiSection != null && typeof uiSection === "object") {
+		const uiRaw = uiSection as Record<string, unknown>;
+		if (
+			typeof uiRaw.on_channel_dead === "string" &&
+			(uiRaw.on_channel_dead === "close" || uiRaw.on_channel_dead === "readonly")
+		) {
+			config.onChannelDead = uiRaw.on_channel_dead;
+		}
+	}
+	return config;
+}
+
+/**
+ * Standalone loader: parse the [ui] section from config.toml and return a UiConfig.
+ * Returns defaults if the file is missing, malformed, or has no [ui] section.
+ */
+export function loadUiConfig(configDir: string): UiConfig {
+	const configPath = join(configDir, "config.toml");
+	if (!existsSync(configPath)) return { ...DEFAULT_UI_CONFIG };
+
+	try {
+		const content = readFileSync(configPath, "utf8");
+		return extractUiConfig(TOML.parse(content));
+	} catch {
+		return { ...DEFAULT_UI_CONFIG };
+	}
+}
+
 // ─── TOML snake_case → camelCase ─────────────────────────────────────────────
 
 /**
@@ -97,6 +144,7 @@ export class ConfigResolver {
 	private fileConfig: Partial<TerminalProfile> | null = null;
 	private agentHints = new Map<string, Partial<TerminalProfile>>();
 	private _gcConfig: GcConfig = { ...DEFAULT_GC_CONFIG };
+	private _uiConfig: UiConfig = { ...DEFAULT_UI_CONFIG };
 
 	constructor(private metaDal: MetaDAL) {}
 
@@ -105,8 +153,13 @@ export class ConfigResolver {
 		return this._gcConfig;
 	}
 
+	/** Returns the resolved UI configuration (defaults merged with [ui] from config.toml). */
+	get uiConfig(): UiConfig {
+		return this._uiConfig;
+	}
+
 	/**
-	 * Load [terminal] and [gc] sections from config.toml at the given config directory.
+	 * Load [terminal], [gc], and [ui] sections from config.toml at the given config directory.
 	 * Silently no-ops if the file does not exist or is malformed.
 	 */
 	loadFromFile(configDir: string): void {
@@ -140,6 +193,9 @@ export class ConfigResolver {
 
 		// ── [gc] section ────────────────────────────────────────────────────
 		this._gcConfig = extractGcConfig(parsed);
+
+		// ── [ui] section ────────────────────────────────────────────────────
+		this._uiConfig = extractUiConfig(parsed);
 	}
 
 	/**

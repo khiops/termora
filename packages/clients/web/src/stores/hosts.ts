@@ -15,8 +15,9 @@ function sessionStatusToHostStatus(status: SessionStatus | undefined): HostStatu
 	switch (status) {
 		case "active":
 			return "live";
-		case "starting":
 		case "detached":
+			return "live";
+		case "starting":
 			return "reconnecting";
 		case "disconnected":
 			return "error";

@@ -2,9 +2,13 @@
 
 ## In Progress
 
-(None)
+- [ ] 🐛 [Hub/UI] No DELETE /api/channels/:id endpoint — channels cannot be permanently killed from UI. Close tab only detaches, doesn't KILL PTY. Warm restart respawns all non-dead channels. — Priority: M (from host-dot-dead-tab investigation)
 
 ## Pending
+
+### Review Findings
+- [ ] 🔧 [Hub] Migrate handleSpawn to pendingRequests dispatcher (architectural consistency with warm restart path) — Priority: M (from /review F-001)
+- [ ] 🐛 [UI] Fix pre-existing typecheck failure in useCommandPalette.spec.ts (hostId on Channel type) — Priority: S (from /review F-003)
 
 ### Post-MVP
 - [ ] 💡 [UI] Tauri v2 desktop packaging — Priority: P1

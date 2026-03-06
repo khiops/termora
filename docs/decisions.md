@@ -4,6 +4,17 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## host-dot-dead-tab — Fix host status dot + configurable dead channel tab behavior (2026-03-06)
+
+- New [ui] section in config.toml for UI behavioral config (separate from terminal profile)
+- on_channel_dead: 'close' (default) | 'readonly' — configurable tab behavior
+- GET /api/config/ui endpoint to expose UI config to frontend
+- addClient sends initial SESSION_STATE for all active sessions
+- sessionStatusToHostStatus: 'detached' maps to 'live' (green) — agent running = host reachable
+- listChannels() excludes dead channels (WHERE status != 'dead') — dead channels are internal bookkeeping
+
+---
+
 ## s-backlog-sweep — Fix all S-priority review backlog items (2026-03-05)
 
 - DEFAULT_CHANNEL_NAME constant in shared/constants.ts replaces all hardcoded "Terminal"

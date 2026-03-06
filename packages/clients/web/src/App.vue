@@ -105,8 +105,9 @@ onMounted(async () => {
 	if (authStore.token !== null) {
 		try {
 			await sessionStore.connect();
-			// Load resolved profile now that auth is established
+			// Load resolved profile + UI behaviour config now that auth is established
 			await configStore.loadProfile();
+			await configStore.loadUiConfig();
 			await hostsStore.fetchHosts();
 		} catch (err) {
 			console.error("[App] startup connect failed:", err);
@@ -161,6 +162,30 @@ watch(
 	},
 );
 
+/**
+ * React to channels transitioning to "dead" in real-time.
+ * - "close" mode: immediately close the tab.
+ * - "readonly" mode: do nothing — the write-lock mechanism already
+ *   prevents input and TerminalPane shows a "Closed" badge.
+ */
+watch(
+	() => channelsStore.channels.map((c) => ({ id: c.id, status: c.status })),
+	(current, previous) => {
+		if (!previous) return;
+		for (const ch of current) {
+			if (ch.status !== "dead") continue;
+			const prev = previous.find((p) => p.id === ch.id);
+			if (prev && prev.status !== "dead") {
+				// Channel just died
+				if (configStore.uiConfig.onChannelDead === "close") {
+					const idx = layout.tabs.value.findIndex((t) => t.channelId === ch.id);
+					if (idx !== -1) layout.closeTab(idx);
+				}
+			}
+		}
+	},
+	{ deep: true },
+);
 
 /**
  * Global keydown handler attached to the app root.

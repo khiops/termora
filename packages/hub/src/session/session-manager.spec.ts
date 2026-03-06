@@ -205,6 +205,30 @@ describe("SessionManager", () => {
 		expect(() => sm.removeClient("c1")).not.toThrow();
 	});
 
+	it("addClient sends initial SESSION_STATE for active sessions", async () => {
+		// First client spawns a channel → creates an active session
+		const c1Received: ProtocolMessage[] = [];
+		const client1 = makeClient("c1", c1Received);
+		sm.addClient(client1);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		// Second client connects — should receive SESSION_STATE immediately
+		const c2Received: ProtocolMessage[] = [];
+		const client2 = makeClient("c2", c2Received);
+		sm.addClient(client2);
+
+		const sessionState = c2Received.find((m) => m.type === "SESSION_STATE");
+		expect(sessionState).toBeTruthy();
+		const ss = sessionState as unknown as {
+			sessionId: string;
+			hostId: string;
+			status: string;
+		};
+		expect(ss.status).toBe("active");
+		expect(ss.hostId).toBeTruthy();
+		expect(ss.sessionId).toBeTruthy();
+	});
+
 	it("handleSpawn sends SPAWN_OK to the requesting client", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);
@@ -247,11 +271,11 @@ describe("SessionManager", () => {
 		sm.addClient(client2);
 		await sm.handleAttach("c2", "local-ch-1");
 
-		expect(client2Received).toHaveLength(1);
-		const firstAttach = client2Received[0] as ProtocolMessage;
-		expect(firstAttach.type).toBe("ATTACH_OK");
+		// addClient now sends initial SESSION_STATE, so client2 receives 2 messages
+		const attachOkMsg = client2Received.find((m) => m.type === "ATTACH_OK");
+		expect(attachOkMsg).toBeTruthy();
 
-		const attachOk = firstAttach as unknown as {
+		const attachOk = attachOkMsg as unknown as {
 			channelId: string;
 			snapshot: { serialized: string } | null;
 			tail: unknown[];
@@ -1168,8 +1192,10 @@ describe("SessionManager", () => {
 
 				// onSpawnErr should have been called with the timed-out channel
 				expect(errChannelId).toBe("timeout-ch-1");
-				// Handler should have been removed
-				expect(silentAgent.off).toHaveBeenCalled();
+				// Pending request should have been cleaned up (no per-channel listeners)
+				const pendingMap = (sm as unknown as { pendingRequests: Map<string, unknown> })
+					.pendingRequests;
+				expect(pendingMap.size).toBe(0);
 			} finally {
 				vi.useRealTimers();
 			}

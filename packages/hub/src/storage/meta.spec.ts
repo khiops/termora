@@ -394,6 +394,25 @@ describe("MetaDAL — Channels CRUD", () => {
 		expect(dal.getChannel(id)).toBeUndefined();
 	});
 
+	it("listChannels excludes dead channels", () => {
+		dal.createChannel({ id: "CHNDEAD1AAAAAAAAAAAAAAAAAAAAA", sessionId, status: "live" });
+		dal.createChannel({ id: "CHNDEAD2AAAAAAAAAAAAAAAAAAAAA", sessionId, status: "dead" });
+		dal.createChannel({ id: "CHNDEAD3AAAAAAAAAAAAAAAAAAAAA", sessionId, status: "born" });
+
+		const all = dal.listChannels();
+		expect(all).toHaveLength(2);
+		expect(all.map((c) => c.id)).not.toContain("CHNDEAD2AAAAAAAAAAAAAAAAAAAAA");
+	});
+
+	it("listChannels with sessionId excludes dead channels", () => {
+		dal.createChannel({ id: "CHNDEAD4AAAAAAAAAAAAAAAAAAAAA", sessionId, status: "live" });
+		dal.createChannel({ id: "CHNDEAD5AAAAAAAAAAAAAAAAAAAAA", sessionId, status: "dead" });
+
+		const filtered = dal.listChannels(sessionId);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.id).toBe("CHNDEAD4AAAAAAAAAAAAAAAAAAAAA");
+	});
+
 	it("listChannels returns empty array when none exist", () => {
 		expect(dal.listChannels()).toEqual([]);
 	});

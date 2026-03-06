@@ -18,6 +18,11 @@ export function registerConfigRoutes(
 		return DEFAULT_PROFILE;
 	});
 
+	// GET /api/config/ui — UI behavioral configuration
+	server.get("/api/config/ui", async () => {
+		return configResolver.uiConfig;
+	});
+
 	// GET /api/config/resolved?host_id=X&channel_id=Y&session_id=Z
 	server.get<{
 		Querystring: { host_id?: string; channel_id?: string; session_id?: string };

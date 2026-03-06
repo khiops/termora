@@ -589,6 +589,11 @@ describe("Auth enforcement", () => {
 		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 
+	it("rejects GET /api/config/ui without auth", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/config/ui" });
+		expect(res.statusCode).toBe(401);
+	});
+
 	it("rejects protected route with wrong token", async () => {
 		const res = await authServer.inject({
 			method: "GET",

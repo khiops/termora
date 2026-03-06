@@ -4,8 +4,11 @@
 		<div class="pane-header">
 			<span class="pane-title">{{ paneTitle }}</span>
 			<WriteLockIndicator :channel-id="effectiveChannelId" class="pane-lock" />
+			<span v-if="isDead" class="dead-badge" title="Channel has exited">
+				Closed
+			</span>
 			<span
-				v-if="effectiveChannelId && !isWriter"
+				v-else-if="effectiveChannelId && !isWriter"
 				class="readonly-badge"
 				title="You are in read-only mode"
 			>
@@ -127,6 +130,21 @@ watch(
 	},
 	{ immediate: true },
 );
+
+// ---------------------------------------------------------------------------
+// Dead-channel awareness
+// ---------------------------------------------------------------------------
+
+const isDead = computed(() => {
+	const chId = effectiveChannelId.value;
+	if (!chId) return false;
+	const channel = channelsStore.channels.find((c) => c.id === chId);
+	return channel?.status === "dead";
+});
+
+watch(isDead, (dead) => {
+	if (dead) canWrite.value = false;
+});
 
 // ---------------------------------------------------------------------------
 // Lifecycle: init terminal + attach/reattach channel
@@ -304,6 +322,18 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	color: #f9e2af;
 	background: rgba(249, 226, 175, 0.12);
 	border: 1px solid rgba(249, 226, 175, 0.3);
+	border-radius: 3px;
+	padding: 1px 6px;
+	letter-spacing: 0.04em;
+	flex-shrink: 0;
+}
+
+.dead-badge {
+	font-size: 10px;
+	font-weight: 600;
+	color: #a6adc8;
+	background: rgba(166, 173, 200, 0.12);
+	border: 1px solid rgba(166, 173, 200, 0.3);
 	border-radius: 3px;
 	padding: 1px 6px;
 	letter-spacing: 0.04em;

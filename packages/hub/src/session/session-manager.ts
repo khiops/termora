@@ -76,6 +76,8 @@ export class SessionManager {
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	/** Crash-loop tracking for local agent restarts: hostId → { count, windowStart } */
 	private restartTracking = new Map<string, { count: number; windowStart: number }>();
+	/** requestId → callback for pending SPAWN_OK/SPAWN_ERR responses */
+	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
 	private metaDal: MetaDAL;
 
 	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
@@ -207,6 +209,18 @@ export class SessionManager {
 
 	addClient(client: WsClient): void {
 		this.clients.set(client.id, client);
+
+		// Send current session states so the UI can show host status dots immediately
+		for (const [hostId, state] of this.sessions) {
+			if (state.status !== "closed") {
+				client.send({
+					type: "SESSION_STATE",
+					sessionId: state.id,
+					hostId,
+					status: state.status,
+				} as SessionStateMessage);
+			}
+		}
 	}
 
 	removeClient(clientId: string): void {
@@ -665,6 +679,16 @@ export class SessionManager {
 
 	private _wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
 		agent.on("message", (msg: ProtocolMessage) => {
+			// Dispatch pending request responses (SPAWN_OK, SPAWN_ERR, etc.)
+			const rid = (msg as { requestId?: string }).requestId;
+			if (rid) {
+				const handler = this.pendingRequests.get(rid);
+				if (handler) {
+					handler(msg);
+					return;
+				}
+			}
+
 			if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
 				// Broadcast to clients first (real-time, no delay)
@@ -800,29 +824,22 @@ export class SessionManager {
 			});
 
 			const timeout = setTimeout(() => {
-				agent.off("message", handler);
+				this.pendingRequests.delete(requestId);
 				console.warn(
 					`[session-manager] SPAWN timeout for channel ${channelId} (request ${requestId})`,
 				);
 				onSpawnErr(channelId, ch);
 			}, SPAWN_TIMEOUT_MS);
 
-			const handler = (incoming: ProtocolMessage): void => {
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timeout);
+				this.pendingRequests.delete(requestId);
 				if (incoming.type === "SPAWN_OK") {
-					const spawnOk = incoming as AgentSpawnOkMessage;
-					if (spawnOk.requestId !== requestId) return;
-					clearTimeout(timeout);
-					agent.off("message", handler);
 					onSpawnOk(channelId, ch);
-				} else if (incoming.type === "SPAWN_ERR") {
-					const spawnErr = incoming as AgentSpawnErrMessage;
-					if (spawnErr.requestId !== requestId) return;
-					clearTimeout(timeout);
-					agent.off("message", handler);
+				} else {
 					onSpawnErr(channelId, ch);
 				}
-			};
-			agent.on("message", handler);
+			});
 		}
 	}
 
