@@ -105,7 +105,6 @@ First message, sent immediately on start.
 {
   type: "HELLO",
   version: 1,
-  protocol_version: 1,       // explicit protocol version for negotiation
   agent_version: "0.1.0",
   capabilities: ["multiplex", "snapshot", "resize"],
   visual_hints?: {
@@ -114,8 +113,6 @@ First message, sent immediately on start.
   }
 }
 ```
-
-Note: `protocol_version` is the canonical version field used during negotiation. The legacy `version` field is kept for backward compatibility.
 
 **Capability handling:** Hub checks `capabilities` array. If `"snapshot"` is missing, hub will not send SNAPSHOT_REQ (relies on local cache only). If `"resize"` is missing, hub skips RESIZE messages. All capabilities are optional — hub degrades gracefully. `"multiplex"` means agent supports multiple channels per process.
 

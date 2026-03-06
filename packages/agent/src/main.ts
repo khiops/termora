@@ -1,3 +1,7 @@
+import { createWriteStream } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { encodeFrame, getSocketPath, parseAgentConfig } from "@nexterm/shared";
 import type { AgentConfig, ProtocolMessage } from "@nexterm/shared";
 import { DaemonServer } from "./daemon.js";
@@ -29,7 +33,31 @@ function parseArgs(): {
 	return { mode, config };
 }
 
+function getAgentStateDir(): string {
+	if (process.platform === "win32") {
+		return join(process.env.LOCALAPPDATA ?? "", "nexterm");
+	}
+	return join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+}
+
+function setupDaemonLogging(): void {
+	const stateDir = getAgentStateDir();
+	mkdirSync(stateDir, { recursive: true });
+	const logPath = join(stateDir, "agent.log");
+	const logStream = createWriteStream(logPath, { flags: "a" });
+
+	const write = (data: string): void => {
+		logStream.write(`${new Date().toISOString()} ${data}\n`);
+	};
+
+	console.log = (...args: unknown[]) => write(args.join(" "));
+	console.error = (...args: unknown[]) => write(`[ERROR] ${args.join(" ")}`);
+	console.warn = (...args: unknown[]) => write(`[WARN] ${args.join(" ")}`);
+}
+
 function startDaemon(config: AgentConfig): void {
+	setupDaemonLogging();
+
 	const socketPath = getSocketPath(config.socketPath);
 	const server = new DaemonServer(socketPath, config);
 
