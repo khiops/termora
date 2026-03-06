@@ -20,6 +20,10 @@
 │                      │            │ auth.json     │       │
 │                      │            │ config.toml   │       │
 │                      │            └───────────────┘       │
+│                      │                                     │
+│                      │ UDS (local daemon agent)            │
+│                      │ agent.sock 0700 parent dir          │
+│                      │ No auth (filesystem perms)          │
 └──────────────────────┼────────────────────────────────────┘
                        │ SSH (encrypted)
                        │ No port opened on remote
@@ -38,6 +42,7 @@
 | Boundary | Trust level | Notes |
 |----------|-------------|-------|
 | Hub process ↔ local filesystem | High | Same user, same machine |
+| Hub ↔ Agent daemon (UDS) | High | Same user, filesystem perms enforce access |
 | Browser ↔ Hub (localhost) | Medium | Any local process can connect |
 | Hub ↔ Remote (SSH) | High | SSH provides encryption + auth |
 | Agent ↔ PTY | High | Same user on remote machine |
@@ -174,6 +179,7 @@ Device B (needs token):
 
 ### 3.4 Agent Launch Security
 
+**Remote (SSH stdio):**
 ```
 ssh user@host "nexterm-agent --stdio"
 ```
@@ -182,6 +188,38 @@ ssh user@host "nexterm-agent --stdio"
 - Agent has no network listener (stdio only)
 - Agent spawns PTYs as the same user
 - Hub controls what commands agent receives (validated protocol)
+
+**Local (daemon mode):**
+```
+nexterm-agent --daemon --socket $XDG_RUNTIME_DIR/nexterm/agent.sock
+```
+
+- Daemon spawned detached by hub via `connectOrLaunch()` (survives hub restart)
+- Listens on UDS only — no TCP listener, not reachable from network
+- Runs as the same user as the hub (inherited from parent process)
+- Socket parent directory permissions (0700) prevent other users from connecting
+
+### 3.5 Daemon Socket Security (UDS / Named Pipe)
+
+The agent daemon communicates with the hub over a Unix domain socket (Linux/macOS) or named pipe (Windows).
+
+**Socket paths:**
+- Linux: `$XDG_RUNTIME_DIR/nexterm/agent.sock` (typically `/run/user/<uid>/nexterm/agent.sock`)
+- Windows: `\\.\pipe\nexterm-agent-<username>`
+
+**Filesystem protection:**
+- Parent directory (`$XDG_RUNTIME_DIR/nexterm/`) created with mode 0700 — only the owning user can list or access contents
+- `probeSocket(path)` throws on EACCES, preventing connection to another user's socket
+- No authentication on the UDS itself — OS filesystem permissions serve as the trust boundary (same model as Docker socket, ssh-agent socket)
+
+**Connection model:**
+- Last-writer-wins displacement: a new hub connection immediately replaces the previous one
+- No multi-client support — the daemon serves exactly one hub at a time
+- Stale socket detection: `probeSocket()` distinguishes ECONNREFUSED (stale, safe to unlink) from EACCES (another user's socket, must not touch)
+
+**Future hardening (deferred):**
+- Linux: `SO_PEERCRED` peer UID verification (verify connecting process runs as the same user)
+- Windows: named pipe ACL hardening (restrict access to current user SID)
 
 ## 4. Data Protection
 
@@ -201,7 +239,8 @@ ssh user@host "nexterm-agent --stdio"
 | Path | Encryption | Notes |
 |------|-----------|-------|
 | UI ↔ Hub | None (localhost) | 127.0.0.1 only — no network transit |
-| Hub ↔ Agent | SSH (AES-256-GCM or ChaCha20) | Standard SSH encryption |
+| Hub ↔ Agent (daemon) | None (UDS) | Kernel-only IPC, same user, no network transit |
+| Hub ↔ Agent (SSH) | SSH (AES-256-GCM or ChaCha20) | Standard SSH encryption |
 
 **Note:** If hub bind is changed to 0.0.0.0 (not recommended), TLS should be added. MVP does not support this — warn user in config comment.
 
@@ -209,7 +248,8 @@ ssh user@host "nexterm-agent --stdio"
 
 - Auth token: kept in memory for comparison
 - SSH passwords: cleared after authentication (not stored)
-- Terminal output: buffer limited by backpressure (max ~1MB per channel in memory)
+- Terminal output (hub): buffer limited by backpressure (max ~1MB per channel in memory)
+- Terminal output (daemon agent): `OutputBuffer` ring buffer — per-channel cap (default 1 MB) + global cap (default 20 MB), oldest data evicted from largest channel
 - Snapshots: kept in cache, limited by GC policy
 
 ## 5. Input Validation
@@ -297,6 +337,8 @@ Security notes:
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
+| UDS SO_PEERCRED | P1 | Verify connecting process UID matches socket owner (Linux) |
+| Named pipe ACL | P1 | Restrict Windows named pipe access to current user SID |
 | SQLCipher | P2 | Encrypt meta.db and spool.db at rest |
 | OS keychain | P1 | Store auth token in OS keychain (keytar) |
 | TLS for non-localhost | P2 | If hub exposed beyond loopback |

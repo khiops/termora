@@ -46,8 +46,9 @@ nexterm is a **local-first session terminal platform** that lets developers and 
 │   └───────────────────────────────────────────────────────────┘  │
 └──────────┬──────────────────────────────────────────────────────┘
            │ Local: child_process.spawn("nexterm-agent --stdio")
+           │   ─or─ UDS to standalone daemon ("nexterm-agent --daemon")
            │ Remote: SSH (ssh2) → "nexterm-agent --stdio"
-           │ Transport: MessagePack framed over stdio (both modes)
+           │ Transport: MessagePack framed over stdio or UDS (all modes)
            │
 ┌──────────▼──────────────────────────────────────────────────────┐
 │                    Agent (Node.js, local or remote)             │
@@ -88,8 +89,12 @@ Universal PTY manager. Runs locally (child process) or remotely (via SSH). Same 
 - Snapshot: serialize() on demand or periodic (3s idle, 5s forced)
 - Channel multiplexing: N channels per agent process
 - Backpressure: pause PTY read when output buffer exceeds threshold
+- Daemon mode: standalone process listening on UDS, output buffering via `OutputBuffer` ring buffer
+- `DaemonServer` (`daemon.ts`): UDS listener, HELLO handshake, connection displacement (last-writer-wins)
+- `OutputBuffer` (`buffer.ts`): per-channel ring buffer with per-channel cap and global cap, evicts from largest channel
+- CLI: `nexterm-agent --daemon --socket <path> --buffer-per-channel <bytes> --buffer-global <bytes>`
 
-**Process model (local):**
+**Process model (local — stdio, legacy):**
 ```
 hub: child_process.spawn("nexterm-agent", ["--stdio"])
   → Agent starts, writes HELLO to stdout
@@ -98,6 +103,20 @@ hub: child_process.spawn("nexterm-agent", ["--stdio"])
   → OUTPUT flows: PTY → headless xterm (for state) → framed stdout → Hub
   → INPUT flows: Hub → framed stdin → Agent → PTY
 ```
+
+**Process model (local — daemon, preferred):**
+```
+hub: connectOrLaunch(socketPath, config, binaryPath)
+  → Probes UDS socket via probeSocket()
+  → If no daemon running: spawn detached "nexterm-agent --daemon --socket <path>"
+  → Polls socket until ready (up to 5s)
+  → Connects to UDS → Agent sends HELLO (with protocolVersion)
+  → On reconnect: Agent sends N x AGENT_CHANNEL_STATE + CHANNEL_STATE_END
+  → Hub reconciles channel state (adopt alive, mark dead)
+  → Normal operation (same framed MessagePack protocol as stdio)
+```
+
+The `DaemonServer` class manages UDS connections with last-writer-wins displacement: a new hub connection immediately replaces the previous one. Output is buffered by `OutputBuffer`, a per-channel ring buffer with configurable per-channel cap (`bufferPerChannel`, default 1 MB) and global cap (`bufferGlobal`, default 20 MB). When the global cap is reached, the largest channel's oldest data is evicted.
 
 **Process model (remote):**
 ```
@@ -109,7 +128,7 @@ hub: ssh2.exec("nexterm-agent --stdio")
   → INPUT flows: Hub → SSH → framed stdin → Agent → PTY
 ```
 
-The protocol is identical in both modes. Only the transport differs (stdio pipe vs SSH channel).
+The protocol is identical in all modes. Only the transport differs (stdio pipe, UDS, or SSH channel).
 
 **Headless xterm.js (spike required):**
 - Needs minimal DOM polyfill (jsdom or custom shim)
@@ -140,9 +159,12 @@ Local daemon, single process, binds to 127.0.0.1.
 - `zero_conf` mode (opt-in): if default port taken, auto-increment 4100→4199, write actual port to `runtime.json`
 
 **Session Manager:**
-- Local sessions: spawn agent as child process (`child_process.spawn`, --stdio), same protocol as remote
+- Local sessions (daemon): connect to standalone agent via UDS (`connectOrLaunch`), auto-spawn if needed
+- Local sessions (fallback): spawn agent as child process (`child_process.spawn`, --stdio)
 - Remote sessions: open SSH via ssh2, launch agent, pipe stdio
 - Hub never spawns PTYs directly — agent is the universal PTY manager
+- `NextermAgent` (`nexterm-agent.ts`): hub-side class extending `AgentConnection`, `connectLocal(socketPath)` factory, `waitForChannelState()` for reconnect reconciliation
+- `connectOrLaunch` (`agent-launcher.ts`): probes socket, spawns detached daemon if needed, polls for readiness
 - Session state machine: STARTING → ACTIVE ↔ DISCONNECTED → CLOSED, with DETACHED branch
 - Reconnect (remote): exponential backoff (1s, 2s, 4s, ... 30s max, 5min total timeout)
 - Reconnect (local): respawn agent immediately on unexpected exit
@@ -449,12 +471,13 @@ User clicks [+ channel] on local host
   Hub: session exists for local host?
   │
   ├─ No → create Session (STARTING)
-  │  Hub: child_process.spawn("nexterm-agent", ["--stdio"])
-  │  Read HELLO from agent stdout
+  │  Hub: connectOrLaunch(socketPath) → connect to daemon (or spawn it)
+  │  Fallback: child_process.spawn("nexterm-agent", ["--stdio"])
+  │  Read HELLO from agent
   │  Session → ACTIVE
   │  Proceed to SPAWN
   │
-  └─ Yes (ACTIVE) → reuse agent process
+  └─ Yes (ACTIVE) → reuse agent connection (daemon UDS or stdio)
      Hub → Agent: SPAWN { shell, cwd, env, cols, rows }
      Agent: spawn PTY, create headless xterm
      Agent → Hub: SPAWN_OK { channelId: "ch-new" }
@@ -508,7 +531,31 @@ SSH connection drops (network issue)
      UI: host icon 🔴, cached content still viewable
 ```
 
-### 5.6 Write-Lock Flow
+### 5.6 Daemon Agent — Connect + Reconnect
+
+```
+Hub starts (or reconnects after restart)
+  │
+  Hub: connectOrLaunch(socketPath, config, binaryPath)
+  │
+  ├─ probeSocket(socketPath) succeeds (daemon already running):
+  │  Hub: connect to UDS
+  │  Agent → Hub: HELLO { protocolVersion, capabilities }
+  │  Agent → Hub: AGENT_CHANNEL_STATE { channelId, title, pid, alive } (×N)
+  │  Agent → Hub: CHANNEL_STATE_END
+  │  Hub: reconcileChannelState()
+  │  ├─ alive channels → adopt into session, update DB
+  │  └─ dead channels → mark dead in DB, notify UI
+  │  Normal operation resumes
+  │
+  └─ probeSocket(socketPath) fails (no daemon):
+     Hub: spawn detached "nexterm-agent --daemon --socket <path>"
+     Hub: poll probeSocket() every 200ms (up to 5s)
+     ├─ Socket appears → connect, receive HELLO (no AGENT_CHANNEL_STATE on fresh start)
+     └─ Timeout → fall back to child_process stdio mode (warm restart)
+```
+
+### 5.7 Write-Lock Flow
 
 ```
 Channel ch-1: Client A = WRITER, Client B = READER
@@ -551,6 +598,17 @@ Resolved config → xterm.js instance
 ```
 
 **Deep merge:** Object keys merge recursively. Scalars overwrite. `null` removes key. Arrays replace.
+
+### 6.1 Agent Config (`[agent]` section in config.toml)
+
+The `[agent]` section configures the local daemon agent. These settings are defined in the `AgentConfig` interface (`@nexterm/shared/agent-config.ts`):
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `socket_path` | string | Platform-dependent (see SECURITY.md) | UDS/named pipe path for daemon communication |
+| `buffer_per_channel` | number | 1048576 (1 MB) | Max output buffer per channel (bytes) |
+| `buffer_global` | number | 20971520 (20 MB) | Max total output buffer across all channels (bytes) |
+| `log_level` | string | `"info"` | Agent log level: trace, debug, info, warn, error |
 
 ## 7. File System Layout
 
@@ -632,15 +690,19 @@ nexterm/
 │   │       ├── framing.ts   # Length-prefixed frame encoder/decoder
 │   │       ├── config.ts    # Config types (TerminalProfile, TabLayout) + deep merge
 │   │       ├── entities.ts  # Host, Session, Channel, Workspace, ChannelGroup
-│   │       └── constants.ts # Protocol version, defaults, error codes
+│   │       ├── constants.ts # Protocol version, defaults, error codes
+│   │       ├── socket-path.ts # getSocketPath(override?) + probeSocket(path) for UDS
+│   │       └── agent-config.ts # AgentConfig interface (daemon settings)
 │   ├── agent/               # @nexterm/agent — remote PTY manager
 │   │   ├── package.json
 │   │   └── src/
-│   │       ├── main.ts      # Entry point (--stdio flag)
+│   │       ├── main.ts      # Entry point (--stdio, --daemon flags)
 │   │       ├── pty.ts       # PTY manager (node-pty wrapper)
 │   │       ├── screen.ts    # Headless xterm.js screen model
 │   │       ├── handler.ts   # Protocol message handler
-│   │       └── config.ts    # Agent config (visual_hints)
+│   │       ├── config.ts    # Agent config (visual_hints)
+│   │       ├── daemon.ts    # DaemonServer: UDS listener, connection displacement, output buffering
+│   │       └── buffer.ts    # OutputBuffer: per-channel ring buffer with global cap
 │   ├── hub/                 # @nexterm/hub — local daemon
 │   │   ├── package.json
 │   │   └── src/
@@ -648,7 +710,9 @@ nexterm/
 │   │       ├── server.ts    # HTTP + WS server (Fastify)
 │   │       ├── api/         # REST route handlers
 │   │       ├── ws/          # WS message handlers
-│   │       ├── session/     # Session manager (local + SSH)
+│   │       ├── session/     # Session manager (local + SSH + daemon)
+│   │       │   ├── nexterm-agent.ts  # NextermAgent: hub-side AgentConnection over UDS
+│   │       │   └── agent-launcher.ts # connectOrLaunch: probe, spawn, poll daemon
 │   │       ├── ssh.ts       # SSH connection manager
 │   │       ├── cache.ts     # Cache manager
 │   │       ├── storage/     # SQLite DAL (meta.db + spool.db)
