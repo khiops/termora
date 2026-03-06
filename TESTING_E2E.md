@@ -161,20 +161,20 @@ Each run records which scenarios passed/failed. Commit = HEAD at time of run.
 | 4 | Shell exit (dead channel) | ✅ | Closed badge, grey dot, no write-lock |
 | 5 | Channel deletion | ✅ | Context menu → Close channel |
 | 6 | Delete fallback | ✅ | Deleted current → fallback to next alive |
-| 7 | Multi-channel lifecycle | ⏭️ | Not tested this run |
-| 8 | Page reload persistence | ⏭️ | Not tested this run |
-| 9 | Write-lock indicator | ⏭️ | Not tested this run |
-| 10 | Host rail status | ⏭️ | Not tested this run |
+| 7 | Multi-channel lifecycle | ✅ | 3 ch: kill B→Closed, delete B→A/C intact, kill C, delete A→fallback C dead, delete C→empty |
+| 8 | Page reload persistence | ✅ | 2 tabs restored, active preserved, RELOAD_TEST in scrollback |
+| 9 | Write-lock indicator | ✅ | Writer+Release, released→No lock+Request/Force, reclaimed, dead→hidden |
+| 10 | Host rail status | ✅ | Green dot (status-dot--live), agent running |
 | 11 | Terminal I/O | ✅ | pwd, ls --color, sleep+Ctrl+C |
-| 12 | Channel rename | ⏭️ | Not tested this run |
-| 13 | Group management | 🟡 | Move to group ✅ — create/delete group ⏭️ |
+| 12 | Channel rename | ✅ | Sidebar dbl-click, tab dbl-click, Escape cancels, name syncs everywhere |
+| 13 | Group management | ✅ | Create group, move channel↔groups, delete empty group |
 | 14 | Daemon survival | ✅ | Hub restart → scrollback preserved, terminal functional |
 | 15 | Daemon death recovery | ✅ | kill agent → hub auto-relaunched new daemon, old channels dead, new channels work |
 | 16 | WS reconnect | ⏭️ | Requires network disruption — manual test |
 | 17 | Multi-browser write-lock | ⏭️ | Requires multi-tab browser — manual test |
 | 18 | Page reload + daemon | ✅ | 5 tabs restored, scrollback preserved, write lock auto-claimed |
 
-**Summary: 11/18 tested, 10 pass, 0 fail, 1 partial, 7 skipped**
+**Summary: 16/18 tested, 16 pass, 0 fail, 0 partial, 2 skipped (manual only)**
 
 ---
 
