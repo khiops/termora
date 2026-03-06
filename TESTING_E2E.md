@@ -78,6 +78,104 @@ Run these after any change to channel/tab/sidebar/write-lock logic.
 - [ ] Pulsing/red dot when agent is disconnected
 - [ ] Status recovers after warm restart
 
+## 11. Terminal I/O
+
+- [ ] Type `echo HELLO` + Enter → output `HELLO` appears in terminal
+- [ ] Type `pwd` + Enter → current directory shown
+- [ ] Type `ls --color` → colored output renders correctly
+- [ ] Rapid typing (paste a long string) → no dropped characters
+- [ ] Ctrl+C interrupts a running command (e.g. `sleep 999`)
+
+## 12. Channel rename (inline edit)
+
+- [ ] Double-click channel name in sidebar → inline input appears
+- [ ] Type new name + Enter → name updates in sidebar and tab bar
+- [ ] Press Escape → cancels rename, original name preserved
+- [ ] Double-click tab label → inline input appears (same behavior)
+- [ ] Empty name rejected (reverts to original)
+
+## 13. Channel group management
+
+- [ ] Click "+ Add group" → new group appears in sidebar (e.g. "GROUP 2")
+- [ ] New channel created in selected group appears under that group
+- [ ] Drag channel from GENERAL to GROUP 1 → channel moves, counts update
+- [ ] Drag channel back → channel returns to original group
+- [ ] Delete empty group → group removed from sidebar
+- [ ] Delete group with channels → channels move to default group (GENERAL)
+
+## 14. Daemon survival (hub restart)
+
+Precondition: 2+ live channels with output, agent running as daemon.
+
+- [ ] Run `echo BEFORE_RESTART` in terminal A
+- [ ] Stop hub (`dev-stop.sh` kills hub but agent survives — or restart hub only)
+- [ ] Start hub again (`dev-start.sh`)
+- [ ] Reload page → channels reappear in sidebar with green dots (alive)
+- [ ] Click channel A → scrollback preserved (contains `BEFORE_RESTART`)
+- [ ] Type `echo AFTER_RESTART` → terminal still functional
+- [ ] Channel B also restored with its scrollback
+
+## 15. Daemon death recovery
+
+- [ ] Kill agent daemon process (`kill <agent-pid>`)
+- [ ] Sidebar channels turn grey/dead (agent disconnected)
+- [ ] Hub auto-restarts agent daemon (check `agent.sock` reappears)
+- [ ] Create new channel → works normally (new agent)
+- [ ] Old channels show as dead (PTYs lost with agent process)
+
+## 16. WS reconnect (network blip)
+
+- [ ] With active terminal, disconnect network briefly (disable adapter or DevTools offline)
+- [ ] Reconnect → WS auto-reconnects (exponential backoff)
+- [ ] Terminal resumes working (type command, see output)
+- [ ] No duplicate tabs or ghost channels after reconnect
+
+## 17. Multiple browser tabs (write-lock contention)
+
+- [ ] Open nexterm in two browser tabs
+- [ ] Tab A has write lock on channel X
+- [ ] Tab B clicks channel X → sees "No lock" (reader mode)
+- [ ] Tab B force-takes write lock → Tab A loses lock, shows "No lock"
+- [ ] Tab A reclaims → Tab B loses lock
+
+## 18. Page reload with daemon
+
+- [ ] Open 3 channels, type distinct commands in each
+- [ ] Reload page (F5) → all 3 tabs restored
+- [ ] Each terminal shows its previous scrollback (snapshot restore)
+- [ ] Write lock auto-claimed on active tab
+
+---
+
+## Run Log
+
+Each run records which scenarios passed/failed. Commit = HEAD at time of run.
+
+### Run #1 — 2026-03-06 — `feat/agent-daemon` (7bf51c3)
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 1 | Channel creation | ✅ | + tab bar, sidebar count |
+| 2 | Tab switching | ✅ | Tab 1↔2, sidebar highlight |
+| 3 | Sidebar re-selection | ✅ | Close tab → reopen via sidebar click |
+| 4 | Shell exit (dead channel) | ✅ | Closed badge, grey dot, no write-lock |
+| 5 | Channel deletion | ✅ | Context menu → Close channel |
+| 6 | Delete fallback | ✅ | Deleted current → fallback to next alive |
+| 7 | Multi-channel lifecycle | ⏭️ | Not tested this run |
+| 8 | Page reload persistence | ⏭️ | Not tested this run |
+| 9 | Write-lock indicator | ⏭️ | Not tested this run |
+| 10 | Host rail status | ⏭️ | Not tested this run |
+| 11 | Terminal I/O | ✅ | pwd, ls --color, sleep+Ctrl+C |
+| 12 | Channel rename | ⏭️ | Not tested this run |
+| 13 | Group management | 🟡 | Move to group ✅ — create/delete group ⏭️ |
+| 14 | Daemon survival | ✅ | Hub restart → scrollback preserved, terminal functional |
+| 15 | Daemon death recovery | ✅ | kill agent → hub auto-relaunched new daemon, old channels dead, new channels work |
+| 16 | WS reconnect | ⏭️ | Requires network disruption — manual test |
+| 17 | Multi-browser write-lock | ⏭️ | Requires multi-tab browser — manual test |
+| 18 | Page reload + daemon | ✅ | 5 tabs restored, scrollback preserved, write lock auto-claimed |
+
+**Summary: 11/18 tested, 10 pass, 0 fail, 1 partial, 7 skipped**
+
 ---
 
 ## Regression markers

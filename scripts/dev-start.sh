@@ -70,11 +70,19 @@ if grep -q "MaxListenersExceeded" "$LOG_DIR/dev.log" 2>/dev/null; then
 	echo "⚠  MaxListenersExceededWarning detected in logs"
 fi
 
+# ── Check agent daemon status ─────────────────────────────────────────────────
+AGENT_SOCK="${XDG_RUNTIME_DIR:-/tmp/nexterm-$(id -u)}/nexterm/agent.sock"
+AGENT_STATUS="not running (hub will auto-start on first connection)"
+if [ -S "$AGENT_SOCK" ]; then
+	AGENT_STATUS="running ($AGENT_SOCK)"
+fi
+
 echo ""
 echo "Dev servers running (PID $DEV_PID)"
-echo "  Hub:  http://127.0.0.1:4100"
-echo "  Web:  http://localhost:5173"
-echo "  Logs: $LOG_DIR/dev.log"
+echo "  Hub:    http://127.0.0.1:4100"
+echo "  Web:    http://localhost:5173"
+echo "  Agent:  $AGENT_STATUS"
+echo "  Logs:   $LOG_DIR/dev.log"
 echo ""
 echo "Stop with: ./scripts/dev-stop.sh"
 echo "Tail logs: tail -f $LOG_DIR/dev.log"
