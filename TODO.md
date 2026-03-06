@@ -8,7 +8,7 @@
 
 ### Review Findings
 - [ ] 🐛 [UI] Fix pre-existing typecheck failure in useCommandPalette.spec.ts (hostId on Channel type) — Priority: S (from /review F-003)
-- [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: M (from /review F-003)
+- [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized: race window ~50ms, waitForSocket retries cover it)
 - [ ] 🔧 [Hub] waitForChannelState() listener cleanup on timeout — Priority: S (from /review F-004)
 - [ ] 🔧 [Hub] DRY: extract shared daemon attach logic from _reconnectDaemon/_connectDaemonAgent — Priority: S (from /review F-005)
 - [ ] 🔧 [Shared] Add EACCES test for probeSocket() — Priority: S (from /review F-006)
