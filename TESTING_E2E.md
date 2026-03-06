@@ -171,10 +171,10 @@ Each run records which scenarios passed/failed. Commit = HEAD at time of run.
 | 14 | Daemon survival | ✅ | Hub restart → scrollback preserved, terminal functional |
 | 15 | Daemon death recovery | ✅ | kill agent → hub auto-relaunched new daemon, old channels dead, new channels work |
 | 16 | WS reconnect | ⏭️ | Requires network disruption — manual test |
-| 17 | Multi-browser write-lock | ⏭️ | Requires multi-tab browser — manual test |
+| 17 | Multi-browser write-lock | ✅ | Tab A Writer → Tab B force-take → A loses → A reclaims → B loses |
 | 18 | Page reload + daemon | ✅ | 5 tabs restored, scrollback preserved, write lock auto-claimed |
 
-**Summary: 16/18 tested, 16 pass, 0 fail, 0 partial, 2 skipped (manual only)**
+**Summary: 17/18 tested, 17 pass, 0 fail, 0 partial, 1 skipped (manual only: WS reconnect)**
 
 ---
 
