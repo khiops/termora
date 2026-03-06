@@ -76,7 +76,7 @@ export class SessionManager {
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	/** Crash-loop tracking for local agent restarts: hostId → { count, windowStart } */
 	private restartTracking = new Map<string, { count: number; windowStart: number }>();
-	/** requestId → callback for pending SPAWN_OK/SPAWN_ERR responses */
+	/** requestId (or keyed token like "attach:<channelId>") → callback for pending agent responses */
 	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
 	private metaDal: MetaDAL;
 
@@ -311,16 +311,15 @@ export class SessionManager {
 
 		return new Promise<string | null>((resolve, reject) => {
 			const timer = setTimeout(() => {
-				agent?.off("message", handler);
+				this.pendingRequests.delete(requestId);
 				reject(new Error("Agent SPAWN timeout"));
 			}, SPAWN_TIMEOUT_MS);
 
-			const handler = (incoming: ProtocolMessage) => {
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
-					if (spawnOk.requestId !== requestId) return;
 					clearTimeout(timer);
-					agent?.off("message", handler);
+					this.pendingRequests.delete(requestId);
 
 					const { channelId } = spawnOk;
 
@@ -371,9 +370,8 @@ export class SessionManager {
 					resolve(channelId);
 				} else if (incoming.type === "SPAWN_ERR") {
 					const spawnErr = incoming as AgentSpawnErrMessage;
-					if (spawnErr.requestId !== requestId) return;
 					clearTimeout(timer);
-					agent?.off("message", handler);
+					this.pendingRequests.delete(requestId);
 
 					const errorMsg: ErrorMessage = {
 						type: "ERROR",
@@ -383,8 +381,7 @@ export class SessionManager {
 					client.send(errorMsg);
 					reject(new Error(`SPAWN_ERR [${spawnErr.code}]: ${spawnErr.message}`));
 				}
-			};
-			agent?.on("message", handler);
+			});
 		});
 	}
 
@@ -449,27 +446,26 @@ export class SessionManager {
 		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
 		agent.send(agentAttach);
 
+		const pendingKey = `attach:${channelId}`;
 		try {
 			const agentResponse = await new Promise<AgentAttachOkMessage>((resolve, reject) => {
 				const timer = setTimeout(() => {
-					agent.off("message", handler);
+					this.pendingRequests.delete(pendingKey);
 					reject(new Error("Agent ATTACH timeout"));
 				}, ATTACH_TIMEOUT_MS);
 
-				const handler = (incoming: ProtocolMessage): void => {
+				this.pendingRequests.set(pendingKey, (incoming: ProtocolMessage) => {
 					if (incoming.type === "ATTACH_OK") {
 						const attachOkMsg = incoming as AgentAttachOkMessage;
-						if (attachOkMsg.channelId !== channelId) return;
 						clearTimeout(timer);
-						agent.off("message", handler);
+						this.pendingRequests.delete(pendingKey);
 						resolve(attachOkMsg);
 					} else if (incoming.type === "ERROR") {
 						clearTimeout(timer);
-						agent.off("message", handler);
+						this.pendingRequests.delete(pendingKey);
 						reject(new Error("Agent ATTACH error"));
 					}
-				};
-				agent.on("message", handler);
+				});
 			});
 
 			// Store the fresh snapshot in spool.db (flush + seq coordination)
@@ -686,6 +682,18 @@ export class SessionManager {
 				if (handler) {
 					handler(msg);
 					return;
+				}
+			}
+
+			// Dispatch pending attach responses (ATTACH_OK uses channelId, not requestId)
+			if (msg.type === "ATTACH_OK" || msg.type === "ERROR") {
+				const cid = (msg as { channelId?: string }).channelId;
+				if (cid) {
+					const handler = this.pendingRequests.get(`attach:${cid}`);
+					if (handler) {
+						handler(msg);
+						return;
+					}
 				}
 			}
 
@@ -932,26 +940,21 @@ export class SessionManager {
 		// 4. Wait for SPAWN_OK
 		const spawnOk = await new Promise<boolean>((resolve) => {
 			const timer = setTimeout(() => {
-				agent.off("message", handler);
+				this.pendingRequests.delete(requestId);
 				resolve(false);
 			}, SPAWN_TIMEOUT_MS);
 
-			const handler = (incoming: ProtocolMessage) => {
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
 				if (incoming.type === "SPAWN_OK") {
-					const ok = incoming as AgentSpawnOkMessage;
-					if (ok.requestId !== requestId) return;
 					clearTimeout(timer);
-					agent.off("message", handler);
+					this.pendingRequests.delete(requestId);
 					resolve(true);
 				} else if (incoming.type === "SPAWN_ERR") {
-					const err = incoming as AgentSpawnErrMessage;
-					if (err.requestId !== requestId) return;
 					clearTimeout(timer);
-					agent.off("message", handler);
+					this.pendingRequests.delete(requestId);
 					resolve(false);
 				}
-			};
-			agent.on("message", handler);
+			});
 		});
 
 		if (!spawnOk) return false;
