@@ -1,5 +1,5 @@
 <template>
-	<div class="wl-indicator" :class="stateClass" :title="tooltip">
+	<div v-if="!isDead" class="wl-indicator" :class="stateClass" :title="tooltip">
 		<span class="wl-dot" aria-hidden="true" />
 		<span class="wl-label">{{ label }}</span>
 
@@ -22,7 +22,7 @@
 		</button>
 
 		<button
-			v-if="isCurrentWriter && channelId"
+			v-if="isCurrentWriter && channelId && !isDead"
 			class="wl-action-btn wl-release"
 			@click="handleRelease"
 			title="Release your write lock"
