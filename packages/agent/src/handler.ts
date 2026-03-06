@@ -58,6 +58,11 @@ export class AgentHandler {
 		});
 	}
 
+	/** Handle a pre-parsed protocol message (used by DaemonServer with per-connection FrameReader). */
+	handleMessage(msg: ProtocolMessage): void {
+		this.dispatch(msg);
+	}
+
 	/** Tear down all active PTY channels (called on SIGTERM / stdin EOF). */
 	shutdown(): void {
 		this.ptyManager.destroyAll();

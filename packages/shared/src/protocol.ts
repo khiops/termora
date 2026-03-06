@@ -150,6 +150,20 @@ export interface ErrorMessage {
 	channelId?: string;
 }
 
+/** Agent → Hub (daemon mode): metadata for each alive channel on hub connect/reconnect */
+export interface AgentChannelStateMessage {
+	type: "AGENT_CHANNEL_STATE";
+	channelId: string;
+	title: string;
+	pid: number;
+	alive: boolean;
+}
+
+/** Agent → Hub (daemon mode): sentinel marking end of AGENT_CHANNEL_STATE enumeration */
+export interface ChannelStateEndMessage {
+	type: "CHANNEL_STATE_END";
+}
+
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)
 // ---------------------------------------------------------------------------
@@ -346,6 +360,8 @@ export type AgentMessage =
 	| AgentAttachOkMessage
 	| ChannelExitMessage
 	| HeartbeatAckMessage
+	| AgentChannelStateMessage
+	| ChannelStateEndMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the Agent */
@@ -435,4 +451,6 @@ export type ProtocolMessage =
 	| PongMessage
 	| HostVerifyMessage
 	| HostVerifyResponseMessage
+	| AgentChannelStateMessage
+	| ChannelStateEndMessage
 	| ErrorMessage;
