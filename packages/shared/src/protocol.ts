@@ -287,6 +287,22 @@ export interface ChannelStateMessage {
 	exitCode?: number;
 }
 
+/** Hub → UI: full state snapshot sent immediately after AUTH_OK */
+export interface StateSyncMessage {
+	type: "STATE_SYNC";
+	sessions: Array<{
+		sessionId: string;
+		hostId: string;
+		status: SessionStatus;
+	}>;
+	channels: Array<{
+		channelId: string;
+		sessionId: string;
+		status: ChannelStatus;
+		exitCode?: number;
+	}>;
+}
+
 // --- Ping / pong (WebSocket keepalive) ---
 
 /** UI → Hub: keepalive ping */
@@ -369,6 +385,7 @@ export type HubToUiMessage =
 	| OutputMessage
 	| SessionStateMessage
 	| ChannelStateMessage
+	| StateSyncMessage
 	| WriteRequestMessage
 	| WriteGrantMessage
 	| WriteDenyMessage
@@ -413,6 +430,7 @@ export type ProtocolMessage =
 	| WriteLockMessage
 	| SessionStateMessage
 	| ChannelStateMessage
+	| StateSyncMessage
 	| PingMessage
 	| PongMessage
 	| HostVerifyMessage

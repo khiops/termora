@@ -25,6 +25,8 @@ export const useSessionStore = defineStore("session", () => {
 		disconnect: null,
 		reconnect: null,
 	};
+	/** Guard against multiple concurrent connect() calls from parallel pane mounts. */
+	let _connectPromise: Promise<void> | null = null;
 
 	/**
 	 * Connect to hub WebSocket, send AUTH, then wait for AUTH_OK or AUTH_FAIL.
@@ -33,6 +35,16 @@ export const useSessionStore = defineStore("session", () => {
 	 */
 	async function connect(): Promise<void> {
 		if (wsClient.isConnected) return;
+		if (_connectPromise) return _connectPromise;
+		_connectPromise = _doConnect();
+		try {
+			await _connectPromise;
+		} finally {
+			_connectPromise = null;
+		}
+	}
+
+	async function _doConnect(): Promise<void> {
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 		const wsUrl = `${protocol}//${window.location.host}/ws`;
 		await wsClient.connect(wsUrl);
@@ -56,6 +68,16 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("CHANNEL_STATE", (msg) => {
 			if (msg.type === "CHANNEL_STATE") {
 				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
+			}
+		});
+
+		// Handle STATE_SYNC — full state snapshot sent after AUTH_OK
+		wsClient.on("STATE_SYNC", (msg) => {
+			if (msg.type === "STATE_SYNC") {
+				for (const s of msg.sessions) {
+					hostsStore.updateSessionStatus(s.hostId, s.status);
+				}
+				channelsStore.applyStateSync(msg.channels);
 			}
 		});
 

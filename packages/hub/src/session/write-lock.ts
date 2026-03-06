@@ -49,10 +49,21 @@ export class WriteLockManager {
 		}
 		clients.add(clientId);
 
-		// Auto-grant write lock to first attached client
 		if (!this.holders.has(channelId)) {
+			// Auto-grant write lock to first attached client
 			this.holders.set(channelId, clientId);
 			this._broadcastLock(channelId, clientId);
+		} else {
+			// Notify the newly attached client of the current holder so it can
+			// render the correct lock state immediately. Without this, a race
+			// between ATTACH_OK and the auto-grant WRITE_LOCK can leave the
+			// client with stale lock state.
+			const holder = this.holders.get(channelId) ?? null;
+			this.sendToClient(clientId, {
+				type: "WRITE_LOCK",
+				channelId,
+				holder,
+			} as WriteLockMessage);
 		}
 	}
 

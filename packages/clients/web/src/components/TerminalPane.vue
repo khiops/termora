@@ -176,8 +176,11 @@ onMounted(async () => {
 				emit("channel-spawned", props.channelId, realId);
 			} else {
 				// Existing channel — reattach (fetch snapshot + tail).
-				const { writeLockHolder } = await reattachChannel(props.channelId);
-				writeLockStore.setInitialHolder(props.channelId, writeLockHolder);
+				// Write-lock state is set by the WRITE_LOCK WS message handler
+				// (fired by WriteLockManager.attach on the hub side), not from
+				// the ATTACH_OK payload — avoids a microtask race where
+				// setInitialHolder would overwrite a more recent WRITE_LOCK.
+				await reattachChannel(props.channelId);
 			}
 			ready.value = true;
 			applyProfile(configStore.profile);
@@ -199,8 +202,7 @@ watch(
 			if (newId === internalChannelId.value) return;
 			try {
 				error.value = null;
-				const { writeLockHolder } = await reattachChannel(newId);
-				writeLockStore.setInitialHolder(newId, writeLockHolder);
+				await reattachChannel(newId);
 			} catch (err) {
 				error.value = err instanceof Error ? err.message : String(err);
 			}
@@ -218,8 +220,7 @@ watch(
 		if (effectiveChannelId.value && ready.value) {
 			try {
 				error.value = null;
-				const { writeLockHolder } = await reattachChannel(effectiveChannelId.value);
-				writeLockStore.setInitialHolder(effectiveChannelId.value, writeLockHolder);
+				await reattachChannel(effectiveChannelId.value);
 			} catch (err) {
 				error.value = err instanceof Error ? err.message : String(err);
 			}

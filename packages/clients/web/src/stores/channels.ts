@@ -81,6 +81,11 @@ export const useChannelsStore = defineStore("channels", () => {
 	 */
 	const unreadChannels = ref<Set<string>>(new Set());
 
+	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
+	const pendingStatuses = ref<Map<string, { status: Channel["status"]; exitCode?: number }>>(
+		new Map(),
+	);
+
 	/** Channels that belong to the currently loaded host. */
 	const activeHostId = ref<string | null>(null);
 
@@ -146,6 +151,27 @@ export const useChannelsStore = defineStore("channels", () => {
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
 			channels.value = data;
+			// Apply any WS status updates that arrived before the fetch completed
+			if (pendingStatuses.value.size > 0) {
+				const pending = pendingStatuses.value;
+				pendingStatuses.value = new Map();
+				let statusUpdated = false;
+				const merged = data.map((ch) => {
+					const p = pending.get(ch.id);
+					if (p) {
+						statusUpdated = true;
+						return {
+							...ch,
+							status: p.status,
+							...(p.exitCode !== undefined && { exitCode: p.exitCode }),
+						};
+					}
+					return ch;
+				});
+				if (statusUpdated) {
+					channels.value = merged;
+				}
+			}
 			// Clear selection if the previously selected channel is no longer
 			// present (e.g. host switched)
 			if (selectedChannelId.value !== null) {
@@ -195,7 +221,13 @@ export const useChannelsStore = defineStore("channels", () => {
 		exitCode?: number,
 	): void {
 		const idx = channels.value.findIndex((c) => c.id === channelId);
-		if (idx === -1) return;
+		if (idx === -1) {
+			// Channel not loaded yet — buffer for later application
+			const next = new Map(pendingStatuses.value);
+			next.set(channelId, { status, ...(exitCode !== undefined && { exitCode }) });
+			pendingStatuses.value = next;
+			return;
+		}
 		const existing = channels.value[idx];
 		if (existing === undefined) return;
 		const updated = { ...existing };
@@ -204,6 +236,63 @@ export const useChannelsStore = defineStore("channels", () => {
 		const next = [...channels.value];
 		next[idx] = updated;
 		channels.value = next;
+	}
+
+	/**
+	 * Apply a batch of channel statuses from a STATE_SYNC message.
+	 * If channels are loaded, updates them directly. Otherwise buffers for later.
+	 */
+	function applyStateSync(
+		syncChannels: Array<{
+			channelId: string;
+			sessionId: string;
+			status: Channel["status"];
+			exitCode?: number;
+		}>,
+	): void {
+		if (channels.value.length === 0) {
+			// Channels not loaded yet — buffer all
+			const next = new Map(pendingStatuses.value);
+			for (const sc of syncChannels) {
+				next.set(sc.channelId, {
+					status: sc.status,
+					...(sc.exitCode !== undefined && { exitCode: sc.exitCode }),
+				});
+			}
+			pendingStatuses.value = next;
+			return;
+		}
+		// Channels loaded — apply directly
+		let changed = false;
+		const updated = channels.value.map((ch) => {
+			const sc = syncChannels.find((s) => s.channelId === ch.id);
+			if (sc && ch.status !== sc.status) {
+				changed = true;
+				return {
+					...ch,
+					status: sc.status,
+					...(sc.exitCode !== undefined && { exitCode: sc.exitCode }),
+				};
+			}
+			return ch;
+		});
+		if (changed) {
+			channels.value = updated;
+		}
+		// Buffer statuses for channels not yet loaded
+		const loadedIds = new Set(channels.value.map((c) => c.id));
+		const next = new Map(pendingStatuses.value);
+		for (const sc of syncChannels) {
+			if (!loadedIds.has(sc.channelId)) {
+				next.set(sc.channelId, {
+					status: sc.status,
+					...(sc.exitCode !== undefined && { exitCode: sc.exitCode }),
+				});
+			}
+		}
+		if (next.size > 0) {
+			pendingStatuses.value = next;
+		}
 	}
 
 	/**
@@ -483,6 +572,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		selectChannel,
 		markUnread,
 		updateChannelStatus,
+		applyStateSync,
 		removeChannel,
 		addChannel,
 		spawnChannel,

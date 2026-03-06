@@ -47,6 +47,20 @@ describe("WriteLockManager — attach / first-writer", () => {
 		expect(mgr.isHolder("ch1", "client-B")).toBe(false);
 	});
 
+	it("second client to attach receives WRITE_LOCK with current holder via sendToClient", () => {
+		const { mgr, sentTo } = makeManager();
+		mgr.attach("ch1", "client-A");
+		mgr.attach("ch1", "client-B");
+
+		const msgs = sentTo("client-B");
+		expect(msgs).toHaveLength(1);
+		expect(msgs[0]).toMatchObject({
+			type: "WRITE_LOCK",
+			channelId: "ch1",
+			holder: "client-A",
+		});
+	});
+
 	it("getHolder returns null when no one is attached", () => {
 		const { mgr } = makeManager();
 		expect(mgr.getHolder("ch1")).toBeNull();

@@ -111,6 +111,7 @@ export async function registerWsRoutes(
 				sessionManager.addClient(client);
 				server.log.info({ clientId }, "ws-auth: accepted");
 				client.send({ type: "AUTH_OK", clientId });
+				client.send(sessionManager.getStateSnapshot());
 				return;
 			}
 

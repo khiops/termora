@@ -14,6 +14,7 @@ import type {
 	ProtocolMessage,
 	ResizeMessage,
 	SessionStateMessage,
+	StateSyncMessage,
 	UiAttachOkMessage,
 	UiSpawnMessage,
 	UiSpawnOkMessage,
@@ -210,18 +211,27 @@ export class SessionManager {
 
 	addClient(client: WsClient): void {
 		this.clients.set(client.id, client);
+	}
 
-		// Send current session states so the UI can show host status dots immediately
+	/** Build a STATE_SYNC payload with all current session and channel states. */
+	getStateSnapshot(): StateSyncMessage {
+		const sessions: StateSyncMessage["sessions"] = [];
 		for (const [hostId, state] of this.sessions) {
 			if (state.status !== "closed") {
-				client.send({
-					type: "SESSION_STATE",
-					sessionId: state.id,
-					hostId,
-					status: state.status,
-				} as SessionStateMessage);
+				sessions.push({ sessionId: state.id, hostId, status: state.status });
 			}
 		}
+		const channels: StateSyncMessage["channels"] = [];
+		for (const [channelId, ch] of this.channels) {
+			if (ch.status !== "dead") {
+				channels.push({
+					channelId,
+					sessionId: ch.sessionId,
+					status: ch.status,
+				});
+			}
+		}
+		return { type: "STATE_SYNC", sessions, channels };
 	}
 
 	removeClient(clientId: string): void {
@@ -838,16 +848,29 @@ export class SessionManager {
 	/**
 	 * Send SPAWN messages for every alive channel belonging to a host.
 	 * Extracted from _reAttachChannels and _warmRestartLocal to eliminate duplication.
+	 * The returned promise resolves once ALL SPAWN_OK/SPAWN_ERR responses (or timeouts) have fired.
 	 */
 	private _spawnChannelsForHost(
 		hostId: string,
 		agent: AgentConnection,
 		onSpawnOk: (channelId: string, ch: ChannelState) => void,
 		onSpawnErr: (channelId: string, ch: ChannelState) => void,
-	): void {
+	): Promise<void> {
+		let pending = 0;
+		let resolve: (() => void) | undefined;
+		const promise = new Promise<void>((r) => {
+			resolve = r;
+		});
+
+		const settle = (): void => {
+			pending--;
+			if (pending === 0) resolve?.();
+		};
+
 		for (const [channelId, ch] of this.channels.entries()) {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
 
+			pending++;
 			const requestId = generateId();
 			agent.send({
 				type: "SPAWN",
@@ -866,6 +889,7 @@ export class SessionManager {
 					`[session-manager] SPAWN timeout for channel ${channelId} (request ${requestId})`,
 				);
 				onSpawnErr(channelId, ch);
+				settle();
 			}, SPAWN_TIMEOUT_MS);
 
 			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
@@ -876,8 +900,14 @@ export class SessionManager {
 				} else {
 					onSpawnErr(channelId, ch);
 				}
+				settle();
 			});
 		}
+
+		// No channels to spawn — resolve immediately
+		if (pending === 0) resolve?.();
+
+		return promise;
 	}
 
 	/**
@@ -914,7 +944,7 @@ export class SessionManager {
 		this._updateSessionStatus(hostId, sessionId, "active");
 
 		// Re-spawn PTYs for each orphan channel, using the SAME channel ID
-		this._spawnChannelsForHost(
+		await this._spawnChannelsForHost(
 			hostId,
 			agent,
 			(channelId) => {

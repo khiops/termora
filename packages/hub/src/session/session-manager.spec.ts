@@ -205,28 +205,26 @@ describe("SessionManager", () => {
 		expect(() => sm.removeClient("c1")).not.toThrow();
 	});
 
-	it("addClient sends initial SESSION_STATE for active sessions", async () => {
+	it("getStateSnapshot returns current sessions and channels after SPAWN", async () => {
 		// First client spawns a channel → creates an active session
 		const c1Received: ProtocolMessage[] = [];
 		const client1 = makeClient("c1", c1Received);
 		sm.addClient(client1);
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
 
-		// Second client connects — should receive SESSION_STATE immediately
-		const c2Received: ProtocolMessage[] = [];
-		const client2 = makeClient("c2", c2Received);
-		sm.addClient(client2);
-
-		const sessionState = c2Received.find((m) => m.type === "SESSION_STATE");
-		expect(sessionState).toBeTruthy();
-		const ss = sessionState as unknown as {
-			sessionId: string;
-			hostId: string;
-			status: string;
-		};
-		expect(ss.status).toBe("active");
-		expect(ss.hostId).toBeTruthy();
-		expect(ss.sessionId).toBeTruthy();
+		// getStateSnapshot should include the active session and live channel
+		const snapshot = sm.getStateSnapshot();
+		expect(snapshot.type).toBe("STATE_SYNC");
+		expect(snapshot.sessions.length).toBeGreaterThan(0);
+		const session = snapshot.sessions[0]!;
+		expect(session.status).toBe("active");
+		expect(session.hostId).toBeTruthy();
+		expect(session.sessionId).toBeTruthy();
+		expect(snapshot.channels.length).toBeGreaterThan(0);
+		const channel = snapshot.channels[0]!;
+		expect(channel.status).toBe("live");
+		expect(channel.channelId).toBeTruthy();
+		expect(channel.sessionId).toBe(session.sessionId);
 	});
 
 	it("handleSpawn sends SPAWN_OK to the requesting client", async () => {
@@ -1218,8 +1216,11 @@ describe("SessionManager", () => {
 				});
 
 				// startup() triggers the first warm restart (count=1)
-				await sm.startup();
+				// _warmRestartLocal now awaits _spawnChannelsForHost, which needs
+				// setImmediate to fire SPAWN_OK. Start without blocking, flush, then await.
+				let p: Promise<void> = sm.startup();
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 
 				// Verify session is active after 1st restart
 				const sessionState = (
@@ -1236,18 +1237,20 @@ describe("SessionManager", () => {
 				};
 
 				// 2nd restart (count=2)
-				await smAny._warmRestartLocal(host.id, sessionId);
+				p = smAny._warmRestartLocal(host.id, sessionId);
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 				expect(sessionState?.status).toBe("active");
 
 				// 3rd restart (count=3)
-				await smAny._warmRestartLocal(host.id, sessionId);
+				p = smAny._warmRestartLocal(host.id, sessionId);
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 				expect(sessionState?.status).toBe("active");
 
 				// 4th restart (count=4 > 3) — should trigger _closeSession
+				// _closeSession is sync so no SPAWN is sent — await directly
 				await smAny._warmRestartLocal(host.id, sessionId);
-				await vi.advanceTimersByTimeAsync(0);
 
 				// Session should be closed
 				const sessions = (
@@ -1281,8 +1284,10 @@ describe("SessionManager", () => {
 				});
 
 				// startup() triggers 1st warm restart (count=1)
-				await sm.startup();
+				// _warmRestartLocal now awaits _spawnChannelsForHost — start, flush, await.
+				let p: Promise<void> = sm.startup();
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 
 				const smAny = sm as unknown as {
 					_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
@@ -1290,10 +1295,12 @@ describe("SessionManager", () => {
 				};
 
 				// 2nd and 3rd restarts (count=2, count=3)
-				await smAny._warmRestartLocal(host.id, sessionId);
+				p = smAny._warmRestartLocal(host.id, sessionId);
 				await vi.advanceTimersByTimeAsync(0);
-				await smAny._warmRestartLocal(host.id, sessionId);
+				await p;
+				p = smAny._warmRestartLocal(host.id, sessionId);
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 
 				expect(smAny.restartTracking.get(host.id)?.count).toBe(3);
 
@@ -1301,8 +1308,9 @@ describe("SessionManager", () => {
 				vi.advanceTimersByTime(61_000);
 
 				// 4th restart — but window has reset, so count becomes 1 again
-				await smAny._warmRestartLocal(host.id, sessionId);
+				p = smAny._warmRestartLocal(host.id, sessionId);
 				await vi.advanceTimersByTimeAsync(0);
+				await p;
 
 				expect(smAny.restartTracking.get(host.id)?.count).toBe(1);
 				// Session should still be active (not closed)
