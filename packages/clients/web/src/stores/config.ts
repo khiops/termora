@@ -65,7 +65,7 @@ export const useConfigStore = defineStore("config", () => {
 	const profile = ref<TerminalProfile>({ ...DEFAULT_PROFILE });
 	const fonts = ref<FontFamily[]>([]);
 	const loaded = ref(false);
-	const uiConfig = ref<UiConfig>({ onChannelDead: "close" });
+	const uiConfig = ref<UiConfig>({ onChannelDead: "readonly" });
 
 	/**
 	 * Load fonts from the hub (no auth needed).

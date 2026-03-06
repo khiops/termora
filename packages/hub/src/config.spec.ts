@@ -613,6 +613,6 @@ describe("GET /api/config/ui", () => {
 		const res = await server.inject({ method: "GET", url: "/api/config/ui" });
 		expect(res.statusCode).toBe(200);
 		const body = res.json<{ onChannelDead: string }>();
-		expect(body.onChannelDead).toBe("close");
+		expect(body.onChannelDead).toBe("readonly");
 	});
 });

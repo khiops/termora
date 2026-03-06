@@ -72,12 +72,12 @@ export function loadGcConfig(configDir: string): GcConfig {
 
 /** UI behavioral configuration (from [ui] in config.toml). */
 export interface UiConfig {
-	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "close". */
+	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
 	onChannelDead: "close" | "readonly";
 }
 
 export const DEFAULT_UI_CONFIG: UiConfig = {
-	onChannelDead: "close",
+	onChannelDead: "readonly",
 };
 
 /**

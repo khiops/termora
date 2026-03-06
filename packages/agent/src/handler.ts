@@ -166,6 +166,12 @@ export class AgentHandler {
 				clearTimeout(timer);
 				timer = null;
 			}
+			// Channel may have been destroyed while flush was pending
+			if (!this.ptyManager.has(channelId)) {
+				buffer = [];
+				bufferSize = 0;
+				return;
+			}
 
 			const data = Buffer.concat(buffer);
 			buffer = [];
@@ -182,6 +188,7 @@ export class AgentHandler {
 		};
 
 		this.ptyManager.onData(channelId, (rawData: string) => {
+			if (!this.ptyManager.has(channelId)) return;
 			// node-pty delivers UTF-8 string; re-encode to bytes
 			const chunk = Buffer.from(rawData);
 			buffer.push(chunk);

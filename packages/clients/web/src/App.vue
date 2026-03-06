@@ -125,9 +125,11 @@ watch(
 	async (hostId) => {
 		if (hostId === null) return;
 		await channelsStore.fetchChannels(hostId);
-		purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab);
-		// Auto-spawn if no live channels exist (all dead after hub restart, or first run).
-		// Opens a pending tab — TerminalPane handles the actual SPAWN with correct dimensions.
+		if (configStore.uiConfig.onChannelDead === "close") {
+			purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab);
+		}
+		// Auto-spawn only if no live channels AND no tabs open
+		// (in "readonly" mode, dead channel tabs are kept so tabs may still exist)
 		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== "dead");
 		if (!hasAliveChannels && layout.tabs.value.length === 0) {
 			openPendingTab(hostId);
