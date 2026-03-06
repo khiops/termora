@@ -39,6 +39,50 @@ function createMockDaemon(socketPath: string): Promise<{
 	});
 }
 
+/**
+ * Create a mock agent daemon that sends AGENT_CHANNEL_STATE messages
+ * for each provided channel before CHANNEL_STATE_END.
+ */
+function createMockDaemonWithChannels(
+	socketPath: string,
+	channels: Array<{ channelId: string; title: string; pid: number; alive: boolean }>,
+): Promise<{
+	server: net.Server;
+	connections: net.Socket[];
+}> {
+	return new Promise((resolve) => {
+		const connections: net.Socket[] = [];
+
+		const server = net.createServer((socket) => {
+			connections.push(socket);
+
+			const hello = encodeFrame({
+				type: "HELLO",
+				version: PROTOCOL_VERSION,
+				agentVersion: "0.1.0",
+				capabilities: ["multiplex", "resize", "snapshot"],
+			});
+			socket.write(Buffer.from(hello));
+
+			for (const ch of channels) {
+				const stateMsg = encodeFrame({
+					type: "AGENT_CHANNEL_STATE",
+					channelId: ch.channelId,
+					title: ch.title,
+					pid: ch.pid,
+					alive: ch.alive,
+				});
+				socket.write(Buffer.from(stateMsg));
+			}
+
+			const end = encodeFrame({ type: "CHANNEL_STATE_END" });
+			socket.write(Buffer.from(end));
+		});
+
+		server.listen(socketPath, () => resolve({ server, connections }));
+	});
+}
+
 /** Close a net.Server and wait for the "close" event. */
 function closeServer(server: net.Server): Promise<void> {
 	return new Promise((resolve) => {
@@ -274,5 +318,93 @@ describe("NextermAgent", () => {
 			},
 			TEST_TIMEOUT,
 		);
+	});
+
+	describe("waitForChannelState", () => {
+		describe("Given agent sends AGENT_CHANNEL_STATE + CHANNEL_STATE_END", () => {
+			it(
+				"resolves with the channel state list",
+				async () => {
+					const channels = [
+						{ channelId: "ch-001", title: "Terminal", pid: 1234, alive: true },
+						{ channelId: "ch-002", title: "Build", pid: 5678, alive: true },
+						{ channelId: "ch-003", title: "Logs", pid: 9999, alive: false },
+					];
+
+					daemon = await createMockDaemonWithChannels(socketPath, channels);
+
+					agent = await NextermAgent.connectLocal(socketPath);
+					const states = await agent.waitForChannelState();
+
+					expect(states).toHaveLength(3);
+
+					expect(states[0]).toMatchObject({
+						type: "AGENT_CHANNEL_STATE",
+						channelId: "ch-001",
+						title: "Terminal",
+						pid: 1234,
+						alive: true,
+					});
+					expect(states[1]).toMatchObject({
+						type: "AGENT_CHANNEL_STATE",
+						channelId: "ch-002",
+						title: "Build",
+						pid: 5678,
+						alive: true,
+					});
+					expect(states[2]).toMatchObject({
+						type: "AGENT_CHANNEL_STATE",
+						channelId: "ch-003",
+						title: "Logs",
+						pid: 9999,
+						alive: false,
+					});
+				},
+				TEST_TIMEOUT,
+			);
+		});
+
+		describe("Given no channels exist", () => {
+			it(
+				"resolves with empty array when only CHANNEL_STATE_END received",
+				async () => {
+					daemon = await createMockDaemon(socketPath);
+
+					agent = await NextermAgent.connectLocal(socketPath);
+					const states = await agent.waitForChannelState();
+
+					expect(states).toEqual([]);
+				},
+				TEST_TIMEOUT,
+			);
+		});
+
+		describe("Given CHANNEL_STATE_END never arrives", () => {
+			it(
+				"rejects with timeout error",
+				async () => {
+					// Daemon that sends HELLO but no CHANNEL_STATE_END
+					await new Promise<void>((resolve) => {
+						const server = net.createServer((socket) => {
+							const hello = encodeFrame({
+								type: "HELLO",
+								version: PROTOCOL_VERSION,
+								agentVersion: "0.1.0",
+								capabilities: ["multiplex", "resize", "snapshot"],
+							});
+							socket.write(Buffer.from(hello));
+							// Intentionally no CHANNEL_STATE_END
+						});
+						daemon = { server, connections: [] };
+						server.listen(socketPath, () => resolve());
+					});
+
+					agent = await NextermAgent.connectLocal(socketPath);
+
+					await expect(agent.waitForChannelState(200)).rejects.toThrow("CHANNEL_STATE timeout");
+				},
+				TEST_TIMEOUT,
+			);
+		});
 	});
 });
