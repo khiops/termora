@@ -165,24 +165,34 @@ watch(
 );
 
 /**
- * React to channels transitioning to "dead" in real-time.
- * - "close" mode: immediately close the tab.
- * - "readonly" mode: do nothing — the write-lock mechanism already
- *   prevents input and TerminalPane shows a "Closed" badge.
+ * React to channels transitioning to "dead" or being removed.
+ * - "close" mode: immediately close the tab when a channel dies.
+ * - "readonly" mode: keep the tab (Closed badge, read-only content).
+ * - Explicit removal (DELETE): always close the tab regardless of mode.
  */
 watch(
 	() => channelsStore.channels.map((c) => ({ id: c.id, status: c.status })),
 	(current, previous) => {
 		if (!previous) return;
-		for (const ch of current) {
-			if (ch.status !== "dead") continue;
-			const prev = previous.find((p) => p.id === ch.id);
-			if (prev && prev.status !== "dead") {
-				// Channel just died
-				if (configStore.uiConfig.onChannelDead === "close") {
+
+		// Close tabs for channels that died (only in "close" mode)
+		if (configStore.uiConfig.onChannelDead === "close") {
+			for (const ch of current) {
+				if (ch.status !== "dead") continue;
+				const prev = previous.find((p) => p.id === ch.id);
+				if (prev && prev.status !== "dead") {
 					const idx = layout.tabs.value.findIndex((t) => t.channelId === ch.id);
 					if (idx !== -1) layout.closeTab(idx);
 				}
+			}
+		}
+
+		// Always close tabs for channels removed from the list (explicit DELETE)
+		const currentIds = new Set(current.map((c) => c.id));
+		for (const prev of previous) {
+			if (!currentIds.has(prev.id)) {
+				const idx = layout.tabs.value.findIndex((t) => t.channelId === prev.id);
+				if (idx !== -1) layout.closeTab(idx);
 			}
 		}
 	},
