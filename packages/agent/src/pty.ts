@@ -105,6 +105,15 @@ export class PtyManager {
 		this.channels.delete(channelId);
 	}
 
+	/** Return metadata for all alive channels. */
+	getChannels(): { id: string; pid: number; title: string }[] {
+		return Array.from(this.channels.values()).map((ch) => ({
+			id: ch.id,
+			pid: ch.pty.pid,
+			title: ch.pty.process,
+		}));
+	}
+
 	/** Return true when the given channel exists. */
 	has(channelId: string): boolean {
 		return this.channels.has(channelId);

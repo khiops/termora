@@ -36,6 +36,23 @@ else
 	echo "No PID file found — cleaning up by port."
 fi
 
+# ── Stop agent daemon (UDS socket) ────────────────────────────────────────────
+AGENT_SOCK="${XDG_RUNTIME_DIR:-/tmp/nexterm-$(id -u)}/nexterm/agent.sock"
+if [ -S "$AGENT_SOCK" ]; then
+	# Find the process listening on the socket
+	AGENT_PID=$(lsof -U 2>/dev/null | grep "$AGENT_SOCK" | awk '{print $2}' | sort -u | head -1 || true)
+	if [ -n "$AGENT_PID" ]; then
+		echo "Stopping agent daemon (PID $AGENT_PID)…"
+		kill "$AGENT_PID" 2>/dev/null || true
+		sleep 0.5
+		kill -9 "$AGENT_PID" 2>/dev/null || true
+	fi
+	rm -f "$AGENT_SOCK"
+	echo "✓ Agent socket removed."
+else
+	echo "No agent daemon socket found."
+fi
+
 # ── Final cleanup: free both ports if still held ─────────────────────────────
 kill_port 4100
 kill_port 5173

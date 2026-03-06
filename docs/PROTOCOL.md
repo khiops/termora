@@ -48,11 +48,11 @@ ssh user@host "nexterm-agent --stdio" | npx nexterm decode --hex
 
 ## 2. Transport Layers
 
-### 2.1 Hub ↔ Agent (SSH stdio)
+### 2.1 Hub ↔ Agent (stdio — SSH or local child process)
 
 ```
-Hub ──── ssh2 session ──── Agent
-             │                │
+Hub ──── ssh2 session / child_process ──── Agent
+             │                                │
              │ stdin  ◄────── framed messages ──────► stdout
              │                (MessagePack)
              │ stderr ──────  log output (text, not framed)
@@ -61,6 +61,22 @@ Hub ──── ssh2 session ──── Agent
 - Agent reads frames from stdin, writes frames to stdout
 - stderr reserved for log output (not parsed by hub)
 - SSH close = agent gone → hub enters reconnect loop
+
+### 2.1b Hub ↔ Agent (UDS — daemon mode)
+
+```
+Hub ──── Unix domain socket / named pipe ──── Agent (daemon)
+                    │                              │
+                    │ bidirectional framed messages │
+                    │ (MessagePack, same framing)   │
+```
+
+- Agent runs as a standalone daemon: `nexterm-agent --daemon --socket <path>`
+- Hub connects to the UDS via `connectOrLaunch(socketPath, config, binaryPath)`
+- Same length-prefixed MessagePack framing as stdio
+- Connection displacement: new hub connection immediately replaces the previous one (last-writer-wins)
+- Agent buffers output while no hub is connected (`OutputBuffer` ring buffer)
+- On reconnect: agent sends HELLO, then enumerates channel state (see section 3.12)
 
 ### 2.2 Hub ↔ UI (WebSocket)
 
@@ -238,6 +254,44 @@ Interval: 15s. 3 consecutive misses (45s) → agent unresponsive.
   channel_id?: string
 }
 ```
+
+### 3.12 AGENT_CHANNEL_STATE / CHANNEL_STATE_END (Daemon Reconnect)
+
+Sent by the agent to the hub immediately after HELLO when reconnecting to a daemon that has existing channels. The agent enumerates all known channels (alive and dead), then signals the end of enumeration.
+
+```typescript
+// Agent → Hub (one per channel)
+{
+  type: "AGENT_CHANNEL_STATE",
+  channel_id: string,
+  title: string,
+  pid: number,           // OS process ID of the PTY (0 if dead)
+  alive: boolean         // true = PTY still running, false = exited
+}
+
+// Agent → Hub (signals end of enumeration)
+{
+  type: "CHANNEL_STATE_END"
+}
+```
+
+**Reconnect handshake flow (daemon mode):**
+```
+Hub connects to daemon UDS
+  │
+  Agent → Hub: HELLO { protocol_version, capabilities, ... }
+  Agent → Hub: AGENT_CHANNEL_STATE { channel_id: "ch-1", title: "bash", pid: 4521, alive: true }
+  Agent → Hub: AGENT_CHANNEL_STATE { channel_id: "ch-2", title: "vim", pid: 0, alive: false }
+  Agent → Hub: CHANNEL_STATE_END
+  │
+  Hub: reconcileChannelState()
+    ├─ ch-1 (alive) → adopt into session, re-attach, resume OUTPUT
+    └─ ch-2 (dead) → mark dead in DB, notify UI CHANNEL_STATE { status: "dead" }
+  │
+  Normal operation (SPAWN, INPUT, OUTPUT, etc.)
+```
+
+On a fresh daemon start (no prior channels), the agent sends HELLO followed immediately by CHANNEL_STATE_END (zero AGENT_CHANNEL_STATE messages).
 
 ## 4. Message Types — Hub ↔ UI (WS)
 
@@ -438,7 +492,23 @@ Hub                        Agent
  │  (resume OUTPUT)           │
 ```
 
-### 5.4 Write-Lock Transfer
+### 5.4 Daemon Reconnect (Hub Restart)
+
+```
+Hub                        Agent (daemon, has channels)
+ │── connect to UDS ───────►│
+ │◄── HELLO ─────────────────│
+ │◄── AGENT_CHANNEL_STATE ───│ (ch-1, alive)
+ │◄── AGENT_CHANNEL_STATE ───│ (ch-2, alive)
+ │◄── AGENT_CHANNEL_STATE ───│ (ch-3, dead)
+ │◄── CHANNEL_STATE_END ─────│
+ │  reconcile: adopt ch-1,2; mark ch-3 dead
+ │── SPAWN (new channel) ───►│
+ │◄── SPAWN_OK ──────────────│
+ │  (normal operation)        │
+```
+
+### 5.5 Write-Lock Transfer
 
 ```
 Client A (WRITER)           Hub                Client B (READER)

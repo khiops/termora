@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { FrameReader, type ProtocolMessage } from "@nexterm/shared";
+import { FrameReader, PROTOCOL_VERSION, type ProtocolMessage } from "@nexterm/shared";
 
 /**
  * Abstract base class for communicating with a nexterm agent (local or remote SSH).
@@ -28,6 +28,16 @@ export abstract class AgentConnection extends EventEmitter {
 		const messages = this.reader.push(data);
 		for (const msg of messages) {
 			if (msg.type === "HELLO" && !this.ready) {
+				if (msg.version !== PROTOCOL_VERSION) {
+					this.emit(
+						"error",
+						new Error(
+							`Protocol version mismatch: expected ${PROTOCOL_VERSION}, got ${msg.version}`,
+						),
+					);
+					this.close();
+					return;
+				}
 				this.ready = true;
 				this.emit("ready", msg);
 			}

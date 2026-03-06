@@ -4,6 +4,28 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## AGENT-DAEMON — Standalone agent daemon with UDS/named pipe transport (2026-03-06)
+
+- Node.js net module for cross-platform socket transport (UDS + named pipes, same API)
+- Socket path per-user: $XDG_RUNTIME_DIR/nexterm/agent.sock (Linux) / \\.\pipe\nexterm-agent-<username> (Windows)
+- Socket probing for agent discovery (net.connect then close) — no PID file for liveness
+- Hub auto-starts agent as detached process (spawn + unref) if socket not found
+- --daemon (new, socket) / --stdio (unchanged, kept for SshAgent until Phase 2)
+- Same MessagePack framing over socket as over stdio — only transport layer changes
+- AGENT_CHANNEL_STATE + CHANNEL_STATE_END messages for reconnect reconciliation
+- Output buffering: configurable per-channel cap (1MB default) + global cap (20MB default), ring buffer
+- NextermAgent: single concrete class replacing AgentConnection abstract, constructor(Duplex), factory methods
+- LocalAgent + SshAgent untouched — used until Phase 2 replaces SshAgent with SSH tunnel + NextermAgent
+- Last-connection-wins: new hub connection displaces previous
+- Warm restart (agent died) vs reconnect (hub died) — distinct documented flows
+- Agent daemon logs to <stateDir>/agent.log when detached
+- EACCES on probe: don't unlink, throw (different user's socket)
+- [agent] section in config.toml for buffer caps, socket_path override, log_level
+- Tests use real UDS in temp dirs, NOT stdio mocks
+- Phase 2 = remote agent daemon via SSH tunnel (NextermAgent.connectTunnel) — separate story
+
+---
+
 ## channel-delete-flow — DELETE endpoint + dead channel UI + tab scroll (2026-03-06)
 
 - DELETE /api/channels/:id: sends DESTROY to agent, marks dead in DB, broadcasts CHANNEL_STATE

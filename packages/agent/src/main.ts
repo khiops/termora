@@ -1,8 +1,82 @@
-import { encodeFrame } from "@nexterm/shared";
-import type { ProtocolMessage } from "@nexterm/shared";
+import { createWriteStream } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { encodeFrame, getSocketPath, parseAgentConfig } from "@nexterm/shared";
+import type { AgentConfig, ProtocolMessage } from "@nexterm/shared";
+import { DaemonServer } from "./daemon.js";
 import { AgentHandler } from "./handler.js";
 
-function main(): void {
+function parseArgs(): {
+	mode: "stdio" | "daemon";
+	config: AgentConfig;
+} {
+	const args = process.argv.slice(2);
+	const mode = args.includes("--daemon") ? "daemon" : "stdio";
+
+	const socketIdx = args.indexOf("--socket");
+	const socketPath = socketIdx >= 0 ? args[socketIdx + 1] : undefined;
+
+	const bpcIdx = args.indexOf("--buffer-per-channel");
+	const bgIdx = args.indexOf("--buffer-global");
+
+	const config = parseAgentConfig({
+		...(socketPath !== undefined && { socket_path: socketPath }),
+		...(bpcIdx >= 0 && args[bpcIdx + 1] !== undefined
+			? { buffer_per_channel: Number(args[bpcIdx + 1]) }
+			: {}),
+		...(bgIdx >= 0 && args[bgIdx + 1] !== undefined
+			? { buffer_global: Number(args[bgIdx + 1]) }
+			: {}),
+	});
+
+	return { mode, config };
+}
+
+function getAgentStateDir(): string {
+	if (process.platform === "win32") {
+		return join(process.env.LOCALAPPDATA ?? "", "nexterm");
+	}
+	return join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+}
+
+function setupDaemonLogging(): void {
+	const stateDir = getAgentStateDir();
+	mkdirSync(stateDir, { recursive: true });
+	const logPath = join(stateDir, "agent.log");
+	const logStream = createWriteStream(logPath, { flags: "a" });
+
+	const write = (data: string): void => {
+		logStream.write(`${new Date().toISOString()} ${data}\n`);
+	};
+
+	console.log = (...args: unknown[]) => write(args.join(" "));
+	console.error = (...args: unknown[]) => write(`[ERROR] ${args.join(" ")}`);
+	console.warn = (...args: unknown[]) => write(`[WARN] ${args.join(" ")}`);
+}
+
+function startDaemon(config: AgentConfig): void {
+	setupDaemonLogging();
+
+	const socketPath = getSocketPath(config.socketPath);
+	const server = new DaemonServer(socketPath, config);
+
+	server.listen().catch((err) => {
+		console.error("[nexterm-agent] failed to start daemon:", err);
+		process.exit(1);
+	});
+
+	const shutdown = (): void => {
+		server
+			.shutdown()
+			.then(() => process.exit(0))
+			.catch(() => process.exit(1));
+	};
+	process.on("SIGTERM", shutdown);
+	process.on("SIGINT", shutdown);
+}
+
+function startStdio(): void {
 	// The agent speaks only via stdin/stdout (length-prefixed MessagePack).
 	// All diagnostic output goes to stderr so it never corrupts the frame stream.
 
@@ -48,6 +122,17 @@ function main(): void {
 		handler.shutdown();
 		process.exit(0);
 	});
+}
+
+function main(): void {
+	const { mode, config } = parseArgs();
+
+	if (mode === "daemon") {
+		startDaemon(config);
+		return;
+	}
+
+	startStdio();
 }
 
 main();
