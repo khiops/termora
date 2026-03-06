@@ -326,7 +326,11 @@ export const useChannelsStore = defineStore("channels", () => {
 		channels.value = channels.value.filter((c) => c.id !== channelId);
 		if (selectedChannelId.value === channelId) {
 			const fallback = channels.value.find((c) => c.status !== "dead");
-			selectedChannelId.value = fallback?.id ?? null;
+			if (fallback) {
+				selectChannel(fallback.id);
+			} else {
+				selectedChannelId.value = null;
+			}
 		}
 	}
 

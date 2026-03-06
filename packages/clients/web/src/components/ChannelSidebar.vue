@@ -60,7 +60,7 @@
 							:is-selected="ch.id === channelsStore.selectedChannelId"
 							:is-unread="channelsStore.unreadChannels.has(ch.id)"
 							:available-groups="otherGroups(group.id)"
-							@select="channelsStore.selectChannel(ch.id)"
+							@select="emit('select-channel', ch.id)"
 							@close-channel="onCloseChannel"
 							@move-to-group="channelsStore.moveChannelToGroup"
 							@rename="onRenameChannel"
@@ -85,7 +85,7 @@
 						:is-selected="ch.id === channelsStore.selectedChannelId"
 						:is-unread="channelsStore.unreadChannels.has(ch.id)"
 						:available-groups="channelsStore.groups.filter((g) => g.hostId === activeHostId || g.hostId === '')"
-						@select="channelsStore.selectChannel(ch.id)"
+						@select="emit('select-channel', ch.id)"
 						@close-channel="onCloseChannel"
 						@move-to-group="channelsStore.moveChannelToGroup"
 						@rename="onRenameChannel"
@@ -114,6 +114,10 @@ import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
 import ChannelGroupHeader from "./ChannelGroupHeader.vue";
 import ChannelItem from "./ChannelItem.vue";
+
+const emit = defineEmits<{
+	"select-channel": [channelId: string];
+}>();
 
 const channelsStore = useChannelsStore();
 const hostsStore = useHostsStore();

@@ -15,7 +15,7 @@
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout">
 			<HostRail class="host-rail" />
-			<ChannelSidebar class="channel-sidebar" />
+			<ChannelSidebar class="channel-sidebar" @select-channel="onSelectChannel" />
 
 			<!-- Terminal main: tab bar + recursive pane layout -->
 			<div class="terminal-main">
@@ -139,17 +139,25 @@ watch(
 );
 
 /**
- * When a channel is selected in the sidebar, open (or switch to) its tab.
+ * When a channel is selected programmatically (e.g. after removeChannel
+ * fallback or fetchChannels auto-select), open its tab.
  */
 watch(
 	() => channelsStore.selectedChannelId,
 	(channelId) => {
 		if (channelId === null) return;
-		// Allow dead channels — the hub will transparently respawn them on ATTACH.
-		// Unknown channels (spawnChannel selects before fetchChannels resolves) also pass through.
 		layout.openTab(channelId, layout.getTabLabel(channelId));
 	},
 );
+
+/**
+ * Sidebar click handler. Always opens a tab — even when re-clicking the
+ * same channel (the watcher above only fires on value *changes*).
+ */
+function onSelectChannel(channelId: string): void {
+	channelsStore.selectChannel(channelId);
+	layout.openTab(channelId, layout.getTabLabel(channelId));
+}
 
 /**
  * Reverse sync: when the active tab changes (e.g. user clicks a tab),
