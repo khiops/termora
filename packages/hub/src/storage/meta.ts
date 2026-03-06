@@ -1,5 +1,6 @@
 import type {
 	Channel,
+	ChannelGroup,
 	ChannelStatus,
 	Host,
 	Session,
@@ -86,6 +87,15 @@ interface ChannelRow {
 	updated_at: string;
 }
 
+interface GroupRow {
+	id: string;
+	host_id: string;
+	name: string;
+	sort_order: number;
+	collapsed: number;
+	created_at: string;
+}
+
 export interface PairingCodeRow {
 	id: string;
 	code: string;
@@ -146,6 +156,17 @@ function rowToChannel(row: ChannelRow): Channel {
 	if (row.exit_code != null) ch.exitCode = row.exit_code;
 	if (row.profile_json != null) ch.profileJson = row.profile_json;
 	return ch;
+}
+
+function rowToGroup(row: GroupRow): ChannelGroup {
+	return {
+		id: row.id,
+		hostId: row.host_id,
+		name: row.name,
+		sortOrder: row.sort_order,
+		collapsed: row.collapsed !== 0,
+		createdAt: row.created_at,
+	};
 }
 
 export class MetaDAL {
@@ -251,6 +272,57 @@ export class MetaDAL {
 
 	deleteHost(id: string): boolean {
 		const result = this.db.prepare("DELETE FROM hosts WHERE id = ?").run(id);
+		return result.changes > 0;
+	}
+
+	// ─── Groups ─────────────────────────────────────────────────────────────
+
+	listGroups(hostId: string): ChannelGroup[] {
+		const rows = this.db
+			.prepare("SELECT * FROM channel_groups WHERE host_id = ? ORDER BY sort_order ASC")
+			.all(hostId) as GroupRow[];
+		return rows.map(rowToGroup);
+	}
+
+	createGroup(hostId: string, name: string): ChannelGroup {
+		const now = new Date().toISOString();
+		const id = generateId();
+
+		const maxRow = this.db
+			.prepare("SELECT MAX(sort_order) AS max_sort FROM channel_groups WHERE host_id = ?")
+			.get(hostId) as { max_sort: number | null } | undefined;
+		const sortOrder = (maxRow?.max_sort ?? -1) + 1;
+
+		this.db
+			.prepare(
+				`INSERT INTO channel_groups (id, host_id, name, sort_order, collapsed, created_at)
+				 VALUES (?, ?, ?, ?, 0, ?)`,
+			)
+			.run(id, hostId, name, sortOrder, now);
+
+		const row = this.db.prepare("SELECT * FROM channel_groups WHERE id = ?").get(id) as GroupRow;
+		return rowToGroup(row);
+	}
+
+	renameGroup(id: string, name: string): boolean {
+		const result = this.db.prepare("UPDATE channel_groups SET name = ? WHERE id = ?").run(name, id);
+		return result.changes > 0;
+	}
+
+	deleteGroup(id: string): boolean {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE channels SET group_id = NULL, updated_at = ? WHERE group_id = ?")
+			.run(now, id);
+		const result = this.db.prepare("DELETE FROM channel_groups WHERE id = ?").run(id);
+		return result.changes > 0;
+	}
+
+	updateChannelGroupId(channelId: string, groupId: string | null): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET group_id = ?, updated_at = ? WHERE id = ?")
+			.run(groupId, now, channelId);
 		return result.changes > 0;
 	}
 

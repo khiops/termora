@@ -41,16 +41,20 @@ export function registerChannelRoutes(
 	});
 
 	// PATCH /api/channels/:id
-	server.patch<{ Params: { id: string }; Body: { title: string | null } }>(
+	server.patch<{
+		Params: { id: string };
+		Body: { title?: string | null; group_id?: string | null };
+	}>(
 		"/api/channels/:id",
 		{
 			schema: {
 				body: {
 					type: "object",
-					required: ["title"],
 					properties: {
 						title: { type: ["string", "null"], minLength: 1, maxLength: 128 },
+						group_id: { type: ["string", "null"] },
 					},
+					anyOf: [{ required: ["title"] }, { required: ["group_id"] }],
 					additionalProperties: false,
 				},
 				params: {
@@ -64,15 +68,24 @@ export function registerChannelRoutes(
 		},
 		async (request, reply) => {
 			const { id } = request.params;
-			const { title } = request.body;
+			const { title, group_id } = request.body;
 
-			// Schema handles type, required, minLength, maxLength, and additionalProperties.
+			// Schema handles type, minLength, maxLength, and additionalProperties.
 			// Whitespace-only titles still need a manual check (schema can't validate trimmed length).
-			if (title !== null && title.trim().length === 0) {
+			if (title !== undefined && title !== null && title.trim().length === 0) {
 				return reply.code(400).send({
 					error: {
 						code: "VALIDATION_ERROR",
 						message: "title must be a string of 1\u2013128 characters, or null",
+					},
+				});
+			}
+
+			if (group_id !== undefined && group_id !== null && !isValidUlid(group_id)) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "group_id must be a valid ULID or null",
 					},
 				});
 			}
@@ -84,7 +97,13 @@ export function registerChannelRoutes(
 				});
 			}
 
-			metaDal.updateChannelTitle(id, title?.trim() ?? null);
+			if (title !== undefined) {
+				metaDal.updateChannelTitle(id, title?.trim() ?? null);
+			}
+			if (group_id !== undefined) {
+				metaDal.updateChannelGroupId(id, group_id);
+			}
+
 			const updated = metaDal.getChannel(id);
 			return reply.code(200).send(toSnakeCase(updated));
 		},

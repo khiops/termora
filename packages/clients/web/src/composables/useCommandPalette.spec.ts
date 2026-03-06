@@ -105,17 +105,25 @@ describe("useCommandPalette", () => {
 			channelsStore.channels = [
 				{
 					id: "c1",
-					hostId: "h1",
+					sessionId: "s1",
+					shell: "/bin/bash",
+					cols: 80,
+					rows: 24,
 					status: "live",
 					title: "Build Runner",
 					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
 				},
 				{
 					id: "c2",
-					hostId: "h1",
+					sessionId: "s1",
+					shell: "/bin/bash",
+					cols: 80,
+					rows: 24,
 					status: "live",
 					title: "Log Tail",
 					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
 				},
 			];
 

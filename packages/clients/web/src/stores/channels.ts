@@ -5,27 +5,64 @@ import { computed, nextTick, ref } from "vue";
 import { useAuthStore } from "./auth.js";
 import { useSessionStore } from "./session.js";
 
-const GROUPS_KEY = "nexterm:channel-groups";
+const COLLAPSED_KEY = "nexterm:collapsed-groups";
 
-function loadGroupsFromStorage(): ChannelGroup[] {
+function loadCollapsedMap(): Record<string, boolean> {
 	try {
-		const raw = localStorage.getItem(GROUPS_KEY);
-		if (raw === null) return [];
-		return JSON.parse(raw) as ChannelGroup[];
+		const raw = localStorage.getItem(COLLAPSED_KEY);
+		if (raw === null) return {};
+		return JSON.parse(raw) as Record<string, boolean>;
 	} catch {
-		return [];
+		return {};
 	}
 }
 
-function saveGroupsToStorage(groups: ChannelGroup[]): void {
-	localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+function saveCollapsedMap(map: Record<string, boolean>): void {
+	localStorage.setItem(COLLAPSED_KEY, JSON.stringify(map));
+}
+
+/** Convert a snake_case channel row from the API to a camelCase Channel. */
+function apiRowToChannel(row: Record<string, unknown>): Channel {
+	const ch: Channel = {
+		id: row.id as string,
+		sessionId: row.session_id as string,
+		shell: row.shell as string,
+		cols: row.cols as number,
+		rows: row.rows as number,
+		status: row.status as Channel["status"],
+		createdAt: row.created_at as string,
+		updatedAt: row.updated_at as string,
+	};
+	if (row.group_id != null) ch.groupId = row.group_id as string;
+	if (row.title != null) ch.title = row.title as string;
+	if (row.cwd != null) ch.cwd = row.cwd as string;
+	if (row.env_json != null) ch.envJson = row.env_json as string;
+	if (row.exit_code != null) ch.exitCode = row.exit_code as number;
+	if (row.profile_json != null) ch.profileJson = row.profile_json as string;
+	return ch;
+}
+
+/** Convert a snake_case group row from the API to a camelCase ChannelGroup. */
+function apiGroupToChannelGroup(
+	row: Record<string, unknown>,
+	collapsedMap: Record<string, boolean>,
+): ChannelGroup {
+	return {
+		id: row.id as string,
+		hostId: row.host_id as string,
+		name: row.name as string,
+		sortOrder: row.sort_order as number,
+		collapsed: collapsedMap[row.id as string] ?? false,
+		createdAt: row.created_at as string,
+	};
 }
 
 /**
  * Channel store — manages channel list, groups, selection, and unread state.
  *
- * Groups are persisted to localStorage (REST endpoint for groups is a future
- * enhancement per the spec). Channels are fetched from GET /api/channels.
+ * Groups are fetched from / persisted via the REST API (GET/POST/PATCH/DELETE
+ * /api/groups). The `collapsed` state is UI-only and stored in localStorage.
+ * Channels are fetched from GET /api/channels.
  *
  * CHANNEL_STATE WebSocket messages update channel status in real time.
  */
@@ -33,7 +70,7 @@ export const useChannelsStore = defineStore("channels", () => {
 	const authStore = useAuthStore();
 
 	const channels = ref<Channel[]>([]);
-	const groups = ref<ChannelGroup[]>(loadGroupsFromStorage());
+	const groups = ref<ChannelGroup[]>([]);
 	const selectedChannelId = ref<string | null>(null);
 	const loading = ref(false);
 	const error = ref<string | null>(null);
@@ -71,6 +108,23 @@ export const useChannelsStore = defineStore("channels", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// REST: fetch groups for a host
+	// -------------------------------------------------------------------------
+
+	async function fetchGroups(hostId: string): Promise<void> {
+		if (authStore.token === null) return;
+		const res = await fetch(`/api/groups?host_id=${encodeURIComponent(hostId)}`, {
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) {
+			throw new Error(`GET /api/groups failed: ${res.status}`);
+		}
+		const rows = (await res.json()) as Record<string, unknown>[];
+		const collapsedMap = loadCollapsedMap();
+		groups.value = rows.map((r) => apiGroupToChannelGroup(r, collapsedMap));
+	}
+
+	// -------------------------------------------------------------------------
 	// REST: fetch channels for a host
 	// -------------------------------------------------------------------------
 
@@ -80,13 +134,17 @@ export const useChannelsStore = defineStore("channels", () => {
 		error.value = null;
 		activeHostId.value = hostId;
 		try {
-			const res = await fetch(`/api/channels?host_id=${encodeURIComponent(hostId)}`, {
-				headers: { Authorization: `Bearer ${authStore.token}` },
-			});
-			if (!res.ok) {
-				throw new Error(`GET /api/channels failed: ${res.status}`);
+			const [channelsRes] = await Promise.all([
+				fetch(`/api/channels?host_id=${encodeURIComponent(hostId)}`, {
+					headers: { Authorization: `Bearer ${authStore.token}` },
+				}),
+				fetchGroups(hostId),
+			]);
+			if (!channelsRes.ok) {
+				throw new Error(`GET /api/channels failed: ${channelsRes.status}`);
 			}
-			const data = (await res.json()) as Channel[];
+			const rows = (await channelsRes.json()) as Record<string, unknown>[];
+			const data = rows.map(apiRowToChannel);
 			channels.value = data;
 			// Clear selection if the previously selected channel is no longer
 			// present (e.g. host switched)
@@ -253,50 +311,88 @@ export const useChannelsStore = defineStore("channels", () => {
 	}
 
 	// -------------------------------------------------------------------------
-	// Group management (localStorage-persisted)
+	// Group management (REST API + localStorage for collapsed state)
 	// -------------------------------------------------------------------------
 
-	function addGroup(name: string): ChannelGroup {
-		const now = new Date().toISOString();
-		const group: ChannelGroup = {
-			id: generateId(),
-			hostId: activeHostId.value ?? "",
-			name,
-			sortOrder: groups.value.length,
-			collapsed: false,
-			createdAt: now,
-		};
-		const next = [...groups.value, group];
-		groups.value = next;
-		saveGroupsToStorage(next);
+	async function addGroup(name: string): Promise<ChannelGroup> {
+		if (authStore.token === null) throw new Error("Not authenticated");
+		const hostId = activeHostId.value;
+		if (hostId === null) throw new Error("No active host");
+
+		const res = await fetch("/api/groups", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${authStore.token}`,
+			},
+			body: JSON.stringify({ host_id: hostId, name }),
+		});
+		if (!res.ok) throw new Error(`POST /api/groups failed: ${res.status}`);
+
+		const row = (await res.json()) as Record<string, unknown>;
+		const collapsedMap = loadCollapsedMap();
+		const group = apiGroupToChannelGroup(row, collapsedMap);
+		groups.value = [...groups.value, group];
 		return group;
 	}
 
-	function removeGroup(groupId: string): void {
-		// Move channels in this group to ungrouped by omitting the groupId key
+	async function removeGroup(groupId: string): Promise<void> {
+		if (authStore.token === null) return;
+
+		await fetch(`/api/groups/${groupId}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+
+		// Update local channels — clear groupId for channels in the deleted group
 		channels.value = channels.value.map((ch) => {
 			if (ch.groupId !== groupId) return ch;
 			// eslint-disable-next-line @typescript-eslint/no-unused-vars
 			const { groupId: _removed, ...rest } = ch;
 			return rest as Channel;
 		});
-		const next = groups.value.filter((g) => g.id !== groupId);
-		groups.value = next;
-		saveGroupsToStorage(next);
+
+		// Remove group locally and clean up collapsed state
+		groups.value = groups.value.filter((g) => g.id !== groupId);
+		const collapsedMap = loadCollapsedMap();
+		delete collapsedMap[groupId];
+		saveCollapsedMap(collapsedMap);
 	}
 
-	function renameGroup(groupId: string, name: string): void {
-		const next = groups.value.map((g) => (g.id === groupId ? { ...g, name } : g));
-		groups.value = next;
-		saveGroupsToStorage(next);
+	async function renameGroup(groupId: string, name: string): Promise<void> {
+		if (authStore.token === null) return;
+
+		// Optimistic update
+		const oldGroups = groups.value;
+		groups.value = groups.value.map((g) => (g.id === groupId ? { ...g, name } : g));
+
+		try {
+			const res = await fetch(`/api/groups/${groupId}`, {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token}`,
+				},
+				body: JSON.stringify({ name }),
+			});
+			if (!res.ok) throw new Error(`PATCH /api/groups/${groupId} failed: ${res.status}`);
+		} catch {
+			// Rollback
+			groups.value = oldGroups;
+		}
 	}
 
 	function toggleGroupCollapsed(groupId: string): void {
-		const next = groups.value.map((g) =>
+		groups.value = groups.value.map((g) =>
 			g.id === groupId ? { ...g, collapsed: !g.collapsed } : g,
 		);
-		groups.value = next;
-		saveGroupsToStorage(next);
+		// Persist collapsed state to localStorage
+		const collapsedMap = loadCollapsedMap();
+		const group = groups.value.find((g) => g.id === groupId);
+		if (group) {
+			collapsedMap[groupId] = group.collapsed;
+		}
+		saveCollapsedMap(collapsedMap);
 	}
 
 	/**
@@ -341,7 +437,11 @@ export const useChannelsStore = defineStore("channels", () => {
 		}
 	}
 
-	function moveChannelToGroup(channelId: string, groupId: string | null): void {
+	async function moveChannelToGroup(channelId: string, groupId: string | null): Promise<void> {
+		if (authStore.token === null) return;
+
+		// Optimistic update
+		const oldChannels = channels.value;
 		channels.value = channels.value.map((ch) => {
 			if (ch.id !== channelId) return ch;
 			if (groupId === null) {
@@ -352,6 +452,21 @@ export const useChannelsStore = defineStore("channels", () => {
 			}
 			return { ...ch, groupId };
 		});
+
+		try {
+			const res = await fetch(`/api/channels/${channelId}`, {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token}`,
+				},
+				body: JSON.stringify({ group_id: groupId }),
+			});
+			if (!res.ok) throw new Error(`PATCH /api/channels/${channelId} failed: ${res.status}`);
+		} catch {
+			// Rollback
+			channels.value = oldChannels;
+		}
 	}
 
 	return {
@@ -363,6 +478,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		unreadChannels,
 		activeHostId,
 		channelsByGroup,
+		fetchGroups,
 		fetchChannels,
 		selectChannel,
 		markUnread,

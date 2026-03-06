@@ -638,6 +638,341 @@ describe("DELETE /api/channels/:id", () => {
 	});
 });
 
+// ─── Groups ───────────────────────────────────────────────────────────────────
+
+describe("GET /api/groups", () => {
+	it("returns 400 without host_id query", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/groups" });
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 with invalid ULID host_id", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/groups?host_id=not-a-ulid",
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns empty array for host with no groups", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/groups?host_id=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual([]);
+	});
+
+	it("returns groups after creating one", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-list-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "My Group" },
+		});
+
+		const res = await server.inject({
+			method: "GET",
+			url: `/api/groups?host_id=${host.id}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const groups = res.json<Array<{ name: string; host_id: string }>>();
+		expect(groups.length).toBe(1);
+		expect(groups[0].name).toBe("My Group");
+		expect(groups[0].host_id).toBe(host.id);
+	});
+});
+
+describe("POST /api/groups", () => {
+	it("returns 400 with missing name", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+		});
+		expect(res.statusCode).toBe(400);
+	});
+
+	it("returns 400 with whitespace-only name", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", name: "   " },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 201 with valid body and correct snake_case response", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-create-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Dev Servers" },
+		});
+		expect(res.statusCode).toBe(201);
+		const body = res.json<Record<string, unknown>>();
+		expect(body.id).toBeTruthy();
+		expect(body.host_id).toBe(host.id);
+		expect(body.name).toBe("Dev Servers");
+		expect(body.sort_order).toBe(0);
+		expect(body.created_at).toBeTruthy();
+	});
+
+	it("auto-increments sort_order", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-sort-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const res1 = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "First" },
+		});
+		const res2 = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Second" },
+		});
+
+		expect(res1.json<Record<string, unknown>>().sort_order).toBe(0);
+		expect(res2.json<Record<string, unknown>>().sort_order).toBe(1);
+	});
+});
+
+describe("PATCH /api/groups/:id", () => {
+	it("returns 404 for non-existent group", async () => {
+		const res = await server.inject({
+			method: "PATCH",
+			url: "/api/groups/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			payload: { name: "Renamed" },
+		});
+		expect(res.statusCode).toBe(404);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("NOT_FOUND");
+	});
+
+	it("returns 400 with whitespace-only name", async () => {
+		const res = await server.inject({
+			method: "PATCH",
+			url: "/api/groups/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			payload: { name: "   " },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 for invalid ULID group ID", async () => {
+		const res = await server.inject({
+			method: "PATCH",
+			url: "/api/groups/not-a-ulid",
+			payload: { name: "Renamed" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 200 with valid rename", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-rename-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Original" },
+		});
+		const group = createRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/groups/${group.id}`,
+			payload: { name: "Renamed" },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+	});
+});
+
+describe("DELETE /api/groups/:id", () => {
+	it("returns 404 for non-existent group", async () => {
+		const res = await server.inject({
+			method: "DELETE",
+			url: "/api/groups/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		});
+		expect(res.statusCode).toBe(404);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("NOT_FOUND");
+	});
+
+	it("returns 400 for invalid ULID group ID", async () => {
+		const res = await server.inject({
+			method: "DELETE",
+			url: "/api/groups/not-a-ulid",
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 200 for successful delete", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-del-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "ToDelete" },
+		});
+		const group = createRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "DELETE",
+			url: `/api/groups/${group.id}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+	});
+
+	it("clears group_id on channels after delete", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "grp-del-chan-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		// Create group
+		const groupRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Ephemeral" },
+		});
+		const group = groupRes.json<{ id: string }>();
+
+		// Create a channel and assign it to the group
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		const sessionId = "01TESTGRPDELSESS000000001";
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		const channelId = "01TESTGRPDELCHAN000000001";
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+		dal.updateChannelGroupId(channelId, group.id);
+
+		// Verify group_id is set
+		const before = dal.getChannel(channelId);
+		expect(before?.groupId).toBe(group.id);
+
+		// Delete the group
+		await server.inject({ method: "DELETE", url: `/api/groups/${group.id}` });
+
+		// Verify group_id is now cleared
+		const after = dal.getChannel(channelId);
+		expect(after?.groupId).toBeUndefined();
+	});
+});
+
+describe("PATCH /api/channels/:id — group_id", () => {
+	async function createTestChannelForGroup(label: string): Promise<{ channelId: string }> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		const sessionId = `01TESTGRP${label.slice(0, 15).padEnd(15, "0")}`;
+		const channelId = `01TSTGRC${label.slice(0, 17).padEnd(17, "0")}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+
+		return { channelId };
+	}
+
+	it("returns 200 when setting group_id on a channel", async () => {
+		const { channelId } = await createTestChannelForGroup("grp-set");
+
+		// Create a group to assign
+		const hostRes = await server.inject({ method: "GET", url: "/api/hosts" });
+		const hosts = hostRes.json<Array<{ id: string }>>();
+		const groupRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: hosts[0].id, name: "AssignGroup" },
+		});
+		const group = groupRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { group_id: group.id },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ group_id: string }>();
+		expect(body.group_id).toBe(group.id);
+	});
+
+	it("returns 200 when clearing group_id to null", async () => {
+		const { channelId } = await createTestChannelForGroup("grp-clear");
+
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { group_id: null },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<Record<string, unknown>>();
+		// group_id should be absent or null (cleared)
+		expect(body.group_id === null || body.group_id === undefined).toBe(true);
+	});
+
+	it("returns 400 for invalid ULID group_id", async () => {
+		const { channelId } = await createTestChannelForGroup("grp-bad-id");
+
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}`,
+			payload: { group_id: "not-a-ulid" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
 // ─── Auth enforcement ─────────────────────────────────────────────────────────
 
 describe("Auth enforcement", () => {
@@ -712,6 +1047,48 @@ describe("Auth enforcement", () => {
 		const res = await authServer.inject({ method: "GET", url: "/api/fonts" });
 		// May be 200 or 404 depending on fonts dir existence, but never 401
 		expect(res.statusCode).not.toBe(401);
+	});
+
+	it("rejects GET /api/groups without auth", async () => {
+		const res = await authServer.inject({
+			method: "GET",
+			url: "/api/groups?host_id=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects POST /api/groups without auth", async () => {
+		const res = await authServer.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", name: "NoAuth" },
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects PATCH /api/groups/:id without auth", async () => {
+		const res = await authServer.inject({
+			method: "PATCH",
+			url: "/api/groups/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			payload: { name: "NoAuth" },
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects DELETE /api/groups/:id without auth", async () => {
+		const res = await authServer.inject({
+			method: "DELETE",
+			url: "/api/groups/01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		});
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 
 	it("rejects PATCH /api/channels/:id without auth", async () => {

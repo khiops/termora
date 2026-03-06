@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { registerChannelRoutes } from "./api/channels.js";
 import { registerConfigRoutes } from "./api/config.js";
 import { registerFontRoutes } from "./api/fonts.js";
+import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
@@ -110,6 +111,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerHostRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal, sessionManager);
+		registerGroupRoutes(server, metaDal);
 		registerConfigRoutes(server, metaDal, configResolver);
 		registerFontRoutes(server, configDir);
 		if (options.authToken) {

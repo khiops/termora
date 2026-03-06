@@ -139,7 +139,7 @@ const isDead = computed(() => {
 	const chId = effectiveChannelId.value;
 	if (!chId) return false;
 	const channel = channelsStore.channels.find((c) => c.id === chId);
-	return channel?.status === "dead" || channel?.status === "orphan";
+	return channel?.status === "dead";
 });
 
 watch(isDead, (dead) => {
