@@ -3,14 +3,11 @@
 ## In Progress
 
 ## Recently Completed
-- [x] ✅ [Agent] Standalone agent daemon with named pipe/UDS transport — local PTYs survive hub restarts (2026-03-06)
 
 ## Pending
 
 ### Review Findings
 - [ ] 🐛 [UI] Fix pre-existing typecheck failure in useCommandPalette.spec.ts (hostId on Channel type) — Priority: S (from /review F-003)
-- [ ] 🔧 [Hub] Add protocol version validation in HELLO (reject incompatible agents) — Priority: M (from /review F-001)
-- [ ] 🔧 [Agent] Daemon log file redirect to <stateDir>/agent.log — Priority: M (from /review F-002)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: M (from /review F-003)
 - [ ] 🔧 [Hub] waitForChannelState() listener cleanup on timeout — Priority: S (from /review F-004)
 - [ ] 🔧 [Hub] DRY: extract shared daemon attach logic from _reconnectDaemon/_connectDaemonAgent — Priority: S (from /review F-005)
