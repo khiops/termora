@@ -33,7 +33,7 @@
 		>
 			<button class="channel-context-menu__item" @click="onCloseChannel">Close channel</button>
 			<div class="channel-context-menu__sep"></div>
-			<button class="channel-context-menu__item" @click="onMoveToGroup(null)">
+			<button v-if="channel.groupId != null" class="channel-context-menu__item" @click="onMoveToGroup(null)">
 				Move to General
 			</button>
 			<button
