@@ -1,6 +1,7 @@
 import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
+	AgentChannelStateMessage,
 	AgentSnapshotResMessage,
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
@@ -19,14 +20,21 @@ import type {
 	UiSpawnMessage,
 	UiSpawnOkMessage,
 } from "@nexterm/shared";
-import type { ChannelStatus, SessionStatus } from "@nexterm/shared";
-import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
+import type { AgentConfig, ChannelStatus, SessionStatus } from "@nexterm/shared";
+import {
+	DEFAULT_AGENT_CONFIG,
+	DEFAULT_CHANNEL_NAME,
+	generateId,
+	getSocketPath,
+} from "@nexterm/shared";
 import type { GcConfig } from "../config.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
+import { connectOrLaunch } from "./agent-launcher.js";
 import { LocalAgent, resolveAgentPath } from "./local-agent.js";
+import { NextermAgent } from "./nexterm-agent.js";
 import { OutputChunker } from "./output-chunker.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
@@ -81,6 +89,8 @@ export class SessionManager {
 	/** requestId (or keyed token like "attach:<channelId>") → callback for pending agent responses */
 	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
 	private metaDal: MetaDAL;
+	/** Agent daemon configuration (socket path, buffer caps) */
+	private agentConfig: AgentConfig;
 
 	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
 	private scheduler: SnapshotScheduler;
@@ -102,9 +112,11 @@ export class SessionManager {
 	constructor(
 		private dbManager: DatabaseManager,
 		gcConfig?: GcConfig,
+		agentConfig?: AgentConfig,
 	) {
 		this.metaDal = new MetaDAL(dbManager.meta);
 		this.spoolDal = new SpoolDAL(dbManager.spool);
+		this.agentConfig = agentConfig ?? { ...DEFAULT_AGENT_CONFIG };
 		this.scheduler = new SnapshotScheduler((channelId) => {
 			// Find the agent for this channel via the channel's hostId
 			const ch = this.channels.get(channelId);
@@ -183,7 +195,12 @@ export class SessionManager {
 			}
 
 			if (hostType === "local") {
-				await this._warmRestartLocal(hostId, session.id);
+				try {
+					await this._connectDaemonAgent(hostId, session.id);
+				} catch {
+					// Daemon connect failed — fall back to warm restart
+					await this._warmRestartLocal(hostId, session.id);
+				}
 			}
 			// SSH: channels stay orphan — future enhancement could schedule reconnect
 		}
@@ -293,13 +310,17 @@ export class SessionManager {
 				this.agents.set(hostId, sshAgent);
 				agent = sshAgent;
 			} else {
-				const la = new LocalAgent(resolveAgentPath());
-				await la.start();
-				this._wireAgentEvents(hostId, session.id, la);
-				this.agents.set(hostId, la);
-				agent = la;
-				// Local agents are immediately active
-				this._updateSessionStatus(hostId, session.id, "active");
+				// Local: try daemon first, fall back to child-process agent
+				try {
+					agent = await this._connectDaemonAgent(hostId, session.id);
+				} catch {
+					const la = new LocalAgent(resolveAgentPath());
+					await la.start();
+					this._wireAgentEvents(hostId, session.id, la);
+					this.agents.set(hostId, la);
+					agent = la;
+					this._updateSessionStatus(hostId, session.id, "active");
+				}
 			}
 		}
 
@@ -765,6 +786,15 @@ export class SessionManager {
 
 			if (!session) return;
 
+			if (agent instanceof NextermAgent) {
+				// Daemon agent: attempt reconnect (daemon may still be alive)
+				this._updateSessionStatus(hostId, session.id, "disconnected");
+				this._reconnectDaemon(hostId, session.id).catch(() => {
+					this._closeSession(hostId, session.id);
+				});
+				return;
+			}
+
 			if (host?.type === "ssh") {
 				// SSH: attempt reconnect with exponential backoff
 				this._updateSessionStatus(hostId, session.id, "disconnected");
@@ -908,6 +938,70 @@ export class SessionManager {
 		if (pending === 0) resolve?.();
 
 		return promise;
+	}
+
+	/**
+	 * Connect to (or launch) a local agent daemon.
+	 * Returns a NextermAgent that's ready to receive commands.
+	 * Performs channel state reconciliation after connecting.
+	 */
+	private async _connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
+		const socketPath = getSocketPath(this.agentConfig.socketPath);
+		const agent = await connectOrLaunch(socketPath, this.agentConfig);
+
+		this._wireAgentEvents(hostId, sessionId, agent);
+
+		const states = await agent.waitForChannelState();
+		this._reconcileChannelState(hostId, states);
+
+		this.agents.set(hostId, agent);
+		this._updateSessionStatus(hostId, sessionId, "active");
+
+		return agent;
+	}
+
+	/**
+	 * Reconcile hub's channel tracking with agent's reported channel state.
+	 * Called after daemon connect/reconnect to sync which channels are alive/dead.
+	 */
+	private _reconcileChannelState(hostId: string, states: AgentChannelStateMessage[]): void {
+		const reportedIds = new Set(states.filter((s) => s.alive).map((s) => s.channelId));
+
+		for (const [channelId, channelState] of this.channels) {
+			if (channelState.hostId !== hostId) continue;
+
+			const session = this.sessions.get(hostId);
+			if (!session || channelState.sessionId !== session.id) continue;
+
+			if (reportedIds.has(channelId)) {
+				// Agent says alive — mark live if currently orphan
+				if (channelState.status === "orphan") {
+					this._updateChannelStatus(channelId, session.id, "live");
+				}
+			} else {
+				// Agent doesn't know about this channel — mark dead
+				if (channelState.status !== "dead") {
+					this._updateChannelStatus(channelId, session.id, "dead");
+				}
+			}
+		}
+	}
+
+	/**
+	 * Attempt to reconnect to a daemon agent after disconnect.
+	 * If the daemon is still running, reconnect. If not, connectOrLaunch will spawn a new one.
+	 */
+	private async _reconnectDaemon(hostId: string, sessionId: string): Promise<void> {
+		const socketPath = getSocketPath(this.agentConfig.socketPath);
+		const agent = await connectOrLaunch(socketPath, this.agentConfig);
+
+		this._wireAgentEvents(hostId, sessionId, agent);
+
+		const states = await agent.waitForChannelState();
+		this._reconcileChannelState(hostId, states);
+
+		this.agents.set(hostId, agent);
+		this._updateSessionStatus(hostId, sessionId, "active");
 	}
 
 	/**
