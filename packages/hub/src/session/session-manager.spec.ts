@@ -216,12 +216,12 @@ describe("SessionManager", () => {
 		const snapshot = sm.getStateSnapshot();
 		expect(snapshot.type).toBe("STATE_SYNC");
 		expect(snapshot.sessions.length).toBeGreaterThan(0);
-		const session = snapshot.sessions[0]!;
+		const session = snapshot.sessions[0];
 		expect(session.status).toBe("active");
 		expect(session.hostId).toBeTruthy();
 		expect(session.sessionId).toBeTruthy();
 		expect(snapshot.channels.length).toBeGreaterThan(0);
-		const channel = snapshot.channels[0]!;
+		const channel = snapshot.channels[0];
 		expect(channel.status).toBe("live");
 		expect(channel.channelId).toBeTruthy();
 		expect(channel.sessionId).toBe(session.sessionId);
