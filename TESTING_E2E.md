@@ -11,6 +11,7 @@ Scenarios 44-58: UX-04 Scrollback Search
 Scenarios 59-70: UX-03 Host Management
 Scenarios 71-80: UX-05 Notifications
 Scenarios 81-88: UX-07 Host Customization
+Scenarios 89-92: Regression tests (bug fixes 2026-03-07)
 
 ## Prerequisites
 
@@ -703,6 +704,51 @@ Precondition: 2 hosts configured — "prod" (Danger preset) and "staging" (Cauti
 - [ ] Pane B: yellow banner, subtle yellow border, yellow tint
 - [ ] Each pane renders its own host's profile independently (not global)
 
+Scenarios 89-92: Regression tests (bug fixes 2026-03-07)
+
+---
+
+### 89. Bell badge on active tab (regression: 1f55b40, e74cc37)
+
+Precondition: 1 host "local", 2 channels, active tab = "Terminal".
+
+- [ ] Type `printf '\x07'` + Enter in the active terminal
+- [ ] Bell badge "1" appears on host rail icon within 200ms
+- [ ] Bell badge "1" appears on "Terminal" in channel sidebar within 200ms
+- [ ] Bell badge "1" appears on "Terminal" tab in tab bar within 200ms
+- [ ] All three badges auto-dismiss after ~1s (still on same tab)
+- [ ] Switch to "MyShell" tab, type `printf '\x07'` in the now-background "Terminal" (via split or pre-queued command)
+- [ ] Bell badge on background channel persists (no auto-dismiss) until user clicks back
+
+### 90. Scroll does not clear bell badge (regression: 1f55b40)
+
+Precondition: 1 host "local", 1 channel with scrollback output.
+
+- [ ] Type `printf '\x07'` → bell badge appears on all 3 locations
+- [ ] Scroll up in terminal (mouse wheel) — bell badge still visible
+- [ ] Scroll back to bottom — bell badge still visible (only auto-dismiss timer clears it)
+- [ ] Unread lines bar (if shown) clears independently of bell badge
+
+### 91. No auto-spawn on SSH host switch (regression: b013a6c)
+
+Precondition: 1 local host with channels, 1+ SSH host without active session.
+
+- [ ] Click SSH host in rail → sidebar shows "No channels yet", no "Starting..." tab
+- [ ] Wait 10s — no SPAWN timeout error appears
+- [ ] Click back on local host → existing channels listed, no phantom "Starting..." tab
+- [ ] Repeat switch 3 times — no ghost tabs accumulate
+
+### 92. Group action dialogs (regression: 73336ae)
+
+Precondition: 1 host "local", 1+ channel group.
+
+- [ ] Right-click group header → "Rename group" → application modal appears (NOT system prompt())
+- [ ] Type new name, click Rename → group renamed in sidebar
+- [ ] Press Escape or click outside → modal closes, no rename
+- [ ] Right-click group header → "Delete group" → danger confirmation modal (NOT system confirm())
+- [ ] Click Cancel → group still exists
+- [ ] Click Delete → group removed, channels moved to default
+
 ---
 
 ## Run Log
@@ -743,3 +789,7 @@ When a test fails, note the commit hash and which test. Fix before merging.
 | Date | Test | Commit | Issue |
 |------|------|--------|-------|
 | 2026-03-06 | 3, 5, 6 | 0988ddb | Sidebar re-click + delete didn't open/close tabs |
+| 2026-03-07 | 89 | 1f55b40, e74cc37 | Bell badge not showing on channel sidebar/tab bar for active tab |
+| 2026-03-07 | 90 | 1f55b40 | Scroll-to-bottom cleared bell badge via clearChannel |
+| 2026-03-07 | 91 | b013a6c | Auto-spawn on SSH host caused "Starting..." timeout tab |
+| 2026-03-07 | 92 | 73336ae | Group rename/delete used system prompt()/confirm() |
