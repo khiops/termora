@@ -3,8 +3,6 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [x] ✅ [UI] UX-05: Notifications (2026-03-07) — 7 blocks, 1054 tests, /review clean
-- [ ] 🟡 [UI] UX-07: Host Customization — spec ready (docs/plans/ux-07-host-customization.md), 5 blocks, 20 BDD, adversarial+llm×2
 - [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
@@ -42,6 +40,11 @@
 - [ ] 🔧 [Web] SC-22 auto mode above threshold no brief badge — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] Grouped notification body says 'terminal' instead of channel name — Priority: L (from /review F-006)
 - [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
+
+### Deferred from UX-07 /review
+- [ ] 🔧 [Hub] DRY: extract validateVisualProfileColors helper (duplicated in POST+PUT) — Priority: M (from /review F-002)
+- [ ] 🔧 [Web] useVisualProfile getVisualProfile: shallow merge drops nested defaults — Priority: L (from /review F-003)
+- [ ] 🔧 [Web] VisualProfileSettings: add unit tests for SC-04, SC-06 — Priority: M (from /review F-005)
 
 ### Deferred from /adversarial Sprint 1
 - [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)

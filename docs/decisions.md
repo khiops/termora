@@ -4,6 +4,17 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-07 — Host Customization & Visual Profiles (2026-03-07)
+
+- Visual profile stored in hosts.profile_json (no DB migration)
+- Presets + resolvePreset() in web package, NOT shared
+- Banner position fixed between pane header and terminal content
+- Tint via CSS ::after pseudo-element with will-change: opacity
+- No detectPresetFromProfile() — preset stored explicitly
+- hostId prop passed through PaneLayout → TerminalPane for per-pane visual profile
+
+---
+
 ## UX-05 — Notifications (2026-03-07)
 
 - BELL + NOTIFICATION: new protocol messages (agent→hub→UI), camelCase interfaces
