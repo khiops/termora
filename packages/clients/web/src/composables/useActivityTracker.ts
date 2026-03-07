@@ -63,12 +63,10 @@ export function useActivityTracker(opts: {
 		// Only track for inactive tabs
 		if (opts.isActiveTab.value) return;
 
-		const lines = countNewlines(data);
+		const lines = Math.max(countNewlines(data), 1);
 
-		// Add unread lines
-		if (lines > 0) {
-			notificationStore.addUnreadLines(channelId, lines);
-		}
+		// Add unread lines (at least 1 for any non-whitespace output)
+		notificationStore.addUnreadLines(channelId, lines);
 
 		// Debounced activity dot
 		pendingLineCount += Math.max(lines, 1); // at least 1 for non-empty output

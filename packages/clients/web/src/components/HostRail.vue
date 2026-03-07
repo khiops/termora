@@ -94,7 +94,7 @@
 						"
 						@dragstart="onDragStart($event, host)"
 						@dragover.prevent="onDragOver($event)"
-						@drop="onDrop($event, host, section)"
+						@drop.prevent="onDrop($event, host, section)"
 					>
 						<div
 							class="badge"
@@ -242,8 +242,7 @@ function onDrop(
 		orderedIds.splice(targetIdx, 0, dragHostId);
 	}
 
-	void hostsStore.reorderHosts(group, orderedIds);
-	void hostsStore.fetchHosts(); // re-fetch to get server-canonical order
+	hostsStore.reorderHosts(group, orderedIds).then(() => hostsStore.fetchHosts());
 	dragHostId = null;
 }
 

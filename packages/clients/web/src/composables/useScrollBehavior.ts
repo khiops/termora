@@ -99,6 +99,11 @@ export function useScrollBehavior(opts: {
 	}
 
 	function onNaturalScrollToBottom(): void {
+		// Ignore scroll events from hidden panes (v-show). xterm.js auto-scrolls
+		// when writing data even when the terminal is display:none, which would
+		// immediately clear unread lines set by the activity tracker.
+		if (!opts.isActiveTab.value) return;
+
 		const chId = opts.channelId.value;
 		if (chId) {
 			// Only clear unread lines (scroll-related). Bell/activity have their

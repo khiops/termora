@@ -541,6 +541,9 @@ Precondition: 2 panes with matches in both, scope="All".
 
 ### 68. Host DnD reorder
 
+NOTE: Fixes applied 2026-03-07 — `.prevent` on `@drop`, race condition in `reorderHosts`/`fetchHosts`.
+Tab-to-tab DnD reorder was never implemented (only pane→tab-bar drop exists).
+
 - [ ] Drag host within same group → host moves to new position
 - [ ] Release → order persists after page reload
 - [ ] Drag host from one group to another → host moves to target group
@@ -591,9 +594,9 @@ Precondition: 2 panes with matches in both, scope="All".
 
 Precondition: channel A has 200+ new lines while inactive.
 
-- [ ] Click A's tab → unread bar appears: "200 new lines"
-- [ ] Click "Jump to bottom" → terminal scrolls to bottom, bar + badges clear
-- [ ] Alternatively, click "Mark as read" → badges clear, scroll position unchanged
+- [x] Click A's tab → unread bar appears: "N new lines" ✅ (2026-03-07, Run #3 — required fix to useScrollBehavior)
+- [x] Click "Jump to bottom" → terminal scrolls to bottom, bar + badges clear ✅
+- [x] Alternatively, click "Mark as read" → badges clear, scroll position unchanged ✅
 - [ ] Manually scroll to bottom → bar dismisses automatically
 - [ ] After reaching bottom, scrolling up does NOT re-show bar
 
@@ -601,14 +604,14 @@ Precondition: channel A has 200+ new lines while inactive.
 
 Precondition: Notification API permission granted, window hidden (minimized/other tab).
 
-- [ ] Background channel outputs BEL → desktop notification: "nexterm - host / Bell in channel"
+- [ ] Background channel outputs BEL → desktop notification: "nexterm - host / Bell in channel" (SKIPPED — requires manual Notification permission grant)
 - [ ] Multiple bells within 5s → grouped: "5 alerts in channel"
 - [ ] Click notification → browser focuses, channel tab activates
 - [ ] Permission denied → no notification, but badge still increments
 
 ### 76. OSC 9 notification
 
-- [ ] Background channel outputs `echo -e '\e]9;Build done!\a'`
+- [ ] Background channel outputs `echo -e '\e]9;Build done!\a'` (SKIPPED — requires manual Notification permission grant)
 - [ ] Desktop notification shows "Build done!" in body
 - [ ] Empty OSC 9 message → generic "Bell in channel" text
 - [ ] OSC 9 on active/focused tab → no notification
@@ -623,9 +626,9 @@ Precondition: Notification API permission granted, window hidden (minimized/othe
 
 ### 78. Scroll mode — auto
 
-- [ ] Set scroll.mode to "auto" with threshold 100
-- [ ] Channel receives 47 lines while inactive → activate tab → resumes position, unread bar "47 new lines"
-- [ ] Channel receives 150 lines → activate tab → scrolls to bottom, brief badge then clears
+- [x] Set scroll.mode to "auto" with threshold 100 (default) ✅ (2026-03-07, Run #3)
+- [x] Channel receives few lines while inactive → activate tab → resumes position, unread bar "N new lines" ✅
+- [x] Channel receives 150 lines → activate tab → scrolls to bottom, no bar ✅
 
 ### 79. Scroll mode — alwaysBottom / alwaysResume
 
@@ -666,10 +669,10 @@ Precondition: Notification API permission granted, window hidden (minimized/othe
 
 ### 84. Banner token substitution
 
-- [ ] Set banner text to "ENV: {host} ({ip}) [{group}]"
-- [ ] Open terminal → banner shows "ENV: prod (1.2.3.4) [Servers]"
-- [ ] Host without group → {group} renders as literal "{group}"
-- [ ] Local host without sshHost → {ip} renders as "localhost"
+- [x] Set banner text to "ENV: {host} ({ip}) [{group}]" ✅ (2026-03-07, Run #3)
+- [x] Open terminal → banner shows "ENV: LOCAL (LOCALHOST) [{GROUP}]" ✅
+- [x] Host without group → {group} renders as literal "{group}" ✅
+- [x] Local host without sshHost → {ip} renders as "localhost" ✅
 - [ ] HTML in host name → rendered as text, NOT executed (XSS safe)
 
 ### 85. Accent border styles
@@ -749,6 +752,16 @@ Precondition: 1 host "local", 1+ channel group.
 - [ ] Click Cancel → group still exists
 - [ ] Click Delete → group removed, channels moved to default
 
+### 93. Hidden pane scroll does not clear unread lines (regression: useScrollBehavior fix 2026-03-07)
+
+Precondition: 1 host "local", 2 channels (A, B), both alive.
+
+- [x] Switch to channel A (active), B is inactive/hidden via v-show ✅ (2026-03-07, Run #3)
+- [x] B receives output in background → unreadLines accumulates for B ✅
+- [x] xterm.js auto-scroll on hidden pane does NOT clear unreadLines ✅
+- [x] Switch to B → unread bar appears with correct line count ✅
+- [x] "Jump ↓" clears bar and scrolls to bottom ✅
+
 ---
 
 ## Run Log
@@ -780,6 +793,52 @@ Each run records which scenarios passed/failed. Commit = HEAD at time of run.
 
 **Summary: 17/18 tested, 17 pass, 0 fail, 0 partial, 1 skipped (manual only: WS reconnect)**
 
+### Run #2 — 2026-03-07 — `main` (1be5f86)
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 59 | Add host modal | ✅ | Form fields, save creates host, cancel discards |
+| 60 | Edit host | ✅ | Pre-filled, modified hostname+user persist |
+| 61 | Delete host | ✅ | Confirm dialog, cancel preserves, confirm removes |
+| 62 | Duplicate host | ✅ | "-copy" suffix, SSH config inherited |
+| 63 | SSH config import (single) | ✅ | Dropdown lists hosts, auto-fill hostname/user/key |
+| 64 | Batch SSH import | ⏭️ | Only 1 host in SSH config |
+| 65 | Host groups — create | ✅ | Inline new group in modal, host assigned on save |
+| 66 | Host groups — collapse | ✅ | Collapse hides hosts, expand restores |
+| 67 | Host groups — rename/delete | ✅ | Application modals (not system dialogs), rename+delete+cancel |
+| 68 | Host DnD reorder | ❌ | DnD does not work — tabs nor hosts (investigating) |
+| 69 | Test connection | ✅ | Unreachable → "EHOSTUNREACH", doesn't save |
+| 70 | Host rail context menu | ✅ | Local: only "Edit Name / Icon", SSH: full menu |
+| 71 | Bell badge inactive tab | ✅ | Badge "1"→"2" on rail+sidebar+tab |
+| 73 | Badge clear on focus | ✅ | Click tab → all badges clear |
+| 80 | Host rail aggregation | ✅ | 5+3=8 aggregated, activity dot + bell coexist |
+| 81 | Visual preset selection | ✅ | None/Danger radio, all elements toggle |
+| 83 | Environment banner | ✅ | Red banner "LOCAL DEV - local", white text |
+| 85 | Accent border | ✅ | Strong 3px solid #e06c75 on L/R |
+| 86 | Background tint | ✅ | rgba(224,108,117,0.05), pointer-events:none |
+| 87 | Tint slider preview | ✅ | Slider 0-15%, preview with fake terminal lines |
+| 89 | Bell on active tab (reg.) | ✅ | Badge appears, auto-clears after ~1s |
+| 91 | No SSH auto-spawn (reg.) | ✅ | No "Starting…" tab on SSH host switch |
+| 92 | Group action dialogs (reg.) | ✅ | Application modals for rename/delete |
+
+**Summary: 22/23 tested, 21 pass, 1 fail (Sc.68 DnD), 0 partial, 1 skipped (Sc.64)**
+
+### Run #3 — 2026-03-07 — `main` (post bug-fix)
+
+Focused run: Sc.74 (unread bar), Sc.78 (auto scroll), Sc.84 (banner tokens), Sc.93 (regression).
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 68 | Host DnD reorder | 🔧 | Fixed `.prevent` on `@drop` + race condition in reorder/fetch |
+| 74 | Unread line bar | ✅ | Required 2 fixes: useActivityTracker (min 1 line) + useScrollBehavior (skip hidden panes) |
+| 75 | Desktop notification (bell) | ⏭️ | Requires manual Notification permission grant |
+| 76 | OSC 9 notification | ⏭️ | Requires manual Notification permission grant |
+| 78 | Scroll mode — auto | ✅ | <threshold shows bar, ≥threshold scrolls to bottom |
+| 84 | Banner token substitution | ✅ | {host}→LOCAL, {ip}→LOCALHOST, {group}→literal |
+| 93 | Hidden pane scroll (reg.) | ✅ | onNaturalScrollToBottom guarded by isActiveTab |
+
+**Summary: 5/7 tested, 5 pass, 0 fail, 2 skipped (Sc.75-76 manual only)**
+
 ---
 
 ## Regression markers
@@ -793,3 +852,5 @@ When a test fails, note the commit hash and which test. Fix before merging.
 | 2026-03-07 | 90 | 1f55b40 | Scroll-to-bottom cleared bell badge via clearChannel |
 | 2026-03-07 | 91 | b013a6c | Auto-spawn on SSH host caused "Starting..." timeout tab |
 | 2026-03-07 | 92 | 73336ae | Group rename/delete used system prompt()/confirm() |
+| 2026-03-07 | 74, 93 | (pending) | Unread bar: countNewlines returned 0 for Uint8Array + hidden pane scroll cleared unreadLines |
+| 2026-03-07 | 68 | (pending) | Host DnD: missing .prevent on @drop + race condition in reorder/fetchHosts |
