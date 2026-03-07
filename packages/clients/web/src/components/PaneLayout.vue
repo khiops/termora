@@ -12,6 +12,7 @@
 					:key="node.paneId ?? node.channelId"
 					:channel-id="node.channelId"
 					:pane-id="node.paneId"
+					:host-id="hostId"
 					:has-multiple-panes="props.hasMultiplePanes ?? false"
 					@split-right="(chId: string) => emit('split', chId, 'vertical')"
 					@split-down="(chId: string) => emit('split', chId, 'horizontal')"

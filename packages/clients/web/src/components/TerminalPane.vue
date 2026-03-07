@@ -140,10 +140,12 @@ const props = withDefaults(
 		channelId?: string | null;
 		/** Stable pane identifier from the layout tree (for DnD targeting). */
 		paneId?: string | null;
+		/** Host ID for this pane — used for visual profile resolution (UX-07). */
+		hostId?: string | null;
 		/** Whether the current tab has multiple panes (SC-12). */
 		hasMultiplePanes?: boolean;
 	}>(),
-	{ channelId: null, paneId: null, hasMultiplePanes: false },
+	{ channelId: null, paneId: null, hostId: null, hasMultiplePanes: false },
 );
 
 const emit = defineEmits<{
@@ -246,11 +248,8 @@ const paneTitle = computed(() => {
 // ---------------------------------------------------------------------------
 
 const paneHost = computed(() => {
-	const chId = effectiveChannelId.value;
-	if (!chId) return undefined;
-	const hostId = channelsStore.activeHostId;
-	if (!hostId) return undefined;
-	return hostsStore.hosts.find((h) => h.id === hostId);
+	if (!props.hostId) return undefined;
+	return hostsStore.hosts.find((h) => h.id === props.hostId);
 });
 
 const { profile: visualProfile, bannerText, borderStyle, tintStyle } = useVisualProfile(paneHost);
