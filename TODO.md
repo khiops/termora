@@ -3,7 +3,7 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [ ] 🟡 [UI] UX-05: Notifications — spec ready (docs/plans/ux-05-notifications.md), 7 blocks, 32 BDD, adversarial+llm×2
+- [x] ✅ [UI] UX-05: Notifications (2026-03-07) — 7 blocks, 1054 tests, /review clean
 - [ ] 🟡 [UI] UX-07: Host Customization — spec ready (docs/plans/ux-07-host-customization.md), 5 blocks, 20 BDD, adversarial+llm×2
 - [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
@@ -36,6 +36,12 @@
 - [ ] 🔧 [Hub] SQL comment for COALESCE(host_group, '~') tilde sorting trick — Priority: L (from /review F-008)
 - [ ] 🔧 [Hub] Batch import: set sshAuth based on IdentityFile presence — Priority: L (from /review F-009)
 - [ ] 🔧 [Hub] SSH config parser: add test for alias-only Host block (no HostName) — Priority: L (from /review F-010)
+
+### Deferred from UX-05 /review
+- [ ] 🔧 [Web] Host rail bell aggregation broken for non-active hosts — Priority: M (from /review F-004)
+- [ ] 🔧 [Web] SC-22 auto mode above threshold no brief badge — Priority: L (from /review F-005)
+- [ ] 🔧 [Web] Grouped notification body says 'terminal' instead of channel name — Priority: L (from /review F-006)
+- [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
 
 ### Deferred from /adversarial Sprint 1
 - [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)

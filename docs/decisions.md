@@ -4,6 +4,23 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-05 — Notifications (2026-03-07)
+
+- BELL + NOTIFICATION: new protocol messages (agent→hub→UI), camelCase interfaces
+- Agent throttle: BELL 1/100ms, OSC9 1/500ms per channel via timestamp comparison
+- Hub rate limit: BELL 10/sec, NOTIFICATION 5/sec per channel via sliding window
+- OSC 9 sanitization: strip control chars, strip HTML tags, truncate 256 chars, trim
+- Sound serving: @fastify/static at /public/sounds/ (same pattern as /public/fonts/)
+- Notification store: shallowRef<Map> with replace-on-mutate for Vue reactivity
+- Activity detection: UI-side only, newline counting in OUTPUT data, debounced
+- Desktop notifications: Notification API tag-based grouping, 5s window
+- Bell sound: system (AudioContext 800Hz sine), custom (Audio element), mute
+- Scroll modes: auto (threshold-based), alwaysBottom, alwaysResume
+- UnreadLinesBar: 999+ cap, mark-as-read + jump buttons
+- Badge clear: only via scroll behavior (markRead/jump/naturalScroll), NOT on tab switch alone
+
+---
+
 ## UX-03 — Host Management (2026-03-07)
 
 - Migration 006: 6 new columns with defaults, backfill sort_order per-group using rowid
