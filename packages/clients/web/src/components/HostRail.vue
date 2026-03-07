@@ -36,6 +36,26 @@
 
 		<div class="rail-footer">
 			<button
+				class="rail-icon-btn"
+				title="Appearance"
+				aria-label="Open appearance panel"
+				@click="$emit('toggle-appearance')"
+			>
+				<svg
+					class="rail-icon-svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="5" />
+					<path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+				</svg>
+			</button>
+			<button
 				class="add-host-btn"
 				title="Add host (coming soon)"
 				disabled
@@ -51,6 +71,10 @@
 import { onMounted } from "vue";
 import { useHostsStore } from "../stores/hosts.js";
 import { getInitials, getColorFromLabel } from "../composables/useHostIcon.js";
+
+defineEmits<{
+	"toggle-appearance": [];
+}>();
 
 const hostsStore = useHostsStore();
 
@@ -101,7 +125,7 @@ onMounted(() => {
 	transform: translateY(-50%);
 	width: 4px;
 	height: 20px;
-	background: #cdd6f4;
+	background: var(--nt-fg);
 	border-radius: 0 3px 3px 0;
 }
 
@@ -128,7 +152,7 @@ onMounted(() => {
 .badge-initials {
 	font-size: 14px;
 	font-weight: 700;
-	color: #fff;
+	color: var(--nt-bright-white);
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 	line-height: 1;
 }
@@ -141,23 +165,23 @@ onMounted(() => {
 	width: 10px;
 	height: 10px;
 	border-radius: 50%;
-	border: 2px solid #181825; /* matches rail background */
+	border: 2px solid var(--nt-tab-bar);
 }
 
 .status-dot--live {
-	background: #a6e3a1; /* catppuccin green */
+	background: var(--nt-green);
 }
 
 .status-dot--offline {
-	background: #45475a; /* catppuccin surface1 — subtle gray */
+	background: var(--nt-tab-hover);
 }
 
 .status-dot--error {
-	background: #f38ba8; /* catppuccin red */
+	background: var(--nt-badge);
 }
 
 .status-dot--reconnecting {
-	background: #f9e2af; /* catppuccin yellow */
+	background: var(--nt-yellow);
 	animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -173,13 +197,38 @@ onMounted(() => {
 	align-items: center;
 }
 
+.rail-icon-btn {
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	border: none;
+	background: transparent;
+	color: var(--nt-text-secondary);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	padding: 0;
+	transition: color 0.15s, background 0.15s;
+}
+
+.rail-icon-btn:hover {
+	color: var(--nt-accent);
+	background: rgba(var(--nt-accent-rgb), 0.12);
+}
+
+.rail-icon-svg {
+	width: 18px;
+	height: 18px;
+}
+
 .add-host-btn {
 	width: 36px;
 	height: 36px;
 	border-radius: 50%;
-	border: 2px dashed #45475a;
+	border: 2px dashed var(--nt-tab-hover);
 	background: transparent;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	font-size: 20px;
 	line-height: 1;
 	display: flex;
@@ -191,8 +240,8 @@ onMounted(() => {
 }
 
 .add-host-btn:not(:disabled):hover {
-	border-color: #89b4fa;
-	color: #89b4fa;
+	border-color: var(--nt-accent);
+	color: var(--nt-accent);
 	cursor: pointer;
 }
 

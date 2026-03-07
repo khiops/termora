@@ -69,7 +69,7 @@ onUnmounted(() => {
 
 <style scoped>
 .pane-splitter {
-	background: #313244;
+	background: var(--nt-border);
 	flex-shrink: 0;
 	transition: background 0.15s;
 	z-index: 10;
@@ -77,7 +77,7 @@ onUnmounted(() => {
 
 .pane-splitter:hover,
 .pane-splitter:active {
-	background: #585b70;
+	background: var(--nt-text-secondary);
 }
 
 .pane-splitter--vertical {

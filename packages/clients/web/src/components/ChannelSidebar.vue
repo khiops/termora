@@ -211,14 +211,14 @@ function onAddGroup(): void {
 	padding: 10px 8px 8px;
 	gap: 6px;
 	flex-shrink: 0;
-	border-bottom: 1px solid #313244;
+	border-bottom: 1px solid var(--nt-border);
 }
 
 .sidebar-header__label {
 	flex: 1;
 	font-size: 12px;
 	font-weight: 600;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -232,7 +232,7 @@ function onAddGroup(): void {
 	border-radius: 4px;
 	border: none;
 	background: transparent;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	font-size: 18px;
 	line-height: 1;
 	display: flex;
@@ -244,8 +244,8 @@ function onAddGroup(): void {
 }
 
 .sidebar-header__new-btn:not(:disabled):hover {
-	background: #313244;
-	color: #89b4fa;
+	background: var(--nt-border);
+	color: var(--nt-accent);
 }
 
 .sidebar-header__new-btn:disabled {
@@ -266,7 +266,7 @@ function onAddGroup(): void {
 	overflow-x: hidden;
 	padding: 4px 0;
 	scrollbar-width: thin;
-	scrollbar-color: #313244 transparent;
+	scrollbar-color: var(--nt-border) transparent;
 }
 
 .sidebar-list::-webkit-scrollbar {
@@ -278,7 +278,7 @@ function onAddGroup(): void {
 }
 
 .sidebar-list::-webkit-scrollbar-thumb {
-	background: #313244;
+	background: var(--nt-border);
 	border-radius: 2px;
 }
 
@@ -286,12 +286,12 @@ function onAddGroup(): void {
 .sidebar-state {
 	padding: 8px 12px;
 	font-size: 12px;
-	color: #45475a;
+	color: var(--nt-tab-hover);
 	font-style: italic;
 }
 
 .sidebar-state--error {
-	color: #f38ba8;
+	color: var(--nt-badge);
 	font-style: normal;
 }
 
@@ -299,16 +299,16 @@ function onAddGroup(): void {
 .sidebar-footer {
 	flex-shrink: 0;
 	padding: 6px 8px;
-	border-top: 1px solid #313244;
+	border-top: 1px solid var(--nt-border);
 }
 
 .sidebar-footer__add-group {
 	width: 100%;
 	padding: 5px 8px;
 	background: none;
-	border: 1px dashed #45475a;
+	border: 1px dashed var(--nt-tab-hover);
 	border-radius: 4px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	font-size: 11px;
 	cursor: pointer;
 	transition: border-color 0.1s, color 0.1s;
@@ -316,7 +316,7 @@ function onAddGroup(): void {
 }
 
 .sidebar-footer__add-group:hover {
-	border-color: #89b4fa;
-	color: #89b4fa;
+	border-color: var(--nt-accent);
+	color: var(--nt-accent);
 }
 </style>

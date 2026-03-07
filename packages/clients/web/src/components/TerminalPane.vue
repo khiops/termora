@@ -298,8 +298,8 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	align-items: center;
 	gap: 8px;
 	padding: 4px 10px;
-	background: #181825;
-	border-bottom: 1px solid #313244;
+	background: var(--nt-tab-bar);
+	border-bottom: 1px solid var(--nt-border);
 	flex-shrink: 0;
 	min-height: 28px;
 }
@@ -307,7 +307,7 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 .pane-title {
 	font-size: 11px;
 	font-weight: 600;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
 	flex: 1;
@@ -320,9 +320,9 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 .readonly-badge {
 	font-size: 10px;
 	font-weight: 600;
-	color: #f9e2af;
-	background: rgba(249, 226, 175, 0.12);
-	border: 1px solid rgba(249, 226, 175, 0.3);
+	color: var(--nt-yellow);
+	background: rgba(var(--nt-yellow-rgb), 0.12);
+	border: 1px solid rgba(var(--nt-yellow-rgb), 0.3);
 	border-radius: 3px;
 	padding: 1px 6px;
 	letter-spacing: 0.04em;
@@ -332,9 +332,9 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 .dead-badge {
 	font-size: 10px;
 	font-weight: 600;
-	color: #a6adc8;
-	background: rgba(166, 173, 200, 0.12);
-	border: 1px solid rgba(166, 173, 200, 0.3);
+	color: var(--nt-text-muted);
+	background: rgba(var(--nt-fg-rgb), 0.12);
+	border: 1px solid rgba(var(--nt-fg-rgb), 0.3);
 	border-radius: 3px;
 	padding: 1px 6px;
 	letter-spacing: 0.04em;
@@ -344,7 +344,7 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 .terminal-container {
 	flex: 1;
 	overflow: hidden;
-	background: #1e1e2e;
+	background: rgba(var(--nt-bg-rgb), var(--nt-terminal-alpha));
 }
 
 .terminal-loading,
@@ -355,25 +355,25 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	align-items: center;
 	justify-content: center;
 	font-size: 13px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	pointer-events: none;
 	z-index: 1;
 }
 
 .terminal-error {
-	color: #f38ba8;
+	color: var(--nt-badge);
 }
 
 /* Context menu */
 .context-menu {
 	position: absolute;
-	background: #1e1e2e;
-	border: 1px solid #45475a;
+	background: var(--nt-bg);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 6px;
 	padding: 4px 0;
 	min-width: 140px;
 	z-index: 100;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+	box-shadow: var(--nt-shadow);
 }
 
 .context-menu__item {
@@ -382,7 +382,7 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	padding: 6px 12px;
 	background: none;
 	border: none;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 12px;
 	font-family: inherit;
 	text-align: left;
@@ -391,16 +391,16 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 }
 
 .context-menu__item:hover {
-	background: #313244;
+	background: var(--nt-border);
 }
 
 .context-menu__item--danger {
-	color: #f38ba8;
+	color: var(--nt-badge);
 }
 
 .context-menu__divider {
 	border: none;
-	border-top: 1px solid #313244;
+	border-top: 1px solid var(--nt-border);
 	margin: 4px 0;
 }
 
@@ -411,13 +411,13 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: rgba(0, 0, 0, 0.7);
+	background: var(--nt-overlay-heavy);
 	z-index: 10;
 	pointer-events: none;
 }
 
 .reconnecting-text {
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 14px;
 	font-weight: 500;
 }

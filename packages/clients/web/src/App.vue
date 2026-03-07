@@ -12,9 +12,12 @@
 			@authenticated="onAuthenticated"
 		/>
 
+		<!-- Appearance panel — rendered globally, outside layout, via Teleport -->
+		<AppearancePanel :visible="showAppearance" @close="showAppearance = false" />
+
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout">
-			<HostRail class="host-rail" />
+			<HostRail class="host-rail" @toggle-appearance="showAppearance = !showAppearance" />
 			<ChannelSidebar class="channel-sidebar" @select-channel="onSelectChannel" />
 
 			<!-- Terminal main: tab bar + recursive pane layout -->
@@ -54,12 +57,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
 import { useChannelsStore } from "./stores/channels.js";
 import { useConfigStore } from "./stores/config.js";
+import { useThemeStore } from "./stores/theme.js";
 import { purgeDeadTabs, useLayout } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { generateId } from "@nexterm/shared";
@@ -70,14 +74,17 @@ import PaneLayout from "./components/PaneLayout.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import CommandPalette from "./components/CommandPalette.vue";
+import AppearancePanel from "./components/settings/AppearancePanel.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
 const configStore = useConfigStore();
+const themeStore = useThemeStore();
 const layout = useLayout();
 const commandPalette = useCommandPalette();
+const showAppearance = ref(false);
 
 /**
  * Show pairing screen when:
@@ -108,6 +115,19 @@ onMounted(async () => {
 			// Load resolved profile + UI behaviour config now that auth is established
 			await configStore.loadProfile();
 			await configStore.loadUiConfig();
+			await themeStore.loadThemes();
+			await themeStore.loadAppearance();
+			// Apply the persisted theme if it exists in available themes
+			const savedThemeName = themeStore.appearance.theme;
+			const savedTheme = themeStore.availableThemes.find(
+				(t) => t.name === savedThemeName,
+			);
+			if (savedTheme) {
+				themeStore.currentTheme = savedTheme;
+				themeStore.applyTheme(savedTheme);
+			}
+			themeStore.applyOpacity(themeStore.appearance.opacity);
+			themeStore.applyScrollbar(themeStore.appearance.scrollbar);
 			await hostsStore.fetchHosts();
 		} catch (err) {
 			console.error("[App] startup connect failed:", err);
@@ -217,6 +237,10 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 	if (isP && modifier) {
 		event.preventDefault();
 		commandPalette.toggle();
+		return;
+	}
+	if (event.key === "Escape" && showAppearance.value) {
+		showAppearance.value = false;
 	}
 }
 
@@ -328,17 +352,17 @@ body,
 	display: grid;
 	grid-template-columns: 48px 200px 1fr;
 	height: 100vh;
-	background: #1e1e2e;
-	color: #cdd6f4;
+	background: var(--nt-bg);
+	color: var(--nt-fg);
 }
 
 .host-rail {
-	background: #181825;
+	background: rgba(var(--nt-host-rail-rgb), var(--nt-host-rail-alpha));
 }
 
 .channel-sidebar {
-	background: #1e1e2e;
-	border-right: 1px solid #313244;
+	background: rgba(var(--nt-sidebar-rgb), var(--nt-sidebar-alpha));
+	border-right: 1px solid var(--nt-border);
 }
 
 .terminal-main {
@@ -369,7 +393,7 @@ body,
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	color: #45475a;
+	color: var(--nt-tab-hover);
 	font-size: 13px;
 	font-style: italic;
 }

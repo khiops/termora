@@ -112,13 +112,13 @@ function autoDeny(): void {
 }
 
 .wrd-card {
-	background: #1e1e2e;
-	border: 1px solid #45475a;
+	background: var(--nt-bg);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 10px;
 	padding: 20px 24px;
 	width: 320px;
 	max-width: calc(100vw - 48px);
-	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+	box-shadow: var(--nt-shadow);
 	pointer-events: all;
 	display: flex;
 	flex-direction: column;
@@ -141,13 +141,13 @@ function autoDeny(): void {
 	margin: 0;
 	font-size: 14px;
 	font-weight: 600;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 }
 
 .wrd-body {
 	margin: 0;
 	font-size: 12px;
-	color: #a6adc8;
+	color: var(--nt-text-muted);
 	line-height: 1.5;
 }
 
@@ -155,36 +155,36 @@ function autoDeny(): void {
 .wrd-channel-id {
 	font-family: "Cascadia Code", "Fira Code", monospace;
 	font-size: 11px;
-	background: #181825;
-	border: 1px solid #313244;
+	background: var(--nt-tab-bar);
+	border: 1px solid var(--nt-border);
 	border-radius: 3px;
 	padding: 1px 4px;
-	color: #89b4fa;
+	color: var(--nt-accent);
 }
 
 .wrd-countdown-wrap {
 	width: 100%;
 	height: 3px;
-	background: #313244;
+	background: var(--nt-border);
 	border-radius: 2px;
 	overflow: hidden;
 }
 
 .wrd-countdown-bar {
 	height: 100%;
-	background: #89b4fa;
+	background: var(--nt-accent);
 	border-radius: 2px;
 	transition: width 1s linear, background 0.3s;
 }
 
 .wrd-countdown-bar.urgent {
-	background: #f38ba8;
+	background: var(--nt-badge);
 }
 
 .wrd-countdown-label {
 	margin: 0;
 	font-size: 10px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 }
 
 .wrd-actions {
@@ -206,22 +206,22 @@ function autoDeny(): void {
 }
 
 .wrd-deny {
-	background: #313244;
-	border-color: #45475a;
-	color: #a6adc8;
+	background: var(--nt-border);
+	border-color: var(--nt-tab-hover);
+	color: var(--nt-text-muted);
 }
 
 .wrd-deny:hover {
-	background: #45475a;
-	color: #cdd6f4;
+	background: var(--nt-tab-hover);
+	color: var(--nt-fg);
 }
 
 .wrd-allow {
-	background: #a6e3a1;
-	color: #1e1e2e;
+	background: var(--nt-green);
+	color: var(--nt-bg);
 }
 
 .wrd-allow:hover {
-	background: #c3f0bf;
+	background: var(--nt-bright-green);
 }
 </style>

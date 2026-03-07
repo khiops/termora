@@ -129,10 +129,10 @@ async function copyCode(): Promise<void> {
 .gen-btn {
 	height: 36px;
 	padding: 0 16px;
-	background: #313244;
-	border: 1px solid #45475a;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 6px;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 13px;
 	font-weight: 500;
 	cursor: pointer;
@@ -143,7 +143,7 @@ async function copyCode(): Promise<void> {
 }
 
 .gen-btn:hover:not(:disabled) {
-	background: #45475a;
+	background: var(--nt-tab-hover);
 }
 
 .gen-btn:disabled {
@@ -152,8 +152,8 @@ async function copyCode(): Promise<void> {
 }
 
 .code-display {
-	background: #181825;
-	border: 1px solid #313244;
+	background: var(--nt-tab-bar);
+	border: 1px solid var(--nt-border);
 	border-radius: 8px;
 	padding: 12px 16px;
 	display: flex;
@@ -173,16 +173,16 @@ async function copyCode(): Promise<void> {
 	font-weight: 700;
 	letter-spacing: 0.25em;
 	font-family: "Cascadia Code", "Fira Code", monospace;
-	color: #89b4fa;
+	color: var(--nt-accent);
 }
 
 .copy-btn {
 	height: 28px;
 	padding: 0 10px;
-	background: #313244;
-	border: 1px solid #45475a;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 4px;
-	color: #a6adc8;
+	color: var(--nt-text-muted);
 	font-size: 12px;
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s;
@@ -190,51 +190,51 @@ async function copyCode(): Promise<void> {
 }
 
 .copy-btn:hover {
-	background: #45475a;
-	color: #cdd6f4;
+	background: var(--nt-tab-hover);
+	color: var(--nt-fg);
 }
 
 .copy-btn.copied {
-	color: #a6e3a1;
-	border-color: #a6e3a1;
+	color: var(--nt-green);
+	border-color: var(--nt-green);
 }
 
 .countdown-bar-wrap {
 	width: 100%;
 	height: 3px;
-	background: #313244;
+	background: var(--nt-border);
 	border-radius: 2px;
 	overflow: hidden;
 }
 
 .countdown-bar {
 	height: 100%;
-	background: #89b4fa;
+	background: var(--nt-accent);
 	border-radius: 2px;
 	transition: width 1s linear, background 0.3s;
 }
 
 .countdown-bar.urgent {
-	background: #f38ba8;
+	background: var(--nt-badge);
 }
 
 .countdown-label {
 	margin: 0;
 	font-size: 11px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 }
 
 .gen-error {
 	margin: 0;
 	font-size: 12px;
-	color: #f38ba8;
+	color: var(--nt-badge);
 }
 
 .spinner {
 	width: 12px;
 	height: 12px;
-	border: 2px solid rgba(205, 214, 244, 0.2);
-	border-top-color: #cdd6f4;
+	border: 2px solid rgba(var(--nt-fg-rgb), 0.2);
+	border-top-color: var(--nt-fg);
 	border-radius: 50%;
 	animation: spin 0.7s linear infinite;
 	flex-shrink: 0;

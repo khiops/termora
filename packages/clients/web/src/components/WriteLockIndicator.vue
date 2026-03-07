@@ -116,37 +116,37 @@ function handleRelease(): void {
 }
 
 .state-writer .wl-dot {
-	background: #a6e3a1;
-	box-shadow: 0 0 6px #a6e3a1;
+	background: var(--nt-green);
+	box-shadow: 0 0 6px var(--nt-green);
 }
 
 .state-writer .wl-label {
-	color: #a6e3a1;
+	color: var(--nt-green);
 }
 
 .state-reader .wl-dot {
-	background: #585b70;
+	background: var(--nt-text-secondary);
 }
 
 .state-reader .wl-label {
-	color: #a6adc8;
+	color: var(--nt-text-muted);
 }
 
 .state-free .wl-dot {
-	background: #45475a;
+	background: var(--nt-tab-hover);
 }
 
 .state-free .wl-label {
-	color: #585b70;
+	color: var(--nt-text-secondary);
 }
 
 .wl-action-btn {
 	height: 18px;
 	padding: 0 6px;
-	background: #313244;
-	border: 1px solid #45475a;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 3px;
-	color: #a6adc8;
+	color: var(--nt-text-muted);
 	font-size: 10px;
 	cursor: pointer;
 	transition: background 0.12s, color 0.12s;
@@ -155,27 +155,27 @@ function handleRelease(): void {
 }
 
 .wl-action-btn:hover {
-	background: #45475a;
-	color: #cdd6f4;
+	background: var(--nt-tab-hover);
+	color: var(--nt-fg);
 }
 
 .wl-force {
-	border-color: #f38ba8;
-	color: #f38ba8;
+	border-color: var(--nt-badge);
+	color: var(--nt-badge);
 }
 
 .wl-force:hover {
-	background: rgba(243, 139, 168, 0.15);
-	color: #f38ba8;
+	background: rgba(var(--nt-badge-rgb), 0.15);
+	color: var(--nt-badge);
 }
 
 .wl-release {
-	border-color: #f9e2af;
-	color: #f9e2af;
+	border-color: var(--nt-yellow);
+	color: var(--nt-yellow);
 }
 
 .wl-release:hover {
-	background: rgba(249, 226, 175, 0.15);
-	color: #f9e2af;
+	background: rgba(var(--nt-yellow-rgb), 0.15);
+	color: var(--nt-yellow);
 }
 </style>

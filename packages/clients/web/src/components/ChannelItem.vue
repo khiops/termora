@@ -133,7 +133,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	padding: 5px 10px 5px 20px;
 	cursor: pointer;
 	font-size: 13px;
-	color: #a6adc8;
+	color: var(--nt-text-muted);
 	border-radius: 4px;
 	margin: 0 4px;
 	transition: background 0.1s, color 0.1s;
@@ -142,13 +142,13 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 .channel-item:hover {
-	background: #313244;
-	color: #cdd6f4;
+	background: var(--nt-border);
+	color: var(--nt-fg);
 }
 
 .channel-item--selected {
-	background: #45475a;
-	color: #cdd6f4;
+	background: var(--nt-tab-hover);
+	color: var(--nt-fg);
 }
 
 .channel-item--dead {
@@ -161,24 +161,24 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
-	background: #45475a;
+	background: var(--nt-tab-hover);
 }
 
 .channel-item__status--live {
-	background: #a6e3a1; /* catppuccin green */
+	background: var(--nt-green);
 }
 
 .channel-item__status--born {
-	background: #f9e2af; /* catppuccin yellow — starting up */
+	background: var(--nt-yellow);
 	animation: pulse 1.4s ease-in-out infinite;
 }
 
 .channel-item__status--orphan {
-	background: #585b70; /* catppuccin surface2 — disconnected */
+	background: var(--nt-text-secondary);
 }
 
 .channel-item__status--dead {
-	background: #45475a; /* surface1 — dimmed */
+	background: var(--nt-tab-hover);
 }
 
 @keyframes pulse {
@@ -197,7 +197,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	flex: 1;
 	background: transparent;
 	border: none;
-	border-bottom: 1px solid #555;
+	border-bottom: 1px solid var(--nt-tab-hover);
 	color: inherit;
 	font: inherit;
 	outline: none;
@@ -211,7 +211,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
-	background: #89b4fa; /* catppuccin blue */
+	background: var(--nt-accent);
 }
 
 /* Context menu */
@@ -224,12 +224,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .channel-context-menu {
 	position: fixed;
 	z-index: 1000;
-	background: #313244;
-	border: 1px solid #45475a;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 6px;
 	padding: 4px;
 	min-width: 160px;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+	box-shadow: var(--nt-shadow);
 }
 
 .channel-context-menu__item {
@@ -240,19 +240,19 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	background: none;
 	border: none;
 	border-radius: 4px;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 13px;
 	cursor: pointer;
 	transition: background 0.1s;
 }
 
 .channel-context-menu__item:hover {
-	background: #45475a;
+	background: var(--nt-tab-hover);
 }
 
 .channel-context-menu__sep {
 	height: 1px;
-	background: #45475a;
+	background: var(--nt-tab-hover);
 	margin: 4px 0;
 }
 </style>

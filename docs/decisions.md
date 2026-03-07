@@ -4,6 +4,30 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-06 — Theming & Color Schemes (2026-03-07)
+
+- CSS custom properties as single source of truth for all chrome colors (--nt-* prefix, 48+ vars in 3 tiers)
+- Theme files on disk (~/.config/nexterm/themes/), not DB — portable, git-friendly
+- 9 bundled presets (6 dark, 3 light), default catppuccin-mocha, copy-if-missing strategy
+- AppearanceConfig = global only; theme NAME = per-host via TerminalProfile cascade
+- AppearanceConfig persisted in appearance.json (not config.toml) — simpler read/write
+- Theme name validation: /^[a-z0-9-]+$/ with path traversal prevention in get/delete
+- NexTermTheme = colors (22 terminal) + ui (15 chrome), validateTheme returns {valid, errors[]}
+- BUNDLED_THEMES as Record<string, NexTermTheme> in shared/themes/index.ts
+- ThemeManager uses fs/promises (async), ThemeError for structured errors
+- Terminal theme propagation via callback Set in theme store — toXtermTheme() + onTerminalThemeChange()
+- Per-host theme override: useTerminal checks profile.theme, resolves from availableThemes (SC-03)
+- Live preview hover debounced via requestAnimationFrame (INV-08)
+- setTheme() disables autoSwitch when enabled (SC-14)
+- AppearancePanel as Teleported right-side slide-out panel (480px) with overlay backdrop
+- ThemeEditor: deep watcher on draft colors with rAF debounce for live preview
+- useAutoSwitch composable with matchMedia listener, onScopeDispose cleanup
+- Opacity via --nt-*-alpha CSS vars + rgba(var(--nt-*-rgb), var(--nt-*-alpha)) pattern
+- Scrollbar: --nt-scrollbar-width CSS var, style thin/wide/hidden
+- deepMerge generic constraint relaxed to T extends object (was Record<string,unknown>)
+
+---
+
 ## AGENT-DAEMON — Standalone agent daemon with UDS/named pipe transport (2026-03-06)
 
 - Node.js net module for cross-platform socket transport (UDS + named pipes, same API)

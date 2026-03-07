@@ -113,14 +113,14 @@ function startRename(idx: number): void {
 .tab-bar {
 	display: flex;
 	align-items: stretch;
-	background: #181825;
-	border-bottom: 1px solid #313244;
+	background: rgba(var(--nt-tab-bar-rgb), var(--nt-tab-bar-alpha));
+	border-bottom: 1px solid var(--nt-border);
 	overflow-x: auto;
 	overflow-y: hidden;
 	flex-shrink: 0;
 	min-height: 32px;
 	scrollbar-width: thin;
-	scrollbar-color: #313244 transparent;
+	scrollbar-color: var(--nt-border) transparent;
 }
 
 .tab-bar::-webkit-scrollbar {
@@ -132,7 +132,7 @@ function startRename(idx: number): void {
 }
 
 .tab-bar::-webkit-scrollbar-thumb {
-	background: #313244;
+	background: var(--nt-border);
 	border-radius: 2px;
 }
 
@@ -143,10 +143,10 @@ function startRename(idx: number): void {
 	padding: 0 10px 0 12px;
 	min-width: 80px;
 	max-width: 180px;
-	background: #11111b;
+	background: var(--nt-host-rail);
 	border: none;
-	border-right: 1px solid #313244;
-	color: #585b70;
+	border-right: 1px solid var(--nt-border);
+	color: var(--nt-text-secondary);
 	font-size: 12px;
 	font-family: inherit;
 	cursor: pointer;
@@ -158,18 +158,18 @@ function startRename(idx: number): void {
 }
 
 .tab:hover {
-	background: #1e1e2e;
-	color: #bac2de;
+	background: var(--nt-bg);
+	color: var(--nt-sidebar-text);
 }
 
 .tab--active {
-	background: #313244;
-	color: #cdd6f4;
-	border-bottom: 2px solid #89b4fa;
+	background: var(--nt-border);
+	color: var(--nt-fg);
+	border-bottom: 2px solid var(--nt-accent);
 }
 
 .tab--active:hover {
-	background: #313244;
+	background: var(--nt-border);
 }
 
 .tab__label {
@@ -191,7 +191,7 @@ function startRename(idx: number): void {
 	font-size: 14px;
 	line-height: 1;
 	opacity: 0;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	transition: opacity 0.1s, background 0.1s, color 0.1s;
 }
 
@@ -201,15 +201,15 @@ function startRename(idx: number): void {
 }
 
 .tab__close:hover {
-	background: #45475a;
-	color: #f38ba8;
+	background: var(--nt-tab-hover);
+	color: var(--nt-badge);
 }
 
 .tab-rename-input {
 	flex: 1;
 	background: transparent;
 	border: none;
-	border-bottom: 1px solid #555;
+	border-bottom: 1px solid var(--nt-tab-hover);
 	color: inherit;
 	font: inherit;
 	outline: none;
@@ -223,7 +223,7 @@ function startRename(idx: number): void {
 	width: 32px;
 	background: transparent;
 	border: none;
-	color: #45475a;
+	color: var(--nt-tab-hover);
 	font-size: 18px;
 	line-height: 1;
 	cursor: pointer;
@@ -235,7 +235,7 @@ function startRename(idx: number): void {
 }
 
 .tab-bar__add:hover {
-	color: #89b4fa;
-	background: #1e1e2e;
+	color: var(--nt-accent);
+	background: var(--nt-bg);
 }
 </style>

@@ -109,7 +109,7 @@ async function handleSubmit(): Promise<void> {
 .pairing-overlay {
 	position: fixed;
 	inset: 0;
-	background: rgba(17, 17, 27, 0.92);
+	background: rgba(var(--nt-bg-rgb), 0.92);
 	backdrop-filter: blur(6px);
 	display: flex;
 	align-items: center;
@@ -118,8 +118,8 @@ async function handleSubmit(): Promise<void> {
 }
 
 .pairing-card {
-	background: #1e1e2e;
-	border: 1px solid #313244;
+	background: var(--nt-bg);
+	border: 1px solid var(--nt-border);
 	border-radius: 12px;
 	padding: 40px 48px;
 	width: 380px;
@@ -128,13 +128,13 @@ async function handleSubmit(): Promise<void> {
 	flex-direction: column;
 	align-items: center;
 	gap: 0;
-	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+	box-shadow: var(--nt-shadow);
 }
 
 .pairing-logo {
 	font-size: 20px;
 	font-weight: 700;
-	color: #89b4fa;
+	color: var(--nt-accent);
 	letter-spacing: 0.04em;
 	margin-bottom: 20px;
 }
@@ -143,14 +143,14 @@ async function handleSubmit(): Promise<void> {
 	margin: 0 0 8px;
 	font-size: 18px;
 	font-weight: 600;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	text-align: center;
 }
 
 .pairing-subtitle {
 	margin: 0 0 28px;
 	font-size: 12px;
-	color: #6c7086;
+	color: var(--nt-text-muted);
 	text-align: center;
 	line-height: 1.6;
 }
@@ -177,16 +177,16 @@ async function handleSubmit(): Promise<void> {
 	font-weight: 700;
 	letter-spacing: 0.25em;
 	font-family: "Cascadia Code", "Fira Code", monospace;
-	background: #181825;
-	border: 1px solid #313244;
+	background: var(--nt-tab-bar);
+	border: 1px solid var(--nt-border);
 	border-radius: 8px;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	outline: none;
 	transition: border-color 0.15s;
 }
 
 .code-input:focus {
-	border-color: #89b4fa;
+	border-color: var(--nt-accent);
 }
 
 .code-input:disabled {
@@ -196,22 +196,22 @@ async function handleSubmit(): Promise<void> {
 .pairing-error {
 	margin: 0;
 	font-size: 12px;
-	color: #f38ba8;
+	color: var(--nt-badge);
 	text-align: center;
 }
 
 .pairing-success {
 	margin: 0;
 	font-size: 12px;
-	color: #a6e3a1;
+	color: var(--nt-green);
 	text-align: center;
 }
 
 .pairing-btn {
 	width: 100%;
 	height: 40px;
-	background: #89b4fa;
-	color: #1e1e2e;
+	background: var(--nt-accent);
+	color: var(--nt-bg);
 	font-size: 14px;
 	font-weight: 600;
 	border: none;
@@ -225,7 +225,7 @@ async function handleSubmit(): Promise<void> {
 }
 
 .pairing-btn:hover:not(:disabled) {
-	background: #b4d0fb;
+	filter: brightness(1.15);
 }
 
 .pairing-btn:disabled {
@@ -236,8 +236,8 @@ async function handleSubmit(): Promise<void> {
 .spinner {
 	width: 14px;
 	height: 14px;
-	border: 2px solid rgba(30, 30, 46, 0.3);
-	border-top-color: #1e1e2e;
+	border: 2px solid rgba(var(--nt-bg-rgb), 0.3);
+	border-top-color: var(--nt-bg);
 	border-radius: 50%;
 	animation: spin 0.7s linear infinite;
 	flex-shrink: 0;

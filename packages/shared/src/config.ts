@@ -40,9 +40,7 @@ export interface TabLayout {
  * - Arrays replace (not merged)
  * - undefined sources are skipped
  */
-export function deepMerge<T extends Record<string, unknown>>(
-	...sources: (Partial<T> | undefined | null)[]
-): T {
+export function deepMerge<T extends object>(...sources: (Partial<T> | undefined | null)[]): T {
 	const result: Record<string, unknown> = {};
 
 	for (const source of sources) {

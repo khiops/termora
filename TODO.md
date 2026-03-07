@@ -3,14 +3,14 @@
 ## In Progress
 
 ### UI/UX Sprint — Briefs Complete (docs/briefs/)
-- [ ] 🟡 [UI] UX-06: Theming & Color Schemes — spec ready (docs/plans/ux-06-theming.md)
-  - [ ] Block 1: Theme Model + Bundled Presets (shared) — S
-  - [ ] Block 2: Theme File Storage + REST API (hub) — M
-  - [ ] Block 3: CSS Variable System + Theme Store (web) — M
-  - [ ] Block 4: xterm.js Theme Integration (web) — S
-  - [ ] Block 5: Theme Picker + Live Preview (web) — M
-  - [ ] Block 6: Theme Editor + Import/Export (web) — L
-  - [ ] Block 7: OS Auto-Switch + Opacity + Scrollbar (web + hub) — M
+- [x] ✅ [UI] UX-06: Theming & Color Schemes (2026-03-07) — 7 blocks, 748 tests, /review clean
+  - [x] Block 1: Theme Model + Bundled Presets (shared)
+  - [x] Block 2: Theme File Storage + REST API (hub)
+  - [x] Block 3: CSS Variable System + Theme Store (web)
+  - [x] Block 4: xterm.js Theme Integration (web)
+  - [x] Block 5: Theme Picker + Live Preview (web)
+  - [x] Block 6: Theme Editor + Import/Export (web)
+  - [x] Block 7: OS Auto-Switch + Opacity + Scrollbar (web)
 - [ ] 🟡 [UI] UX-01: Tab Actions, Split Panes, Welcome Tab — spec ready (docs/plans/ux-01-tab-actions.md)
   - [ ] Block 1: Tab Context Menu + Close Actions (web) — M
   - [ ] Block 2: Vacant Pane Slots + Picker (web) — M
@@ -34,7 +34,7 @@
   - [ ] Block 6: Search History + Settings (web + hub) — S
 ### Deferred from /adversarial Sprint 1
 - [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
-- [ ] 💡 [UI] UX-06 Block 6 (Theme Editor) deferral candidate — heaviest block, consider Sprint 2 if time-constrained — Priority: L (from /adversarial C-04)
+- [x] ⏭️ [UI] UX-06 Block 6 (Theme Editor) deferral candidate — implemented (2026-03-07)
 
 - [ ] 💡 [UI] UX-03: Host Management (Sprint 2)
 - [ ] 💡 [UI] UX-05: Notifications (Sprint 3)

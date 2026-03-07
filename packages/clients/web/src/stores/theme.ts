@@ -1,0 +1,313 @@
+import type { AppearanceConfig, NexTermTheme, NexTermThemeColors } from "@nexterm/shared";
+import { BUNDLED_THEMES, DEFAULT_APPEARANCE, DEFAULT_THEME_NAME } from "@nexterm/shared";
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
+import { useAuthStore } from "./auth.js";
+
+/**
+ * Theme store — manages available themes, current/preview theme,
+ * and applies CSS custom properties to :root.
+ */
+export const useThemeStore = defineStore("theme", () => {
+	const availableThemes = ref<NexTermTheme[]>([]);
+	const currentTheme = ref<NexTermTheme | null>(null);
+	const previewTheme = ref<NexTermTheme | null>(null);
+
+	/** The active theme (preview if hovering, otherwise current). */
+	const activeTheme = computed(() => previewTheme.value ?? currentTheme.value);
+
+	// ── Terminal theme callbacks ────────────────────────────────────────
+
+	/** xterm.js instances register to receive theme color updates. */
+	const terminalThemeCallbacks = new Set<(theme: Record<string, string>) => void>();
+
+	/**
+	 * Register a callback invoked whenever the active theme changes.
+	 * Returns an unsubscribe function.
+	 */
+	function onTerminalThemeChange(cb: (theme: Record<string, string>) => void): () => void {
+		terminalThemeCallbacks.add(cb);
+		return () => terminalThemeCallbacks.delete(cb);
+	}
+
+	/**
+	 * Convert NexTermThemeColors to a plain object suitable for xterm.js ITheme.
+	 * Strips undefined optional fields so xterm.js falls back to its own defaults.
+	 */
+	function toXtermTheme(colors: NexTermThemeColors): Record<string, string> {
+		const result: Record<string, string> = {};
+		for (const [key, value] of Object.entries(colors)) {
+			if (value !== undefined) {
+				result[key] = value;
+			}
+		}
+		return result;
+	}
+
+	// ── Load themes from hub API ────────────────────────────────────────
+
+	async function loadThemes(): Promise<void> {
+		const authStore = useAuthStore();
+		try {
+			const response = await fetch("/api/themes", {
+				headers: {
+					Authorization: `Bearer ${authStore.token ?? ""}`,
+				},
+			});
+			if (response.ok) {
+				availableThemes.value = (await response.json()) as NexTermTheme[];
+			}
+		} catch {
+			// API may not exist yet — fall back to bundled themes
+		}
+
+		// Always include bundled themes
+		if (availableThemes.value.length === 0) {
+			availableThemes.value = Object.values(BUNDLED_THEMES);
+		}
+	}
+
+	// ── Apply theme: set CSS variables on :root ─────────────────────────
+
+	function applyTheme(theme: NexTermTheme): void {
+		const root = document.documentElement.style;
+
+		// Tier 1: terminal colors
+		root.setProperty("--nt-fg", theme.colors.foreground);
+		root.setProperty("--nt-bg", theme.colors.background);
+		root.setProperty("--nt-cursor", theme.colors.cursor);
+		root.setProperty("--nt-cursor-accent", theme.colors.cursorAccent ?? "transparent");
+		root.setProperty("--nt-selection-bg", theme.colors.selectionBackground);
+		root.setProperty("--nt-selection-fg", theme.colors.selectionForeground ?? "transparent");
+
+		// ANSI 16
+		root.setProperty("--nt-black", theme.colors.black);
+		root.setProperty("--nt-red", theme.colors.red);
+		root.setProperty("--nt-green", theme.colors.green);
+		root.setProperty("--nt-yellow", theme.colors.yellow);
+		root.setProperty("--nt-blue", theme.colors.blue);
+		root.setProperty("--nt-magenta", theme.colors.magenta);
+		root.setProperty("--nt-cyan", theme.colors.cyan);
+		root.setProperty("--nt-white", theme.colors.white);
+		root.setProperty("--nt-bright-black", theme.colors.brightBlack);
+		root.setProperty("--nt-bright-red", theme.colors.brightRed);
+		root.setProperty("--nt-bright-green", theme.colors.brightGreen);
+		root.setProperty("--nt-bright-yellow", theme.colors.brightYellow);
+		root.setProperty("--nt-bright-blue", theme.colors.brightBlue);
+		root.setProperty("--nt-bright-magenta", theme.colors.brightMagenta);
+		root.setProperty("--nt-bright-cyan", theme.colors.brightCyan);
+		root.setProperty("--nt-bright-white", theme.colors.brightWhite);
+
+		// Tier 2: UI chrome
+		root.setProperty("--nt-tab-bar", theme.ui.tabBar);
+		root.setProperty("--nt-tab-active", theme.ui.tabActive);
+		root.setProperty("--nt-tab-inactive", theme.ui.tabInactive);
+		root.setProperty("--nt-tab-hover", theme.ui.tabHover);
+		root.setProperty("--nt-sidebar", theme.ui.sidebar);
+		root.setProperty("--nt-sidebar-text", theme.ui.sidebarText);
+		root.setProperty("--nt-sidebar-active", theme.ui.sidebarActive);
+		root.setProperty("--nt-host-rail", theme.ui.hostRail);
+		root.setProperty("--nt-border", theme.ui.border);
+		root.setProperty("--nt-accent", theme.ui.accent);
+		root.setProperty("--nt-badge", theme.ui.badge);
+		root.setProperty("--nt-scrollbar-thumb", theme.ui.scrollbarThumb);
+		root.setProperty("--nt-scrollbar-track", theme.ui.scrollbarTrack);
+		root.setProperty("--nt-search-highlight", theme.ui.searchHighlight);
+		root.setProperty("--nt-search-highlight-active", theme.ui.searchHighlightActive);
+
+		// Tier 3: computed
+		root.setProperty("--nt-text-secondary", theme.colors.brightBlack);
+		root.setProperty("--nt-text-muted", theme.colors.brightWhite);
+
+		// RGB components for rgba() usage
+		root.setProperty("--nt-accent-rgb", hexToRgb(theme.ui.accent));
+		root.setProperty("--nt-badge-rgb", hexToRgb(theme.ui.badge));
+		root.setProperty("--nt-green-rgb", hexToRgb(theme.colors.green));
+		root.setProperty("--nt-yellow-rgb", hexToRgb(theme.colors.yellow));
+		root.setProperty("--nt-fg-rgb", hexToRgb(theme.colors.foreground));
+		root.setProperty("--nt-bg-rgb", hexToRgb(theme.colors.background));
+		root.setProperty("--nt-sidebar-rgb", hexToRgb(theme.ui.sidebar));
+		root.setProperty("--nt-host-rail-rgb", hexToRgb(theme.ui.hostRail));
+		root.setProperty("--nt-tab-bar-rgb", hexToRgb(theme.ui.tabBar));
+
+		// Overlays (dark vs light)
+		if (theme.type === "dark") {
+			root.setProperty("--nt-overlay", "rgba(0, 0, 0, 0.5)");
+			root.setProperty("--nt-overlay-heavy", "rgba(0, 0, 0, 0.7)");
+			root.setProperty("--nt-shadow", "0 4px 24px rgba(0, 0, 0, 0.6)");
+		} else {
+			root.setProperty("--nt-overlay", "rgba(0, 0, 0, 0.3)");
+			root.setProperty("--nt-overlay-heavy", "rgba(0, 0, 0, 0.5)");
+			root.setProperty("--nt-shadow", "0 4px 24px rgba(0, 0, 0, 0.15)");
+		}
+
+		// Notify xterm.js terminals of the color change
+		const xtermTheme = toXtermTheme(theme.colors);
+		for (const cb of terminalThemeCallbacks) {
+			cb(xtermTheme);
+		}
+	}
+
+	// ── Set current theme and apply ─────────────────────────────────────
+
+	async function setTheme(theme: NexTermTheme): Promise<void> {
+		currentTheme.value = theme;
+		applyTheme(theme);
+
+		// Disable auto-switch on manual selection (SC-14)
+		const update: Partial<AppearanceConfig> = { theme: theme.name };
+		if (appearance.value.autoSwitch.enabled) {
+			update.autoSwitch = { ...appearance.value.autoSwitch, enabled: false };
+			appearance.value = {
+				...appearance.value,
+				autoSwitch: { ...appearance.value.autoSwitch, enabled: false },
+			};
+		}
+
+		const authStore = useAuthStore();
+		try {
+			await fetch("/api/config/appearance", {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token ?? ""}`,
+				},
+				body: JSON.stringify(update),
+			});
+		} catch {
+			// API may not exist yet — theme is still applied locally
+		}
+	}
+
+	// ── Preview on hover (debounced via rAF) ────────────────────────────
+
+	let rafId: number | null = null;
+
+	function previewHover(theme: NexTermTheme): void {
+		if (rafId !== null) cancelAnimationFrame(rafId);
+		rafId = requestAnimationFrame(() => {
+			previewTheme.value = theme;
+			applyTheme(theme);
+			rafId = null;
+		});
+	}
+
+	function clearPreview(): void {
+		if (rafId !== null) cancelAnimationFrame(rafId);
+		rafId = requestAnimationFrame(() => {
+			previewTheme.value = null;
+			if (currentTheme.value !== null) applyTheme(currentTheme.value);
+			rafId = null;
+		});
+	}
+
+	// ── Appearance config (opacity, scrollbar, auto-switch) ─────────────
+
+	const appearance = ref<AppearanceConfig>({ ...DEFAULT_APPEARANCE });
+
+	async function loadAppearance(): Promise<void> {
+		const authStore = useAuthStore();
+		try {
+			const response = await fetch("/api/config/appearance", {
+				headers: {
+					Authorization: `Bearer ${authStore.token ?? ""}`,
+				},
+			});
+			if (response.ok) {
+				appearance.value = (await response.json()) as AppearanceConfig;
+			}
+		} catch {
+			// API may not exist yet — use defaults
+		}
+	}
+
+	/** Apply opacity settings to CSS custom properties. */
+	function applyOpacity(opacity: AppearanceConfig["opacity"]): void {
+		const root = document.documentElement.style;
+		root.setProperty("--nt-terminal-alpha", String(opacity.terminal / 100));
+		root.setProperty("--nt-sidebar-alpha", String(opacity.sidebar / 100));
+		root.setProperty("--nt-host-rail-alpha", String(opacity.hostRail / 100));
+		root.setProperty("--nt-tab-bar-alpha", String(opacity.tabBar / 100));
+	}
+
+	/** Apply scrollbar settings to CSS custom properties. */
+	function applyScrollbar(scrollbar: AppearanceConfig["scrollbar"]): void {
+		const root = document.documentElement.style;
+		const width =
+			scrollbar.style === "hidden"
+				? "0"
+				: scrollbar.style === "thin"
+					? `${scrollbar.widthThin}px`
+					: `${scrollbar.widthWide}px`;
+		root.setProperty("--nt-scrollbar-width", width);
+		if (scrollbar.thumbColor) {
+			root.setProperty("--nt-scrollbar-thumb", scrollbar.thumbColor);
+		}
+		if (scrollbar.trackColor) {
+			root.setProperty("--nt-scrollbar-track", scrollbar.trackColor);
+		}
+	}
+
+	/** Update appearance setting and persist via API. */
+	async function updateAppearance(partial: Partial<AppearanceConfig>): Promise<void> {
+		const authStore = useAuthStore();
+		try {
+			const response = await fetch("/api/config/appearance", {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token ?? ""}`,
+				},
+				body: JSON.stringify(partial),
+			});
+			if (response.ok) {
+				appearance.value = (await response.json()) as AppearanceConfig;
+			}
+		} catch {
+			// API may not exist yet
+		}
+		applyOpacity(appearance.value.opacity);
+		applyScrollbar(appearance.value.scrollbar);
+	}
+
+	// ── Initialize: apply default theme ─────────────────────────────────
+
+	function initialize(): void {
+		const defaultTheme = BUNDLED_THEMES[DEFAULT_THEME_NAME];
+		if (defaultTheme !== undefined) {
+			currentTheme.value = defaultTheme;
+			applyTheme(defaultTheme);
+		}
+		applyOpacity(appearance.value.opacity);
+		applyScrollbar(appearance.value.scrollbar);
+	}
+
+	return {
+		availableThemes,
+		currentTheme,
+		previewTheme,
+		activeTheme,
+		appearance,
+		loadThemes,
+		loadAppearance,
+		applyTheme,
+		applyOpacity,
+		applyScrollbar,
+		updateAppearance,
+		setTheme,
+		previewHover,
+		clearPreview,
+		initialize,
+		onTerminalThemeChange,
+		toXtermTheme,
+	};
+});
+
+// ── Helper: "#89b4fa" -> "137, 180, 250" ──────────────────────────────
+
+export function hexToRgb(hex: string): string {
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
+	return `${r}, ${g}, ${b}`;
+}

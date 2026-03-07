@@ -10,11 +10,14 @@ import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
+import { registerThemeRoutes } from "./api/themes.js";
+import { AppearanceManager } from "./appearance-manager.js";
 import { validateToken } from "./auth.js";
 import { getConfigDir } from "./cli.js";
 import { ConfigResolver, loadGcConfig } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
+import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
 
 export interface ServerOptions {
@@ -114,6 +117,11 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerGroupRoutes(server, metaDal);
 		registerConfigRoutes(server, metaDal, configResolver);
 		registerFontRoutes(server, configDir);
+		const themeManager = new ThemeManager(configDir);
+		await themeManager.init();
+		const appearanceManager = new AppearanceManager(configDir);
+		await appearanceManager.init();
+		registerThemeRoutes(server, themeManager, appearanceManager);
 		if (options.authToken) {
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}

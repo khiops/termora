@@ -135,7 +135,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	margin-top: 8px;
 	cursor: pointer;
 	user-select: none;
-	color: #7f849c; /* catppuccin overlay0 */
+	color: var(--nt-text-muted);
 	font-size: 11px;
 	font-weight: 600;
 	text-transform: uppercase;
@@ -145,8 +145,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 .group-header:hover {
-	color: #a6adc8;
-	background: #1e1e2e;
+	color: var(--nt-text-muted);
+	background: var(--nt-bg);
 }
 
 /* Chevron: points right when collapsed, down when expanded */
@@ -156,7 +156,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	transition: transform 0.15s ease;
 	/* Default (not collapsed): rotate to point down */
 	transform: rotate(90deg);
-	color: #585b70;
+	color: var(--nt-text-secondary);
 }
 
 .group-header--collapsed .group-header__chevron {
@@ -172,10 +172,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
 .group-header__input {
 	flex: 1;
-	background: #313244;
-	border: 1px solid #89b4fa;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-accent);
 	border-radius: 3px;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 11px;
 	font-weight: 600;
 	letter-spacing: 0.08em;
@@ -185,7 +185,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
 .group-header__count {
 	font-size: 10px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	min-width: 12px;
 	text-align: right;
 }
@@ -200,12 +200,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .group-context-menu {
 	position: fixed;
 	z-index: 1000;
-	background: #313244;
-	border: 1px solid #45475a;
+	background: var(--nt-border);
+	border: 1px solid var(--nt-tab-hover);
 	border-radius: 6px;
 	padding: 4px;
 	min-width: 140px;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+	box-shadow: var(--nt-shadow);
 }
 
 .group-context-menu__item {
@@ -216,7 +216,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	background: none;
 	border: none;
 	border-radius: 4px;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 13px;
 	cursor: pointer;
 	transition: background 0.1s;
@@ -226,20 +226,20 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 .group-context-menu__item:hover {
-	background: #45475a;
+	background: var(--nt-tab-hover);
 }
 
 .group-context-menu__item--danger {
-	color: #f38ba8;
+	color: var(--nt-badge);
 }
 
 .group-context-menu__item--danger:hover {
-	background: rgba(243, 139, 168, 0.15);
+	background: rgba(var(--nt-badge-rgb), 0.15);
 }
 
 .group-context-menu__sep {
 	height: 1px;
-	background: #45475a;
+	background: var(--nt-tab-hover);
 	margin: 4px 0;
 }
 </style>

@@ -10,3 +10,6 @@ export * from "./utils.js";
 export * from "./validation.js";
 export * from "./socket-path.js";
 export * from "./agent-config.js";
+export * from "./theme.js";
+export * from "./appearance.js";
+export * from "./themes/index.js";

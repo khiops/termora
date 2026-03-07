@@ -136,7 +136,7 @@ function typeBadge(type: PaletteItemType): string {
 .palette-overlay {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--nt-overlay);
 	display: flex;
 	align-items: flex-start;
 	justify-content: center;
@@ -146,12 +146,10 @@ function typeBadge(type: PaletteItemType): string {
 
 /* ── Card ─────────────────────────────────────────────────────────────────── */
 .palette-card {
-	background: #1e1e2e;
-	border: 1px solid #313244;
+	background: var(--nt-bg);
+	border: 1px solid var(--nt-border);
 	border-radius: 8px;
-	box-shadow:
-		0 8px 32px rgba(0, 0, 0, 0.6),
-		0 2px 8px rgba(0, 0, 0, 0.4);
+	box-shadow: var(--nt-shadow);
 	width: 560px;
 	max-width: calc(100vw - 32px);
 	overflow: hidden;
@@ -165,7 +163,7 @@ function typeBadge(type: PaletteItemType): string {
 	align-items: center;
 	gap: 10px;
 	padding: 12px 16px;
-	border-bottom: 1px solid #313244;
+	border-bottom: 1px solid var(--nt-border);
 }
 
 .palette-search-icon {
@@ -179,14 +177,14 @@ function typeBadge(type: PaletteItemType): string {
 	background: transparent;
 	border: none;
 	outline: none;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 15px;
 	font-family: inherit;
-	caret-color: #89b4fa;
+	caret-color: var(--nt-accent);
 }
 
 .palette-input::placeholder {
-	color: #45475a;
+	color: var(--nt-tab-hover);
 }
 
 /* ── Results list ─────────────────────────────────────────────────────────── */
@@ -195,7 +193,7 @@ function typeBadge(type: PaletteItemType): string {
 	overflow-y: auto;
 	padding: 4px 0;
 	scrollbar-width: thin;
-	scrollbar-color: #313244 transparent;
+	scrollbar-color: var(--nt-border) transparent;
 }
 
 .palette-results::-webkit-scrollbar {
@@ -207,7 +205,7 @@ function typeBadge(type: PaletteItemType): string {
 }
 
 .palette-results::-webkit-scrollbar-thumb {
-	background: #313244;
+	background: var(--nt-border);
 	border-radius: 3px;
 }
 
@@ -218,7 +216,7 @@ function typeBadge(type: PaletteItemType): string {
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	user-select: none;
 }
 
@@ -233,7 +231,7 @@ function typeBadge(type: PaletteItemType): string {
 	border: none;
 	cursor: pointer;
 	text-align: left;
-	color: #cdd6f4;
+	color: var(--nt-fg);
 	font-size: 13px;
 	font-family: inherit;
 	transition: background 0.08s;
@@ -241,7 +239,7 @@ function typeBadge(type: PaletteItemType): string {
 
 .palette-item:hover,
 .palette-item.selected {
-	background: #313244;
+	background: var(--nt-border);
 }
 
 .palette-item-icon {
@@ -269,27 +267,27 @@ function typeBadge(type: PaletteItemType): string {
 }
 
 .palette-item-badge[data-type="host"] {
-	background: rgba(137, 180, 250, 0.12);
-	color: #89b4fa;
-	border: 1px solid rgba(137, 180, 250, 0.25);
+	background: rgba(var(--nt-accent-rgb), 0.12);
+	color: var(--nt-accent);
+	border: 1px solid rgba(var(--nt-accent-rgb), 0.25);
 }
 
 .palette-item-badge[data-type="channel"] {
-	background: rgba(166, 227, 161, 0.12);
-	color: #a6e3a1;
-	border: 1px solid rgba(166, 227, 161, 0.25);
+	background: rgba(var(--nt-green-rgb), 0.12);
+	color: var(--nt-green);
+	border: 1px solid rgba(var(--nt-green-rgb), 0.25);
 }
 
 .palette-item-badge[data-type="action"] {
-	background: rgba(203, 166, 247, 0.12);
-	color: #cba6f7;
-	border: 1px solid rgba(203, 166, 247, 0.25);
+	background: rgba(var(--nt-accent-rgb), 0.12);
+	color: var(--nt-magenta);
+	border: 1px solid rgba(var(--nt-accent-rgb), 0.25);
 }
 
 /* ── Shortcut hint ────────────────────────────────────────────────────────── */
 .palette-item-shortcut {
 	font-size: 11px;
-	color: #585b70;
+	color: var(--nt-text-secondary);
 	font-family: ui-monospace, monospace;
 	flex-shrink: 0;
 }
@@ -298,7 +296,7 @@ function typeBadge(type: PaletteItemType): string {
 .palette-empty {
 	padding: 24px 16px;
 	text-align: center;
-	color: #45475a;
+	color: var(--nt-tab-hover);
 	font-size: 13px;
 	font-style: italic;
 }

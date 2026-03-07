@@ -4,6 +4,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
 import { type Ref, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";
+import { useThemeStore } from "../stores/theme.js";
 
 /**
  * xterm.js composable.
@@ -19,6 +20,7 @@ export function useTerminal(
 	let channelId: string | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let outputUnsubscribe: (() => void) | null = null;
+	let themeUnsubscribe: (() => void) | null = null;
 
 	/**
 	 * When false, keyboard input is suppressed (read-only mode).
@@ -52,6 +54,15 @@ export function useTerminal(
 		}
 
 		const p = profile;
+		const themeStore = useThemeStore();
+
+		// Resolve per-host theme override (SC-03) or fall back to global
+		const hostTheme = p?.theme
+			? themeStore.availableThemes.find((t) => t.name === p.theme)
+			: undefined;
+		const initialColors = (hostTheme ?? themeStore.activeTheme)?.colors;
+		const initialXtermTheme = initialColors ? themeStore.toXtermTheme(initialColors) : {};
+
 		const term = new Terminal({
 			allowProposedApi: true,
 			cursorBlink: p?.cursorStyle !== "underline", // blink except underline (xterm default)
@@ -59,28 +70,7 @@ export function useTerminal(
 			fontFamily: p?.fontFamily ?? '"Consolas", "Liberation Mono", "Courier New", monospace',
 			cursorStyle: p?.cursorStyle ?? "block",
 			scrollback: p?.scrollback ?? 5000,
-			theme: {
-				// Catppuccin Mocha — hardcoded for now, themeOverrides later
-				background: "#1e1e2e",
-				foreground: "#cdd6f4",
-				cursor: "#f5e0dc",
-				black: "#45475a",
-				red: "#f38ba8",
-				green: "#a6e3a1",
-				yellow: "#f9e2af",
-				blue: "#89b4fa",
-				magenta: "#f5c2e7",
-				cyan: "#94e2d5",
-				white: "#bac2de",
-				brightBlack: "#585b70",
-				brightRed: "#f38ba8",
-				brightGreen: "#a6e3a1",
-				brightYellow: "#f9e2af",
-				brightBlue: "#89b4fa",
-				brightMagenta: "#f5c2e7",
-				brightCyan: "#94e2d5",
-				brightWhite: "#a6adc8",
-			},
+			theme: initialXtermTheme,
 		});
 
 		term.loadAddon(fitAddon);
@@ -115,6 +105,18 @@ export function useTerminal(
 			fitAddon.fit();
 		});
 		resizeObserver.observe(containerRef.value);
+
+		// Subscribe to global theme changes so all terminals update live.
+		// Per-host override (SC-03): if a host-specific theme is set, use that instead.
+		themeUnsubscribe = themeStore.onTerminalThemeChange((xtermTheme) => {
+			if (terminal.value) {
+				if (hostTheme) {
+					terminal.value.options.theme = themeStore.toXtermTheme(hostTheme.colors);
+				} else {
+					terminal.value.options.theme = xtermTheme;
+				}
+			}
+		});
 
 		return { cols: term.cols, rows: term.rows };
 	}
@@ -271,6 +273,8 @@ export function useTerminal(
 	function dispose(): void {
 		if (resizeTimer !== null) clearTimeout(resizeTimer);
 		resizeTimer = null;
+		themeUnsubscribe?.();
+		themeUnsubscribe = null;
 		outputUnsubscribe?.();
 		outputUnsubscribe = null;
 		resizeObserver?.disconnect();
