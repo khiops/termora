@@ -394,10 +394,11 @@ watch(
 			layout.openTab(welcomeCh.id, layout.getTabLabel(welcomeCh.id));
 		}
 
-		// Auto-spawn only if no live channels AND no tabs open
-		// (in "readonly" mode, dead channel tabs are kept so tabs may still exist)
+		// Auto-spawn only for local hosts with no live channels and no tabs open.
+		// SSH hosts require an explicit connection — auto-spawn would timeout.
+		const host = hostsStore.hosts.find((h) => h.id === hostId);
 		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== "dead");
-		if (!hasAliveChannels && layout.tabs.value.length === 0) {
+		if (host?.type === "local" && !hasAliveChannels && layout.tabs.value.length === 0) {
 			openPendingTab(hostId);
 		}
 	},
