@@ -125,16 +125,17 @@ describe("MetaDAL — Hosts CRUD", () => {
 			expect(hosts).toEqual([]);
 		});
 
-		it("returns all hosts ordered by created_at", () => {
+		it("returns hosts ordered by type (local first), then group, then sort_order", () => {
 			dal.createHost({ type: "local", label: "First" });
 			dal.createHost({ type: "ssh", label: "Second", sshHost: "10.0.0.1" });
 			dal.createHost({ type: "local", label: "Third" });
 
 			const hosts = dal.listHosts();
 			expect(hosts).toHaveLength(3);
+			// Local hosts come first, then SSH
 			expect((hosts[0] as Host).label).toBe("First");
-			expect((hosts[1] as Host).label).toBe("Second");
-			expect((hosts[2] as Host).label).toBe("Third");
+			expect((hosts[1] as Host).label).toBe("Third");
+			expect((hosts[2] as Host).label).toBe("Second");
 		});
 	});
 
@@ -198,6 +199,105 @@ describe("MetaDAL — Hosts CRUD", () => {
 			const host = dal.createHost({ type: "local", label: "No Children" });
 			expect(() => dal.deleteHost(host.id)).not.toThrow();
 		});
+	});
+});
+
+describe("MetaDAL — Host Management fields", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createHost returns new fields with defaults", () => {
+		const host = dal.createHost({ type: "local", label: "defaults-test" });
+
+		expect(host.sortOrder).toBe(0);
+		expect(host.keepAliveSeconds).toBe(60);
+		expect(host.historyRetentionDays).toBe(30);
+		expect(host.hostGroup).toBeUndefined();
+		expect(host.sshConfigHost).toBeUndefined();
+		expect(host.sshUser).toBeUndefined();
+	});
+
+	it("createHost stores explicit new field values", () => {
+		const host = dal.createHost({
+			type: "ssh",
+			label: "explicit-fields",
+			sshHost: "10.0.0.5",
+			hostGroup: "production",
+			sortOrder: 3,
+			sshConfigHost: "prod-server",
+			sshUser: "deploy",
+			keepAliveSeconds: 120,
+			historyRetentionDays: 90,
+		});
+
+		expect(host.hostGroup).toBe("production");
+		expect(host.sortOrder).toBe(3);
+		expect(host.sshConfigHost).toBe("prod-server");
+		expect(host.sshUser).toBe("deploy");
+		expect(host.keepAliveSeconds).toBe(120);
+		expect(host.historyRetentionDays).toBe(90);
+	});
+
+	it("updateHost updates hostGroup", () => {
+		const host = dal.createHost({ type: "ssh", label: "group-test", sshHost: "10.0.0.6" });
+		expect(host.hostGroup).toBeUndefined();
+
+		const updated = dal.updateHost(host.id, { hostGroup: "staging" });
+		expect(updated.hostGroup).toBe("staging");
+	});
+
+	it("updateHost updates keepAliveSeconds and historyRetentionDays", () => {
+		const host = dal.createHost({ type: "local", label: "retention-test" });
+
+		const updated = dal.updateHost(host.id, {
+			keepAliveSeconds: 300,
+			historyRetentionDays: 7,
+		});
+		expect(updated.keepAliveSeconds).toBe(300);
+		expect(updated.historyRetentionDays).toBe(7);
+	});
+
+	it("listHosts orders local first, then by group and sortOrder", () => {
+		// Create hosts: local, then two SSH in different groups
+		dal.createHost({ type: "local", label: "my-local" });
+		dal.createHost({
+			type: "ssh",
+			label: "ssh-beta",
+			sshHost: "10.0.0.1",
+			hostGroup: "beta",
+			sortOrder: 0,
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "ssh-alpha",
+			sshHost: "10.0.0.2",
+			hostGroup: "alpha",
+			sortOrder: 0,
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "ssh-no-group",
+			sshHost: "10.0.0.3",
+		});
+
+		const hosts = dal.listHosts();
+		expect(hosts).toHaveLength(4);
+		// 1. local first
+		expect(hosts[0]?.label).toBe("my-local");
+		// 2. SSH: group "alpha" before "beta" (alphabetical)
+		expect(hosts[1]?.label).toBe("ssh-alpha");
+		expect(hosts[2]?.label).toBe("ssh-beta");
+		// 3. SSH: NULL group sorts last (COALESCE to '~')
+		expect(hosts[3]?.label).toBe("ssh-no-group");
 	});
 });
 
@@ -1024,5 +1124,226 @@ describe("MetaDAL — Welcome Channel", () => {
 		// Each host should have its own welcome
 		expect(dal.getWelcomeChannel(hostId)?.id).toBe(id1);
 		expect(dal.getWelcomeChannel(host2.id)?.id).toBe(id2);
+	});
+});
+
+// ─── Host Group Operations ────────────────────────────────────────────────────
+
+describe("MetaDAL — Host Group Operations", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("reorderHosts updates sort_order for hosts in a group", () => {
+		const h1 = dal.createHost({
+			type: "ssh",
+			label: "reorder-a",
+			sshHost: "10.0.0.1",
+			hostGroup: "prod",
+			sortOrder: 0,
+		});
+		const h2 = dal.createHost({
+			type: "ssh",
+			label: "reorder-b",
+			sshHost: "10.0.0.2",
+			hostGroup: "prod",
+			sortOrder: 1,
+		});
+		const h3 = dal.createHost({
+			type: "ssh",
+			label: "reorder-c",
+			sshHost: "10.0.0.3",
+			hostGroup: "prod",
+			sortOrder: 2,
+		});
+
+		// Reverse order
+		dal.reorderHosts("prod", [h3.id, h2.id, h1.id]);
+
+		const updated1 = dal.getHost(h1.id);
+		const updated2 = dal.getHost(h2.id);
+		const updated3 = dal.getHost(h3.id);
+
+		expect(updated3?.sortOrder).toBe(0);
+		expect(updated2?.sortOrder).toBe(1);
+		expect(updated1?.sortOrder).toBe(2);
+	});
+
+	it("reorderHosts also updates host_group", () => {
+		const h1 = dal.createHost({
+			type: "ssh",
+			label: "move-group-a",
+			sshHost: "10.0.0.4",
+			hostGroup: "old-group",
+		});
+		const h2 = dal.createHost({
+			type: "ssh",
+			label: "move-group-b",
+			sshHost: "10.0.0.5",
+		});
+
+		// Move both to "new-group"
+		dal.reorderHosts("new-group", [h1.id, h2.id]);
+
+		expect(dal.getHost(h1.id)?.hostGroup).toBe("new-group");
+		expect(dal.getHost(h2.id)?.hostGroup).toBe("new-group");
+	});
+
+	it("duplicateHost creates copy with -copy suffix", () => {
+		const original = dal.createHost({
+			type: "ssh",
+			label: "dup-source",
+			sshHost: "10.0.0.10",
+			sshPort: 2222,
+			color: "#ff0000",
+			hostGroup: "staging",
+		});
+
+		const copy = dal.duplicateHost(original.id);
+
+		expect(copy).not.toBeNull();
+		expect(copy?.label).toBe("dup-source-copy");
+		expect(copy?.sshHost).toBe("10.0.0.10");
+		expect(copy?.sshPort).toBe(2222);
+		expect(copy?.color).toBe("#ff0000");
+		expect(copy?.hostGroup).toBe("staging");
+		expect(copy?.id).not.toBe(original.id);
+	});
+
+	it("duplicateHost increments suffix: -copy, -copy-2, -copy-3", () => {
+		const original = dal.createHost({
+			type: "ssh",
+			label: "dup-inc",
+			sshHost: "10.0.0.11",
+		});
+
+		const copy1 = dal.duplicateHost(original.id);
+		expect(copy1?.label).toBe("dup-inc-copy");
+
+		const copy2 = dal.duplicateHost(original.id);
+		expect(copy2?.label).toBe("dup-inc-copy-2");
+
+		const copy3 = dal.duplicateHost(original.id);
+		expect(copy3?.label).toBe("dup-inc-copy-3");
+	});
+
+	it("duplicateHost returns null for local host", () => {
+		const local = dal.createHost({ type: "local", label: "dup-local" });
+		expect(dal.duplicateHost(local.id)).toBeNull();
+	});
+
+	it("duplicateHost returns null for non-existent host", () => {
+		expect(dal.duplicateHost("no-such-id")).toBeNull();
+	});
+
+	it("renameHostGroup renames all hosts in group", () => {
+		dal.createHost({
+			type: "ssh",
+			label: "rename-grp-a",
+			sshHost: "10.0.0.20",
+			hostGroup: "old-name",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "rename-grp-b",
+			sshHost: "10.0.0.21",
+			hostGroup: "old-name",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "rename-grp-c",
+			sshHost: "10.0.0.22",
+			hostGroup: "other",
+		});
+
+		const count = dal.renameHostGroup("old-name", "new-name");
+		expect(count).toBe(2);
+
+		const hosts = dal.listHosts();
+		const renamed = hosts.filter((h) => h.hostGroup === "new-name");
+		const unchanged = hosts.filter((h) => h.hostGroup === "other");
+		const oldGroup = hosts.filter((h) => h.hostGroup === "old-name");
+
+		expect(renamed).toHaveLength(2);
+		expect(unchanged).toHaveLength(1);
+		expect(oldGroup).toHaveLength(0);
+	});
+
+	it("deleteHostGroup moves hosts to ungrouped (host_group=NULL)", () => {
+		dal.createHost({
+			type: "ssh",
+			label: "del-grp-a",
+			sshHost: "10.0.0.30",
+			hostGroup: "doomed",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "del-grp-b",
+			sshHost: "10.0.0.31",
+			hostGroup: "doomed",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "del-grp-c",
+			sshHost: "10.0.0.32",
+			hostGroup: "safe",
+		});
+
+		const count = dal.deleteHostGroup("doomed");
+		expect(count).toBe(2);
+
+		const hosts = dal.listHosts();
+		const doomed = hosts.filter((h) => h.hostGroup === "doomed");
+		const safe = hosts.filter((h) => h.hostGroup === "safe");
+		const ungrouped = hosts.filter((h) => h.hostGroup === undefined);
+
+		expect(doomed).toHaveLength(0);
+		expect(safe).toHaveLength(1);
+		expect(ungrouped).toHaveLength(2);
+	});
+
+	it("listHostGroups returns distinct groups sorted", () => {
+		dal.createHost({
+			type: "ssh",
+			label: "grp-list-c",
+			sshHost: "10.0.0.40",
+			hostGroup: "charlie",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "grp-list-a",
+			sshHost: "10.0.0.41",
+			hostGroup: "alpha",
+		});
+		dal.createHost({
+			type: "ssh",
+			label: "grp-list-b",
+			sshHost: "10.0.0.42",
+			hostGroup: "bravo",
+		});
+		// Second host in alpha — should not duplicate
+		dal.createHost({
+			type: "ssh",
+			label: "grp-list-a2",
+			sshHost: "10.0.0.43",
+			hostGroup: "alpha",
+		});
+		// Ungrouped host — should not appear
+		dal.createHost({
+			type: "ssh",
+			label: "grp-list-none",
+			sshHost: "10.0.0.44",
+		});
+
+		const groups = dal.listHostGroups();
+		expect(groups).toEqual(["alpha", "bravo", "charlie"]);
 	});
 });

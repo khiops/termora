@@ -23,6 +23,12 @@ export interface Host {
 	trustRemoteHints: TrustPolicy;
 	defaultShell?: string;
 	defaultCwd?: string;
+	hostGroup?: string | null;
+	sortOrder: number;
+	sshConfigHost?: string | null;
+	sshUser?: string | null;
+	keepAliveSeconds: number;
+	historyRetentionDays: number;
 	createdAt: string; // ISO 8601
 	updatedAt: string;
 }
@@ -86,4 +92,27 @@ export interface PairingCode {
 	token: string;
 	expiresAt: string;
 	used: boolean;
+}
+
+export interface SshConfigEntry {
+	name: string;
+	hostname: string | null;
+	port: number;
+	user: string | null;
+	identityFile: string | null;
+	proxyJump: string | null;
+	isGitHost: boolean;
+}
+
+export interface SshConfigImport {
+	name: string;
+	label: string;
+	hostGroup?: string;
+}
+
+export interface TestConnectionResult {
+	ok: boolean;
+	latencyMs?: number;
+	serverVersion?: string;
+	error?: string;
 }

@@ -24,6 +24,12 @@ export interface CreateHostInput {
 	trustRemoteHints?: "apply" | "ask" | "ignore";
 	defaultShell?: string;
 	defaultCwd?: string;
+	hostGroup?: string | null;
+	sortOrder?: number;
+	sshConfigHost?: string | null;
+	sshUser?: string | null;
+	keepAliveSeconds?: number;
+	historyRetentionDays?: number;
 }
 
 export interface CreateSessionInput {
@@ -61,6 +67,12 @@ interface HostRow {
 	trust_remote_hints: string;
 	default_shell: string | null;
 	default_cwd: string | null;
+	host_group: string | null;
+	sort_order: number;
+	ssh_config_host: string | null;
+	ssh_user: string | null;
+	keep_alive_seconds: number;
+	history_retention_days: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -121,6 +133,9 @@ function rowToHost(row: HostRow): Host {
 		label: row.label,
 		iconType: row.icon_type as Host["iconType"],
 		trustRemoteHints: row.trust_remote_hints as Host["trustRemoteHints"],
+		sortOrder: row.sort_order,
+		keepAliveSeconds: row.keep_alive_seconds,
+		historyRetentionDays: row.history_retention_days,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
@@ -133,6 +148,9 @@ function rowToHost(row: HostRow): Host {
 	if (row.profile_json != null) host.profileJson = row.profile_json;
 	if (row.default_shell != null) host.defaultShell = row.default_shell;
 	if (row.default_cwd != null) host.defaultCwd = row.default_cwd;
+	if (row.host_group != null) host.hostGroup = row.host_group;
+	if (row.ssh_config_host != null) host.sshConfigHost = row.ssh_config_host;
+	if (row.ssh_user != null) host.sshUser = row.ssh_user;
 	return host;
 }
 
@@ -203,11 +221,17 @@ export class MetaDAL {
 				`INSERT INTO hosts (
 					id, type, label, ssh_host, ssh_port, ssh_auth, ssh_key_path,
 					icon_type, icon_value, color, profile_json, trust_remote_hints,
-					default_shell, default_cwd, created_at, updated_at
+					default_shell, default_cwd,
+					host_group, sort_order, ssh_config_host, ssh_user,
+					keep_alive_seconds, history_retention_days,
+					created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?,
-					?, ?, ?, ?
+					?, ?,
+					?, ?, ?, ?,
+					?, ?,
+					?, ?
 				)`,
 			)
 			.run(
@@ -225,6 +249,12 @@ export class MetaDAL {
 				input.trustRemoteHints ?? "apply",
 				input.defaultShell ?? null,
 				input.defaultCwd ?? null,
+				input.hostGroup ?? null,
+				input.sortOrder ?? 0,
+				input.sshConfigHost ?? null,
+				input.sshUser ?? null,
+				input.keepAliveSeconds ?? 60,
+				input.historyRetentionDays ?? 30,
 				now,
 				now,
 			);
@@ -245,7 +275,14 @@ export class MetaDAL {
 	}
 
 	listHosts(): Host[] {
-		const rows = this.db.prepare("SELECT * FROM hosts ORDER BY created_at ASC").all() as HostRow[];
+		const rows = this.db
+			.prepare(
+				`SELECT * FROM hosts ORDER BY
+				CASE WHEN type = 'local' THEN 0 ELSE 1 END,
+				COALESCE(host_group, '~') ASC,
+				sort_order ASC`,
+			)
+			.all() as HostRow[];
 		return rows.map(rowToHost);
 	}
 
@@ -266,6 +303,12 @@ export class MetaDAL {
 			trustRemoteHints: "trust_remote_hints",
 			defaultShell: "default_shell",
 			defaultCwd: "default_cwd",
+			hostGroup: "host_group",
+			sortOrder: "sort_order",
+			sshConfigHost: "ssh_config_host",
+			sshUser: "ssh_user",
+			keepAliveSeconds: "keep_alive_seconds",
+			historyRetentionDays: "history_retention_days",
 		};
 
 		const setClauses: string[] = ["updated_at = ?"];
@@ -293,6 +336,86 @@ export class MetaDAL {
 	deleteHost(id: string): boolean {
 		const result = this.db.prepare("DELETE FROM hosts WHERE id = ?").run(id);
 		return result.changes > 0;
+	}
+
+	importHosts(inputs: CreateHostInput[]): Host[] {
+		const txn = this.db.transaction(() => {
+			return inputs.map((input) => this.createHost(input));
+		});
+		return txn();
+	}
+
+	reorderHosts(group: string | null, hostIds: string[]): void {
+		const txn = this.db.transaction(() => {
+			for (let i = 0; i < hostIds.length; i++) {
+				this.db
+					.prepare("UPDATE hosts SET sort_order = ?, host_group = ?, updated_at = ? WHERE id = ?")
+					.run(i, group, new Date().toISOString(), hostIds[i]);
+			}
+		});
+		txn();
+	}
+
+	duplicateHost(id: string): Host | null {
+		const original = this.getHost(id);
+		if (!original) return null;
+		if (original.type === "local") return null; // cannot duplicate local host
+
+		// Find unique label: "label-copy", "label-copy-2", etc.
+		let suffix = "-copy";
+		let attempt = 1;
+		while (this.getHostByLabel(original.label + suffix)) {
+			attempt++;
+			suffix = `-copy-${attempt}`;
+		}
+
+		return this.createHost({
+			type: original.type,
+			label: original.label + suffix,
+			...(original.sshHost !== undefined && { sshHost: original.sshHost }),
+			...(original.sshPort !== undefined && { sshPort: original.sshPort }),
+			...(original.sshAuth !== undefined && { sshAuth: original.sshAuth }),
+			...(original.sshKeyPath !== undefined && { sshKeyPath: original.sshKeyPath }),
+			...(original.iconType !== undefined && { iconType: original.iconType }),
+			...(original.iconValue !== undefined && { iconValue: original.iconValue }),
+			...(original.color !== undefined && { color: original.color }),
+			...(original.profileJson !== undefined && { profileJson: original.profileJson }),
+			...(original.trustRemoteHints !== undefined && {
+				trustRemoteHints: original.trustRemoteHints,
+			}),
+			...(original.defaultShell !== undefined && { defaultShell: original.defaultShell }),
+			...(original.defaultCwd !== undefined && { defaultCwd: original.defaultCwd }),
+			...(original.hostGroup != null && { hostGroup: original.hostGroup }),
+			...(original.sshConfigHost != null && { sshConfigHost: original.sshConfigHost }),
+			...(original.sshUser != null && { sshUser: original.sshUser }),
+			keepAliveSeconds: original.keepAliveSeconds,
+			historyRetentionDays: original.historyRetentionDays,
+		});
+	}
+
+	renameHostGroup(oldName: string, newName: string): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE hosts SET host_group = ?, updated_at = ? WHERE host_group = ?")
+			.run(newName, now, oldName);
+		return result.changes;
+	}
+
+	deleteHostGroup(name: string): number {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE hosts SET host_group = NULL, updated_at = ? WHERE host_group = ?")
+			.run(now, name);
+		return result.changes;
+	}
+
+	listHostGroups(): string[] {
+		const rows = this.db
+			.prepare(
+				"SELECT DISTINCT host_group FROM hosts WHERE host_group IS NOT NULL ORDER BY host_group ASC",
+			)
+			.all() as Array<{ host_group: string }>;
+		return rows.map((r) => r.host_group);
 	}
 
 	// ─── Groups ─────────────────────────────────────────────────────────────

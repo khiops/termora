@@ -130,6 +130,18 @@ export interface SearchConfig {
 	historySize?: number;
 }
 
+export interface HostRailConfig {
+	width?: number;
+	showLabels?: boolean;
+	showStatusDot?: boolean;
+}
+
+export interface HostsDefaultsConfig {
+	defaultShell?: string;
+	keepAliveSeconds?: number;
+	historyRetentionDays?: number;
+}
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',
