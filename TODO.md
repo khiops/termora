@@ -2,6 +2,18 @@
 
 ## In Progress
 
+### UI/UX Sprint — Briefs Complete (docs/briefs/)
+- [ ] 🟡 [UI] UX-06: Theming & Color Schemes (Sprint 1 — foundation)
+- [ ] 💡 [UI] UX-01: Tab Actions, Split Panes, Welcome Tab (Sprint 1)
+- [ ] 💡 [UI] UX-02: Terminal Title — OSC 0/2 (Sprint 1)
+- [ ] 💡 [UI] UX-04: Scrollback Search (Sprint 1)
+- [ ] 💡 [UI] UX-03: Host Management (Sprint 2)
+- [ ] 💡 [UI] UX-05: Notifications (Sprint 3)
+- [ ] 💡 [UI] UX-07: Host Customization & Visual Profiles (Sprint 3)
+- [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
+- [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
+- [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
+
 ## Recently Completed
 
 ## Pending
