@@ -146,7 +146,7 @@ function onAction(action: ContextAction): void {
 		emit("triggerRename", props.channel.id);
 		return;
 	}
-	emit(action, props.channel.id);
+	(emit as (event: string, ...args: unknown[]) => void)(action, props.channel.id);
 }
 
 function onMoveToGroup(groupId: string | null): void {

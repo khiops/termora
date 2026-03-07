@@ -601,7 +601,7 @@ function onDragStart(event: DragEvent): void {
 
 	// Find host ID from channels store
 	const channel = channelsStore.channels.find((c) => c.id === chId);
-	const hostId = channel?.hostId ?? channelsStore.activeHostId ?? null;
+	const hostId = channelsStore.activeHostId ?? null;
 
 	event.dataTransfer.setData(
 		"text/x-nexterm-pane",

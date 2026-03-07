@@ -102,7 +102,7 @@ export const useHostsStore = defineStore("hosts", () => {
 			const host = hosts.value.find((h) => h.id === hostIds[i]);
 			if (host) {
 				host.sortOrder = i;
-				host.hostGroup = group ?? undefined;
+				host.hostGroup = group ?? null;
 			}
 		}
 	}
