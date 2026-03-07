@@ -1028,7 +1028,9 @@ describe("SessionManager", () => {
 			}
 		).agents;
 		expect(agentsMap.size).toBeGreaterThan(0);
-		const [, agent] = [...agentsMap.entries()][0]!;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
 
 		// Emit TITLE_CHANGE with a channel ID that doesn't exist
 		// Should log a warning but not throw

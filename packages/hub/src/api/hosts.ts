@@ -48,6 +48,22 @@ interface UpdateHostBody {
 
 const SSH_TEST_TIMEOUT_MS = 10_000;
 
+const testConnectionAttempts = new Map<string, number[]>();
+
+function checkTestConnectionRateLimit(token: string): boolean {
+	const now = Date.now();
+	const window = 60_000;
+	const limit = 5;
+	const attempts = (testConnectionAttempts.get(token) ?? []).filter((t) => now - t < window);
+	if (attempts.length >= limit) {
+		testConnectionAttempts.set(token, attempts);
+		return false;
+	}
+	attempts.push(now);
+	testConnectionAttempts.set(token, attempts);
+	return true;
+}
+
 function validateCreateHost(body: CreateHostBody): string | null {
 	if (!body.label || body.label.trim().length === 0) {
 		return "Label is required";
@@ -378,6 +394,13 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 
 	// POST /api/hosts/:id/test
 	server.post<{ Params: { id: string } }>("/api/hosts/:id/test", async (request, reply) => {
+		const token = request.headers.authorization ?? "";
+		if (!checkTestConnectionRateLimit(token)) {
+			return reply.code(429).send({
+				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
+			});
+		}
+
 		const host = metaDal.getHost(request.params.id);
 		if (!host) {
 			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
@@ -543,8 +566,8 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 					label: entry.label.trim(),
 					sshHost: sshEntry.hostname ?? sshEntry.name,
 					sshPort: sshEntry.port,
-					sshUser: sshEntry.user,
-					sshKeyPath: sshEntry.identityFile,
+					...(sshEntry.user != null && { sshUser: sshEntry.user }),
+					...(sshEntry.identityFile != null && { sshKeyPath: sshEntry.identityFile }),
 					sshConfigHost: sshEntry.name,
 					...(entry.hostGroup !== undefined && { hostGroup: entry.hostGroup }),
 				};
@@ -565,6 +588,13 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			ssh_user?: string;
 		};
 	}>("/api/hosts/test", async (request, reply) => {
+		const token = request.headers.authorization ?? "";
+		if (!checkTestConnectionRateLimit(token)) {
+			return reply.code(429).send({
+				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
+			});
+		}
+
 		const { hostname, port, ssh_auth, ssh_key_path } = request.body;
 		if (!hostname) {
 			return reply.code(400).send({
