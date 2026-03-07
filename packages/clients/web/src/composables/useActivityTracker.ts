@@ -108,13 +108,11 @@ export function useActivityTracker(opts: {
 		pendingLineCount = 0;
 	}
 
-	// Clear notifications when tab becomes active
+	// Reset pending activity tracking when tab becomes active.
+	// Badge clearing is handled by useScrollBehavior (markRead, jumpToBottom,
+	// natural scroll to bottom, or onTabSwitch) — NOT here (SC-19).
 	watch(opts.isActiveTab, (active) => {
 		if (active) {
-			const chId = opts.channelId.value;
-			if (chId) {
-				notificationStore.clearChannel(chId);
-			}
 			pendingLineCount = 0;
 			if (debounceTimer !== null) {
 				clearTimeout(debounceTimer);

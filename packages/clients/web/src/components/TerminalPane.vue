@@ -204,7 +204,7 @@ const notificationConfig = computed(() => configStore.uiConfig.notifications ?? 
 const scrollMode = computed(() => notificationConfig.value.scroll?.mode ?? "auto");
 const autoThreshold = computed(() => notificationConfig.value.scroll?.autoThreshold ?? 100);
 
-const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBottom } = useScrollBehavior({
+const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBottom, onNaturalScrollToBottom } = useScrollBehavior({
 	channelId: effectiveChannelId,
 	isActiveTab,
 	scrollMode: scrollMode.value,
@@ -599,6 +599,21 @@ useSearchShortcuts(search.isOpen, {
 	onToggleCase: () => toggleSearchOption("caseSensitive"),
 	onToggleRegex: () => toggleSearchOption("regex"),
 	onToggleWholeWord: () => toggleSearchOption("wholeWord"),
+});
+
+// Wire natural scroll-to-bottom detection (EFF-07 / F-007).
+// When the viewport reaches the bottom of the scrollback buffer,
+// clear unread badges and hide the unread lines bar.
+watch(terminal, (term) => {
+	if (!term) return;
+	term.onScroll(() => {
+		const buf = term.buffer.active;
+		// Viewport is at bottom when baseY equals the scrollback position
+		// (i.e., no lines are hidden below the viewport)
+		if (buf.baseY === buf.viewportY) {
+			onNaturalScrollToBottom();
+		}
+	});
 });
 
 // Intercept Ctrl+Shift+F before xterm.js captures it.

@@ -1052,6 +1052,10 @@ describe("SessionManager", () => {
 	// ─── Warm restart (Block 4) ───────────────────────────────────────────────
 
 	describe("startup() warm restart", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
 		it("is a no-op when there are no alive channels", async () => {
 			// Fresh SM with empty DB — nothing to restore
 			await sm.startup();

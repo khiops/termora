@@ -7,6 +7,32 @@ interface GroupEntry {
 }
 
 /**
+ * Show a desktop notification without requiring Vue component context.
+ * Intended for use from Pinia stores or plain modules.
+ * Only shows when document is hidden and permission is granted.
+ */
+export function showSimpleNotification(title: string, body: string, channelId: string): void {
+	if (typeof Notification === "undefined") return;
+	if (Notification.permission !== "granted") return;
+	if (!document.hidden) return;
+
+	try {
+		const notification = new Notification(title, {
+			body,
+			tag: `nexterm-${channelId}`,
+			silent: true,
+		});
+
+		notification.onclick = () => {
+			window.focus();
+			notification.close();
+		};
+	} catch {
+		// Notification API may throw in some environments
+	}
+}
+
+/**
  * Desktop notification management for terminal alerts.
  *
  * Features:

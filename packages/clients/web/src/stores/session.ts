@@ -1,6 +1,8 @@
-import { generateId } from "@nexterm/shared";
+import { DEFAULT_NOTIFICATION_CONFIG, generateId } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
+import { playBellSound } from "../composables/useBellSound.js";
+import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
@@ -79,21 +81,43 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 
-		// Route BELL messages to notification store (only for inactive tabs)
+		// Route BELL messages: badge + sound + desktop notification
 		const notificationStore = useNotificationStore();
+		const configStore = useConfigStore();
 		wsClient.on("BELL", (msg) => {
 			if (msg.type === "BELL") {
+				const bellCfg =
+					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
+				// Play bell sound regardless of active/inactive tab
+				playBellSound({
+					sound: bellCfg.sound ?? DEFAULT_NOTIFICATION_CONFIG.bell.sound,
+					customSoundFile: bellCfg.customSoundFile,
+				});
+				// Badge only for inactive tabs
 				if (msg.channelId !== channelsStore.selectedChannelId) {
 					notificationStore.incrementBellCount(msg.channelId);
+				}
+				// Desktop notification when document is hidden
+				if (bellCfg.desktopNotification !== false && document.hidden) {
+					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
+					const name = ch?.title ?? ch?.dynamicTitle ?? "Terminal";
+					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
 				}
 			}
 		});
 
-		// Route NOTIFICATION (OSC 9) messages — also increment bell count
+		// Route NOTIFICATION (OSC 9) messages: badge + desktop notification
 		wsClient.on("NOTIFICATION", (msg) => {
 			if (msg.type === "NOTIFICATION") {
+				const osc9Cfg =
+					configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
+				// Badge only for inactive tabs
 				if (msg.channelId !== channelsStore.selectedChannelId) {
 					notificationStore.incrementBellCount(msg.channelId);
+				}
+				// Desktop notification when document is hidden
+				if (osc9Cfg.desktopNotification !== false && document.hidden) {
+					showSimpleNotification("Terminal Notification", msg.message, msg.channelId);
 				}
 			}
 		});
@@ -130,6 +154,13 @@ export const useSessionStore = defineStore("session", () => {
 				}
 				// Reload resolved profile (font, cursor, scrollback settings)
 				await useConfigStore().loadProfile();
+				// Mark background channels with activity (SC-30/ERR-04)
+				const notifStore = useNotificationStore();
+				for (const ch of channelsStore2.channels) {
+					if (ch.id !== channelsStore2.selectedChannelId) {
+						notifStore.setActivity(ch.id);
+					}
+				}
 				reconnectCount.value++;
 			} catch (err) {
 				console.error("[session] Reconnect auth failed:", err);
