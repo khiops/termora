@@ -29,6 +29,10 @@
 						:class="`status-dot--${hostsStore.getHostStatus(localHost.id)}`"
 					></span>
 				</div>
+				<span
+					v-if="notificationStore.getBellCountForHost(localHost.id) > 0"
+					class="host-bell-badge"
+				>{{ notificationStore.getBellCountForHost(localHost.id) }}</span>
 			</div>
 
 			<!-- Separator after local host -->
@@ -108,6 +112,10 @@
 								:class="`status-dot--${hostsStore.getHostStatus(host.id)}`"
 							></span>
 						</div>
+						<span
+							v-if="notificationStore.getBellCountForHost(host.id) > 0"
+							class="host-bell-badge"
+						>{{ notificationStore.getBellCountForHost(host.id) }}</span>
 					</div>
 				</template>
 
@@ -157,6 +165,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useHostsStore } from "../stores/hosts.js";
+import { useNotificationStore } from "../stores/notifications.js";
 import {
 	useHostGroups,
 	type HostSection,
@@ -177,6 +186,7 @@ defineEmits<{
 }>();
 
 const hostsStore = useHostsStore();
+const notificationStore = useNotificationStore();
 const { sections, localHost, toggleGroup } = useHostGroups();
 
 let dragHostId: string | null = null;
@@ -352,6 +362,25 @@ onMounted(() => {
 	50% {
 		opacity: 0.4;
 	}
+}
+
+/* Bell badge — top-right corner of host badge */
+.host-bell-badge {
+	position: absolute;
+	top: -4px;
+	right: -4px;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--nt-badge);
+	color: var(--nt-bright-white, #fff);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 16px;
+	text-align: center;
+	pointer-events: none;
+	z-index: 1;
 }
 
 .rail-separator {

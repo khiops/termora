@@ -33,6 +33,15 @@
 			/>
 			<span v-else class="tab__label" @dblclick="startRename(idx)">{{ getTabLabel(tab.channelId) }}</span>
 			<span
+				v-if="notificationStore.activityDots.get(tab.channelId) && idx !== activeTabIndex"
+				class="tab__activity-dot"
+				aria-label="New activity"
+			></span>
+			<span
+				v-if="(notificationStore.bellCounts.get(tab.channelId) ?? 0) > 0 && idx !== activeTabIndex"
+				class="tab__bell-badge"
+			>{{ notificationStore.bellCounts.get(tab.channelId) }}</span>
+			<span
 				class="tab__close"
 				role="button"
 				:aria-label="`Close ${getTabLabel(tab.channelId)}`"
@@ -77,9 +86,11 @@ import { computed, reactive, ref, watch, nextTick } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 import { useRename } from "../composables/useRename.js";
 import { useChannelsStore } from "../stores/channels.js";
+import { useNotificationStore } from "../stores/notifications.js";
 import TabContextMenu from "./TabContextMenu.vue";
 
 const channelsStore = useChannelsStore();
+const notificationStore = useNotificationStore();
 
 const props = defineProps<{
 	tabs: Tab[];
@@ -349,6 +360,28 @@ function onTabBarDrop(event: DragEvent): void {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	text-align: left;
+}
+
+.tab__activity-dot {
+	flex-shrink: 0;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--nt-blue, #3b82f6);
+}
+
+.tab__bell-badge {
+	flex-shrink: 0;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--nt-badge);
+	color: var(--nt-bright-white, #fff);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 16px;
+	text-align: center;
 }
 
 .tab__close {

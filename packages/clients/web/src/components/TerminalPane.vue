@@ -44,6 +44,14 @@
 			<span class="reconnecting-text">Reconnecting<span class="reconnecting-dots" /></span>
 		</div>
 
+		<!-- Unread lines bar -->
+		<UnreadLinesBar
+			:line-count="unreadBarCount"
+			:show="showUnreadBar"
+			@mark-read="markRead"
+			@jump-to-bottom="jumpToBottom"
+		/>
+
 		<!-- Search overlay -->
 		<SearchOverlay
 			:is-open="search.isOpen.value"
@@ -97,8 +105,12 @@ import type { SearchHistoryEntry } from "../composables/useSearchHistory.js";
 import { useSearchShortcuts } from "../composables/useSearchShortcuts.js";
 import { MULTI_PANE_SEARCH_KEY } from "../composables/useMultiPaneSearch.js";
 import type { SearchScope } from "../composables/useMultiPaneSearch.js";
+import { useNotificationStore } from "../stores/notifications.js";
+import { useActivityTracker } from "../composables/useActivityTracker.js";
+import { useScrollBehavior } from "../composables/useScrollBehavior.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 import SearchOverlay from "./SearchOverlay.vue";
+import UnreadLinesBar from "./UnreadLinesBar.vue";
 
 // ---------------------------------------------------------------------------
 // Props + emits
@@ -172,6 +184,35 @@ const internalChannelId = ref<string | null>(null);
 const effectiveChannelId = computed<string | null>(
 	() => props.channelId ?? internalChannelId.value,
 );
+
+// ---------------------------------------------------------------------------
+// Notification: activity tracking + unread lines bar
+// ---------------------------------------------------------------------------
+
+const isActiveTab = computed(() => {
+	const chId = effectiveChannelId.value;
+	return chId !== null && channelsStore.selectedChannelId === chId;
+});
+
+useActivityTracker({
+	channelId: effectiveChannelId,
+	isActiveTab,
+	wsClient: sessionStore.wsClient,
+});
+
+const notificationConfig = computed(() => configStore.uiConfig.notifications ?? {});
+const scrollMode = computed(() => notificationConfig.value.scroll?.mode ?? "auto");
+const autoThreshold = computed(() => notificationConfig.value.scroll?.autoThreshold ?? 100);
+
+const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBottom } = useScrollBehavior({
+	channelId: effectiveChannelId,
+	isActiveTab,
+	scrollMode: scrollMode.value,
+	autoThreshold: autoThreshold.value,
+	scrollToBottom: () => {
+		terminal.value?.scrollToBottom();
+	},
+});
 
 const paneTitle = computed(() => {
 	const ch = effectiveChannelId.value;

@@ -1,6 +1,7 @@
 import {
 	type ChannelsConfig,
 	DEFAULT_PROFILE,
+	type NotificationConfig,
 	type PanesConfig,
 	type SearchConfig,
 	type StartupConfig,
@@ -74,6 +75,7 @@ interface UiConfig {
 	startup?: StartupConfig;
 	title?: TitleConfig;
 	search?: SearchConfig;
+	notifications?: NotificationConfig;
 }
 
 export const useConfigStore = defineStore("config", () => {

@@ -21,6 +21,15 @@
 		/>
 		<span v-else class="channel-item__label" @dblclick="startRename">{{ displayLabel }}</span>
 		<span v-if="channel.isWelcome" class="channel-item__welcome-star" title="Welcome Tab">&#x2605;</span>
+		<span
+			v-if="hasActivity && !isSelected"
+			class="channel-item__activity-dot"
+			aria-label="New activity"
+		></span>
+		<span
+			v-if="bellCount > 0 && !isSelected"
+			class="channel-item__bell-badge"
+		>{{ bellCount }}</span>
 		<span v-if="isUnread" class="channel-item__unread" aria-label="Unread output"></span>
 	</div>
 
@@ -75,6 +84,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import type { Channel, ChannelGroup } from "@nexterm/shared";
 import { useRename } from "../composables/useRename.js";
+import { useNotificationStore } from "../stores/notifications.js";
 
 const props = defineProps<{
 	channel: Channel;
@@ -98,6 +108,11 @@ const emit = defineEmits<{
 	restart: [channelId: string];
 	destroy: [channelId: string];
 }>();
+
+const notificationStore = useNotificationStore();
+
+const bellCount = computed(() => notificationStore.bellCounts.get(props.channel.id) ?? 0);
+const hasActivity = computed(() => notificationStore.activityDots.get(props.channel.id) ?? false);
 
 const displayLabel = computed(
 	() => props.channel.title || props.channel.dynamicTitle || DEFAULT_CHANNEL_NAME,
@@ -263,6 +278,30 @@ onUnmounted(() => {
 	font-size: 10px;
 	color: var(--nt-accent);
 	line-height: 1;
+}
+
+/* Activity dot */
+.channel-item__activity-dot {
+	flex-shrink: 0;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--nt-blue, #3b82f6);
+}
+
+/* Bell badge */
+.channel-item__bell-badge {
+	flex-shrink: 0;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--nt-badge);
+	color: var(--nt-bright-white, #fff);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 16px;
+	text-align: center;
 }
 
 /* Unread indicator dot */

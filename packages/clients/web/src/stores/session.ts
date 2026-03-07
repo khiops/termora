@@ -6,6 +6,7 @@ import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
 import { useHostsStore } from "./hosts.js";
+import { useNotificationStore } from "./notifications.js";
 import { useWriteLockStore } from "./writelock.js";
 
 export const useSessionStore = defineStore("session", () => {
@@ -75,6 +76,25 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("TITLE_CHANGE", (msg) => {
 			if (msg.type === "TITLE_CHANGE") {
 				channelsStore.setDynamicTitle(msg.channelId, msg.title);
+			}
+		});
+
+		// Route BELL messages to notification store (only for inactive tabs)
+		const notificationStore = useNotificationStore();
+		wsClient.on("BELL", (msg) => {
+			if (msg.type === "BELL") {
+				if (msg.channelId !== channelsStore.selectedChannelId) {
+					notificationStore.incrementBellCount(msg.channelId);
+				}
+			}
+		});
+
+		// Route NOTIFICATION (OSC 9) messages — also increment bell count
+		wsClient.on("NOTIFICATION", (msg) => {
+			if (msg.type === "NOTIFICATION") {
+				if (msg.channelId !== channelsStore.selectedChannelId) {
+					notificationStore.incrementBellCount(msg.channelId);
+				}
 			}
 		});
 
