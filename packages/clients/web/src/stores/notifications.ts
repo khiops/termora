@@ -78,6 +78,14 @@ export const useNotificationStore = defineStore("notifications", () => {
 		}
 	}
 
+	function clearUnreadLines(channelId: string): void {
+		if (unreadLines.value.has(channelId)) {
+			const next = new Map(unreadLines.value);
+			next.delete(channelId);
+			unreadLines.value = next;
+		}
+	}
+
 	function clearAll(): void {
 		bellCounts.value = new Map();
 		activityDots.value = new Map();
@@ -118,6 +126,7 @@ export const useNotificationStore = defineStore("notifications", () => {
 		addUnreadLines,
 		clearChannel,
 		clearBellAndActivity,
+		clearUnreadLines,
 		clearAll,
 		getBellCountForHost,
 		getHostActivity,

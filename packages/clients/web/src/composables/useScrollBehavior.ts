@@ -101,7 +101,9 @@ export function useScrollBehavior(opts: {
 	function onNaturalScrollToBottom(): void {
 		const chId = opts.channelId.value;
 		if (chId) {
-			notificationStore.clearChannel(chId);
+			// Only clear unread lines (scroll-related). Bell/activity have their
+			// own lifecycle — cleared on tab focus or auto-dismiss, not on scroll.
+			notificationStore.clearUnreadLines(chId);
 		}
 		showBar.value = false;
 	}

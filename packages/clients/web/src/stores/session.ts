@@ -102,7 +102,7 @@ export const useSessionStore = defineStore("session", () => {
 						if (msg.channelId === channelsStore.selectedChannelId) {
 							notificationStore.clearBellAndActivity(msg.channelId);
 						}
-					}, 800);
+					}, 1000);
 				}
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
@@ -125,7 +125,7 @@ export const useSessionStore = defineStore("session", () => {
 						if (msg.channelId === channelsStore.selectedChannelId) {
 							notificationStore.clearBellAndActivity(msg.channelId);
 						}
-					}, 800);
+					}, 1000);
 				}
 				// Desktop notification when document is hidden
 				if (osc9Cfg.desktopNotification !== false && document.hidden) {
