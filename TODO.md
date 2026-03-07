@@ -2,57 +2,16 @@
 
 ## In Progress
 
-### UI/UX Sprint — Briefs Complete (docs/briefs/)
-- [x] ✅ [UI] UX-06: Theming & Color Schemes (2026-03-07) — 7 blocks, 748 tests, /review clean
-  - [x] Block 1: Theme Model + Bundled Presets (shared)
-  - [x] Block 2: Theme File Storage + REST API (hub)
-  - [x] Block 3: CSS Variable System + Theme Store (web)
-  - [x] Block 4: xterm.js Theme Integration (web)
-  - [x] Block 5: Theme Picker + Live Preview (web)
-  - [x] Block 6: Theme Editor + Import/Export (web)
-  - [x] Block 7: OS Auto-Switch + Opacity + Scrollbar (web)
-- [x] ✅ [UI] UX-01: Tab Actions, Split Panes, Welcome Tab (2026-03-07) — 7 blocks, 802 tests, /review clean
-  - [x] Block 1: Tab Context Menu + Close Actions (web)
-  - [x] Block 2: Vacant Pane Slots + Picker (web)
-  - [x] Block 3: Welcome Tab (web + hub)
-  - [x] Block 4: Cross-Tab Pane DnD (web)
-  - [x] Block 5: Configure Command + Direct Process (web + hub + agent)
-  - [x] Block 6: Channel Sidebar Context Menu + States (web)
-  - [x] Block 7: Settings + Confirmations (web + hub)
-- [x] ✅ [UI] UX-02: Terminal Title (2026-03-07) — 5 blocks, 892 tests, /review clean
-  - [x] Block 1: TITLE_CHANGE Protocol + DB Migration (shared + agent + hub)
-  - [x] Block 2: UI Dynamic Title Display + Title Stack (web)
-  - [x] Block 3: Title Truncation + Sanitization (shared + web)
-  - [x] Block 4: Window Title + Per-Host Prefix (web + hub)
-  - [x] Block 5: Title Settings + Reset to Dynamic (web + hub)
-- [x] ✅ [UI] UX-04: Scrollback Search (2026-03-07) — 6 blocks, 984 tests, /review clean
-  - [x] Block 1: SearchAddon Integration + Basic Search (web) — S
-  - [x] Block 2: Search Overlay UI (web) — M
-  - [x] Block 3: Search Toggles + Keyboard Shortcuts (web) — S
-  - [x] Block 4: Scrollbar Markers (web) — S
-  - [x] Block 5: Multi-Pane Search Scope (web) — M
-  - [x] Block 6: Search History + Settings (web + hub) — S
-### Deferred from /adversarial Sprint 1
-- [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
-- [x] ⏭️ [UI] UX-06 Block 6 (Theme Editor) deferral candidate — implemented (2026-03-07)
-
-- [ ] 💡 [UI] UX-03: Host Management (Sprint 2)
-- [ ] 💡 [UI] UX-05: Notifications (Sprint 3)
-- [ ] 💡 [UI] UX-07: Host Customization & Visual Profiles (Sprint 3)
+### UI/UX Sprint — Phase B
+- [ ] 🟡 [UI] UX-05: Notifications — spec ready (docs/plans/ux-05-notifications.md), 7 blocks, 32 BDD, adversarial+llm×2
+- [ ] 🟡 [UI] UX-07: Host Customization — spec ready (docs/plans/ux-07-host-customization.md), 5 blocks, 20 BDD, adversarial+llm×2
 - [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
-## Recently Completed
-
 ## Pending
 
 ### Review Findings
-- [x] ✅ [Hub] waitForChannelState() listener cleanup on timeout (2026-03-06) — Promise.race + clearTimeout
-- [x] ✅ [Hub] DRY: extract shared daemon attach logic (2026-03-06) — _attachDaemon helper
-- [x] ✅ [Shared] Add EACCES test for probeSocket() (2026-03-06)
-- [x] ✅ [Hub] Add waitForSocket() timeout test (2026-03-06)
-- [x] ✅ [Agent] Add stat() assertion for 0700 socket dir permissions (2026-03-06)
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
 - [ ] 🔧 [UI] VacantPane: filter detached channels by hostId (currently shows all hosts) — Priority: M (from /review F-006)
 - [ ] 🔧 [UI] TerminalPane: channel?.hostId references non-existent field, falls back silently — Priority: M (from /review F-009)
@@ -69,6 +28,25 @@
 - [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: M (from /adversarial C-08)
 - [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: M (from /llm Codex)
 - [ ] 💡 [Agent] Unix socket path length validation (~100 char limit) — Priority: L (from /llm Copilot)
+
+### Deferred from UX-03 /review
+- [ ] 🔧 [Web] DeleteHostModal: hasActiveSessions always false — needs session store data — Priority: M (from /review F-004)
+- [ ] 🔧 [Hub] testSshConnectivity returns ok:true for auth failures — confusing UX — Priority: M (from /review F-005)
+- [ ] 🔧 [Web] HostRail tooltip missing channel count + connection duration (SC-17) — Priority: L (from /review F-007)
+- [ ] 🔧 [Hub] SQL comment for COALESCE(host_group, '~') tilde sorting trick — Priority: L (from /review F-008)
+- [ ] 🔧 [Hub] Batch import: set sshAuth based on IdentityFile presence — Priority: L (from /review F-009)
+- [ ] 🔧 [Hub] SSH config parser: add test for alias-only Host block (no HostName) — Priority: L (from /review F-010)
+
+### Deferred from /adversarial Sprint 1
+- [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
+
+### Deferred from /adversarial Sprint 2
+- [ ] 💡 [UI] Windows Terminal import in Add Host modal — Priority: L (from UX-03 /adversarial C-01)
+- [ ] 💡 [UI] Host group reorder (DnD group separators) — Priority: L (from UX-03 /adversarial C-02)
+- [ ] 💡 [UI] ProxyJump auto-check in batch SSH import — Priority: L (from UX-03 /adversarial C-22)
+- [ ] 💡 [UI] Banner position 'aboveTabs' option — Priority: L (from UX-07 /adversarial C-01)
+- [ ] 💡 [UI] Collapsible banner with shortText — Priority: L (from UX-07 /adversarial C-02)
+- [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
 
 ### Phase 2 (follows AGENT-DAEMON)
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1

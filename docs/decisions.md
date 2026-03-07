@@ -4,6 +4,24 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-03 — Host Management (2026-03-07)
+
+- Migration 006: 6 new columns with defaults, backfill sort_order per-group using rowid
+- listHosts ordering: local first, then COALESCE(host_group, '~') ASC, sort_order ASC
+- Label regex updated to allow dots: /^[a-zA-Z0-9._-]+$/ per INV-02
+- SSH config parser: manual (no dependency), supports Host/HostName/Port/User/IdentityFile/ProxyJump
+- Batch import: atomic transaction, 409 with conflicting_labels array on conflict
+- Route ordering: static routes before parameterized :id routes in Fastify
+- Duplicate host: -copy suffix, auto-increment, cannot duplicate local
+- sortedHosts computed: use server order directly (no client re-sorting)
+- Host groups: collapse state persisted in localStorage (nexterm:collapsed-host-groups)
+- HostRail: DnD via HTML5 drag/drop, reorder API call + fetchHosts on drop
+- BatchImportModal: snake_case wire → camelCase conversion, ProxyJump auto-check, 409 conflict display
+- HostRailSettings: singleton composable with localStorage persistence (nexterm:host-rail-settings)
+- Rate limiting: in-memory sliding window 5/60s on test connection endpoints (INV-11)
+
+---
+
 ## UX-04 — Scrollback Search (2026-03-07)
 
 - @xterm/addon-search ^0.16.0 via pnpm catalog
