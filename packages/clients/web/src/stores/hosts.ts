@@ -40,14 +40,11 @@ export const useHostsStore = defineStore("hosts", () => {
 	 */
 	const _sessionStatuses = ref<Map<string, SessionStatus>>(new Map());
 
-	/** Sorted hosts — local host always first, then alphabetical by label. */
-	const sortedHosts = computed(() =>
-		[...hosts.value].sort((a, b) => {
-			if (a.type === "local" && b.type !== "local") return -1;
-			if (a.type !== "local" && b.type === "local") return 1;
-			return a.label.localeCompare(b.label);
-		}),
-	);
+	/**
+	 * Sorted hosts — server already returns them in the correct order
+	 * (local first, then by group/sort_order).
+	 */
+	const sortedHosts = computed(() => hosts.value);
 
 	async function fetchHosts(): Promise<void> {
 		if (authStore.token === null) return;
@@ -91,6 +88,96 @@ export const useHostsStore = defineStore("hosts", () => {
 		return sessionStatusToHostStatus(_sessionStatuses.value.get(hostId));
 	}
 
+	async function reorderHosts(group: string | null, hostIds: string[]): Promise<void> {
+		await fetch("/api/hosts/reorder", {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ group, host_ids: hostIds }),
+		});
+		// Update local state optimistically
+		for (let i = 0; i < hostIds.length; i++) {
+			const host = hosts.value.find((h) => h.id === hostIds[i]);
+			if (host) {
+				host.sortOrder = i;
+				host.hostGroup = group ?? undefined;
+			}
+		}
+	}
+
+	async function createHost(body: Record<string, unknown>): Promise<Host | null> {
+		const res = await fetch("/api/hosts", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+		if (!res.ok) return null;
+		const host = (await res.json()) as Host;
+		hosts.value = [...hosts.value, host];
+		return host;
+	}
+
+	async function updateHost(id: string, body: Record<string, unknown>): Promise<Host | null> {
+		const res = await fetch(`/api/hosts/${id}`, {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+		if (!res.ok) return null;
+		const updated = (await res.json()) as Host;
+		const idx = hosts.value.findIndex((h) => h.id === id);
+		if (idx >= 0) hosts.value[idx] = updated;
+		return updated;
+	}
+
+	async function deleteHost(id: string): Promise<boolean> {
+		const res = await fetch(`/api/hosts/${id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return false;
+		hosts.value = hosts.value.filter((h) => h.id !== id);
+		if (selectedHostId.value === id) {
+			selectedHostId.value = hosts.value[0]?.id ?? null;
+		}
+		return true;
+	}
+
+	async function duplicateHost(id: string): Promise<Host | null> {
+		const res = await fetch(`/api/hosts/${id}/duplicate`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return null;
+		const host = (await res.json()) as Host;
+		hosts.value = [...hosts.value, host];
+		return host;
+	}
+
+	async function testConnection(id: string): Promise<{ ok: boolean; message?: string }> {
+		const res = await fetch(`/api/hosts/${id}/test`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		return (await res.json()) as { ok: boolean; message?: string };
+	}
+
+	function getHostGroups(): string[] {
+		const groups = new Set<string>();
+		for (const host of hosts.value) {
+			if (host.hostGroup) groups.add(host.hostGroup);
+		}
+		return [...groups].sort();
+	}
+
 	return {
 		hosts,
 		sortedHosts,
@@ -101,5 +188,12 @@ export const useHostsStore = defineStore("hosts", () => {
 		selectHost,
 		updateSessionStatus,
 		getHostStatus,
+		reorderHosts,
+		createHost,
+		updateHost,
+		deleteHost,
+		duplicateHost,
+		testConnection,
+		getHostGroups,
 	};
 });

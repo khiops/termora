@@ -28,6 +28,53 @@
 			@cancel="confirmDialog.visible = false"
 		/>
 
+		<!-- Add/Edit Host modal — opened from rail "+" or host context menu -->
+		<HostModal
+			:visible="showHostModal"
+			:edit-host="editingHost"
+			@close="showHostModal = false; editingHost = null"
+			@saved="onHostSaved"
+			@batch-import="showHostModal = false; showBatchImport = true"
+		/>
+
+		<!-- Context menus — host badge and group header right-click -->
+		<HostContextMenu
+			:visible="hostContextMenu !== null"
+			:host-id="hostContextMenu?.hostId ?? ''"
+			:x="hostContextMenu?.x ?? 0"
+			:y="hostContextMenu?.y ?? 0"
+			@close="hostContextMenu = null"
+			@edit="onEditHost"
+			@delete="onDeleteHost"
+			@connect="onConnectHost"
+			@disconnect="onDisconnectHost"
+			@new-group="onNewGroupForHost"
+		/>
+
+		<GroupContextMenu
+			:visible="groupContextMenu !== null"
+			:group-name="groupContextMenu?.groupName ?? ''"
+			:x="groupContextMenu?.x ?? 0"
+			:y="groupContextMenu?.y ?? 0"
+			@close="groupContextMenu = null"
+			@rename="onRenameGroup"
+			@delete-group="onDeleteGroup"
+		/>
+
+		<!-- Delete host confirmation modal -->
+		<DeleteHostModal
+			:visible="deleteHostId !== null"
+			:host-id="deleteHostId ?? ''"
+			@close="deleteHostId = null"
+			@deleted="deleteHostId = null; void hostsStore.fetchHosts()"
+		/>
+
+		<!-- Batch import from SSH config -->
+		<BatchImportModal
+			v-model:show="showBatchImport"
+			@imported="void hostsStore.fetchHosts()"
+		/>
+
 		<!-- Pairing overlay — shown when no token yet, or AUTH_FAIL -->
 		<PairingScreen
 			v-if="needsPairing"
@@ -36,7 +83,13 @@
 
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout">
-			<HostRail class="host-rail" @toggle-appearance="showAppearance = !showAppearance" />
+			<HostRail
+			class="host-rail"
+			@toggle-appearance="showAppearance = !showAppearance"
+			@add-host="showHostModal = true"
+			@host-context-menu="onHostContextMenu"
+			@group-context-menu="onGroupContextMenu"
+		/>
 			<ChannelSidebar
 			class="channel-sidebar"
 			@select-channel="onSelectChannel"
@@ -104,6 +157,7 @@
 import { computed, onMounted, provide, ref, watch } from "vue";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
+import type { Host } from "@nexterm/shared";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
@@ -125,6 +179,11 @@ import CommandPalette from "./components/CommandPalette.vue";
 import AppearancePanel from "./components/settings/AppearancePanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import HostModal from "./components/HostModal.vue";
+import HostContextMenu from "./components/HostContextMenu.vue";
+import GroupContextMenu from "./components/GroupContextMenu.vue";
+import DeleteHostModal from "./components/DeleteHostModal.vue";
+import BatchImportModal from "./components/BatchImportModal.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -139,6 +198,20 @@ const commandPalette = useCommandPalette();
 const showAppearance = ref(false);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
+const showHostModal = ref(false);
+const editingHost = ref<Host | null>(null);
+const deleteHostId = ref<string | null>(null);
+const showBatchImport = ref(false);
+const hostContextMenu = ref<{
+	hostId: string;
+	x: number;
+	y: number;
+} | null>(null);
+const groupContextMenu = ref<{
+	groupName: string;
+	x: number;
+	y: number;
+} | null>(null);
 
 // ─── Window title ────────────────────────────────────────────────────────────
 
@@ -384,6 +457,105 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 	}
 	if (event.key === "Escape" && showAppearance.value) {
 		showAppearance.value = false;
+	}
+}
+
+/**
+ * Handle host modal save — refresh the host list and close the modal.
+ */
+function onHostSaved(_host: Host): void {
+	showHostModal.value = false;
+	editingHost.value = null;
+	void hostsStore.fetchHosts();
+}
+
+/**
+ * Handle right-click on a host badge in the rail.
+ * Stores position + hostId for the context menu component (Block 6).
+ */
+function onHostContextMenu(payload: {
+	hostId: string;
+	event: MouseEvent;
+}): void {
+	hostContextMenu.value = {
+		hostId: payload.hostId,
+		x: payload.event.clientX,
+		y: payload.event.clientY,
+	};
+}
+
+/**
+ * Handle right-click on a group header in the rail.
+ * Stores position + groupName for the context menu component (Block 6).
+ */
+function onGroupContextMenu(payload: {
+	groupName: string;
+	event: MouseEvent;
+}): void {
+	groupContextMenu.value = {
+		groupName: payload.groupName,
+		x: payload.event.clientX,
+		y: payload.event.clientY,
+	};
+}
+
+// ─── Context menu action handlers ─────────────────────────────────────────
+
+function onEditHost(hostId: string): void {
+	const host = hostsStore.hosts.find((h) => h.id === hostId) ?? null;
+	editingHost.value = host;
+	showHostModal.value = true;
+}
+
+function onDeleteHost(hostId: string): void {
+	deleteHostId.value = hostId;
+}
+
+function onConnectHost(hostId: string): void {
+	hostsStore.selectHost(hostId);
+}
+
+function onDisconnectHost(_hostId: string): void {
+	// TODO: implement disconnect via session store
+}
+
+function onNewGroupForHost(hostId: string): void {
+	// Open the host modal in edit mode so the user can set a new group
+	onEditHost(hostId);
+}
+
+function onRenameGroup(groupName: string): void {
+	const newName = prompt(`Rename group "${groupName}" to:`);
+	if (newName && newName.trim()) {
+		void fetch(
+			`/api/hosts/groups/${encodeURIComponent(groupName)}`,
+			{
+				method: "PUT",
+				headers: {
+					Authorization: `Bearer ${authStore.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ name: newName.trim() }),
+			},
+		).then(() => hostsStore.fetchHosts());
+	}
+}
+
+function onDeleteGroup(groupName: string): void {
+	if (
+		confirm(
+			`Delete group "${groupName}"? Hosts will move to Ungrouped.`,
+		)
+	) {
+		void fetch(
+			`/api/hosts/groups/${encodeURIComponent(groupName)}`,
+			{
+				method: "DELETE",
+				headers: {
+					Authorization: `Bearer ${authStore.token}`,
+				},
+			},
+		).then(() => hostsStore.fetchHosts());
 	}
 }
 
