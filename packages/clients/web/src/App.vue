@@ -6,14 +6,14 @@
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
+		<!-- Appearance panel — rendered globally, outside layout, via Teleport -->
+		<AppearancePanel :visible="showAppearance" @close="showAppearance = false" />
+
 		<!-- Pairing overlay — shown when no token yet, or AUTH_FAIL -->
 		<PairingScreen
 			v-if="needsPairing"
 			@authenticated="onAuthenticated"
 		/>
-
-		<!-- Appearance panel — rendered globally, outside layout, via Teleport -->
-		<AppearancePanel :visible="showAppearance" @close="showAppearance = false" />
 
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout">
