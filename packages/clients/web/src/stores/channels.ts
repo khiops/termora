@@ -45,6 +45,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 	if (Array.isArray(row.args) && (row.args as string[]).length > 0) {
 		ch.args = row.args as string[];
 	}
+	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title as string;
 	return ch;
 }
 
@@ -241,6 +242,22 @@ export const useChannelsStore = defineStore("channels", () => {
 		if (exitCode !== undefined) updated.exitCode = exitCode;
 		const next = [...channels.value];
 		next[idx] = updated;
+		channels.value = next;
+	}
+
+	/**
+	 * Update the dynamic title for a channel (from TITLE_CHANGE WS message or ATTACH_OK).
+	 * Silently ignored if the channel is not loaded yet.
+	 */
+	function setDynamicTitle(channelId: string, title: string): void {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		// Avoid unnecessary reactivity triggers if title hasn't changed
+		if (existing.dynamicTitle === title) return;
+		const next = [...channels.value];
+		next[idx] = { ...existing, dynamicTitle: title };
 		channels.value = next;
 	}
 
@@ -536,6 +553,14 @@ export const useChannelsStore = defineStore("channels", () => {
 		}
 	}
 
+	/**
+	 * Clear the custom title for a channel, reverting to dynamic title resolution.
+	 * Calls PATCH /api/channels/:id with { title: null }.
+	 */
+	async function clearTitle(channelId: string): Promise<void> {
+		await renameChannel(channelId, null);
+	}
+
 	async function moveChannelToGroup(channelId: string, groupId: string | null): Promise<void> {
 		if (authStore.token === null) return;
 
@@ -686,6 +711,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		selectChannel,
 		markUnread,
 		updateChannelStatus,
+		setDynamicTitle,
 		applyStateSync,
 		removeChannel,
 		addChannel,
@@ -697,6 +723,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		renameGroup,
 		toggleGroupCollapsed,
 		renameChannel,
+		clearTitle,
 		moveChannelToGroup,
 		setWelcomeChannel,
 		clearWelcomeChannel,

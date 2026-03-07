@@ -6,6 +6,7 @@ import type {
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
 	AgentSpawnOkMessage,
+	AgentTitleChangeMessage,
 	ChannelExitMessage,
 	ChannelStateMessage,
 	DestroyMessage,
@@ -42,6 +43,7 @@ import { SshAgent } from "./ssh-agent.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
 const ATTACH_TIMEOUT_MS = 5_000;
+const TITLE_DEBOUNCE_MS = 100;
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
 const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
@@ -100,6 +102,8 @@ export class SessionManager {
 	private chunker: OutputChunker;
 	/** Spool GC — periodically deletes old chunks and runs incremental vacuum */
 	private gc: SpoolGarbageCollector;
+	/** channelId → pending title debounce timer for DB writes */
+	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	/**
 	 * Optional callback to resolve the current write-lock holder for a channel.
@@ -470,6 +474,10 @@ export class SessionManager {
 		// Case 1: agent connected — request fresh snapshot via ATTACH
 		// Case 2: agent disconnected — serve cached snapshot from spool.db
 
+		// Look up dynamic_title from DB once — used in all ATTACH_OK responses
+		const dbChannelForTitle = this.metaDal.getChannel(channelId);
+		const dynamicTitle = dbChannelForTitle?.dynamicTitle;
+
 		if (!agent?.connected) {
 			// Agent disconnected — serve cached snapshot from spool.db
 			const { snapshot, tail } = this._buildAttachPayload(channelId);
@@ -480,6 +488,7 @@ export class SessionManager {
 				tail,
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
 			};
 			client.send(attachOk);
 			return true;
@@ -528,6 +537,7 @@ export class SessionManager {
 				tail,
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: false,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
 			};
 			client.send(attachOk);
 		} catch {
@@ -540,6 +550,7 @@ export class SessionManager {
 				tail,
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
 			};
 			client.send(attachOk);
 		}
@@ -722,6 +733,10 @@ export class SessionManager {
 			clearTimeout(timer);
 		}
 		this.reconnectTimers.clear();
+		for (const timer of this.titleDebounceTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.titleDebounceTimers.clear();
 		this.scheduler.shutdown();
 		this.chunker.shutdown();
 		this.gc.stop();
@@ -874,6 +889,10 @@ export class SessionManager {
 				}
 				this.scheduler.untrackChannel(exitMsg.channelId);
 				this.chunker.untrackChannel(exitMsg.channelId);
+				this._clearTitleDebounce(exitMsg.channelId);
+			} else if (msg.type === "TITLE_CHANGE") {
+				const titleMsg = msg as AgentTitleChangeMessage;
+				this._handleTitleChange(titleMsg);
 			}
 		});
 
@@ -1241,6 +1260,7 @@ export class SessionManager {
 		const { snapshot, tail } = this._buildAttachPayload(deadChannelId);
 
 		// 8. Send ATTACH_OK with same channel ID (no respawnedFrom needed)
+		// Note: dynamic_title is intentionally omitted here — fresh PTY has no title yet
 		const attachOk: UiAttachOkMessage = {
 			type: "ATTACH_OK",
 			channelId: deadChannelId,
@@ -1270,6 +1290,39 @@ export class SessionManager {
 		}
 		this._updateSessionStatus(hostId, sessionId, "closed");
 		this.sessions.delete(hostId);
+	}
+
+	/**
+	 * Handle TITLE_CHANGE from agent: debounce DB writes (100ms, last-write-wins)
+	 * and forward to connected UI clients immediately.
+	 */
+	private _handleTitleChange(msg: AgentTitleChangeMessage): void {
+		const channel = this.channels.get(msg.channelId);
+		if (!channel) {
+			console.warn(`[session-manager] TITLE_CHANGE for unknown channel ${msg.channelId} — ignored`);
+			return;
+		}
+
+		// Forward to UI clients immediately (real-time)
+		this._broadcastToChannel(msg.channelId, msg);
+
+		// Debounce DB writes
+		this._clearTitleDebounce(msg.channelId);
+		this.titleDebounceTimers.set(
+			msg.channelId,
+			setTimeout(() => {
+				this.titleDebounceTimers.delete(msg.channelId);
+				this.metaDal.updateDynamicTitle(msg.channelId, msg.title);
+			}, TITLE_DEBOUNCE_MS),
+		);
+	}
+
+	private _clearTitleDebounce(channelId: string): void {
+		const timer = this.titleDebounceTimers.get(channelId);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			this.titleDebounceTimers.delete(channelId);
+		}
 	}
 
 	private _broadcastToChannel(channelId: string, msg: ProtocolMessage): void {

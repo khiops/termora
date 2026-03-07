@@ -20,6 +20,7 @@ import type {
 	StartupConfig,
 	TabsConfig,
 	TerminalProfile,
+	TitleConfig,
 } from "@nexterm/shared";
 import type { MetaDAL } from "./storage/meta.js";
 
@@ -76,7 +77,7 @@ export function loadGcConfig(configDir: string): GcConfig {
 
 // ─── UI configuration ───────────────────────────────────────────────────────
 
-/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup] in config.toml). */
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title] in config.toml). */
 export interface UiConfig {
 	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
 	onChannelDead: "close" | "readonly";
@@ -88,6 +89,8 @@ export interface UiConfig {
 	channels: ChannelsConfig;
 	/** Startup behavior configuration. */
 	startup: StartupConfig;
+	/** Terminal title configuration. */
+	title: TitleConfig;
 }
 
 export const DEFAULT_TABS_CONFIG: TabsConfig = {
@@ -108,12 +111,22 @@ export const DEFAULT_STARTUP_CONFIG: StartupConfig = {
 	autoOpenWelcome: true,
 };
 
+export const DEFAULT_TITLE_CONFIG: TitleConfig = {
+	source: "dynamic",
+	fallback: "channel",
+	maxLength: 50,
+	truncation: "end",
+	windowTitle: true,
+	windowFormat: "nexterm - {prefix}{host} - {title}",
+};
+
 export const DEFAULT_UI_CONFIG: UiConfig = {
 	onChannelDead: "readonly",
 	tabs: { ...DEFAULT_TABS_CONFIG },
 	panes: { ...DEFAULT_PANES_CONFIG },
 	channels: { ...DEFAULT_CHANNELS_CONFIG },
 	startup: { ...DEFAULT_STARTUP_CONFIG },
+	title: { ...DEFAULT_TITLE_CONFIG },
 };
 
 /**
@@ -127,6 +140,7 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		panes: { ...DEFAULT_PANES_CONFIG },
 		channels: { ...DEFAULT_CHANNELS_CONFIG },
 		startup: { ...DEFAULT_STARTUP_CONFIG },
+		title: { ...DEFAULT_TITLE_CONFIG },
 	};
 
 	// ── [ui] section ────────────────────────────────────────────────────
@@ -192,6 +206,42 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		const raw = startupSection as Record<string, unknown>;
 		if (typeof raw.auto_open_welcome === "boolean") {
 			config.startup.autoOpenWelcome = raw.auto_open_welcome;
+		}
+	}
+
+	// ── [title] section ─────────────────────────────────────────────────
+	const titleSection = parsed.title;
+	if (titleSection != null && typeof titleSection === "object") {
+		const raw = titleSection as Record<string, unknown>;
+		if (typeof raw.source === "string" && (raw.source === "dynamic" || raw.source === "static")) {
+			config.title.source = raw.source;
+		}
+		if (
+			typeof raw.fallback === "string" &&
+			(raw.fallback === "channel" || raw.fallback === "shell" || raw.fallback === "custom")
+		) {
+			config.title.fallback = raw.fallback;
+		}
+		if (typeof raw.fallback_custom === "string") {
+			config.title.fallbackCustom = raw.fallback_custom;
+		}
+		if (typeof raw.max_length === "number" && raw.max_length >= 1) {
+			config.title.maxLength = raw.max_length;
+		}
+		if (
+			typeof raw.truncation === "string" &&
+			(raw.truncation === "end" || raw.truncation === "middle" || raw.truncation === "start")
+		) {
+			config.title.truncation = raw.truncation;
+		}
+		if (typeof raw.prefix === "string") {
+			config.title.prefix = raw.prefix;
+		}
+		if (typeof raw.window_title === "boolean") {
+			config.title.windowTitle = raw.window_title;
+		}
+		if (typeof raw.window_format === "string") {
+			config.title.windowFormat = raw.window_format;
 		}
 	}
 

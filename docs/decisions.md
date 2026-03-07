@@ -4,6 +4,34 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-02 — Terminal Title / OSC 0/2 (2026-03-07)
+
+- Dual approach: UI parses OSC locally for instant display (INV-04), agent sends TITLE_CHANGE to hub for DB persistence (INV-05)
+- sanitizeTitle in shared/src/sanitize.ts: strips HTML tags (/<[^>]*>/g), strips C0/C1 control chars, trims, truncates to 256 — defense-in-depth (both agent and UI sanitize)
+- Tag content preserved during HTML strip (e.g., `<script>alert(1)</script>vim` → `alert(1)vim`) — safe because Vue renders via .textContent, not innerHTML
+- Agent debounce: per-channel 100ms last-write-wins timer for TITLE_CHANGE emission (INV-07)
+- Hub debounce: per-channel 100ms last-write-wins timer for dynamic_title DB writes (INV-08), but broadcasts to UI immediately
+- Empty OSC title suppressed (not sent as TITLE_CHANGE) per INV-09
+- Migration 005-dynamic-title.sql: ALTER TABLE channels ADD COLUMN dynamic_title TEXT DEFAULT NULL
+- dynamicTitle added to Channel entity + UiAttachOkMessage for reconnect recovery (SC-02)
+- HeadlessTerminal.onTitleChange exposed for agent subscription, PtyManager.onTitleChange(channelId, cb)
+- useTabTitle composable: INV-01 priority chain — custom > live dynamic > stored dynamic > fallback
+- Title stack in useTerminal: max 5 entries, empty titles skipped, top of stack = currentDynamicTitle (SC-05)
+- resolveTabLabel updated to accept dynamicTitle in channel objects
+- TITLE_CHANGE WS handler in session store routes to channelsStore.setDynamicTitle
+- ChannelItem shows dynamicTitle without prefix (SC-15)
+- truncateTitle: 3 positions (end/middle/start), U+2026 ellipsis, default maxLength 50
+- useWindowTitle: formatWindowTitle with {prefix},{host},{title},{channel},{shell} tokens, trailing/leading separator trimming, debounced 100ms
+- TitleConfig interface: source, fallback, fallbackCustom, maxLength, truncation, prefix, windowTitle, windowFormat
+- Hub [title] section parser with DEFAULT_TITLE_CONFIG, exposed via UiConfig
+- resolvedTitle exposed from useTabTitle for window title composition (raw, no prefix/truncation)
+- Prefix prepended BEFORE truncation (counts toward char limit), sidebar excluded from prefix
+- Reset Title to Dynamic: clears channel.title via PATCH null, TabContextMenu enabled when isCustom
+- clearTitle action in channels store wraps renameChannel(id, null)
+- TitleConfig.source='static' disables dynamic titles, TitleConfig.fallback controls fallback strategy (channel/shell/custom)
+
+---
+
 ## UX-01 — Tab Actions, Split Panes & Welcome Tab (2026-03-07)
 
 - TabContextMenu: Teleport to body, click-outside listener, fixed positioning from event coords

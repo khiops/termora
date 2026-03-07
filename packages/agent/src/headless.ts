@@ -72,6 +72,11 @@ export class HeadlessTerminal {
 		};
 	}
 
+	/** Register a callback for terminal title changes (OSC 0/2). */
+	onTitleChange(callback: (title: string) => void): void {
+		this.terminal.onTitleChange(callback);
+	}
+
 	dispose(): void {
 		this.terminal.dispose();
 	}

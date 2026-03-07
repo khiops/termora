@@ -100,7 +100,7 @@ const emit = defineEmits<{
 }>();
 
 const displayLabel = computed(
-	() => props.channel.title ?? DEFAULT_CHANNEL_NAME,
+	() => props.channel.title || props.channel.dynamicTitle || DEFAULT_CHANNEL_NAME,
 );
 
 // -------------------------------------------------------------------------

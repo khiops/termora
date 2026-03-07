@@ -5,6 +5,7 @@ import {
 	type StartupConfig,
 	type TabsConfig,
 	type TerminalProfile,
+	type TitleConfig,
 } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
@@ -70,6 +71,7 @@ interface UiConfig {
 	panes?: PanesConfig;
 	channels?: ChannelsConfig;
 	startup?: StartupConfig;
+	title?: TitleConfig;
 }
 
 export const useConfigStore = defineStore("config", () => {

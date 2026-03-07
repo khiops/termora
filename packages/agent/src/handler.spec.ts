@@ -17,17 +17,20 @@ interface MockPtyManager {
 	snapshot: ReturnType<typeof vi.fn>;
 	onData: ReturnType<typeof vi.fn>;
 	onExit: ReturnType<typeof vi.fn>;
+	onTitleChange: ReturnType<typeof vi.fn>;
 	destroy: ReturnType<typeof vi.fn>;
 	has: ReturnType<typeof vi.fn>;
 	destroyAll: ReturnType<typeof vi.fn>;
 	// Helpers for triggering registered callbacks in tests
 	_triggerData: (channelId: string, raw: string) => void;
 	_triggerExit: (channelId: string, exit: { exitCode: number; signal?: number }) => void;
+	_triggerTitleChange: (channelId: string, title: string) => void;
 }
 
 function makeMockPtyManager(): MockPtyManager {
 	const dataCallbacks = new Map<string, (data: string) => void>();
 	const exitCallbacks = new Map<string, (exit: { exitCode: number; signal?: number }) => void>();
+	const titleCallbacks = new Map<string, (title: string) => void>();
 
 	const defaultSnapshot = {
 		serialized: "\x1b[1;1Hhello world",
@@ -52,6 +55,9 @@ function makeMockPtyManager(): MockPtyManager {
 				exitCallbacks.set(channelId, cb);
 			},
 		),
+		onTitleChange: vi.fn((channelId: string, cb: (title: string) => void) => {
+			titleCallbacks.set(channelId, cb);
+		}),
 		destroy: vi.fn(),
 		has: vi.fn().mockReturnValue(true),
 		destroyAll: vi.fn(),
@@ -60,6 +66,9 @@ function makeMockPtyManager(): MockPtyManager {
 		},
 		_triggerExit: (channelId: string, exit: { exitCode: number; signal?: number }) => {
 			exitCallbacks.get(channelId)?.(exit);
+		},
+		_triggerTitleChange: (channelId: string, title: string) => {
+			titleCallbacks.get(channelId)?.(title);
 		},
 	};
 }
@@ -523,5 +532,88 @@ describe("AgentHandler", () => {
 		expect(err.type).toBe("ERROR");
 		expect(err.code).toBe("CHANNEL_NOT_FOUND");
 		expect(err.channelId).toBe("missing-chan");
+	});
+
+	// -------------------------------------------------------------------------
+	// TITLE_CHANGE (via headless terminal onTitleChange)
+	// -------------------------------------------------------------------------
+
+	it("title change emits TITLE_CHANGE after debounce", () => {
+		vi.useFakeTimers();
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-title",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		mock._triggerTitleChange("chan-001", "vim file.ts");
+
+		// Not sent yet — debounced
+		expect(sent.filter((m) => m.type === "TITLE_CHANGE")).toHaveLength(0);
+
+		vi.advanceTimersByTime(100);
+
+		const titleMsgs = sent.filter((m) => m.type === "TITLE_CHANGE");
+		expect(titleMsgs).toHaveLength(1);
+		const msg = titleMsgs[0] as { type: string; channelId: string; title: string };
+		expect(msg.channelId).toBe("chan-001");
+		expect(msg.title).toBe("vim file.ts");
+
+		vi.useRealTimers();
+	});
+
+	it("rapid title changes are debounced (last-write-wins)", () => {
+		vi.useFakeTimers();
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-debounce",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		mock._triggerTitleChange("chan-001", "first");
+		vi.advanceTimersByTime(50);
+		mock._triggerTitleChange("chan-001", "second");
+		vi.advanceTimersByTime(50);
+		mock._triggerTitleChange("chan-001", "third");
+		vi.advanceTimersByTime(100);
+
+		const titleMsgs = sent.filter((m) => m.type === "TITLE_CHANGE");
+		expect(titleMsgs).toHaveLength(1);
+		const msg = titleMsgs[0] as { type: string; title: string };
+		expect(msg.title).toBe("third");
+
+		vi.useRealTimers();
+	});
+
+	it("empty title after sanitization is not sent", () => {
+		vi.useFakeTimers();
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-empty",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		// Only control chars — sanitizes to empty
+		mock._triggerTitleChange("chan-001", "\x07\x1b");
+		vi.advanceTimersByTime(100);
+
+		expect(sent.filter((m) => m.type === "TITLE_CHANGE")).toHaveLength(0);
+
+		vi.useRealTimers();
 	});
 });

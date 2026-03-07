@@ -14,8 +14,12 @@
 				@click="onRename"
 			>Rename</button>
 
-			<!-- Reset Title (placeholder for UX-02) -->
-			<button class="ctx-item" disabled>Reset Title</button>
+			<!-- Reset Title to Dynamic -->
+			<button
+				class="ctx-item"
+				:disabled="!tab || !isCustomTitle"
+				@click="onResetTitle"
+			>Reset Title to Dynamic</button>
 
 			<div class="ctx-sep" />
 
@@ -89,11 +93,13 @@ const props = defineProps<{
 	tabIndex: number;
 	tabCount: number;
 	isWelcome: boolean;
+	isCustomTitle: boolean;
 }>();
 
 const emit = defineEmits<{
 	(e: "close"): void;
 	(e: "rename", channelId: string): void;
+	(e: "reset-title", channelId: string): void;
 	(e: "close-tab", index: number): void;
 	(e: "close-others", index: number): void;
 	(e: "close-to-right", index: number): void;
@@ -125,6 +131,13 @@ onUnmounted(() => {
 function onRename(): void {
 	if (props.tab) {
 		emit("rename", props.tab.channelId);
+	}
+	emit("close");
+}
+
+function onResetTitle(): void {
+	if (props.tab) {
+		emit("reset-title", props.tab.channelId);
 	}
 	emit("close");
 }

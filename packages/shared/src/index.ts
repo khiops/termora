@@ -8,6 +8,7 @@ export * from "./codec.js";
 export * from "./framing.js";
 export * from "./utils.js";
 export * from "./validation.js";
+export * from "./sanitize.js";
 export * from "./socket-path.js";
 export * from "./agent-config.js";
 export * from "./theme.js";

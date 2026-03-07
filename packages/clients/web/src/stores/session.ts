@@ -71,6 +71,13 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 
+		// Route TITLE_CHANGE messages to channels store for dynamic titles
+		wsClient.on("TITLE_CHANGE", (msg) => {
+			if (msg.type === "TITLE_CHANGE") {
+				channelsStore.setDynamicTitle(msg.channelId, msg.title);
+			}
+		});
+
 		// Handle STATE_SYNC — full state snapshot sent after AUTH_OK
 		wsClient.on("STATE_SYNC", (msg) => {
 			if (msg.type === "STATE_SYNC") {

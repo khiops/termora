@@ -98,6 +98,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
+import { generateId } from "@nexterm/shared";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
@@ -107,7 +109,7 @@ import { useThemeStore } from "./stores/theme.js";
 import { countPanes, purgeDeadTabs, useLayout } from "./composables/useLayout.js";
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
-import { generateId } from "@nexterm/shared";
+import { useWindowTitle } from "./composables/useWindowTitle.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
 import TabBar from "./components/TabBar.vue";
@@ -130,6 +132,47 @@ const commandPalette = useCommandPalette();
 const showAppearance = ref(false);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
+
+// ─── Window title ────────────────────────────────────────────────────────────
+
+const windowTitleEnabled = computed(
+	() => configStore.uiConfig.title?.windowTitle !== false,
+);
+
+const windowTitleFormat = computed(
+	() => configStore.uiConfig.title?.windowFormat ?? "nexterm - {prefix}{host} - {title}",
+);
+
+/** Resolved title of the active tab's channel (no prefix, no truncation). */
+const activeTitle = computed(() => {
+	const tab = layout.activeTab.value;
+	if (tab === null) return "";
+	const ch = channelsStore.channels.find((c) => c.id === tab.channelId);
+	if (ch?.title) return ch.title;
+	if (ch?.dynamicTitle) return ch.dynamicTitle;
+	return DEFAULT_CHANNEL_NAME;
+});
+
+/** Label of the host that owns the active tab's channel. */
+const activeHost = computed(() => {
+	const hostId = hostsStore.selectedHostId;
+	if (hostId === null) return "";
+	const host = hostsStore.hosts.find((h) => h.id === hostId);
+	return host?.label ?? "";
+});
+
+/** Per-host prefix from config (global default from [title] section). */
+const activePrefix = computed(() => {
+	return configStore.uiConfig.title?.prefix ?? "";
+});
+
+useWindowTitle({
+	enabled: windowTitleEnabled,
+	format: windowTitleFormat,
+	activeTitle,
+	activeHost,
+	activePrefix,
+});
 
 // ─── Confirm dialog state ────────────────────────────────────────────────────
 

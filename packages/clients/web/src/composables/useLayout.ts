@@ -244,18 +244,22 @@ export function countPanes(node: PaneNode): number {
 
 /**
  * Resolve the display label for a channel in a tab or pane.
- * Prefers the server-side channel title, falls back to the tab label,
- * then DEFAULT_CHANNEL_NAME.
+ *
+ * Title priority (INV-01):
+ *   1. Custom title (from F2 rename) — channel.title
+ *   2. Dynamic title (from OSC 0/2) — channel.dynamicTitle
+ *   3. Tab label or DEFAULT_CHANNEL_NAME fallback
  *
  * Extracted as a standalone function for testability — no Vue/Pinia deps.
  */
 export function resolveTabLabel(
 	channelId: string,
-	channels: ReadonlyArray<{ id: string; title?: string }>,
+	channels: ReadonlyArray<{ id: string; title?: string; dynamicTitle?: string }>,
 	tabs: ReadonlyArray<{ channelId: string; label: string }>,
 ): string {
 	const channel = channels.find((c) => c.id === channelId);
 	if (channel?.title) return channel.title;
+	if (channel?.dynamicTitle) return channel.dynamicTitle;
 	const tab = tabs.find((t) => t.channelId === channelId);
 	return tab?.label ?? DEFAULT_CHANNEL_NAME;
 }

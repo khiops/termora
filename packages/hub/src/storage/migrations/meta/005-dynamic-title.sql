@@ -1,0 +1,1 @@
+ALTER TABLE channels ADD COLUMN dynamic_title TEXT DEFAULT NULL;

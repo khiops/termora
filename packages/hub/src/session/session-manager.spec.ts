@@ -1010,6 +1010,43 @@ describe("SessionManager", () => {
 		expect(dal.getChannel("STARTUPCH02AAAAAAAAAAAAAAAAA")?.status).toBe("dead");
 	});
 
+	// ─── SC-14: TITLE_CHANGE for unknown channel ─────────────────────────────
+
+	it("TITLE_CHANGE for unknown channelId does not crash or update DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Spawn a channel to set up the local agent with its message handler
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		// Grab the mock agent from the agents map (EventEmitter-based mock)
+		// Key is the resolved local hostId (a ULID), not "local"
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		expect(agentsMap.size).toBeGreaterThan(0);
+		const [, agent] = [...agentsMap.entries()][0]!;
+
+		// Emit TITLE_CHANGE with a channel ID that doesn't exist
+		// Should log a warning but not throw
+		expect(() => {
+			agent.emit("message", {
+				type: "TITLE_CHANGE",
+				channelId: "nonexistent-channel-id",
+				title: "ghost title",
+			});
+		}).not.toThrow();
+
+		// Verify no DB update occurred for the unknown channel
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const channel = dal.getChannel("nonexistent-channel-id");
+		expect(channel).toBeUndefined();
+	});
+
 	// ─── Warm restart (Block 4) ───────────────────────────────────────────────
 
 	describe("startup() warm restart", () => {

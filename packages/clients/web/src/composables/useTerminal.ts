@@ -1,10 +1,14 @@
 import type { TerminalProfile, UiAttachOkMessage } from "@nexterm/shared";
+import { sanitizeTitle } from "@nexterm/shared";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
 import { type Ref, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";
 import { useThemeStore } from "../stores/theme.js";
+
+/** Maximum number of entries in the title stack (SC-05). */
+const MAX_TITLE_STACK = 5;
 
 /**
  * xterm.js composable.
@@ -38,6 +42,20 @@ export function useTerminal(
 
 	/** Debounce timer for RESIZE messages */
 	let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/**
+	 * Title stack — tracks recent non-empty titles from xterm.js onTitleChange
+	 * (OSC 0/2). Prevents blank titles during process exit → shell restore
+	 * transitions (SC-05). Max depth: MAX_TITLE_STACK.
+	 */
+	const titleStack: string[] = [];
+
+	/**
+	 * Reactive current dynamic title derived from the title stack.
+	 * null when stack is empty (fallback handled by useTabTitle).
+	 */
+	const currentDynamicTitle = ref<string | null>(null);
+	let titleChangeDispose: (() => void) | null = null;
 
 	function sendResize(cols: number, rows: number): void {
 		if (!channelId || !wsClient.isConnected) return;
@@ -106,6 +124,22 @@ export function useTerminal(
 		});
 		resizeObserver.observe(containerRef.value);
 
+		// Terminal title change (OSC 0/2) → push to title stack
+		titleChangeDispose?.();
+		const titleDisposable = term.onTitleChange((raw: string) => {
+			const clean = sanitizeTitle(raw); // defense-in-depth
+			if (clean === "") {
+				// INV-09: empty title — don't push, show top of stack instead
+				return;
+			}
+			titleStack.push(clean);
+			if (titleStack.length > MAX_TITLE_STACK) {
+				titleStack.shift();
+			}
+			currentDynamicTitle.value = clean;
+		});
+		titleChangeDispose = () => titleDisposable.dispose();
+
 		// Subscribe to global theme changes so all terminals update live.
 		// Per-host override (SC-03): if a host-specific theme is set, use that instead.
 		themeUnsubscribe = themeStore.onTerminalThemeChange((xtermTheme) => {
@@ -170,6 +204,7 @@ export function useTerminal(
 			snapshot: unknown;
 			tail: Uint8Array[];
 			writeLockHolder: string | null;
+			dynamicTitle: string | null;
 		}>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				unsubOk();
@@ -188,6 +223,7 @@ export function useTerminal(
 						snapshot: uiMsg.snapshot,
 						tail: uiMsg.tail ?? [],
 						writeLockHolder: uiMsg.writeLockHolder ?? null,
+						dynamicTitle: uiMsg.dynamicTitle ?? null,
 					});
 				}
 			});
@@ -222,6 +258,13 @@ export function useTerminal(
 				const data = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk as ArrayBuffer);
 				terminal.value.write(data);
 			}
+		}
+
+		// Restore dynamic title from ATTACH_OK (SC-02 — titles survive reconnects)
+		if (result.dynamicTitle) {
+			titleStack.length = 0;
+			titleStack.push(result.dynamicTitle);
+			currentDynamicTitle.value = result.dynamicTitle;
 		}
 
 		// Set channelId — same ID always (respawn reuses the same channel ID)
@@ -273,6 +316,8 @@ export function useTerminal(
 	function dispose(): void {
 		if (resizeTimer !== null) clearTimeout(resizeTimer);
 		resizeTimer = null;
+		titleChangeDispose?.();
+		titleChangeDispose = null;
 		themeUnsubscribe?.();
 		themeUnsubscribe = null;
 		outputUnsubscribe?.();
@@ -282,11 +327,14 @@ export function useTerminal(
 		terminal.value?.dispose();
 		terminal.value = null;
 		channelId = null;
+		titleStack.length = 0;
+		currentDynamicTitle.value = null;
 	}
 
 	return {
 		terminal,
 		canWrite,
+		currentDynamicTitle,
 		init,
 		attachChannel,
 		reattachChannel,

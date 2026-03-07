@@ -56,8 +56,10 @@
 			:tab-index="ctxMenu.tabIndex"
 			:tab-count="tabs.length"
 			:is-welcome="ctxMenu.tabIndex >= 0 && tabs[ctxMenu.tabIndex] ? isWelcomeTab(tabs[ctxMenu.tabIndex]!.channelId) : false"
+			:is-custom-title="isCtxTabCustomTitle"
 			@close="ctxMenu.visible = false"
 			@rename="onCtxRename"
+			@reset-title="onCtxResetTitle"
 			@close-tab="(idx) => emit('close-tab', idx)"
 			@close-others="(idx) => emit('close-others', idx)"
 			@close-to-right="(idx) => emit('close-to-right', idx)"
@@ -71,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch, nextTick } from "vue";
+import { computed, reactive, ref, watch, nextTick } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 import { useRename } from "../composables/useRename.js";
 import { useChannelsStore } from "../stores/channels.js";
@@ -174,6 +176,18 @@ function onTabContextMenu(idx: number, event: MouseEvent): void {
 function onCtxRename(channelId: string): void {
 	const idx = props.tabs.findIndex((t) => t.channelId === channelId);
 	if (idx !== -1) startRename(idx);
+}
+
+/** Whether the context-menu'd tab has a user-set custom title. */
+const isCtxTabCustomTitle = computed(() => {
+	const tab = ctxMenu.tabIndex >= 0 ? props.tabs[ctxMenu.tabIndex] : undefined;
+	if (!tab) return false;
+	const ch = channelsStore.channels.find((c) => c.id === tab.channelId);
+	return ch?.title != null && ch.title !== "";
+});
+
+function onCtxResetTitle(channelId: string): void {
+	channelsStore.clearTitle(channelId);
 }
 
 // -------------------------------------------------------------------------

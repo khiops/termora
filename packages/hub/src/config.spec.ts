@@ -11,6 +11,7 @@ import {
 	DEFAULT_PANES_CONFIG,
 	DEFAULT_STARTUP_CONFIG,
 	DEFAULT_TABS_CONFIG,
+	DEFAULT_TITLE_CONFIG,
 	DEFAULT_UI_CONFIG,
 	extractUiConfig,
 	loadGcConfig,
@@ -751,5 +752,148 @@ describe("ConfigResolver.uiConfig — tabs/panes", () => {
 		resolver.loadFromFile(dir);
 		expect(resolver.uiConfig.panes.maxPanes).toBe(8);
 		expect(resolver.uiConfig.panes.defaultSplitDirection).toBe("vertical");
+	});
+});
+
+// ─── extractUiConfig: title section ──────────────────────────────────────────
+
+describe("extractUiConfig — title section", () => {
+	it("returns default title config when no [title] section", () => {
+		const config = extractUiConfig({});
+		expect(config.title).toEqual(DEFAULT_TITLE_CONFIG);
+	});
+
+	it('parses source = "static"', () => {
+		const config = extractUiConfig({ title: { source: "static" } });
+		expect(config.title.source).toBe("static");
+	});
+
+	it('parses source = "dynamic"', () => {
+		const config = extractUiConfig({ title: { source: "dynamic" } });
+		expect(config.title.source).toBe("dynamic");
+	});
+
+	it("ignores invalid source value", () => {
+		const config = extractUiConfig({ title: { source: "invalid" } });
+		expect(config.title.source).toBe(DEFAULT_TITLE_CONFIG.source);
+	});
+
+	it('parses fallback = "shell"', () => {
+		const config = extractUiConfig({ title: { fallback: "shell" } });
+		expect(config.title.fallback).toBe("shell");
+	});
+
+	it('parses fallback = "custom"', () => {
+		const config = extractUiConfig({ title: { fallback: "custom" } });
+		expect(config.title.fallback).toBe("custom");
+	});
+
+	it("parses fallback_custom string", () => {
+		const config = extractUiConfig({
+			title: { fallback: "custom", fallback_custom: "My Terminal" },
+		});
+		expect(config.title.fallbackCustom).toBe("My Terminal");
+	});
+
+	it("parses max_length", () => {
+		const config = extractUiConfig({ title: { max_length: 30 } });
+		expect(config.title.maxLength).toBe(30);
+	});
+
+	it("ignores max_length < 1", () => {
+		const config = extractUiConfig({ title: { max_length: 0 } });
+		expect(config.title.maxLength).toBe(DEFAULT_TITLE_CONFIG.maxLength);
+	});
+
+	it('parses truncation = "middle"', () => {
+		const config = extractUiConfig({ title: { truncation: "middle" } });
+		expect(config.title.truncation).toBe("middle");
+	});
+
+	it('parses truncation = "start"', () => {
+		const config = extractUiConfig({ title: { truncation: "start" } });
+		expect(config.title.truncation).toBe("start");
+	});
+
+	it("ignores invalid truncation value", () => {
+		const config = extractUiConfig({ title: { truncation: "invalid" } });
+		expect(config.title.truncation).toBe(DEFAULT_TITLE_CONFIG.truncation);
+	});
+
+	it("parses prefix string", () => {
+		const config = extractUiConfig({ title: { prefix: "PROD " } });
+		expect(config.title.prefix).toBe("PROD ");
+	});
+
+	it("parses window_title = false", () => {
+		const config = extractUiConfig({ title: { window_title: false } });
+		expect(config.title.windowTitle).toBe(false);
+	});
+
+	it("parses window_format string", () => {
+		const config = extractUiConfig({ title: { window_format: "[{host}] {title}" } });
+		expect(config.title.windowFormat).toBe("[{host}] {title}");
+	});
+
+	it("parses all title fields together", () => {
+		const config = extractUiConfig({
+			title: {
+				source: "static",
+				fallback: "custom",
+				fallback_custom: "Shell",
+				max_length: 25,
+				truncation: "middle",
+				prefix: "DEV ",
+				window_title: true,
+				window_format: "{prefix}{host}: {title}",
+			},
+		});
+		expect(config.title).toEqual({
+			source: "static",
+			fallback: "custom",
+			fallbackCustom: "Shell",
+			maxLength: 25,
+			truncation: "middle",
+			prefix: "DEV ",
+			windowTitle: true,
+			windowFormat: "{prefix}{host}: {title}",
+		});
+	});
+});
+
+describe("ConfigResolver.uiConfig — title", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns default title config when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.uiConfig.title).toEqual(DEFAULT_TITLE_CONFIG);
+	});
+
+	it("returns overridden title values after loadFromFile", () => {
+		const dir = join(tmpdir(), `nexterm-title-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[title]\nsource = "static"\nprefix = "PROD "\nwindow_title = false\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.uiConfig.title.source).toBe("static");
+		expect(resolver.uiConfig.title.prefix).toBe("PROD ");
+		expect(resolver.uiConfig.title.windowTitle).toBe(false);
+		// Unchanged defaults
+		expect(resolver.uiConfig.title.maxLength).toBe(50);
+		expect(resolver.uiConfig.title.truncation).toBe("end");
 	});
 });

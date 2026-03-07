@@ -3,6 +3,7 @@ import {
 	OUTPUT_BATCH_BYTES,
 	OUTPUT_BATCH_MS,
 	PROTOCOL_VERSION,
+	sanitizeTitle,
 } from "@nexterm/shared";
 import type {
 	AgentAttachMessage,
@@ -28,9 +29,12 @@ const SIGNAL_NAMES: Record<number, string> = {
 	15: "SIGTERM",
 };
 
+const TITLE_DEBOUNCE_MS = 100;
+
 export class AgentHandler {
 	private reader = new FrameReader();
 	private ptyManager: PtyManager;
+	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	constructor(
 		private readonly sendMessage: (msg: ProtocolMessage) => void,
@@ -65,6 +69,10 @@ export class AgentHandler {
 
 	/** Tear down all active PTY channels (called on SIGTERM / stdin EOF). */
 	shutdown(): void {
+		for (const timer of this.titleDebounceTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.titleDebounceTimers.clear();
 		this.ptyManager.destroyAll();
 	}
 
@@ -119,8 +127,10 @@ export class AgentHandler {
 			});
 
 			this.setupOutputBatching(channelId);
+			this.setupTitleChangeHandler(channelId);
 
 			this.ptyManager.onExit(channelId, (exit) => {
+				this.clearTitleDebounce(channelId);
 				const exitMsg: ProtocolMessage =
 					exit.signal !== undefined
 						? {
@@ -208,6 +218,44 @@ export class AgentHandler {
 		});
 	}
 
+	private clearTitleDebounce(channelId: string): void {
+		const timer = this.titleDebounceTimers.get(channelId);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			this.titleDebounceTimers.delete(channelId);
+		}
+	}
+
+	/**
+	 * Debounce terminal title changes (OSC 0/2) per channel.
+	 * Fires TITLE_CHANGE at most once every TITLE_DEBOUNCE_MS per channel
+	 * (last-write-wins).
+	 */
+	private setupTitleChangeHandler(channelId: string): void {
+		this.ptyManager.onTitleChange(channelId, (rawTitle: string) => {
+			if (!this.ptyManager.has(channelId)) return;
+			const title = sanitizeTitle(rawTitle);
+			if (title === "") return;
+
+			const existing = this.titleDebounceTimers.get(channelId);
+			if (existing !== undefined) {
+				clearTimeout(existing);
+			}
+			this.titleDebounceTimers.set(
+				channelId,
+				setTimeout(() => {
+					this.titleDebounceTimers.delete(channelId);
+					if (!this.ptyManager.has(channelId)) return;
+					this.sendMessage({
+						type: "TITLE_CHANGE",
+						channelId,
+						title,
+					});
+				}, TITLE_DEBOUNCE_MS),
+			);
+		});
+	}
+
 	private handleInput(msg: InputMessage): void {
 		if (!this.ptyManager.has(msg.channelId)) {
 			this.sendMessage({
@@ -228,6 +276,7 @@ export class AgentHandler {
 	}
 
 	private handleDestroy(msg: DestroyMessage): void {
+		this.clearTitleDebounce(msg.channelId);
 		this.ptyManager.destroy(msg.channelId);
 	}
 

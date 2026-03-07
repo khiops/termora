@@ -90,6 +90,7 @@ interface ChannelRow {
 	is_welcome: number;
 	icon: string | null;
 	direct_process: number;
+	dynamic_title: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -165,6 +166,7 @@ function rowToChannel(row: ChannelRow): Channel {
 	if (row.is_welcome === 1) ch.isWelcome = true;
 	if (row.icon != null) ch.icon = row.icon;
 	if (row.direct_process === 1) ch.directProcess = true;
+	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title;
 	if (row.args && row.args !== "[]") {
 		try {
 			const parsed = JSON.parse(row.args) as string[];
@@ -483,6 +485,13 @@ export class MetaDAL {
 			.prepare("UPDATE channels SET title = ?, updated_at = ? WHERE id = ?")
 			.run(title, now, id);
 		return result.changes > 0;
+	}
+
+	updateDynamicTitle(channelId: string, title: string): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE channels SET dynamic_title = ?, updated_at = ? WHERE id = ?")
+			.run(title, now, channelId);
 	}
 
 	updateChannelConfig(

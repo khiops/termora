@@ -61,6 +61,7 @@ export interface Channel {
 	isWelcome?: boolean;
 	icon?: string;
 	directProcess?: boolean;
+	dynamicTitle?: string;
 	createdAt: string;
 	updatedAt: string;
 }

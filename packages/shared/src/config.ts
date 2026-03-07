@@ -102,6 +102,25 @@ export interface StartupConfig {
 	autoOpenWelcome?: boolean;
 }
 
+export interface TitleConfig {
+	/** Title source: 'dynamic' uses OSC 0/2, 'static' uses only fallback. Default: 'dynamic'. */
+	source?: "dynamic" | "static";
+	/** What to show when no dynamic or custom title is set. Default: 'channel'. */
+	fallback?: "channel" | "shell" | "custom";
+	/** Custom fallback string (used when fallback = 'custom'). */
+	fallbackCustom?: string;
+	/** Maximum display length for tab titles. Default: 50. */
+	maxLength?: number;
+	/** Where to place the ellipsis when truncating. Default: 'end'. */
+	truncation?: "end" | "middle" | "start";
+	/** Per-host title prefix (global default; per-host overrides via host profile). */
+	prefix?: string;
+	/** Whether to update the browser window/tab title. Default: true. */
+	windowTitle?: boolean;
+	/** Format string for the browser window title. Default: 'nexterm - {prefix}{host} - {title}'. */
+	windowFormat?: string;
+}
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',

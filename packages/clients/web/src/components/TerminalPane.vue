@@ -109,7 +109,7 @@ const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
 
-const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite } = useTerminal(
+const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
 	configStore.profile,
@@ -129,7 +129,11 @@ const paneTitle = computed(() => {
 	const ch = effectiveChannelId.value;
 	if (ch === null) return DEFAULT_CHANNEL_NAME;
 	const channel = channelsStore.channels.find((c) => c.id === ch);
-	return channel?.title ?? DEFAULT_CHANNEL_NAME;
+	// Title priority: custom > live dynamic > stored dynamic > fallback
+	if (channel?.title) return channel.title;
+	if (currentDynamicTitle.value) return currentDynamicTitle.value;
+	if (channel?.dynamicTitle) return channel.dynamicTitle;
+	return DEFAULT_CHANNEL_NAME;
 });
 
 // ---------------------------------------------------------------------------

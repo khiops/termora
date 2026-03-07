@@ -87,6 +87,12 @@ export class PtyManager {
 		channel.pty.onExit(callback);
 	}
 
+	/** Register an onTitleChange callback on a channel's headless terminal (OSC 0/2). */
+	onTitleChange(channelId: string, callback: (title: string) => void): void {
+		const channel = this.getChannel(channelId);
+		channel.headless.onTitleChange(callback);
+	}
+
 	/**
 	 * Produce a serialized snapshot of a channel's headless terminal state.
 	 * Returns null if the channel does not exist.

@@ -166,6 +166,13 @@ export interface ChannelStateEndMessage {
 	type: "CHANNEL_STATE_END";
 }
 
+/** Agent → Hub: terminal title changed (OSC 0/2) */
+export interface AgentTitleChangeMessage {
+	type: "TITLE_CHANGE";
+	channelId: string;
+	title: string; // already sanitized by agent
+}
+
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)
 // ---------------------------------------------------------------------------
@@ -224,6 +231,7 @@ export interface UiAttachOkMessage {
 	tail: Uint8Array[];
 	writeLockHolder: string | null;
 	cached: boolean;
+	dynamicTitle?: string;
 }
 
 /** UI → Hub: detach this client from a channel (keep channel alive) */
@@ -366,6 +374,7 @@ export type AgentMessage =
 	| HeartbeatAckMessage
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
+	| AgentTitleChangeMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the Agent */
@@ -411,6 +420,7 @@ export type HubToUiMessage =
 	| WriteDenyMessage
 	| WriteRevokedMessage
 	| WriteLockMessage
+	| AgentTitleChangeMessage
 	| PongMessage
 	| HostVerifyMessage
 	| ErrorMessage;
@@ -457,4 +467,5 @@ export type ProtocolMessage =
 	| HostVerifyResponseMessage
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
+	| AgentTitleChangeMessage
 	| ErrorMessage;

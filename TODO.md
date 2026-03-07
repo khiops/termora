@@ -19,12 +19,12 @@
   - [x] Block 5: Configure Command + Direct Process (web + hub + agent)
   - [x] Block 6: Channel Sidebar Context Menu + States (web)
   - [x] Block 7: Settings + Confirmations (web + hub)
-- [ ] 🟡 [UI] UX-02: Terminal Title — spec ready (docs/plans/ux-02-terminal-title.md)
-  - [ ] Block 1: TITLE_CHANGE Protocol + DB Migration (shared + agent + hub) — S
-  - [ ] Block 2: UI Dynamic Title Display + Title Stack (web) — S
-  - [ ] Block 3: Title Truncation + Sanitization (shared + web) — S
-  - [ ] Block 4: Window Title + Per-Host Prefix (web + hub) — S
-  - [ ] Block 5: Title Settings + Reset to Dynamic (web + hub) — S
+- [x] ✅ [UI] UX-02: Terminal Title (2026-03-07) — 5 blocks, 892 tests, /review clean
+  - [x] Block 1: TITLE_CHANGE Protocol + DB Migration (shared + agent + hub)
+  - [x] Block 2: UI Dynamic Title Display + Title Stack (web)
+  - [x] Block 3: Title Truncation + Sanitization (shared + web)
+  - [x] Block 4: Window Title + Per-Host Prefix (web + hub)
+  - [x] Block 5: Title Settings + Reset to Dynamic (web + hub)
 - [ ] 🟡 [UI] UX-04: Scrollback Search — spec ready (docs/plans/ux-04-scrollback-search.md)
   - [ ] Block 1: SearchAddon Integration + Basic Search (web) — S
   - [ ] Block 2: Search Overlay UI (web) — M
@@ -58,7 +58,10 @@
 - [ ] 🔧 [UI] TerminalPane: channel?.hostId references non-existent field, falls back silently — Priority: M (from /review F-009)
 - [ ] 🔧 [UI] useLayout localStorage load: validate max-pane-count (INV-10) — Priority: M (from /review F-011)
 - [ ] 🔧 [Hub] session-manager.spec.ts: crash-loop 60s window reset test skipped (timer cascade) — Priority: M (from /review F-003)
+- [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
+- [ ] 💡 [UI] E2E scenarios for UX-06 + UX-01 + UX-02 + UX-04 — update TESTING_E2E.md after all 4 stories — Priority: M
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
+- [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
 
 ### Deferred from /adversarial + /llm
 - [ ] 💡 [Agent] Configurable socket bind timeout (currently hardcoded 5s) — Priority: L (from /adversarial C-07)
