@@ -204,6 +204,32 @@ export const DEFAULT_NOTIFICATION_CONFIG: Required<
 	},
 };
 
+// ---------------------------------------------------------------------------
+// Visual profile types (UX-07)
+// ---------------------------------------------------------------------------
+
+export type VisualPreset = "none" | "caution" | "danger" | "custom";
+export type BorderStyle = "none" | "subtle" | "strong";
+
+export interface VisualProfile {
+	preset: VisualPreset;
+	banner: {
+		enabled: boolean;
+		text: string;
+		bgColor: string;
+		textColor: string;
+	};
+	border: {
+		style: BorderStyle;
+		color: string;
+	};
+	tint: {
+		enabled: boolean;
+		color: string;
+		opacity: number;
+	};
+}
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',

@@ -24,6 +24,7 @@ interface CreateHostBody {
 	ssh_user?: string | null;
 	keep_alive_seconds?: number;
 	history_retention_days?: number;
+	profile_json?: string;
 }
 
 interface UpdateHostBody {
@@ -44,6 +45,7 @@ interface UpdateHostBody {
 	ssh_user?: string | null;
 	keep_alive_seconds?: number;
 	history_retention_days?: number;
+	profile_json?: string;
 }
 
 const SSH_TEST_TIMEOUT_MS = 10_000;
@@ -195,6 +197,44 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				.send({ error: { code: "VALIDATION_ERROR", message: validationError } });
 		}
 
+		// Validate visual profile colors in profile_json (INV-09)
+		if (body.profile_json !== undefined) {
+			try {
+				const profileObj =
+					typeof body.profile_json === "string" ? JSON.parse(body.profile_json) : body.profile_json;
+				if (profileObj?.visualProfile) {
+					const vp = profileObj.visualProfile;
+					const hexRe = /^#[0-9a-fA-F]{6}$/;
+					const colorsToCheck = [
+						vp.banner?.bgColor,
+						vp.banner?.textColor,
+						vp.border?.color,
+						vp.tint?.color,
+					].filter((c: unknown): c is string => typeof c === "string" && c !== "");
+					for (const c of colorsToCheck) {
+						if (!hexRe.test(c)) {
+							return reply.code(400).send({
+								error: {
+									code: "VALIDATION_ERROR",
+									message: `Invalid color value: ${c}`,
+								},
+							});
+						}
+					}
+					if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
+						vp.tint.opacity = 15;
+					}
+				}
+			} catch {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "Invalid profile_json format",
+					},
+				});
+			}
+		}
+
 		// Duplicate label check
 		const existing = metaDal.getHostByLabel(body.label.trim());
 		if (existing) {
@@ -224,6 +264,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			...(body.history_retention_days !== undefined && {
 				historyRetentionDays: body.history_retention_days,
 			}),
+			...(body.profile_json !== undefined && { profileJson: body.profile_json }),
 		});
 
 		return reply.code(201).send(toSnakeCase(host));
@@ -313,6 +354,47 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				}
 			}
 
+			// Validate visual profile colors (INV-09)
+			if (body.profile_json !== undefined) {
+				try {
+					const profileObj =
+						typeof body.profile_json === "string"
+							? JSON.parse(body.profile_json)
+							: body.profile_json;
+					if (profileObj?.visualProfile) {
+						const vp = profileObj.visualProfile;
+						const hexRe = /^#[0-9a-fA-F]{6}$/;
+						const colorsToCheck = [
+							vp.banner?.bgColor,
+							vp.banner?.textColor,
+							vp.border?.color,
+							vp.tint?.color,
+						].filter((c: unknown): c is string => typeof c === "string" && c !== "");
+						for (const c of colorsToCheck) {
+							if (!hexRe.test(c)) {
+								return reply.code(400).send({
+									error: {
+										code: "VALIDATION_ERROR",
+										message: `Invalid color value: ${c}`,
+									},
+								});
+							}
+						}
+						// Clamp tint opacity server-side
+						if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
+							vp.tint.opacity = 15;
+						}
+					}
+				} catch {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "Invalid profile_json format",
+						},
+					});
+				}
+			}
+
 			// Validate label if provided
 			if (body.label !== undefined) {
 				if (body.label.trim().length === 0 || body.label.length > 64) {
@@ -362,6 +444,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				updateInput.keepAliveSeconds = body.keep_alive_seconds;
 			if (body.history_retention_days !== undefined)
 				updateInput.historyRetentionDays = body.history_retention_days;
+			if (body.profile_json !== undefined) updateInput.profileJson = body.profile_json;
 
 			const updated = metaDal.updateHost(request.params.id, updateInput);
 

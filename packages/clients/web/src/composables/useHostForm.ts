@@ -152,7 +152,7 @@ export function useHostForm(editHost?: Host) {
 		}
 	}
 
-	async function save(): Promise<Host | null> {
+	async function save(extraBody?: Record<string, unknown>): Promise<Host | null> {
 		if (!canSave.value) return null;
 		saving.value = true;
 		try {
@@ -183,6 +183,7 @@ export function useHostForm(editHost?: Host) {
 				keep_alive_seconds: form.value.keepAliveSeconds,
 				history_retention_days: form.value.historyRetentionDays,
 				trust_remote_hints: form.value.trustRemoteHints,
+				...extraBody,
 			};
 
 			if (isEdit && editHost) {

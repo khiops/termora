@@ -1,5 +1,5 @@
 <template>
-	<div class="terminal-pane" @contextmenu.prevent="showContextMenu">
+	<div class="terminal-pane" :style="borderStyle" @contextmenu.prevent="showContextMenu">
 		<!-- Pane header — always rendered so fitAddon.fit() calculates correct rows -->
 		<div
 			class="pane-header"
@@ -21,6 +21,14 @@
 			</span>
 		</div>
 
+		<!-- Environment banner (UX-07) -->
+		<EnvironmentBanner
+			v-if="bannerText"
+			:text="bannerText"
+			:bg-color="visualProfile.banner.bgColor"
+			:text-color="visualProfile.banner.textColor"
+		/>
+
 		<div v-if="error" class="terminal-error">
 			<span>{{ error }}</span>
 		</div>
@@ -28,6 +36,9 @@
 			<span>Connecting…</span>
 		</div>
 		<div ref="terminalContainer" class="terminal-container" />
+
+		<!-- Background tint overlay (UX-07) -->
+		<div v-if="tintStyle" class="tint-overlay" :style="tintStyle" />
 
 		<!-- Exit overlay for direct process channels -->
 		<div v-if="isDead && isDirectProcess" class="exit-overlay">
@@ -108,9 +119,12 @@ import type { SearchScope } from "../composables/useMultiPaneSearch.js";
 import { useNotificationStore } from "../stores/notifications.js";
 import { useActivityTracker } from "../composables/useActivityTracker.js";
 import { useScrollBehavior } from "../composables/useScrollBehavior.js";
+import { useVisualProfile } from "../composables/useVisualProfile.js";
+import { useHostsStore } from "../stores/hosts.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 import SearchOverlay from "./SearchOverlay.vue";
 import UnreadLinesBar from "./UnreadLinesBar.vue";
+import EnvironmentBanner from "./EnvironmentBanner.vue";
 
 // ---------------------------------------------------------------------------
 // Props + emits
@@ -154,6 +168,8 @@ const configStore = useConfigStore();
 const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
+
+const hostsStore = useHostsStore();
 
 const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
@@ -224,6 +240,20 @@ const paneTitle = computed(() => {
 	if (channel?.dynamicTitle) return channel.dynamicTitle;
 	return DEFAULT_CHANNEL_NAME;
 });
+
+// ---------------------------------------------------------------------------
+// Visual profile (UX-07)
+// ---------------------------------------------------------------------------
+
+const paneHost = computed(() => {
+	const chId = effectiveChannelId.value;
+	if (!chId) return undefined;
+	const hostId = channelsStore.activeHostId;
+	if (!hostId) return undefined;
+	return hostsStore.hosts.find((h) => h.id === hostId);
+});
+
+const { profile: visualProfile, bannerText, borderStyle, tintStyle } = useVisualProfile(paneHost);
 
 // ---------------------------------------------------------------------------
 // Write-lock awareness
@@ -743,6 +773,14 @@ function onDragEnd(): void {
 	flex: 1;
 	overflow: hidden;
 	background: rgba(var(--nt-bg-rgb), var(--nt-terminal-alpha));
+}
+
+.tint-overlay {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 1;
+	will-change: opacity;
 }
 
 .terminal-loading,

@@ -254,6 +254,9 @@
 								<option value="ignore">Ignore</option>
 							</select>
 						</div>
+						<!-- Visual Profile (UX-07) -->
+						<div class="advanced-divider" />
+						<VisualProfileSettings v-model="visualProfile" />
 					</details>
 				</div>
 
@@ -281,10 +284,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type PropType } from "vue";
-import type { Host } from "@nexterm/shared";
+import { computed, ref, type PropType } from "vue";
+import type { Host, VisualProfile } from "@nexterm/shared";
 import { useHostForm } from "../composables/useHostForm.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { DEFAULT_VISUAL_PROFILE } from "../utils/visual-presets.js";
+import VisualProfileSettings from "./VisualProfileSettings.vue";
 
 const props = defineProps({
 	visible: { type: Boolean, required: true },
@@ -318,6 +323,21 @@ const {
 	save,
 } = useHostForm(props.editHost ?? undefined);
 
+// Visual profile state — initialized from editHost.profileJson
+const visualProfile = ref<VisualProfile>((() => {
+	if (props.editHost?.profileJson) {
+		try {
+			const parsed = JSON.parse(props.editHost.profileJson);
+			if (parsed?.visualProfile) {
+				return { ...DEFAULT_VISUAL_PROFILE, ...parsed.visualProfile };
+			}
+		} catch {
+			// Invalid JSON — use defaults
+		}
+	}
+	return { ...DEFAULT_VISUAL_PROFILE };
+})());
+
 const groups = computed(() => hostsStore.getHostGroups());
 const serverHosts = computed(() =>
 	sshConfigEntries.value.filter((e) => !e.isGitHost),
@@ -329,7 +349,21 @@ function onSelectSshConfig(): void {
 }
 
 async function onSave(): Promise<void> {
-	const host = await save();
+	// Build profile_json by merging visualProfile into any existing profile
+	let existingProfile: Record<string, unknown> = {};
+	if (props.editHost?.profileJson) {
+		try {
+			existingProfile = JSON.parse(props.editHost.profileJson);
+		} catch {
+			// Invalid JSON — start fresh
+		}
+	}
+	const profileJson = JSON.stringify({
+		...existingProfile,
+		visualProfile: visualProfile.value,
+	});
+
+	const host = await save({ profile_json: profileJson });
 	if (host) {
 		emit("saved", host);
 		emit("close");
@@ -609,5 +643,10 @@ async function onSave(): Promise<void> {
 
 .advanced-section[open] summary {
 	margin-bottom: 12px;
+}
+
+.advanced-divider {
+	border-top: 1px solid var(--nt-border);
+	margin: 12px 0;
 }
 </style>
