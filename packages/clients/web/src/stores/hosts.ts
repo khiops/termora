@@ -1,4 +1,4 @@
-import type { Host, SessionStatus } from "@nexterm/shared";
+import { type Host, type SessionStatus, toCamelCase } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -57,7 +57,7 @@ export const useHostsStore = defineStore("hosts", () => {
 			if (!res.ok) {
 				throw new Error(`GET /api/hosts failed: ${res.status}`);
 			}
-			const data = (await res.json()) as Host[];
+			const data = toCamelCase(await res.json()) as Host[];
 			hosts.value = data;
 			// Auto-select the first host if nothing is selected yet
 			if (selectedHostId.value === null && data.length > 0) {
@@ -117,7 +117,7 @@ export const useHostsStore = defineStore("hosts", () => {
 			body: JSON.stringify(body),
 		});
 		if (!res.ok) return null;
-		const host = (await res.json()) as Host;
+		const host = toCamelCase(await res.json()) as Host;
 		hosts.value = [...hosts.value, host];
 		return host;
 	}
@@ -132,7 +132,7 @@ export const useHostsStore = defineStore("hosts", () => {
 			body: JSON.stringify(body),
 		});
 		if (!res.ok) return null;
-		const updated = (await res.json()) as Host;
+		const updated = toCamelCase(await res.json()) as Host;
 		const idx = hosts.value.findIndex((h) => h.id === id);
 		if (idx >= 0) hosts.value[idx] = updated;
 		return updated;
@@ -157,7 +157,7 @@ export const useHostsStore = defineStore("hosts", () => {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) return null;
-		const host = (await res.json()) as Host;
+		const host = toCamelCase(await res.json()) as Host;
 		hosts.value = [...hosts.value, host];
 		return host;
 	}

@@ -9,6 +9,11 @@
 
 ## Pending
 
+### E2E Bugs
+- [x] ✅ [Web] Edit Host modal creates duplicate — HostModal not remounting, v-if added (from E2E Sc.60) (2026-03-07)
+- [x] ✅ [Web] Edit Host self-name validation — same root cause as above (from E2E Sc.60) (2026-03-07)
+- [x] ✅ [Web] Visual profiles never render — added toCamelCase() to hosts store API responses (from E2E Sc.83) (2026-03-07)
+
 ### Review Findings
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
 - [ ] 🔧 [UI] VacantPane: filter detached channels by hostId (currently shows all hosts) — Priority: M (from /review F-006)

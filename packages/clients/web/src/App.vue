@@ -30,7 +30,8 @@
 
 		<!-- Add/Edit Host modal — opened from rail "+" or host context menu -->
 		<HostModal
-			:visible="showHostModal"
+			v-if="showHostModal"
+			:visible="true"
 			:edit-host="editingHost"
 			@close="showHostModal = false; editingHost = null"
 			@saved="onHostSaved"
