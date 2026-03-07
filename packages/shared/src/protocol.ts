@@ -43,10 +43,12 @@ export interface AgentSpawnMessage {
 	requestId: string;
 	channelId?: string;
 	shell: string;
+	args?: string[];
 	cwd: string;
 	env: Record<string, string>;
 	cols: number;
 	rows: number;
+	directProcess?: boolean;
 }
 
 /** Agent → Hub: PTY spawned successfully */
@@ -191,11 +193,13 @@ export interface UiSpawnMessage {
 	type: "SPAWN";
 	hostId: string;
 	shell?: string;
+	args?: string[];
 	cwd?: string;
 	env?: Record<string, string>;
 	groupId?: string;
 	cols?: number;
 	rows?: number;
+	directProcess?: boolean;
 }
 
 /** Hub → UI: channel spawned successfully */

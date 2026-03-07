@@ -1,7 +1,12 @@
 <template>
 	<div class="terminal-pane" @contextmenu.prevent="showContextMenu">
 		<!-- Pane header — always rendered so fitAddon.fit() calculates correct rows -->
-		<div class="pane-header">
+		<div
+			class="pane-header"
+			draggable="true"
+			@dragstart="onDragStart"
+			@dragend="onDragEnd"
+		>
 			<span class="pane-title">{{ paneTitle }}</span>
 			<WriteLockIndicator :channel-id="effectiveChannelId" :is-dead="isDead" class="pane-lock" />
 			<span v-if="isDead" class="dead-badge" title="Channel has exited">
@@ -23,6 +28,16 @@
 			<span>Connecting…</span>
 		</div>
 		<div ref="terminalContainer" class="terminal-container" />
+
+		<!-- Exit overlay for direct process channels -->
+		<div v-if="isDead && isDirectProcess" class="exit-overlay">
+			<div class="exit-message">Process exited</div>
+			<div class="exit-actions">
+				<button class="exit-btn" @click="onRestart">Restart</button>
+				<button class="exit-btn" @click="onConfigure">Configure</button>
+				<button class="exit-btn exit-btn--danger" @click="onClosePaneFromOverlay">Close</button>
+			</div>
+		</div>
 
 		<!-- Reconnecting overlay — shown when WS drops after terminal was initialized -->
 		<div v-if="ready && !sessionStore.connected" class="reconnecting-overlay">
@@ -68,8 +83,10 @@ const props = withDefaults(
 		 * own channel on mount (legacy single-pane behaviour).
 		 */
 		channelId?: string | null;
+		/** Stable pane identifier from the layout tree (for DnD targeting). */
+		paneId?: string | null;
 	}>(),
-	{ channelId: null },
+	{ channelId: null, paneId: null },
 );
 
 const emit = defineEmits<{
@@ -77,6 +94,7 @@ const emit = defineEmits<{
 	(e: "split-down", channelId: string): void;
 	(e: "close-pane", channelId: string): void;
 	(e: "channel-spawned", tempId: string, realId: string): void;
+	(e: "configure-command", channelId: string): void;
 }>();
 
 // ---------------------------------------------------------------------------
@@ -140,6 +158,13 @@ const isDead = computed(() => {
 	if (!chId) return false;
 	const channel = channelsStore.channels.find((c) => c.id === chId);
 	return channel?.status === "dead";
+});
+
+const isDirectProcess = computed(() => {
+	const chId = effectiveChannelId.value;
+	if (!chId) return false;
+	const channel = channelsStore.channels.find((c) => c.id === chId);
+	return channel?.directProcess === true;
 });
 
 watch(isDead, (dead) => {
@@ -243,6 +268,31 @@ onUnmounted(() => {
 });
 
 // ---------------------------------------------------------------------------
+// Exit overlay actions (direct process)
+// ---------------------------------------------------------------------------
+
+async function onRestart(): Promise<void> {
+	const chId = effectiveChannelId.value;
+	if (chId !== null) {
+		await channelsStore.restartChannel(chId);
+	}
+}
+
+function onConfigure(): void {
+	const chId = effectiveChannelId.value;
+	if (chId !== null) {
+		emit("configure-command", chId);
+	}
+}
+
+function onClosePaneFromOverlay(): void {
+	const chId = effectiveChannelId.value;
+	if (chId !== null) {
+		emit("close-pane", chId);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
 
@@ -281,6 +331,37 @@ function onDocumentClick(): void {
 
 onMounted(() => document.addEventListener("click", onDocumentClick));
 onUnmounted(() => document.removeEventListener("click", onDocumentClick));
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop (cross-tab pane DnD)
+// ---------------------------------------------------------------------------
+
+function onDragStart(event: DragEvent): void {
+	if (!event.dataTransfer) return;
+	const chId = effectiveChannelId.value;
+	if (chId === null) return;
+
+	event.dataTransfer.effectAllowed = "move";
+
+	// Find host ID from channels store
+	const channel = channelsStore.channels.find((c) => c.id === chId);
+	const hostId = channel?.hostId ?? channelsStore.activeHostId ?? null;
+
+	event.dataTransfer.setData(
+		"text/x-nexterm-pane",
+		JSON.stringify({
+			channelId: chId,
+			paneId: props.paneId,
+			hostId,
+		}),
+	);
+
+	document.body.classList.add("nexterm-dragging");
+}
+
+function onDragEnd(): void {
+	document.body.classList.remove("nexterm-dragging");
+}
 </script>
 
 <style scoped>
@@ -302,6 +383,11 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	border-bottom: 1px solid var(--nt-border);
 	flex-shrink: 0;
 	min-height: 28px;
+	cursor: grab;
+}
+
+.pane-header:active {
+	cursor: grabbing;
 }
 
 .pane-title {
@@ -402,6 +488,52 @@ onUnmounted(() => document.removeEventListener("click", onDocumentClick));
 	border: none;
 	border-top: 1px solid var(--nt-border);
 	margin: 4px 0;
+}
+
+/* Exit overlay for direct process */
+.exit-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	background: var(--nt-overlay-heavy);
+	z-index: 10;
+}
+
+.exit-message {
+	color: var(--nt-text-secondary);
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.exit-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.exit-btn {
+	padding: 6px 14px;
+	font-size: 12px;
+	font-family: inherit;
+	font-weight: 500;
+	background: var(--nt-tab-hover);
+	color: var(--nt-fg);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: background 0.12s, opacity 0.12s;
+}
+
+.exit-btn:hover {
+	opacity: 0.85;
+	background: var(--nt-border);
+}
+
+.exit-btn--danger {
+	color: var(--nt-badge);
 }
 
 /* Reconnecting overlay */

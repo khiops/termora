@@ -14,6 +14,7 @@ export interface PtyChannel {
 export interface SpawnOptions {
 	id?: string;
 	shell: string;
+	args?: string[];
 	cwd: string;
 	env: Record<string, string>;
 	cols: number;
@@ -27,7 +28,7 @@ export class PtyManager {
 	/** Spawn a new PTY. Returns the new channel ID. */
 	spawn(options: SpawnOptions): string {
 		const id = options.id ?? generateId();
-		const ptyProcess = pty.spawn(options.shell, [], {
+		const ptyProcess = pty.spawn(options.shell, options.args ?? [], {
 			name: "xterm-256color",
 			cols: options.cols,
 			rows: options.rows,

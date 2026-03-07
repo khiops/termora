@@ -14,7 +14,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
-import type { TerminalProfile } from "@nexterm/shared";
+import type {
+	ChannelsConfig,
+	PanesConfig,
+	StartupConfig,
+	TabsConfig,
+	TerminalProfile,
+} from "@nexterm/shared";
 import type { MetaDAL } from "./storage/meta.js";
 
 // ─── GC configuration ──────────────────────────────────────────────────────────
@@ -70,14 +76,44 @@ export function loadGcConfig(configDir: string): GcConfig {
 
 // ─── UI configuration ───────────────────────────────────────────────────────
 
-/** UI behavioral configuration (from [ui] in config.toml). */
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup] in config.toml). */
 export interface UiConfig {
 	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
 	onChannelDead: "close" | "readonly";
+	/** Tab behavior configuration. */
+	tabs: TabsConfig;
+	/** Pane behavior configuration. */
+	panes: PanesConfig;
+	/** Channel defaults configuration. */
+	channels: ChannelsConfig;
+	/** Startup behavior configuration. */
+	startup: StartupConfig;
 }
+
+export const DEFAULT_TABS_CONFIG: TabsConfig = {
+	closeButton: true,
+	newTabPosition: "end",
+	confirmCloseAll: true,
+	confirmCloseOthers: true,
+};
+
+export const DEFAULT_PANES_CONFIG: PanesConfig = {
+	maxPanes: 4,
+	defaultSplitDirection: "horizontal",
+};
+
+export const DEFAULT_CHANNELS_CONFIG: ChannelsConfig = {};
+
+export const DEFAULT_STARTUP_CONFIG: StartupConfig = {
+	autoOpenWelcome: true,
+};
 
 export const DEFAULT_UI_CONFIG: UiConfig = {
 	onChannelDead: "readonly",
+	tabs: { ...DEFAULT_TABS_CONFIG },
+	panes: { ...DEFAULT_PANES_CONFIG },
+	channels: { ...DEFAULT_CHANNELS_CONFIG },
+	startup: { ...DEFAULT_STARTUP_CONFIG },
 };
 
 /**
@@ -85,7 +121,15 @@ export const DEFAULT_UI_CONFIG: UiConfig = {
  * Returns a new UiConfig with defaults overridden by any valid values found.
  */
 export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
-	const config: UiConfig = { ...DEFAULT_UI_CONFIG };
+	const config: UiConfig = {
+		...DEFAULT_UI_CONFIG,
+		tabs: { ...DEFAULT_TABS_CONFIG },
+		panes: { ...DEFAULT_PANES_CONFIG },
+		channels: { ...DEFAULT_CHANNELS_CONFIG },
+		startup: { ...DEFAULT_STARTUP_CONFIG },
+	};
+
+	// ── [ui] section ────────────────────────────────────────────────────
 	const uiSection = parsed.ui;
 	if (uiSection != null && typeof uiSection === "object") {
 		const uiRaw = uiSection as Record<string, unknown>;
@@ -96,6 +140,61 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 			config.onChannelDead = uiRaw.on_channel_dead;
 		}
 	}
+
+	// ── [tabs] section ──────────────────────────────────────────────────
+	const tabsSection = parsed.tabs;
+	if (tabsSection != null && typeof tabsSection === "object") {
+		const raw = tabsSection as Record<string, unknown>;
+		if (typeof raw.close_button === "boolean") {
+			config.tabs.closeButton = raw.close_button;
+		}
+		if (
+			typeof raw.new_tab_position === "string" &&
+			(raw.new_tab_position === "end" || raw.new_tab_position === "afterActive")
+		) {
+			config.tabs.newTabPosition = raw.new_tab_position;
+		}
+		if (typeof raw.confirm_close_all === "boolean") {
+			config.tabs.confirmCloseAll = raw.confirm_close_all;
+		}
+		if (typeof raw.confirm_close_others === "boolean") {
+			config.tabs.confirmCloseOthers = raw.confirm_close_others;
+		}
+	}
+
+	// ── [panes] section ─────────────────────────────────────────────────
+	const panesSection = parsed.panes;
+	if (panesSection != null && typeof panesSection === "object") {
+		const raw = panesSection as Record<string, unknown>;
+		if (typeof raw.max_panes === "number" && raw.max_panes >= 1) {
+			config.panes.maxPanes = raw.max_panes;
+		}
+		if (
+			typeof raw.default_split_direction === "string" &&
+			(raw.default_split_direction === "horizontal" || raw.default_split_direction === "vertical")
+		) {
+			config.panes.defaultSplitDirection = raw.default_split_direction;
+		}
+	}
+
+	// ── [channels] section ──────────────────────────────────────────────
+	const channelsSection = parsed.channels;
+	if (channelsSection != null && typeof channelsSection === "object") {
+		const raw = channelsSection as Record<string, unknown>;
+		if (typeof raw.default_shell === "string") {
+			config.channels.defaultShell = raw.default_shell;
+		}
+	}
+
+	// ── [startup] section ───────────────────────────────────────────────
+	const startupSection = parsed.startup;
+	if (startupSection != null && typeof startupSection === "object") {
+		const raw = startupSection as Record<string, unknown>;
+		if (typeof raw.auto_open_welcome === "boolean") {
+			config.startup.autoOpenWelcome = raw.auto_open_welcome;
+		}
+	}
+
 	return config;
 }
 
@@ -159,7 +258,8 @@ export class ConfigResolver {
 	}
 
 	/**
-	 * Load [terminal], [gc], and [ui] sections from config.toml at the given config directory.
+	 * Load [terminal], [gc], [ui], [tabs], [panes], [channels], and [startup] sections
+	 * from config.toml at the given config directory.
 	 * Silently no-ops if the file does not exist or is malformed.
 	 */
 	loadFromFile(configDir: string): void {

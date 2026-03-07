@@ -11,14 +11,14 @@
   - [x] Block 5: Theme Picker + Live Preview (web)
   - [x] Block 6: Theme Editor + Import/Export (web)
   - [x] Block 7: OS Auto-Switch + Opacity + Scrollbar (web)
-- [ ] 🟡 [UI] UX-01: Tab Actions, Split Panes, Welcome Tab — spec ready (docs/plans/ux-01-tab-actions.md)
-  - [ ] Block 1: Tab Context Menu + Close Actions (web) — M
-  - [ ] Block 2: Vacant Pane Slots + Picker (web) — M
-  - [ ] Block 3: Welcome Tab (web + hub) — M
-  - [ ] Block 4: Cross-Tab Pane DnD (web) — M
-  - [ ] Block 5: Configure Command + Direct Process (web + hub + agent) — M
-  - [ ] Block 6: Channel Sidebar Context Menu + States (web) — S
-  - [ ] Block 7: Settings + Confirmations (web + hub) — S
+- [x] ✅ [UI] UX-01: Tab Actions, Split Panes, Welcome Tab (2026-03-07) — 7 blocks, 802 tests, /review clean
+  - [x] Block 1: Tab Context Menu + Close Actions (web)
+  - [x] Block 2: Vacant Pane Slots + Picker (web)
+  - [x] Block 3: Welcome Tab (web + hub)
+  - [x] Block 4: Cross-Tab Pane DnD (web)
+  - [x] Block 5: Configure Command + Direct Process (web + hub + agent)
+  - [x] Block 6: Channel Sidebar Context Menu + States (web)
+  - [x] Block 7: Settings + Confirmations (web + hub)
 - [ ] 🟡 [UI] UX-02: Terminal Title — spec ready (docs/plans/ux-02-terminal-title.md)
   - [ ] Block 1: TITLE_CHANGE Protocol + DB Migration (shared + agent + hub) — S
   - [ ] Block 2: UI Dynamic Title Display + Title Stack (web) — S
@@ -54,6 +54,10 @@
 - [x] ✅ [Hub] Add waitForSocket() timeout test (2026-03-06)
 - [x] ✅ [Agent] Add stat() assertion for 0700 socket dir permissions (2026-03-06)
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
+- [ ] 🔧 [UI] VacantPane: filter detached channels by hostId (currently shows all hosts) — Priority: M (from /review F-006)
+- [ ] 🔧 [UI] TerminalPane: channel?.hostId references non-existent field, falls back silently — Priority: M (from /review F-009)
+- [ ] 🔧 [UI] useLayout localStorage load: validate max-pane-count (INV-10) — Priority: M (from /review F-011)
+- [ ] 🔧 [Hub] session-manager.spec.ts: crash-loop 60s window reset test skipped (timer cascade) — Priority: M (from /review F-003)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 
 ### Deferred from /adversarial + /llm

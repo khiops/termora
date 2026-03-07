@@ -4,6 +4,36 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-01 — Tab Actions, Split Panes & Welcome Tab (2026-03-07)
+
+- TabContextMenu: Teleport to body, click-outside listener, fixed positioning from event coords
+- Close actions (closeOthers/closeToRight/closeAll): vacate panes in other tabs, tabs stay open (never removed)
+- vacateAllPanesInTab: walks layout tree, replaces all terminal nodes with vacant
+- closeAll accepts optional exceptWelcomeId for welcome tab protection (INV-06)
+- Vacant nodes carry unique id (generateId()) to distinguish multiple vacant slots in same tree
+- vacatePane replaces terminal node in-place with vacant (preserving split structure)
+- rearrangeVacant collapses parent split; does nothing if root vacant (INV-04: tab never auto-closes)
+- onClosePane no longer kills terminals — INV-03 compliance (detach, never kill)
+- countPanes exported as standalone function for max-4-pane enforcement (INV-02)
+- Welcome tab: per-host, enforced via transaction (clears previous before setting new), migration 003
+- Star icon: Unicode ★ with --nt-accent color in both TabBar and ChannelItem
+- Cross-tab DnD: vacate-first strategy prevents duplicate channelId in same-tab moves
+- DnD: paneId-based targeting for precise node replacement in tree, header as drag handle
+- DnD: 5 drop zones (left/right 25%, top/bottom 25%, center 50%)
+- Configure Command: migration 004 (icon, args, direct_process columns added to channels)
+- SPAWN message extended with args/directProcess; agent PtyManager honors in pty.spawn
+- POST /api/channels/:id/restart: kills + re-spawns with saved config
+- Exit overlay for directProcess channels: Restart / Configure Command / Close buttons
+- Channel sidebar: context menu inline in ChannelItem (no separate component — reduces indirection)
+- Open in Current Tab: uses replaceChannelId to swap active tab content
+- ConfirmDialog: generic reusable component with "Remember for host" / "Remember globally" checkboxes
+- Remember preferences: localStorage nexterm:skipConfirm* keys with explicit actionKey (not title parsing)
+- Config sections: [tabs] [panes] [channels] [startup] in config.toml
+- Config defaults: confirmCloseAll=true, confirmCloseOthers=true, maxPanes=4, autoOpenWelcome=true
+- Welcome endpoint cross-host check: verifies channel.hostId matches path param host ID
+
+---
+
 ## UX-06 — Theming & Color Schemes (2026-03-07)
 
 - CSS custom properties as single source of truth for all chrome colors (--nt-* prefix, 48+ vars in 3 tiers)

@@ -383,6 +383,8 @@ describe("GET /api/channels/:id", () => {
 });
 
 describe("PATCH /api/channels/:id", () => {
+	let patchCounter = 0;
+
 	async function createTestChannel(label: string): Promise<{ channelId: string }> {
 		const hostRes = await server.inject({
 			method: "POST",
@@ -393,9 +395,11 @@ describe("PATCH /api/channels/:id", () => {
 
 		const { MetaDAL } = await import("../storage/meta.js");
 		const dal = new MetaDAL(dbs.meta);
-		const sessionId = `01TESTPATCH${label.slice(0, 14).padEnd(14, "0")}`;
+		patchCounter++;
+		const n = String(patchCounter).padStart(3, "0");
+		const sessionId = `01TSTPATCHSES0000000000${n}`;
+		const channelId = `01TSTPATCHCHN0000000000${n}`;
 		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
-		const channelId = `01TESTCHAN${label.slice(0, 15).padEnd(15, "0")}`;
 		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
 
 		return { channelId };
@@ -552,12 +556,23 @@ describe("PATCH /api/channels/:id", () => {
 	it("returns 404 for non-existent channel", async () => {
 		const res = await server.inject({
 			method: "PATCH",
-			url: "/api/channels/nonexistent",
+			url: "/api/channels/01ARZ3NDEKTSV4RRFFQ69G5FAV",
 			payload: { title: "Ghost" },
 		});
 		expect(res.statusCode).toBe(404);
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("NOT_FOUND");
+	});
+
+	it("returns 400 for invalid channel ID", async () => {
+		const res = await server.inject({
+			method: "PATCH",
+			url: "/api/channels/not-a-ulid",
+			payload: { title: "Ghost" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 });
 
@@ -904,6 +919,8 @@ describe("DELETE /api/groups/:id", () => {
 });
 
 describe("PATCH /api/channels/:id — group_id", () => {
+	let grpCounter = 0;
+
 	async function createTestChannelForGroup(label: string): Promise<{ channelId: string }> {
 		const hostRes = await server.inject({
 			method: "POST",
@@ -914,8 +931,10 @@ describe("PATCH /api/channels/:id — group_id", () => {
 
 		const { MetaDAL } = await import("../storage/meta.js");
 		const dal = new MetaDAL(dbs.meta);
-		const sessionId = `01TESTGRP${label.slice(0, 15).padEnd(15, "0")}`;
-		const channelId = `01TSTGRC${label.slice(0, 17).padEnd(17, "0")}`;
+		grpCounter++;
+		const n = String(grpCounter).padStart(3, "0");
+		const sessionId = `01TSTGRPSESS00000000000${n}`;
+		const channelId = `01TSTGRPCHAN00000000000${n}`;
 		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
 		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
 

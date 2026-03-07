@@ -60,9 +60,11 @@ interface ChannelState {
 	/** clientId set — empty when orphan */
 	clients: Set<string>;
 	shell: string;
+	args?: string[];
 	cwd?: string;
 	cols: number;
 	rows: number;
+	directProcess?: boolean;
 }
 
 interface SessionState {
@@ -188,9 +190,11 @@ export class SessionManager {
 					status: "orphan",
 					clients: new Set(),
 					shell: ch.shell,
+					...(ch.args.length > 0 && { args: ch.args }),
 					cols: ch.cols,
 					rows: ch.rows,
 					...(ch.cwd !== null && { cwd: ch.cwd }),
+					...(ch.directProcess && { directProcess: true }),
 				});
 			}
 
@@ -326,14 +330,17 @@ export class SessionManager {
 
 		const requestId = generateId();
 		const shell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = msg.args ?? [];
 		const cwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
 		const cols = msg.cols ?? 80;
 		const rows = msg.rows ?? 24;
+		const directProcess = msg.directProcess ?? false;
 
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
 			shell,
+			...(args.length > 0 && { args }),
 			cwd,
 			env: msg.env ?? {},
 			cols,
@@ -362,10 +369,12 @@ export class SessionManager {
 						sessionId: session.id,
 						status: "born",
 						shell,
+						...(args.length > 0 && { args }),
 						cwd,
 						title,
 						cols,
 						rows,
+						...(directProcess && { directProcess }),
 					});
 
 					this.channels.set(channelId, {
@@ -374,9 +383,11 @@ export class SessionManager {
 						status: "live",
 						clients: new Set([clientId]),
 						shell,
+						...(args.length > 0 && { args }),
 						cwd,
 						cols,
 						rows,
+						...(directProcess && { directProcess }),
 					});
 					this.metaDal.updateChannelStatus(channelId, "live");
 					this.scheduler.trackChannel(channelId);
@@ -615,6 +626,93 @@ export class SessionManager {
 
 		// Remove from in-memory map
 		this.channels.delete(channelId);
+
+		return true;
+	}
+
+	/**
+	 * Restart a channel: destroy the current PTY and respawn with the same config.
+	 * Used by POST /api/channels/:id/restart. Returns true on success.
+	 */
+	async restartChannel(channelId: string): Promise<boolean> {
+		// Load latest config from DB (may have been updated via PATCH)
+		const info = this.metaDal.getChannelWithHost(channelId);
+		if (!info) return false;
+
+		const { channel, hostId } = info;
+		const ch = this.channels.get(channelId);
+
+		// Kill existing PTY if alive
+		const agent = this.agents.get(hostId);
+		if (agent?.connected && ch && ch.status !== "dead") {
+			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
+		}
+
+		// Find active session
+		const sessionEntry = this.sessions.get(hostId);
+		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		if (!agent?.connected) return false;
+
+		// Build SPAWN from DB config
+		const requestId = generateId();
+		const shell = channel.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = channel.args ?? [];
+		const cwd = channel.cwd ?? process.env.HOME ?? "/";
+		const cols = channel.cols;
+		const rows = channel.rows;
+
+		agent.send({
+			type: "SPAWN",
+			requestId,
+			channelId,
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			env: {},
+			cols,
+			rows,
+		});
+
+		const ok = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				resolve(false);
+			}, SPAWN_TIMEOUT_MS);
+
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timer);
+				this.pendingRequests.delete(requestId);
+				resolve(incoming.type === "SPAWN_OK");
+			});
+		});
+
+		if (!ok) return false;
+
+		// Restore in-memory state
+		this.metaDal.updateChannelStatus(channelId, "live");
+		this.channels.set(channelId, {
+			sessionId: sessionEntry.id,
+			hostId,
+			status: "live",
+			clients: ch?.clients ?? new Set(),
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			cols,
+			rows,
+			...(channel.directProcess && { directProcess: true }),
+		});
+		this.scheduler.trackChannel(channelId);
+		this.chunker.trackChannel(channelId);
+
+		// Broadcast new state
+		const channelStateMsg: ChannelStateMessage = {
+			type: "CHANNEL_STATE",
+			channelId,
+			sessionId: sessionEntry.id,
+			status: "live",
+		};
+		this._broadcastToAllClients(channelStateMsg);
 
 		return true;
 	}
@@ -907,6 +1005,7 @@ export class SessionManager {
 				requestId,
 				channelId,
 				shell: ch.shell,
+				...(ch.args !== undefined && ch.args.length > 0 && { args: ch.args }),
 				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
 				env: {},
 				cols: ch.cols,
@@ -1070,6 +1169,7 @@ export class SessionManager {
 		// 3. Send SPAWN to agent reusing the same channel ID
 		const requestId = generateId();
 		const shell = deadChannel.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = deadChannel.args ?? [];
 		const cwd = deadChannel.cwd ?? process.env.HOME ?? "/";
 		const cols = deadChannel.cols;
 		const rows = deadChannel.rows;
@@ -1078,6 +1178,7 @@ export class SessionManager {
 			requestId,
 			channelId: deadChannelId,
 			shell,
+			...(args.length > 0 && { args }),
 			cwd,
 			env: {},
 			cols,
@@ -1116,9 +1217,11 @@ export class SessionManager {
 			status: "live",
 			clients: new Set([clientId]),
 			shell,
+			...(args.length > 0 && { args }),
 			cwd,
 			cols,
 			rows,
+			...(deadChannel.directProcess && { directProcess: true }),
 		});
 
 		this.scheduler.trackChannel(deadChannelId);

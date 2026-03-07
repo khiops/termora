@@ -1,15 +1,26 @@
 <template>
-	<div ref="tabBarEl" class="tab-bar" role="tablist" aria-label="Open terminals" @wheel.prevent="onWheel">
+	<div
+		ref="tabBarEl"
+		class="tab-bar"
+		role="tablist"
+		aria-label="Open terminals"
+		@wheel.prevent="onWheel"
+		@dragover.prevent="onTabBarDragOver"
+		@dragleave="onTabBarDragLeave"
+		@drop="onTabBarDrop"
+	>
 		<button
 			v-for="(tab, idx) in tabs"
 			:key="tab.channelId"
 			role="tab"
 			:aria-selected="idx === activeTabIndex"
-			:class="['tab', { 'tab--active': idx === activeTabIndex }]"
+			:class="['tab', { 'tab--active': idx === activeTabIndex, 'tab--drop-before': dropInsertIndex === idx, 'tab--drop-after': dropInsertIndex === idx + 1 && idx === tabs.length - 1 }]"
 			:title="getTabLabel(tab.channelId)"
 			@click="emit('select-tab', idx)"
 			@mousedown.middle.prevent="emit('close-tab', idx)"
+			@contextmenu.prevent="onTabContextMenu(idx, $event)"
 		>
+			<span v-if="isWelcomeTab(tab.channelId)" class="tab__welcome-star" title="Welcome Tab">&#x2605;</span>
 			<input
 				v-if="editingTabIndex === idx"
 				ref="editInput"
@@ -36,13 +47,37 @@
 			title="New terminal"
 			@click="emit('add-tab')"
 		>+</button>
+
+		<TabContextMenu
+			:visible="ctxMenu.visible"
+			:x="ctxMenu.x"
+			:y="ctxMenu.y"
+			:tab="ctxMenu.tabIndex >= 0 ? tabs[ctxMenu.tabIndex] ?? null : null"
+			:tab-index="ctxMenu.tabIndex"
+			:tab-count="tabs.length"
+			:is-welcome="ctxMenu.tabIndex >= 0 && tabs[ctxMenu.tabIndex] ? isWelcomeTab(tabs[ctxMenu.tabIndex]!.channelId) : false"
+			@close="ctxMenu.visible = false"
+			@rename="onCtxRename"
+			@close-tab="(idx) => emit('close-tab', idx)"
+			@close-others="(idx) => emit('close-others', idx)"
+			@close-to-right="(idx) => emit('close-to-right', idx)"
+			@close-all="emit('close-all')"
+			@split-right="(id) => emit('split', id, 'horizontal')"
+			@split-down="(id) => emit('split', id, 'vertical')"
+			@set-welcome="(id) => emit('set-welcome', id)"
+			@configure-command="(id) => emit('configure-command', id)"
+		/>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { reactive, ref, watch, nextTick } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 import { useRename } from "../composables/useRename.js";
+import { useChannelsStore } from "../stores/channels.js";
+import TabContextMenu from "./TabContextMenu.vue";
+
+const channelsStore = useChannelsStore();
 
 const props = defineProps<{
 	tabs: Tab[];
@@ -53,8 +88,15 @@ const props = defineProps<{
 const emit = defineEmits<{
 	(e: "select-tab", index: number): void;
 	(e: "close-tab", index: number): void;
+	(e: "close-others", index: number): void;
+	(e: "close-to-right", index: number): void;
+	(e: "close-all"): void;
 	(e: "add-tab"): void;
 	(e: "rename-tab", channelId: string, title: string): void;
+	(e: "split", channelId: string, direction: "horizontal" | "vertical"): void;
+	(e: "set-welcome", channelId: string): void;
+	(e: "move-to-new-tab", sourceChannelId: string, insertAtIndex: number): void;
+	(e: "configure-command", channelId: string): void;
 }>();
 
 // -------------------------------------------------------------------------
@@ -106,6 +148,92 @@ function startRename(idx: number): void {
 	if (tab === undefined) return;
 	editingTabIndex.value = idx;
 	startRenameRaw(props.getTabLabel(tab.channelId));
+}
+
+// -------------------------------------------------------------------------
+// Welcome tab check
+// -------------------------------------------------------------------------
+
+function isWelcomeTab(channelId: string): boolean {
+	return channelsStore.welcomeChannel?.id === channelId;
+}
+
+// -------------------------------------------------------------------------
+// Context menu
+// -------------------------------------------------------------------------
+
+const ctxMenu = reactive({ visible: false, x: 0, y: 0, tabIndex: -1 });
+
+function onTabContextMenu(idx: number, event: MouseEvent): void {
+	ctxMenu.x = event.clientX;
+	ctxMenu.y = event.clientY;
+	ctxMenu.tabIndex = idx;
+	ctxMenu.visible = true;
+}
+
+function onCtxRename(channelId: string): void {
+	const idx = props.tabs.findIndex((t) => t.channelId === channelId);
+	if (idx !== -1) startRename(idx);
+}
+
+// -------------------------------------------------------------------------
+// Tab bar drop (move pane to new tab between existing tabs)
+// -------------------------------------------------------------------------
+
+const dropInsertIndex = ref<number | null>(null);
+
+/**
+ * Determine the insertion index for a tab-bar drop based on mouse position.
+ * Returns the index at which a new tab would be inserted.
+ */
+function getDropInsertIndex(event: DragEvent): number {
+	const el = tabBarEl.value;
+	if (!el) return props.tabs.length;
+
+	// Iterate over tab buttons to find the insertion point
+	const buttons = Array.from(el.querySelectorAll<HTMLElement>("[role=tab]"));
+	for (let i = 0; i < buttons.length; i++) {
+		const btn = buttons[i];
+		if (!btn) continue;
+		const rect = btn.getBoundingClientRect();
+		const midX = rect.left + rect.width / 2;
+		if (event.clientX < midX) return i;
+	}
+	return props.tabs.length;
+}
+
+function onTabBarDragOver(event: DragEvent): void {
+	if (!event.dataTransfer?.types.includes("text/x-nexterm-pane")) return;
+	event.dataTransfer.dropEffect = "move";
+	dropInsertIndex.value = getDropInsertIndex(event);
+}
+
+function onTabBarDragLeave(event: DragEvent): void {
+	const el = event.currentTarget as HTMLElement;
+	const related = event.relatedTarget as Node | null;
+	if (related && el.contains(related)) return;
+	dropInsertIndex.value = null;
+}
+
+function onTabBarDrop(event: DragEvent): void {
+	dropInsertIndex.value = null;
+
+	if (!event.dataTransfer) return;
+	const raw = event.dataTransfer.getData("text/x-nexterm-pane");
+	if (!raw) return;
+
+	let data: { channelId: string; paneId: string; hostId: string | null };
+	try {
+		data = JSON.parse(raw) as typeof data;
+	} catch {
+		return;
+	}
+
+	// Prevent drops from propagating to PaneLayout drop zones
+	event.stopPropagation();
+
+	const insertIdx = getDropInsertIndex(event);
+	emit("move-to-new-tab", data.channelId, insertIdx);
 }
 </script>
 
@@ -170,6 +298,35 @@ function startRename(idx: number): void {
 
 .tab--active:hover {
 	background: var(--nt-border);
+}
+
+.tab--drop-before::before {
+	content: "";
+	position: absolute;
+	left: -1px;
+	top: 4px;
+	bottom: 4px;
+	width: 2px;
+	background: var(--nt-accent, #6495ed);
+	z-index: 10;
+}
+
+.tab--drop-after::after {
+	content: "";
+	position: absolute;
+	right: -1px;
+	top: 4px;
+	bottom: 4px;
+	width: 2px;
+	background: var(--nt-accent, #6495ed);
+	z-index: 10;
+}
+
+.tab__welcome-star {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--nt-accent);
+	line-height: 1;
 }
 
 .tab__label {

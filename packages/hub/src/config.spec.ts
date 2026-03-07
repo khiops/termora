@@ -6,7 +6,11 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ConfigResolver,
+	DEFAULT_CHANNELS_CONFIG,
 	DEFAULT_GC_CONFIG,
+	DEFAULT_PANES_CONFIG,
+	DEFAULT_STARTUP_CONFIG,
+	DEFAULT_TABS_CONFIG,
 	DEFAULT_UI_CONFIG,
 	extractUiConfig,
 	loadGcConfig,
@@ -609,10 +613,143 @@ describe("GET /api/config/ui", () => {
 		dbs.close();
 	});
 
-	it("returns default UiConfig", async () => {
+	it("returns default UiConfig with tabs/panes/channels/startup", async () => {
 		const res = await server.inject({ method: "GET", url: "/api/config/ui" });
 		expect(res.statusCode).toBe(200);
-		const body = res.json<{ onChannelDead: string }>();
+		const body = res.json<typeof DEFAULT_UI_CONFIG>();
 		expect(body.onChannelDead).toBe("readonly");
+		expect(body.tabs).toEqual(DEFAULT_TABS_CONFIG);
+		expect(body.panes).toEqual(DEFAULT_PANES_CONFIG);
+		expect(body.channels).toEqual(DEFAULT_CHANNELS_CONFIG);
+		expect(body.startup).toEqual(DEFAULT_STARTUP_CONFIG);
+	});
+});
+
+// ─── extractUiConfig: tabs/panes/channels/startup ───────────────────────────
+
+describe("extractUiConfig — tabs section", () => {
+	it("returns default tabs config when no [tabs] section", () => {
+		const config = extractUiConfig({});
+		expect(config.tabs).toEqual(DEFAULT_TABS_CONFIG);
+	});
+
+	it("parses confirm_close_all = false", () => {
+		const config = extractUiConfig({ tabs: { confirm_close_all: false } });
+		expect(config.tabs.confirmCloseAll).toBe(false);
+	});
+
+	it("parses confirm_close_others = false", () => {
+		const config = extractUiConfig({ tabs: { confirm_close_others: false } });
+		expect(config.tabs.confirmCloseOthers).toBe(false);
+	});
+
+	it("parses close_button = false", () => {
+		const config = extractUiConfig({ tabs: { close_button: false } });
+		expect(config.tabs.closeButton).toBe(false);
+	});
+
+	it('parses new_tab_position = "afterActive"', () => {
+		const config = extractUiConfig({ tabs: { new_tab_position: "afterActive" } });
+		expect(config.tabs.newTabPosition).toBe("afterActive");
+	});
+
+	it("ignores invalid new_tab_position value", () => {
+		const config = extractUiConfig({ tabs: { new_tab_position: "invalid" } });
+		expect(config.tabs.newTabPosition).toBe(DEFAULT_TABS_CONFIG.newTabPosition);
+	});
+});
+
+describe("extractUiConfig — panes section", () => {
+	it("returns default panes config when no [panes] section", () => {
+		const config = extractUiConfig({});
+		expect(config.panes).toEqual(DEFAULT_PANES_CONFIG);
+	});
+
+	it("parses max_panes", () => {
+		const config = extractUiConfig({ panes: { max_panes: 6 } });
+		expect(config.panes.maxPanes).toBe(6);
+	});
+
+	it("ignores max_panes < 1", () => {
+		const config = extractUiConfig({ panes: { max_panes: 0 } });
+		expect(config.panes.maxPanes).toBe(DEFAULT_PANES_CONFIG.maxPanes);
+	});
+
+	it('parses default_split_direction = "vertical"', () => {
+		const config = extractUiConfig({ panes: { default_split_direction: "vertical" } });
+		expect(config.panes.defaultSplitDirection).toBe("vertical");
+	});
+});
+
+describe("extractUiConfig — channels section", () => {
+	it("returns default channels config when no [channels] section", () => {
+		const config = extractUiConfig({});
+		expect(config.channels).toEqual(DEFAULT_CHANNELS_CONFIG);
+	});
+
+	it("parses default_shell", () => {
+		const config = extractUiConfig({ channels: { default_shell: "/bin/zsh" } });
+		expect(config.channels.defaultShell).toBe("/bin/zsh");
+	});
+});
+
+describe("extractUiConfig — startup section", () => {
+	it("returns default startup config when no [startup] section", () => {
+		const config = extractUiConfig({});
+		expect(config.startup).toEqual(DEFAULT_STARTUP_CONFIG);
+	});
+
+	it("parses auto_open_welcome = false", () => {
+		const config = extractUiConfig({ startup: { auto_open_welcome: false } });
+		expect(config.startup.autoOpenWelcome).toBe(false);
+	});
+});
+
+describe("ConfigResolver.uiConfig — tabs/panes", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns default tabs config when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.uiConfig.tabs).toEqual(DEFAULT_TABS_CONFIG);
+	});
+
+	it("returns overridden tabs values after loadFromFile", () => {
+		const dir = join(tmpdir(), `nexterm-tabs-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[tabs]\nconfirm_close_all = false\nnew_tab_position = "afterActive"\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.uiConfig.tabs.confirmCloseAll).toBe(false);
+		expect(resolver.uiConfig.tabs.newTabPosition).toBe("afterActive");
+		// Unchanged defaults
+		expect(resolver.uiConfig.tabs.confirmCloseOthers).toBe(true);
+	});
+
+	it("returns overridden panes values after loadFromFile", () => {
+		const dir = join(tmpdir(), `nexterm-panes-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[panes]\nmax_panes = 8\ndefault_split_direction = "vertical"\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.uiConfig.panes.maxPanes).toBe(8);
+		expect(resolver.uiConfig.panes.defaultSplitDirection).toBe("vertical");
 	});
 });

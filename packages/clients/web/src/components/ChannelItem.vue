@@ -20,6 +20,7 @@
 			@blur="commitRename"
 		/>
 		<span v-else class="channel-item__label" @dblclick="startRename">{{ displayLabel }}</span>
+		<span v-if="channel.isWelcome" class="channel-item__welcome-star" title="Welcome Tab">&#x2605;</span>
 		<span v-if="isUnread" class="channel-item__unread" aria-label="Unread output"></span>
 	</div>
 
@@ -27,12 +28,30 @@
 	<Teleport to="body">
 		<div
 			v-if="contextMenuVisible"
+			ref="menuEl"
 			class="channel-context-menu"
 			:style="{ top: `${contextMenuY}px`, left: `${contextMenuX}px` }"
 			@click.stop
 		>
-			<button class="channel-context-menu__item" @click="onCloseChannel">Close channel</button>
+			<button class="channel-context-menu__item" @click="onAction('openNewTab')">Open in New Tab</button>
+			<button class="channel-context-menu__item" @click="onAction('openCurrentTab')">Open in Current Tab</button>
+
 			<div class="channel-context-menu__sep"></div>
+
+			<button class="channel-context-menu__item" @click="onAction('rename')">Rename</button>
+			<button class="channel-context-menu__item" @click="onAction('configureCommand')">Configure Command</button>
+			<button class="channel-context-menu__item" @click="onAction('setWelcome')">
+				{{ channel.isWelcome ? "Unset Welcome Tab" : "Set as Welcome Tab" }}
+			</button>
+
+			<div v-if="channel.status === 'dead'" class="channel-context-menu__sep"></div>
+			<button
+				v-if="channel.status === 'dead'"
+				class="channel-context-menu__item"
+				@click="onAction('restart')"
+			>Restart</button>
+
+			<div v-if="availableGroups.length > 0 || channel.groupId != null" class="channel-context-menu__sep"></div>
 			<button v-if="channel.groupId != null" class="channel-context-menu__item" @click="onMoveToGroup(null)">
 				Move to General
 			</button>
@@ -44,18 +63,15 @@
 			>
 				Move to {{ group.name }}
 			</button>
+
+			<div class="channel-context-menu__sep"></div>
+			<button class="channel-context-menu__item channel-context-menu__item--danger" @click="onAction('destroy')">Destroy</button>
 		</div>
-		<div
-			v-if="contextMenuVisible"
-			class="channel-context-menu__backdrop"
-			@click="contextMenuVisible = false"
-			@contextmenu.prevent="contextMenuVisible = false"
-		></div>
 	</Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import type { Channel, ChannelGroup } from "@nexterm/shared";
 import { useRename } from "../composables/useRename.js";
@@ -74,6 +90,13 @@ const emit = defineEmits<{
 	closeChannel: [channelId: string];
 	moveToGroup: [channelId: string, groupId: string | null];
 	rename: [channelId: string, title: string];
+	openNewTab: [channelId: string];
+	openCurrentTab: [channelId: string];
+	triggerRename: [channelId: string];
+	configureCommand: [channelId: string];
+	setWelcome: [channelId: string];
+	restart: [channelId: string];
+	destroy: [channelId: string];
 }>();
 
 const displayLabel = computed(
@@ -99,6 +122,7 @@ function startRename(): void {
 const contextMenuVisible = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
+const menuEl = ref<HTMLElement | null>(null);
 
 function onContextMenu(event: MouseEvent): void {
 	contextMenuX.value = event.clientX;
@@ -106,9 +130,23 @@ function onContextMenu(event: MouseEvent): void {
 	contextMenuVisible.value = true;
 }
 
-function onCloseChannel(): void {
+type ContextAction =
+	| "openNewTab"
+	| "openCurrentTab"
+	| "rename"
+	| "configureCommand"
+	| "setWelcome"
+	| "restart"
+	| "destroy";
+
+function onAction(action: ContextAction): void {
 	contextMenuVisible.value = false;
-	emit("closeChannel", props.channel.id);
+	if (action === "rename") {
+		startRename();
+		emit("triggerRename", props.channel.id);
+		return;
+	}
+	emit(action, props.channel.id);
 }
 
 function onMoveToGroup(groupId: string | null): void {
@@ -116,13 +154,27 @@ function onMoveToGroup(groupId: string | null): void {
 	emit("moveToGroup", props.channel.id, groupId);
 }
 
+// Close on click-outside (same pattern as TabContextMenu)
+function onClickOutside(event: MouseEvent): void {
+	if (menuEl.value && !menuEl.value.contains(event.target as Node)) {
+		contextMenuVisible.value = false;
+	}
+}
+
 // Close on Escape
 function onKeydown(e: KeyboardEvent): void {
 	if (e.key === "Escape") contextMenuVisible.value = false;
 }
 
-window.addEventListener("keydown", onKeydown);
-onUnmounted(() => window.removeEventListener("keydown", onKeydown));
+onMounted(() => {
+	document.addEventListener("mousedown", onClickOutside, true);
+	window.addEventListener("keydown", onKeydown);
+});
+
+onUnmounted(() => {
+	document.removeEventListener("mousedown", onClickOutside, true);
+	window.removeEventListener("keydown", onKeydown);
+});
 </script>
 
 <style scoped>
@@ -205,6 +257,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	padding: 0;
 }
 
+/* Welcome tab star */
+.channel-item__welcome-star {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--nt-accent);
+	line-height: 1;
+}
+
 /* Unread indicator dot */
 .channel-item__unread {
 	flex-shrink: 0;
@@ -215,12 +275,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 /* Context menu */
-.channel-context-menu__backdrop {
-	position: fixed;
-	inset: 0;
-	z-index: 999;
-}
-
 .channel-context-menu {
 	position: fixed;
 	z-index: 1000;
@@ -254,5 +308,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	height: 1px;
 	background: var(--nt-tab-hover);
 	margin: 4px 0;
+}
+
+.channel-context-menu__item--danger {
+	color: var(--nt-badge);
+}
+
+.channel-context-menu__item--danger:hover {
+	background: var(--nt-badge);
+	color: var(--nt-fg);
 }
 </style>

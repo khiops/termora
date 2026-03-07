@@ -43,7 +43,15 @@ export function registerChannelRoutes(
 	// PATCH /api/channels/:id
 	server.patch<{
 		Params: { id: string };
-		Body: { title?: string | null; group_id?: string | null };
+		Body: {
+			title?: string | null;
+			group_id?: string | null;
+			icon?: string | null;
+			shell?: string | null;
+			args?: string[];
+			cwd?: string | null;
+			direct_process?: boolean;
+		};
 	}>(
 		"/api/channels/:id",
 		{
@@ -53,8 +61,17 @@ export function registerChannelRoutes(
 					properties: {
 						title: { type: ["string", "null"], minLength: 1, maxLength: 128 },
 						group_id: { type: ["string", "null"] },
+						icon: { type: ["string", "null"], maxLength: 64 },
+						shell: { type: ["string", "null"], maxLength: 512 },
+						args: {
+							type: "array",
+							items: { type: "string" },
+							maxItems: 64,
+						},
+						cwd: { type: ["string", "null"], maxLength: 1024 },
+						direct_process: { type: "boolean" },
 					},
-					anyOf: [{ required: ["title"] }, { required: ["group_id"] }],
+					minProperties: 1,
 					additionalProperties: false,
 				},
 				params: {
@@ -68,9 +85,15 @@ export function registerChannelRoutes(
 		},
 		async (request, reply) => {
 			const { id } = request.params;
-			const { title, group_id } = request.body;
 
-			// Schema handles type, minLength, maxLength, and additionalProperties.
+			if (!isValidUlid(id)) {
+				return reply.code(400).send({
+					error: { code: "VALIDATION_ERROR", message: "Invalid channel ID" },
+				});
+			}
+
+			const { title, group_id, icon, shell, args, cwd, direct_process } = request.body;
+
 			// Whitespace-only titles still need a manual check (schema can't validate trimmed length).
 			if (title !== undefined && title !== null && title.trim().length === 0) {
 				return reply.code(400).send({
@@ -104,10 +127,62 @@ export function registerChannelRoutes(
 				metaDal.updateChannelGroupId(id, group_id);
 			}
 
+			// Collect config fields and update in a single call
+			const configUpdate: {
+				icon?: string | null;
+				shell?: string | null;
+				args?: string[];
+				cwd?: string | null;
+				directProcess?: boolean;
+			} = {};
+			if (icon !== undefined) configUpdate.icon = icon;
+			if (shell !== undefined) configUpdate.shell = shell;
+			if (args !== undefined) configUpdate.args = args;
+			if (cwd !== undefined) configUpdate.cwd = cwd;
+			if (direct_process !== undefined) configUpdate.directProcess = direct_process;
+			if (Object.keys(configUpdate).length > 0) {
+				metaDal.updateChannelConfig(id, configUpdate);
+			}
+
 			const updated = metaDal.getChannel(id);
 			return reply.code(200).send(toSnakeCase(updated));
 		},
 	);
+
+	// POST /api/channels/:id/restart — restart a channel's PTY
+	server.post<{ Params: { id: string } }>("/api/channels/:id/restart", async (request, reply) => {
+		const { id } = request.params;
+
+		if (!isValidUlid(id)) {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: "Invalid channel ID" },
+			});
+		}
+
+		const channel = metaDal.getChannel(id);
+		if (!channel) {
+			return reply.code(404).send({
+				error: { code: "NOT_FOUND", message: "Channel not found" },
+			});
+		}
+
+		try {
+			const ok = await sessionManager.restartChannel(id);
+			if (!ok) {
+				return reply.code(503).send({
+					error: { code: "RESTART_FAILED", message: "Unable to restart channel" },
+				});
+			}
+			return reply.code(200).send({ channel_id: id });
+		} catch (err) {
+			return reply.code(500).send({
+				error: {
+					code: "RESTART_ERROR",
+					message: err instanceof Error ? err.message : "Unknown error",
+				},
+			});
+		}
+	});
 
 	// DELETE /api/channels/:id — destroy a channel's PTY and mark it dead
 	server.delete<{ Params: { id: string } }>("/api/channels/:id", async (request, reply) => {

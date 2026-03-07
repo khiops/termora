@@ -111,6 +111,7 @@ export class AgentHandler {
 			const channelId = this.ptyManager.spawn({
 				...(msg.channelId !== undefined && { id: msg.channelId }),
 				shell: msg.shell,
+				...(msg.args !== undefined && msg.args.length > 0 && { args: msg.args }),
 				cwd: msg.cwd,
 				env: msg.env,
 				cols: msg.cols,

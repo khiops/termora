@@ -1,4 +1,11 @@
-import { DEFAULT_PROFILE, type TerminalProfile } from "@nexterm/shared";
+import {
+	type ChannelsConfig,
+	DEFAULT_PROFILE,
+	type PanesConfig,
+	type StartupConfig,
+	type TabsConfig,
+	type TerminalProfile,
+} from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -59,6 +66,10 @@ function injectFontFaces(families: FontFamily[]): void {
  */
 interface UiConfig {
 	onChannelDead: "close" | "readonly";
+	tabs?: TabsConfig;
+	panes?: PanesConfig;
+	channels?: ChannelsConfig;
+	startup?: StartupConfig;
 }
 
 export const useConfigStore = defineStore("config", () => {

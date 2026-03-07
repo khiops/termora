@@ -908,3 +908,121 @@ describe("MetaDAL — PairingCodes", () => {
 		expect(dal.getPairingCodeByCode("901234")).toBeDefined(); // used+expired — survives
 	});
 });
+
+// ─── Welcome Channel ──────────────────────────────────────────────────────────
+
+describe("MetaDAL — Welcome Channel", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+	let hostId: string;
+	let sessionId: string;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+		const host = dal.createHost({ type: "local", label: "welcome-host" });
+		hostId = host.id;
+		sessionId = "WELCOMESESS0AAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id: sessionId, hostId, status: "active" });
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("setWelcomeChannel sets is_welcome=1 on the channel", () => {
+		const id = "WELCH01AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+
+		const result = dal.setWelcomeChannel(id);
+		expect(result).toBe(true);
+
+		const ch = dal.getChannel(id);
+		expect(ch?.isWelcome).toBe(true);
+	});
+
+	it("setWelcomeChannel clears previous welcome on same host", () => {
+		const id1 = "WELCH02AAAAAAAAAAAAAAAAAAAAAA";
+		const id2 = "WELCH03AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id: id1, sessionId, status: "born" });
+		dal.createChannel({ id: id2, sessionId, status: "born" });
+
+		dal.setWelcomeChannel(id1);
+		expect(dal.getChannel(id1)?.isWelcome).toBe(true);
+
+		dal.setWelcomeChannel(id2);
+		expect(dal.getChannel(id2)?.isWelcome).toBe(true);
+		// Previous welcome should be cleared
+		expect(dal.getChannel(id1)?.isWelcome).toBeUndefined();
+	});
+
+	it("setWelcomeChannel returns false for non-existent channel", () => {
+		expect(dal.setWelcomeChannel("no-such-id")).toBe(false);
+	});
+
+	it("clearWelcomeChannel clears is_welcome", () => {
+		const id = "WELCH04AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+		dal.setWelcomeChannel(id);
+		expect(dal.getChannel(id)?.isWelcome).toBe(true);
+
+		const result = dal.clearWelcomeChannel(id);
+		expect(result).toBe(true);
+		expect(dal.getChannel(id)?.isWelcome).toBeUndefined();
+	});
+
+	it("clearWelcomeChannel returns false for non-existent channel", () => {
+		expect(dal.clearWelcomeChannel("no-such-id")).toBe(false);
+	});
+
+	it("getWelcomeChannel returns the welcome channel for a host", () => {
+		const id = "WELCH05AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id, sessionId, status: "born" });
+		dal.setWelcomeChannel(id);
+
+		const welcome = dal.getWelcomeChannel(hostId);
+		expect(welcome).toBeDefined();
+		expect(welcome?.id).toBe(id);
+		expect(welcome?.isWelcome).toBe(true);
+	});
+
+	it("getWelcomeChannel returns undefined when no welcome set", () => {
+		expect(dal.getWelcomeChannel(hostId)).toBeUndefined();
+	});
+
+	it("only one welcome per host at a time", () => {
+		const id1 = "WELCH06AAAAAAAAAAAAAAAAAAAAAA";
+		const id2 = "WELCH07AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id: id1, sessionId, status: "born" });
+		dal.createChannel({ id: id2, sessionId, status: "born" });
+
+		dal.setWelcomeChannel(id1);
+		dal.setWelcomeChannel(id2);
+
+		const welcome = dal.getWelcomeChannel(hostId);
+		expect(welcome?.id).toBe(id2);
+		// Verify only one channel has isWelcome
+		const ch1 = dal.getChannel(id1);
+		const ch2 = dal.getChannel(id2);
+		expect(ch1?.isWelcome).toBeUndefined();
+		expect(ch2?.isWelcome).toBe(true);
+	});
+
+	it("welcome does not cross host boundaries", () => {
+		const host2 = dal.createHost({ type: "local", label: "welcome-host-2" });
+		const sess2Id = "WELCOMESESS2AAAAAAAAAAAAAAAAAA";
+		dal.createSession({ id: sess2Id, hostId: host2.id, status: "active" });
+
+		const id1 = "WELCH08AAAAAAAAAAAAAAAAAAAAAA";
+		const id2 = "WELCH09AAAAAAAAAAAAAAAAAAAAAA";
+		dal.createChannel({ id: id1, sessionId, status: "born" });
+		dal.createChannel({ id: id2, sessionId: sess2Id, status: "born" });
+
+		dal.setWelcomeChannel(id1);
+		dal.setWelcomeChannel(id2);
+
+		// Each host should have its own welcome
+		expect(dal.getWelcomeChannel(hostId)?.id).toBe(id1);
+		expect(dal.getWelcomeChannel(host2.id)?.id).toBe(id2);
+	});
+});

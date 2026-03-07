@@ -72,6 +72,36 @@ export function deepMerge<T extends object>(...sources: (Partial<T> | undefined 
 	return result as T;
 }
 
+// ─── UI behavioral config interfaces ─────────────────────────────────────────
+
+export interface TabsConfig {
+	/** Whether to show close button on tabs. Default: true */
+	closeButton?: boolean;
+	/** Where new tabs open: "end" | "afterActive". Default: "end" */
+	newTabPosition?: "end" | "afterActive";
+	/** Confirm before Close All. Default: true */
+	confirmCloseAll?: boolean;
+	/** Confirm before Close Others. Default: true */
+	confirmCloseOthers?: boolean;
+}
+
+export interface PanesConfig {
+	/** Max panes per tab. Default: 4 */
+	maxPanes?: number;
+	/** Default split direction. Default: "horizontal" */
+	defaultSplitDirection?: "horizontal" | "vertical";
+}
+
+export interface ChannelsConfig {
+	/** Default shell for new channels. Default: system shell */
+	defaultShell?: string;
+}
+
+export interface StartupConfig {
+	/** Auto-open welcome tab on host connect. Default: true */
+	autoOpenWelcome?: boolean;
+}
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',

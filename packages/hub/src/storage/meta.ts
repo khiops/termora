@@ -37,10 +37,13 @@ export interface CreateChannelInput {
 	sessionId: string;
 	status: ChannelStatus;
 	shell?: string;
+	args?: string[];
 	cwd?: string;
 	title?: string;
 	cols?: number;
 	rows?: number;
+	icon?: string;
+	directProcess?: boolean;
 }
 
 interface HostRow {
@@ -76,6 +79,7 @@ interface ChannelRow {
 	group_id: string | null;
 	title: string | null;
 	shell: string;
+	args: string;
 	cwd: string | null;
 	env_json: string | null;
 	cols: number;
@@ -83,6 +87,9 @@ interface ChannelRow {
 	status: string;
 	exit_code: number | null;
 	profile_json: string | null;
+	is_welcome: number;
+	icon: string | null;
+	direct_process: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -155,6 +162,17 @@ function rowToChannel(row: ChannelRow): Channel {
 	if (row.env_json != null) ch.envJson = row.env_json;
 	if (row.exit_code != null) ch.exitCode = row.exit_code;
 	if (row.profile_json != null) ch.profileJson = row.profile_json;
+	if (row.is_welcome === 1) ch.isWelcome = true;
+	if (row.icon != null) ch.icon = row.icon;
+	if (row.direct_process === 1) ch.directProcess = true;
+	if (row.args && row.args !== "[]") {
+		try {
+			const parsed = JSON.parse(row.args) as string[];
+			if (parsed.length > 0) ch.args = parsed;
+		} catch {
+			// Ignore malformed JSON — treat as no args
+		}
+	}
 	return ch;
 }
 
@@ -374,18 +392,22 @@ export class MetaDAL {
 		this.db
 			.prepare(
 				`INSERT INTO channels (
-					id, session_id, shell, cwd, title, status, cols, rows, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					id, session_id, shell, args, cwd, title, status, cols, rows,
+					icon, direct_process, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				input.id,
 				input.sessionId,
 				input.shell ?? "/bin/sh",
+				input.args ? JSON.stringify(input.args) : "[]",
 				input.cwd ?? null,
 				input.title ?? null,
 				input.status,
 				input.cols ?? 80,
 				input.rows ?? 24,
+				input.icon ?? null,
+				input.directProcess ? 1 : 0,
 				now,
 				now,
 			);
@@ -463,6 +485,52 @@ export class MetaDAL {
 		return result.changes > 0;
 	}
 
+	updateChannelConfig(
+		channelId: string,
+		config: {
+			icon?: string | null;
+			shell?: string | null;
+			args?: string[];
+			cwd?: string | null;
+			directProcess?: boolean;
+		},
+	): boolean {
+		const sets: string[] = [];
+		const params: Record<string, unknown> = { id: channelId };
+
+		if (config.icon !== undefined) {
+			sets.push("icon = @icon");
+			params.icon = config.icon;
+		}
+		if (config.shell !== undefined) {
+			sets.push("shell = @shell");
+			params.shell = config.shell ?? "/bin/sh";
+		}
+		if (config.args !== undefined) {
+			sets.push("args = @args");
+			params.args = JSON.stringify(config.args);
+		}
+		if (config.cwd !== undefined) {
+			sets.push("cwd = @cwd");
+			params.cwd = config.cwd;
+		}
+		if (config.directProcess !== undefined) {
+			sets.push("direct_process = @directProcess");
+			params.directProcess = config.directProcess ? 1 : 0;
+		}
+
+		if (sets.length === 0) return false;
+
+		const now = new Date().toISOString();
+		sets.push("updated_at = @updatedAt");
+		params.updatedAt = now;
+
+		const result = this.db
+			.prepare(`UPDATE channels SET ${sets.join(", ")} WHERE id = @id`)
+			.run(params);
+		return result.changes > 0;
+	}
+
 	deleteChannel(id: string): void {
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
@@ -499,6 +567,60 @@ export class MetaDAL {
 		return result.changes > 0;
 	}
 
+	// ─── Welcome Channel ──────────────────────────────────────────────────
+
+	/** Set a channel as welcome tab for its host. Clears any previous welcome on the same host. */
+	setWelcomeChannel(channelId: string): boolean {
+		const row = this.db
+			.prepare(
+				`SELECT s.host_id FROM channels c
+				 JOIN sessions s ON c.session_id = s.id
+				 WHERE c.id = ?`,
+			)
+			.get(channelId) as { host_id: string } | undefined;
+		if (!row) return false;
+
+		const now = new Date().toISOString();
+		const txn = this.db.transaction(() => {
+			// Clear existing welcome for this host
+			this.db
+				.prepare(
+					`UPDATE channels SET is_welcome = 0, updated_at = ?
+					 WHERE is_welcome = 1
+					   AND session_id IN (SELECT id FROM sessions WHERE host_id = ?)`,
+				)
+				.run(now, row.host_id);
+			// Set new welcome
+			this.db
+				.prepare("UPDATE channels SET is_welcome = 1, updated_at = ? WHERE id = ?")
+				.run(now, channelId);
+		});
+		txn();
+		return true;
+	}
+
+	/** Clear welcome status for a channel. */
+	clearWelcomeChannel(channelId: string): boolean {
+		const now = new Date().toISOString();
+		const result = this.db
+			.prepare("UPDATE channels SET is_welcome = 0, updated_at = ? WHERE id = ?")
+			.run(now, channelId);
+		return result.changes > 0;
+	}
+
+	/** Get the welcome channel for a host (if any). */
+	getWelcomeChannel(hostId: string): Channel | undefined {
+		const row = this.db
+			.prepare(
+				`SELECT c.* FROM channels c
+				 JOIN sessions s ON c.session_id = s.id
+				 WHERE s.host_id = ? AND c.is_welcome = 1
+				 LIMIT 1`,
+			)
+			.get(hostId) as ChannelRow | undefined;
+		return row ? rowToChannel(row) : undefined;
+	}
+
 	markAllChannelsDead(): number {
 		const now = new Date().toISOString();
 		const result = this.db
@@ -522,16 +644,19 @@ export class MetaDAL {
 		id: string;
 		sessionId: string;
 		shell: string;
+		args: string[];
 		cwd: string | null;
 		cols: number;
 		rows: number;
 		status: string;
 		hostId: string;
 		hostType: string;
+		directProcess: boolean;
 	}> {
 		const rows = this.db
 			.prepare(
-				`SELECT c.id, c.session_id, c.shell, c.cwd, c.cols, c.rows, c.status,
+				`SELECT c.id, c.session_id, c.shell, c.args, c.cwd, c.cols, c.rows,
+				        c.status, c.direct_process,
 				        s.host_id, h.type AS host_type
 				 FROM channels c
 				 JOIN sessions s ON c.session_id = s.id
@@ -542,24 +667,36 @@ export class MetaDAL {
 			id: string;
 			session_id: string;
 			shell: string;
+			args: string;
 			cwd: string | null;
 			cols: number;
 			rows: number;
 			status: string;
+			direct_process: number;
 			host_id: string;
 			host_type: string;
 		}>;
-		return rows.map((r) => ({
-			id: r.id,
-			sessionId: r.session_id,
-			shell: r.shell,
-			cwd: r.cwd,
-			cols: r.cols,
-			rows: r.rows,
-			status: r.status,
-			hostId: r.host_id,
-			hostType: r.host_type,
-		}));
+		return rows.map((r) => {
+			let args: string[] = [];
+			try {
+				args = JSON.parse(r.args) as string[];
+			} catch {
+				// ignore
+			}
+			return {
+				id: r.id,
+				sessionId: r.session_id,
+				shell: r.shell,
+				args,
+				cwd: r.cwd,
+				cols: r.cols,
+				rows: r.rows,
+				status: r.status,
+				hostId: r.host_id,
+				hostType: r.host_type,
+				directProcess: r.direct_process === 1,
+			};
+		});
 	}
 
 	/** Mark all non-dead channels for a host as orphan. */

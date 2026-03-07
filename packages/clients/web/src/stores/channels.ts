@@ -39,6 +39,12 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 	if (row.env_json != null) ch.envJson = row.env_json as string;
 	if (row.exit_code != null) ch.exitCode = row.exit_code as number;
 	if (row.profile_json != null) ch.profileJson = row.profile_json as string;
+	if (row.is_welcome === 1 || row.is_welcome === true) ch.isWelcome = true;
+	if (row.icon != null) ch.icon = row.icon as string;
+	if (row.direct_process === 1 || row.direct_process === true) ch.directProcess = true;
+	if (Array.isArray(row.args) && (row.args as string[]).length > 0) {
+		ch.args = row.args as string[];
+	}
 	return ch;
 }
 
@@ -562,6 +568,109 @@ export const useChannelsStore = defineStore("channels", () => {
 		}
 	}
 
+	// -------------------------------------------------------------------------
+	// Welcome channel
+	// -------------------------------------------------------------------------
+
+	/** The welcome channel for the currently loaded host (if any). */
+	const welcomeChannel = computed(() => channels.value.find((c) => c.isWelcome === true) ?? null);
+
+	/** Set a channel as welcome tab for a host. API call + local update. */
+	async function setWelcomeChannel(hostId: string, channelId: string): Promise<void> {
+		if (authStore.token === null) return;
+
+		// Optimistic update: clear existing welcome, set new one
+		const oldChannels = channels.value;
+		channels.value = channels.value.map((ch) => {
+			const { isWelcome: _removed, ...rest } = ch;
+			if (ch.id === channelId) return { ...rest, isWelcome: true } as Channel;
+			return rest as Channel;
+		});
+
+		try {
+			const res = await fetch(`/api/hosts/${hostId}/welcome`, {
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token}`,
+				},
+				body: JSON.stringify({ channel_id: channelId }),
+			});
+			if (!res.ok) throw new Error(`PUT /api/hosts/${hostId}/welcome failed: ${res.status}`);
+		} catch {
+			// Rollback
+			channels.value = oldChannels;
+		}
+	}
+
+	/** Clear welcome status for a host. API call + local update. */
+	async function clearWelcomeChannel(hostId: string): Promise<void> {
+		if (authStore.token === null) return;
+
+		// Optimistic update: clear isWelcome from all channels
+		const oldChannels = channels.value;
+		channels.value = channels.value.map((ch) => {
+			const { isWelcome: _removed, ...rest } = ch;
+			return rest as Channel;
+		});
+
+		try {
+			const res = await fetch(`/api/hosts/${hostId}/welcome`, {
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${authStore.token}` },
+			});
+			if (!res.ok) throw new Error(`DELETE /api/hosts/${hostId}/welcome failed: ${res.status}`);
+		} catch {
+			// Rollback
+			channels.value = oldChannels;
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Channel config (icon, shell, args, cwd, directProcess)
+	// -------------------------------------------------------------------------
+
+	async function updateChannelConfig(
+		channelId: string,
+		config: {
+			icon?: string | null;
+			shell?: string | null;
+			args?: string[];
+			cwd?: string | null;
+			direct_process?: boolean;
+		},
+	): Promise<boolean> {
+		if (authStore.token === null) return false;
+
+		const res = await fetch(`/api/channels/${channelId}`, {
+			method: "PATCH",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${authStore.token}`,
+			},
+			body: JSON.stringify(config),
+		});
+		if (!res.ok) return false;
+
+		// Refresh local state
+		if (activeHostId.value !== null) {
+			await fetchChannels(activeHostId.value);
+		}
+		return true;
+	}
+
+	async function restartChannel(channelId: string): Promise<boolean> {
+		if (authStore.token === null) return false;
+
+		const res = await fetch(`/api/channels/${channelId}/restart`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+			},
+		});
+		return res.ok;
+	}
+
 	return {
 		channels,
 		groups,
@@ -571,6 +680,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		unreadChannels,
 		activeHostId,
 		channelsByGroup,
+		welcomeChannel,
 		fetchGroups,
 		fetchChannels,
 		selectChannel,
@@ -588,5 +698,9 @@ export const useChannelsStore = defineStore("channels", () => {
 		toggleGroupCollapsed,
 		renameChannel,
 		moveChannelToGroup,
+		setWelcomeChannel,
+		clearWelcomeChannel,
+		updateChannelConfig,
+		restartChannel,
 	};
 });

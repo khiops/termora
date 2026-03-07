@@ -8,6 +8,7 @@ import { useChannelsStore } from "../stores/channels.js";
 
 export type PaneNode =
 	| { type: "terminal"; channelId: string; paneId: string }
+	| { type: "vacant"; id: string }
 	| {
 			type: "split";
 			direction: "horizontal" | "vertical";
@@ -15,6 +16,8 @@ export type PaneNode =
 			first: PaneNode;
 			second: PaneNode;
 	  };
+
+export type DropZone = "left" | "right" | "top" | "bottom" | "center";
 
 export interface Tab {
 	channelId: string;
@@ -38,6 +41,7 @@ function ensurePaneIds(node: PaneNode): PaneNode {
 	if (node.type === "terminal") {
 		return node.paneId ? node : { ...node, paneId: generateId() };
 	}
+	if (node.type === "vacant") return node;
 	return { ...node, first: ensurePaneIds(node.first), second: ensurePaneIds(node.second) };
 }
 
@@ -102,6 +106,7 @@ function findChannelPath(root: PaneNode, channelId: string): NodePath | null {
 	if (root.type === "terminal") {
 		return root.channelId === channelId ? [] : null;
 	}
+	if (root.type === "vacant") return null;
 	const inFirst = findChannelPath(root.first, channelId);
 	if (inFirst !== null) return ["first", ...inFirst];
 	const inSecond = findChannelPath(root.second, channelId);
@@ -115,7 +120,7 @@ function findChannelPath(root: PaneNode, channelId: string): NodePath | null {
 
 function getNodeAtPath(root: PaneNode, path: NodePath): PaneNode | null {
 	if (path.length === 0) return root;
-	if (root.type !== "split") return null;
+	if (root.type !== "split") return null; // terminal or vacant — path goes nowhere
 	const [head, ...rest] = path;
 	return getNodeAtPath(head === "first" ? root.first : root.second, rest);
 }
@@ -128,11 +133,109 @@ function replaceInTree(node: PaneNode, oldId: string, newId: string): PaneNode {
 	if (node.type === "terminal") {
 		return node.channelId === oldId ? { ...node, channelId: newId } : node;
 	}
+	if (node.type === "vacant") return node;
 	return {
 		...node,
 		first: replaceInTree(node.first, oldId, newId),
 		second: replaceInTree(node.second, oldId, newId),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Helper: find the path to a vacant node by its id
+// ---------------------------------------------------------------------------
+
+function findVacantPath(root: PaneNode, vacantId: string): NodePath | null {
+	if (root.type === "vacant") {
+		return root.id === vacantId ? [] : null;
+	}
+	if (root.type === "terminal") return null;
+	const inFirst = findVacantPath(root.first, vacantId);
+	if (inFirst !== null) return ["first", ...inFirst];
+	const inSecond = findVacantPath(root.second, vacantId);
+	if (inSecond !== null) return ["second", ...inSecond];
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: replace a terminal node matching channelId with a replacement node
+// ---------------------------------------------------------------------------
+
+function replaceTerminalNode(
+	node: PaneNode,
+	channelId: string,
+	replacement: PaneNode,
+): PaneNode | null {
+	if (node.type === "terminal") {
+		return node.channelId === channelId ? replacement : null;
+	}
+	if (node.type === "vacant") return null;
+	const firstResult = replaceTerminalNode(node.first, channelId, replacement);
+	if (firstResult !== null) {
+		return { ...node, first: firstResult };
+	}
+	const secondResult = replaceTerminalNode(node.second, channelId, replacement);
+	if (secondResult !== null) {
+		return { ...node, second: secondResult };
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: get the unique leaf ID for a pane node (paneId or vacant id)
+// ---------------------------------------------------------------------------
+
+function getLeafId(node: PaneNode): string | null {
+	if (node.type === "terminal") return node.paneId;
+	if (node.type === "vacant") return node.id;
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: find a leaf node path by its paneId or vacant id
+// ---------------------------------------------------------------------------
+
+function findNodePathByPaneId(root: PaneNode, paneId: string): NodePath | null {
+	const leafId = getLeafId(root);
+	if (leafId === paneId) return [];
+	if (root.type !== "split") return null;
+	const inFirst = findNodePathByPaneId(root.first, paneId);
+	if (inFirst !== null) return ["first", ...inFirst];
+	const inSecond = findNodePathByPaneId(root.second, paneId);
+	if (inSecond !== null) return ["second", ...inSecond];
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: replace a leaf node matching paneId/vacantId with a replacement
+// ---------------------------------------------------------------------------
+
+function replaceNodeByPaneId(
+	node: PaneNode,
+	paneId: string,
+	replacement: PaneNode,
+): PaneNode | null {
+	const leafId = getLeafId(node);
+	if (leafId === paneId) return replacement;
+	if (node.type !== "split") return null;
+	const firstResult = replaceNodeByPaneId(node.first, paneId, replacement);
+	if (firstResult !== null) {
+		return { ...node, first: firstResult };
+	}
+	const secondResult = replaceNodeByPaneId(node.second, paneId, replacement);
+	if (secondResult !== null) {
+		return { ...node, second: secondResult };
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Exported helper: count leaf panes (terminal + vacant)
+// ---------------------------------------------------------------------------
+
+export function countPanes(node: PaneNode): number {
+	if (node.type === "terminal" || node.type === "vacant") return 1;
+	return countPanes(node.first) + countPanes(node.second);
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +389,55 @@ export function useLayout() {
 	function setActiveTab(index: number): void {
 		if (index >= 0 && index < tabs.value.length) {
 			activeTabIndex.value = index;
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Bulk close operations
+	// ------------------------------------------------------------------
+
+	/** Replace all terminal nodes in a tab's layout with vacant slots. */
+	function vacateAllPanesInTab(tabChannelId: string): void {
+		const root = layouts.value[tabChannelId];
+		if (root === null || root === undefined) return;
+
+		function vacateNode(node: PaneNode): PaneNode {
+			if (node.type === "terminal") return { type: "vacant", id: generateId() };
+			if (node.type === "vacant") return node;
+			return {
+				type: "split",
+				direction: node.direction,
+				ratio: node.ratio,
+				first: vacateNode(node.first),
+				second: vacateNode(node.second),
+			};
+		}
+
+		layouts.value = { ...layouts.value, [tabChannelId]: vacateNode(root) };
+	}
+
+	/** Vacate all panes in tabs except the one at `keepIndex`. */
+	function closeOthers(keepIndex: number): void {
+		for (let i = 0; i < tabs.value.length; i++) {
+			if (i === keepIndex) continue;
+			const tab = tabs.value[i];
+			if (tab !== undefined) vacateAllPanesInTab(tab.channelId);
+		}
+	}
+
+	/** Vacate all panes in tabs to the right of `fromIndex`. */
+	function closeToRight(fromIndex: number): void {
+		for (let i = fromIndex + 1; i < tabs.value.length; i++) {
+			const tab = tabs.value[i];
+			if (tab !== undefined) vacateAllPanesInTab(tab.channelId);
+		}
+	}
+
+	/** Vacate all panes in all tabs. If `exceptWelcomeId` is provided, skip that tab. */
+	function closeAll(exceptWelcomeId?: string): void {
+		for (const tab of tabs.value) {
+			if (tab.channelId === exceptWelcomeId) continue;
+			vacateAllPanesInTab(tab.channelId);
 		}
 	}
 
@@ -452,6 +604,212 @@ export function useLayout() {
 		return resolveTabLabel(channelId, channelsStore.channels, tabs.value);
 	}
 
+	// ------------------------------------------------------------------
+	// Vacant pane management
+	// ------------------------------------------------------------------
+
+	/**
+	 * Replace a terminal pane with a vacant slot (detach, don't remove).
+	 * INV-03: closing a pane detaches the terminal — it keeps running.
+	 */
+	function vacatePane(channelId: string): void {
+		const tab = activeTab.value;
+		if (tab === null) return;
+
+		const root = layouts.value[tab.channelId];
+		if (root === null || root === undefined) return;
+
+		const updated = replaceTerminalNode(root, channelId, { type: "vacant", id: generateId() });
+		if (updated !== null) {
+			layouts.value = { ...layouts.value, [tab.channelId]: updated };
+		}
+	}
+
+	/**
+	 * Fill a vacant slot with a channel.
+	 */
+	function fillVacant(vacantId: string, channelId: string): void {
+		const tab = activeTab.value;
+		if (tab === null) return;
+
+		const root = layouts.value[tab.channelId];
+		if (root === null || root === undefined) return;
+
+		const path = findVacantPath(root, vacantId);
+		if (path === null) return;
+
+		const replacement: PaneNode = { type: "terminal", channelId, paneId: generateId() };
+		const newRoot = setNodeAtPath(root, path, replacement);
+		layouts.value = { ...layouts.value, [tab.channelId]: newRoot };
+	}
+
+	/**
+	 * Remove a vacant pane by collapsing the parent split. The sibling expands
+	 * to fill the space. If the root is vacant, do nothing (can't rearrange
+	 * the last pane — INV-04: tab never auto-closes).
+	 */
+	function rearrangeVacant(vacantId: string): void {
+		const tab = activeTab.value;
+		if (tab === null) return;
+
+		const root = layouts.value[tab.channelId];
+		if (root === null || root === undefined) return;
+
+		const path = findVacantPath(root, vacantId);
+		if (path === null || path.length === 0) return; // root vacant — can't rearrange
+
+		// Parent path = all but last segment; sibling = the other branch
+		const parentPath = path.slice(0, -1);
+		const lastTurn = path[path.length - 1];
+		if (lastTurn === undefined) return;
+		const siblingTurn = lastTurn === "first" ? "second" : "first";
+
+		const parentNode = getNodeAtPath(root, parentPath);
+		if (parentNode === null || parentNode.type !== "split") return;
+
+		const sibling = siblingTurn === "first" ? parentNode.first : parentNode.second;
+
+		let newRoot: PaneNode;
+		if (parentPath.length === 0) {
+			newRoot = sibling;
+		} else {
+			newRoot = setNodeAtPath(root, parentPath, sibling);
+		}
+
+		layouts.value = { ...layouts.value, [tab.channelId]: newRoot };
+	}
+
+	// ------------------------------------------------------------------
+	// Cross-tab pane DnD
+	// ------------------------------------------------------------------
+
+	/**
+	 * Vacate a pane in a SPECIFIC tab (not just the active one).
+	 * Needed for cross-tab drag where source tab is not active.
+	 */
+	function vacatePaneInTab(tabChannelId: string, channelId: string): void {
+		const root = layouts.value[tabChannelId];
+		if (root === null || root === undefined) return;
+
+		const updated = replaceTerminalNode(root, channelId, {
+			type: "vacant",
+			id: generateId(),
+		});
+		if (updated !== null) {
+			layouts.value = { ...layouts.value, [tabChannelId]: updated };
+		}
+	}
+
+	/**
+	 * Find which tab contains a given channel ID.
+	 * Returns the tab's root channelId, or null if not found.
+	 */
+	function findTabForChannel(channelId: string): string | null {
+		for (const [tabKey, root] of Object.entries(layouts.value)) {
+			if (root !== null && findChannelPath(root, channelId) !== null) {
+				return tabKey;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Move a pane from one location to another (possibly cross-tab).
+	 *
+	 * - CENTER: replace the target pane content with the source
+	 * - LEFT/RIGHT: wrap target in horizontal split, source on chosen side
+	 * - TOP/BOTTOM: wrap target in vertical split, source on chosen side
+	 *
+	 * The source pane is vacated (replaced with a vacant slot).
+	 * If the source pane is the only pane in its tab, that tab is NOT closed
+	 * (INV-04: tabs never auto-close) — a vacant slot remains.
+	 */
+	function movePaneTo(
+		sourceChannelId: string,
+		targetPaneId: string,
+		targetTabChannelId: string,
+		zone: DropZone,
+	): void {
+		// 1. Find source tab
+		const sourceTabKey = findTabForChannel(sourceChannelId);
+		if (sourceTabKey === null) return;
+
+		// 2. Vacate source FIRST to avoid duplicate channelId in same-tab moves.
+		//    After this, the source slot becomes vacant. Then we re-read the
+		//    (possibly mutated) target root for the insertion step.
+		vacatePaneInTab(sourceTabKey, sourceChannelId);
+
+		const targetRoot = layouts.value[targetTabChannelId];
+		if (targetRoot === null || targetRoot === undefined) return;
+
+		// 3. Build source terminal node (reuse channel, fresh paneId)
+		const sourceNode: PaneNode = {
+			type: "terminal",
+			channelId: sourceChannelId,
+			paneId: generateId(),
+		};
+
+		if (zone === "center") {
+			// Replace target pane content with source
+			const updated = replaceNodeByPaneId(targetRoot, targetPaneId, sourceNode);
+			if (updated === null) return;
+			layouts.value = { ...layouts.value, [targetTabChannelId]: updated };
+		} else {
+			// Find the target node in the tree
+			const targetPath = findNodePathByPaneId(targetRoot, targetPaneId);
+			if (targetPath === null) return;
+
+			const existingNode = getNodeAtPath(targetRoot, targetPath);
+			if (existingNode === null) return;
+
+			const direction: "horizontal" | "vertical" =
+				zone === "left" || zone === "right" ? "vertical" : "horizontal";
+			const first = zone === "left" || zone === "top" ? sourceNode : existingNode;
+			const second = zone === "left" || zone === "top" ? existingNode : sourceNode;
+
+			const splitNode: PaneNode = {
+				type: "split",
+				direction,
+				ratio: 0.5,
+				first,
+				second,
+			};
+
+			const updated = setNodeAtPath(targetRoot, targetPath, splitNode);
+			layouts.value = { ...layouts.value, [targetTabChannelId]: updated };
+		}
+	}
+
+	/**
+	 * Move a pane out of its current tab into a brand-new tab.
+	 * The new tab is inserted at `insertAtIndex`.
+	 */
+	function moveToNewTab(sourceChannelId: string, insertAtIndex: number): void {
+		const sourceTabKey = findTabForChannel(sourceChannelId);
+		if (sourceTabKey === null) return;
+
+		// Vacate the source pane first
+		vacatePaneInTab(sourceTabKey, sourceChannelId);
+
+		// Create the new tab with the channel
+		const label = getPaneLabel(sourceChannelId);
+		const newTab: Tab = { channelId: sourceChannelId, label };
+		const newLayout: PaneNode = {
+			type: "terminal",
+			channelId: sourceChannelId,
+			paneId: generateId(),
+		};
+
+		// Insert tab at position
+		const idx = Math.max(0, Math.min(insertAtIndex, tabs.value.length));
+		const newTabs = [...tabs.value];
+		newTabs.splice(idx, 0, newTab);
+		tabs.value = newTabs;
+
+		layouts.value = { ...layouts.value, [sourceChannelId]: newLayout };
+		activeTabIndex.value = idx;
+	}
+
 	return {
 		tabs,
 		activeTabIndex,
@@ -460,6 +818,10 @@ export function useLayout() {
 		layouts,
 		openTab,
 		closeTab,
+		closeOthers,
+		closeToRight,
+		closeAll,
+		vacateAllPanesInTab,
 		setActiveTab,
 		setLayout,
 		splitPane,
@@ -468,5 +830,11 @@ export function useLayout() {
 		replaceChannelId,
 		getPaneLabel,
 		getTabLabel,
+		vacatePane,
+		fillVacant,
+		rearrangeVacant,
+		movePaneTo,
+		moveToNewTab,
+		findTabForChannel,
 	};
 }

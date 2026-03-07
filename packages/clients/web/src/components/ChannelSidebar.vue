@@ -64,6 +64,12 @@
 							@close-channel="onCloseChannel"
 							@move-to-group="channelsStore.moveChannelToGroup"
 							@rename="onRenameChannel"
+							@open-new-tab="emit('open-new-tab', $event)"
+							@open-current-tab="emit('open-current-tab', $event)"
+							@configure-command="emit('configure-command', $event)"
+							@set-welcome="emit('set-welcome', $event)"
+							@restart="onRestartChannel"
+							@destroy="onDestroyChannel"
 						/>
 					</template>
 				</template>
@@ -89,6 +95,12 @@
 						@close-channel="onCloseChannel"
 						@move-to-group="channelsStore.moveChannelToGroup"
 						@rename="onRenameChannel"
+						@open-new-tab="emit('open-new-tab', $event)"
+						@open-current-tab="emit('open-current-tab', $event)"
+						@configure-command="emit('configure-command', $event)"
+						@set-welcome="emit('set-welcome', $event)"
+						@restart="onRestartChannel"
+						@destroy="onDestroyChannel"
 					/>
 				</template>
 			</template>
@@ -117,6 +129,10 @@ import ChannelItem from "./ChannelItem.vue";
 
 const emit = defineEmits<{
 	"select-channel": [channelId: string];
+	"open-new-tab": [channelId: string];
+	"open-current-tab": [channelId: string];
+	"configure-command": [channelId: string];
+	"set-welcome": [channelId: string];
 }>();
 
 const channelsStore = useChannelsStore();
@@ -188,6 +204,14 @@ function onCloseChannel(channelId: string): void {
 
 function onRenameChannel(channelId: string, title: string): void {
 	channelsStore.renameChannel(channelId, title);
+}
+
+function onRestartChannel(channelId: string): void {
+	channelsStore.restartChannel(channelId);
+}
+
+function onDestroyChannel(channelId: string): void {
+	channelsStore.removeChannel(channelId);
 }
 
 function onAddGroup(): void {

@@ -50,6 +50,7 @@ export interface Channel {
 	groupId?: string;
 	title?: string;
 	shell: string;
+	args?: string[];
 	cwd?: string;
 	envJson?: string; // JSON string
 	cols: number;
@@ -57,6 +58,9 @@ export interface Channel {
 	status: ChannelStatus;
 	exitCode?: number;
 	profileJson?: string;
+	isWelcome?: boolean;
+	icon?: string;
+	directProcess?: boolean;
 	createdAt: string;
 	updatedAt: string;
 }
