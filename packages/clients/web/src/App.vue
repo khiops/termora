@@ -62,6 +62,32 @@
 			@delete-group="onDeleteGroup"
 		/>
 
+		<!-- Rename group dialog -->
+		<GroupActionDialog
+			v-if="renameGroupName !== null"
+			:visible="true"
+			title="Rename Group"
+			:message="`Rename group '${renameGroupName}'.`"
+			confirm-label="Rename"
+			input-label="NEW NAME"
+			:input-value="renameGroupName"
+			input-placeholder="Group name"
+			@close="renameGroupName = null"
+			@confirm="onRenameGroupConfirmed"
+		/>
+
+		<!-- Delete group confirmation -->
+		<GroupActionDialog
+			v-if="deleteGroupName !== null"
+			:visible="true"
+			title="Delete Group"
+			:message="`Delete group '${deleteGroupName}'? Hosts will move to Ungrouped.`"
+			confirm-label="Delete"
+			:confirm-danger="true"
+			@close="deleteGroupName = null"
+			@confirm="onDeleteGroupConfirmed"
+		/>
+
 		<!-- Delete host confirmation modal -->
 		<DeleteHostModal
 			:visible="deleteHostId !== null"
@@ -185,6 +211,7 @@ import HostContextMenu from "./components/HostContextMenu.vue";
 import GroupContextMenu from "./components/GroupContextMenu.vue";
 import DeleteHostModal from "./components/DeleteHostModal.vue";
 import BatchImportModal from "./components/BatchImportModal.vue";
+import GroupActionDialog from "./components/GroupActionDialog.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -213,6 +240,8 @@ const groupContextMenu = ref<{
 	x: number;
 	y: number;
 } | null>(null);
+const renameGroupName = ref<string | null>(null);
+const deleteGroupName = ref<string | null>(null);
 
 // ─── Window title ────────────────────────────────────────────────────────────
 
@@ -526,38 +555,43 @@ function onNewGroupForHost(hostId: string): void {
 }
 
 function onRenameGroup(groupName: string): void {
-	const newName = prompt(`Rename group "${groupName}" to:`);
-	if (newName && newName.trim()) {
-		void fetch(
-			`/api/hosts/groups/${encodeURIComponent(groupName)}`,
-			{
-				method: "PUT",
-				headers: {
-					Authorization: `Bearer ${authStore.token}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ name: newName.trim() }),
+	renameGroupName.value = groupName;
+}
+
+function onRenameGroupConfirmed(newName?: string): void {
+	const oldName = renameGroupName.value;
+	renameGroupName.value = null;
+	if (!oldName || !newName?.trim()) return;
+	void fetch(
+		`/api/hosts/groups/${encodeURIComponent(oldName)}`,
+		{
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
 			},
-		).then(() => hostsStore.fetchHosts());
-	}
+			body: JSON.stringify({ name: newName.trim() }),
+		},
+	).then(() => hostsStore.fetchHosts());
 }
 
 function onDeleteGroup(groupName: string): void {
-	if (
-		confirm(
-			`Delete group "${groupName}"? Hosts will move to Ungrouped.`,
-		)
-	) {
-		void fetch(
-			`/api/hosts/groups/${encodeURIComponent(groupName)}`,
-			{
-				method: "DELETE",
-				headers: {
-					Authorization: `Bearer ${authStore.token}`,
-				},
+	deleteGroupName.value = groupName;
+}
+
+function onDeleteGroupConfirmed(): void {
+	const name = deleteGroupName.value;
+	deleteGroupName.value = null;
+	if (!name) return;
+	void fetch(
+		`/api/hosts/groups/${encodeURIComponent(name)}`,
+		{
+			method: "DELETE",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
 			},
-		).then(() => hostsStore.fetchHosts());
-	}
+		},
+	).then(() => hostsStore.fetchHosts());
 }
 
 /**
