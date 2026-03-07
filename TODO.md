@@ -3,10 +3,39 @@
 ## In Progress
 
 ### UI/UX Sprint — Briefs Complete (docs/briefs/)
-- [ ] 🟡 [UI] UX-06: Theming & Color Schemes (Sprint 1 — foundation)
-- [ ] 💡 [UI] UX-01: Tab Actions, Split Panes, Welcome Tab (Sprint 1)
-- [ ] 💡 [UI] UX-02: Terminal Title — OSC 0/2 (Sprint 1)
-- [ ] 💡 [UI] UX-04: Scrollback Search (Sprint 1)
+- [ ] 🟡 [UI] UX-06: Theming & Color Schemes — spec ready (docs/plans/ux-06-theming.md)
+  - [ ] Block 1: Theme Model + Bundled Presets (shared) — S
+  - [ ] Block 2: Theme File Storage + REST API (hub) — M
+  - [ ] Block 3: CSS Variable System + Theme Store (web) — M
+  - [ ] Block 4: xterm.js Theme Integration (web) — S
+  - [ ] Block 5: Theme Picker + Live Preview (web) — M
+  - [ ] Block 6: Theme Editor + Import/Export (web) — L
+  - [ ] Block 7: OS Auto-Switch + Opacity + Scrollbar (web + hub) — M
+- [ ] 🟡 [UI] UX-01: Tab Actions, Split Panes, Welcome Tab — spec ready (docs/plans/ux-01-tab-actions.md)
+  - [ ] Block 1: Tab Context Menu + Close Actions (web) — M
+  - [ ] Block 2: Vacant Pane Slots + Picker (web) — M
+  - [ ] Block 3: Welcome Tab (web + hub) — M
+  - [ ] Block 4: Cross-Tab Pane DnD (web) — M
+  - [ ] Block 5: Configure Command + Direct Process (web + hub + agent) — M
+  - [ ] Block 6: Channel Sidebar Context Menu + States (web) — S
+  - [ ] Block 7: Settings + Confirmations (web + hub) — S
+- [ ] 🟡 [UI] UX-02: Terminal Title — spec ready (docs/plans/ux-02-terminal-title.md)
+  - [ ] Block 1: TITLE_CHANGE Protocol + DB Migration (shared + agent + hub) — S
+  - [ ] Block 2: UI Dynamic Title Display + Title Stack (web) — S
+  - [ ] Block 3: Title Truncation + Sanitization (shared + web) — S
+  - [ ] Block 4: Window Title + Per-Host Prefix (web + hub) — S
+  - [ ] Block 5: Title Settings + Reset to Dynamic (web + hub) — S
+- [ ] 🟡 [UI] UX-04: Scrollback Search — spec ready (docs/plans/ux-04-scrollback-search.md)
+  - [ ] Block 1: SearchAddon Integration + Basic Search (web) — S
+  - [ ] Block 2: Search Overlay UI (web) — M
+  - [ ] Block 3: Search Toggles + Keyboard Shortcuts (web) — S
+  - [ ] Block 4: Scrollbar Markers (web) — S
+  - [ ] Block 5: Multi-Pane Search Scope (web) — M
+  - [ ] Block 6: Search History + Settings (web + hub) — S
+### Deferred from /adversarial Sprint 1
+- [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
+- [ ] 💡 [UI] UX-06 Block 6 (Theme Editor) deferral candidate — heaviest block, consider Sprint 2 if time-constrained — Priority: L (from /adversarial C-04)
+
 - [ ] 💡 [UI] UX-03: Host Management (Sprint 2)
 - [ ] 💡 [UI] UX-05: Notifications (Sprint 3)
 - [ ] 💡 [UI] UX-07: Host Customization & Visual Profiles (Sprint 3)
