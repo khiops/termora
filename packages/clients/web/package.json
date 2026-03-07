@@ -10,18 +10,19 @@
 		"typecheck": "vue-tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
-		"@nexterm/shared": "workspace:*",
-		"vue": "catalog:",
-		"pinia": "catalog:",
 		"@msgpack/msgpack": "catalog:",
-		"@xterm/xterm": "catalog:",
+		"@nexterm/shared": "workspace:*",
 		"@xterm/addon-fit": "catalog:",
-		"@xterm/addon-unicode11": "catalog:"
+		"@xterm/addon-search": "catalog:",
+		"@xterm/addon-unicode11": "catalog:",
+		"@xterm/xterm": "catalog:",
+		"pinia": "catalog:",
+		"vue": "catalog:"
 	},
 	"devDependencies": {
+		"@vitejs/plugin-vue": "catalog:",
 		"typescript": "catalog:",
 		"vite": "catalog:",
-		"@vitejs/plugin-vue": "catalog:",
 		"vue-tsc": "catalog:"
 	}
 }

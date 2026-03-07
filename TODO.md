@@ -25,13 +25,13 @@
   - [x] Block 3: Title Truncation + Sanitization (shared + web)
   - [x] Block 4: Window Title + Per-Host Prefix (web + hub)
   - [x] Block 5: Title Settings + Reset to Dynamic (web + hub)
-- [ ] 🟡 [UI] UX-04: Scrollback Search — spec ready (docs/plans/ux-04-scrollback-search.md)
-  - [ ] Block 1: SearchAddon Integration + Basic Search (web) — S
-  - [ ] Block 2: Search Overlay UI (web) — M
-  - [ ] Block 3: Search Toggles + Keyboard Shortcuts (web) — S
-  - [ ] Block 4: Scrollbar Markers (web) — S
-  - [ ] Block 5: Multi-Pane Search Scope (web) — M
-  - [ ] Block 6: Search History + Settings (web + hub) — S
+- [x] ✅ [UI] UX-04: Scrollback Search (2026-03-07) — 6 blocks, 984 tests, /review clean
+  - [x] Block 1: SearchAddon Integration + Basic Search (web) — S
+  - [x] Block 2: Search Overlay UI (web) — M
+  - [x] Block 3: Search Toggles + Keyboard Shortcuts (web) — S
+  - [x] Block 4: Scrollbar Markers (web) — S
+  - [x] Block 5: Multi-Pane Search Scope (web) — M
+  - [x] Block 6: Search History + Settings (web + hub) — S
 ### Deferred from /adversarial Sprint 1
 - [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
 - [x] ⏭️ [UI] UX-06 Block 6 (Theme Editor) deferral candidate — implemented (2026-03-07)
@@ -62,6 +62,7 @@
 - [ ] 💡 [UI] E2E scenarios for UX-06 + UX-01 + UX-02 + UX-04 — update TESTING_E2E.md after all 4 stories — Priority: M
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 - [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
+- [ ] 🔧 [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll near-symmetric (~50 lines each) — Priority: M (from UX-04 /review F-007)
 
 ### Deferred from /adversarial + /llm
 - [ ] 💡 [Agent] Configurable socket bind timeout (currently hardcoded 5s) — Priority: L (from /adversarial C-07)

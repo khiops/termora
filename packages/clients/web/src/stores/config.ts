@@ -2,6 +2,7 @@ import {
 	type ChannelsConfig,
 	DEFAULT_PROFILE,
 	type PanesConfig,
+	type SearchConfig,
 	type StartupConfig,
 	type TabsConfig,
 	type TerminalProfile,
@@ -72,6 +73,7 @@ interface UiConfig {
 	channels?: ChannelsConfig;
 	startup?: StartupConfig;
 	title?: TitleConfig;
+	search?: SearchConfig;
 }
 
 export const useConfigStore = defineStore("config", () => {

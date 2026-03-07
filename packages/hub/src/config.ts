@@ -17,6 +17,7 @@ import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
 import type {
 	ChannelsConfig,
 	PanesConfig,
+	SearchConfig,
 	StartupConfig,
 	TabsConfig,
 	TerminalProfile,
@@ -77,7 +78,7 @@ export function loadGcConfig(configDir: string): GcConfig {
 
 // ─── UI configuration ───────────────────────────────────────────────────────
 
-/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title] in config.toml). */
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search] in config.toml). */
 export interface UiConfig {
 	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
 	onChannelDead: "close" | "readonly";
@@ -91,6 +92,8 @@ export interface UiConfig {
 	startup: StartupConfig;
 	/** Terminal title configuration. */
 	title: TitleConfig;
+	/** Search behavior configuration. */
+	search: SearchConfig;
 }
 
 export const DEFAULT_TABS_CONFIG: TabsConfig = {
@@ -120,6 +123,13 @@ export const DEFAULT_TITLE_CONFIG: TitleConfig = {
 	windowFormat: "nexterm - {prefix}{host} - {title}",
 };
 
+export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
+	position: "top-right",
+	highlightOnClose: "clear",
+	scrollbarMarkers: true,
+	historySize: 20,
+};
+
 export const DEFAULT_UI_CONFIG: UiConfig = {
 	onChannelDead: "readonly",
 	tabs: { ...DEFAULT_TABS_CONFIG },
@@ -127,6 +137,7 @@ export const DEFAULT_UI_CONFIG: UiConfig = {
 	channels: { ...DEFAULT_CHANNELS_CONFIG },
 	startup: { ...DEFAULT_STARTUP_CONFIG },
 	title: { ...DEFAULT_TITLE_CONFIG },
+	search: { ...DEFAULT_SEARCH_CONFIG },
 };
 
 /**
@@ -141,6 +152,7 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		channels: { ...DEFAULT_CHANNELS_CONFIG },
 		startup: { ...DEFAULT_STARTUP_CONFIG },
 		title: { ...DEFAULT_TITLE_CONFIG },
+		search: { ...DEFAULT_SEARCH_CONFIG },
 	};
 
 	// ── [ui] section ────────────────────────────────────────────────────
@@ -245,6 +257,34 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		}
 	}
 
+	// ── [search] section ────────────────────────────────────────────────
+	const searchSection = parsed.search;
+	if (searchSection != null && typeof searchSection === "object") {
+		const raw = searchSection as Record<string, unknown>;
+		if (
+			typeof raw.position === "string" &&
+			(raw.position === "top-right" ||
+				raw.position === "bottom-right" ||
+				raw.position === "bottom-bar")
+		) {
+			config.search.position = raw.position;
+		}
+		if (
+			typeof raw.highlight_on_close === "string" &&
+			(raw.highlight_on_close === "clear" ||
+				raw.highlight_on_close === "fade" ||
+				raw.highlight_on_close === "persist")
+		) {
+			config.search.highlightOnClose = raw.highlight_on_close;
+		}
+		if (typeof raw.scrollbar_markers === "boolean") {
+			config.search.scrollbarMarkers = raw.scrollbar_markers;
+		}
+		if (typeof raw.history_size === "number" && raw.history_size >= 1) {
+			config.search.historySize = raw.history_size;
+		}
+	}
+
 	return config;
 }
 
@@ -308,8 +348,8 @@ export class ConfigResolver {
 	}
 
 	/**
-	 * Load [terminal], [gc], [ui], [tabs], [panes], [channels], and [startup] sections
-	 * from config.toml at the given config directory.
+	 * Load [terminal], [gc], [ui], [tabs], [panes], [channels], [startup], [title], and [search]
+	 * sections from config.toml at the given config directory.
 	 * Silently no-ops if the file does not exist or is malformed.
 	 */
 	loadFromFile(configDir: string): void {

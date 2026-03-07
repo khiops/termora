@@ -12,11 +12,15 @@
 					:key="node.paneId ?? node.channelId"
 					:channel-id="node.channelId"
 					:pane-id="node.paneId"
-					@split-right="(chId) => emit('split', chId, 'vertical')"
-					@split-down="(chId) => emit('split', chId, 'horizontal')"
-					@close-pane="(chId) => emit('close-pane', chId)"
-					@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
-					@configure-command="(chId) => emit('configure-command', chId)"
+					:has-multiple-panes="props.hasMultiplePanes ?? false"
+					@split-right="(chId: string) => emit('split', chId, 'vertical')"
+					@split-down="(chId: string) => emit('split', chId, 'horizontal')"
+					@close-pane="(chId: string) => emit('close-pane', chId)"
+					@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
+					@configure-command="(chId: string) => emit('configure-command', chId)"
+					@search-all-panes="(q: string) => emit('search-all-panes', q)"
+					@find-next-all="(chId: string) => emit('find-next-all', chId)"
+					@find-previous-all="(chId: string) => emit('find-previous-all', chId)"
 				/>
 				<div v-if="showDropZones" class="drop-zones">
 					<div
@@ -55,9 +59,9 @@
 					:key="node.id"
 					:vacant-id="node.id"
 					:host-id="hostId"
-					@select-channel="(vId, chId) => emit('fill-vacant', vId, chId)"
-					@new-terminal="(vId) => emit('new-terminal-vacant', vId)"
-					@rearrange="(vId) => emit('rearrange-vacant', vId)"
+					@select-channel="(vId: string, chId: string) => emit('fill-vacant', vId, chId)"
+					@new-terminal="(vId: string) => emit('new-terminal-vacant', vId)"
+					@rearrange="(vId: string) => emit('rearrange-vacant', vId)"
 				/>
 				<div v-if="showDropZones" class="drop-zones">
 					<div
@@ -76,16 +80,20 @@
 				:node-path="firstChildPath"
 				:host-id="hostId"
 				:tab-channel-id="tabChannelId"
+				:has-multiple-panes="props.hasMultiplePanes"
 				:style="firstStyle"
-				@split="(chId, dir) => emit('split', chId, dir)"
-				@close-pane="(chId) => emit('close-pane', chId)"
-				@update-ratio="(path, ratio) => emit('update-ratio', path, ratio)"
-				@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
-				@fill-vacant="(vId, chId) => emit('fill-vacant', vId, chId)"
-				@new-terminal-vacant="(vId) => emit('new-terminal-vacant', vId)"
-				@rearrange-vacant="(vId) => emit('rearrange-vacant', vId)"
-				@drop-pane="(sourceChId, targetPId, tTabId, zone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
-			@configure-command="(chId) => emit('configure-command', chId)"
+				@split="(chId: string, dir: string) => emit('split', chId, dir)"
+				@close-pane="(chId: string) => emit('close-pane', chId)"
+				@update-ratio="(path: NodePath, ratio: number) => emit('update-ratio', path, ratio)"
+				@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
+				@fill-vacant="(vId: string, chId: string) => emit('fill-vacant', vId, chId)"
+				@new-terminal-vacant="(vId: string) => emit('new-terminal-vacant', vId)"
+				@rearrange-vacant="(vId: string) => emit('rearrange-vacant', vId)"
+				@drop-pane="(sourceChId: string, targetPId: string, tTabId: string, zone: DropZone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
+				@configure-command="(chId: string) => emit('configure-command', chId)"
+				@search-all-panes="(q: string) => emit('search-all-panes', q)"
+				@find-next-all="(chId: string) => emit('find-next-all', chId)"
+				@find-previous-all="(chId: string) => emit('find-previous-all', chId)"
 			/>
 
 			<!-- Drag handle between the two panes -->
@@ -93,7 +101,7 @@
 				:direction="node.direction"
 				:node-path="effectivePath"
 				:container-el="containerEl"
-				@update-ratio="(path, ratio) => emit('update-ratio', path, ratio)"
+				@update-ratio="(path: NodePath, ratio: number) => emit('update-ratio', path, ratio)"
 			/>
 
 			<!-- Second child -->
@@ -102,16 +110,20 @@
 				:node-path="secondChildPath"
 				:host-id="hostId"
 				:tab-channel-id="tabChannelId"
+				:has-multiple-panes="props.hasMultiplePanes"
 				:style="secondStyle"
-				@split="(chId, dir) => emit('split', chId, dir)"
-				@close-pane="(chId) => emit('close-pane', chId)"
-				@update-ratio="(path, ratio) => emit('update-ratio', path, ratio)"
-				@channel-spawned="(tempId, realId) => emit('channel-spawned', tempId, realId)"
-				@fill-vacant="(vId, chId) => emit('fill-vacant', vId, chId)"
-				@new-terminal-vacant="(vId) => emit('new-terminal-vacant', vId)"
-				@rearrange-vacant="(vId) => emit('rearrange-vacant', vId)"
-				@drop-pane="(sourceChId, targetPId, tTabId, zone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
-			@configure-command="(chId) => emit('configure-command', chId)"
+				@split="(chId: string, dir: string) => emit('split', chId, dir)"
+				@close-pane="(chId: string) => emit('close-pane', chId)"
+				@update-ratio="(path: NodePath, ratio: number) => emit('update-ratio', path, ratio)"
+				@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
+				@fill-vacant="(vId: string, chId: string) => emit('fill-vacant', vId, chId)"
+				@new-terminal-vacant="(vId: string) => emit('new-terminal-vacant', vId)"
+				@rearrange-vacant="(vId: string) => emit('rearrange-vacant', vId)"
+				@drop-pane="(sourceChId: string, targetPId: string, tTabId: string, zone: DropZone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
+				@configure-command="(chId: string) => emit('configure-command', chId)"
+				@search-all-panes="(q: string) => emit('search-all-panes', q)"
+				@find-next-all="(chId: string) => emit('find-next-all', chId)"
+				@find-previous-all="(chId: string) => emit('find-previous-all', chId)"
 			/>
 		</template>
 	</div>
@@ -140,6 +152,8 @@ const props = defineProps<{
 	hostId?: string | null;
 	/** The tab's root channel ID — needed for cross-tab DnD. */
 	tabChannelId?: string | null;
+	/** Whether the current tab has multiple panes (SC-12, for search scope toggle). */
+	hasMultiplePanes?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -152,6 +166,9 @@ const emit = defineEmits<{
 	(e: "rearrange-vacant", vacantId: string): void;
 	(e: "drop-pane", sourceChannelId: string, targetPaneId: string, targetTabChannelId: string, zone: DropZone): void;
 	(e: "configure-command", channelId: string): void;
+	(e: "search-all-panes", query: string): void;
+	(e: "find-next-all", currentChannelId: string): void;
+	(e: "find-previous-all", currentChannelId: string): void;
 }>();
 
 const containerEl = ref<HTMLElement | null>(null);

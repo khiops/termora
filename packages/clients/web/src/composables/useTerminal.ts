@@ -6,6 +6,7 @@ import { Terminal } from "@xterm/xterm";
 import { type Ref, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";
 import { useThemeStore } from "../stores/theme.js";
+import { useTerminalSearch } from "./useTerminalSearch.js";
 
 /** Maximum number of entries in the title stack (SC-05). */
 const MAX_TITLE_STACK = 5;
@@ -21,6 +22,7 @@ export function useTerminal(
 ) {
 	const terminal = ref<Terminal | null>(null);
 	const fitAddon = new FitAddon();
+	const search = useTerminalSearch();
 	let channelId: string | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let outputUnsubscribe: (() => void) | null = null;
@@ -81,6 +83,7 @@ export function useTerminal(
 		const initialColors = (hostTheme ?? themeStore.activeTheme)?.colors;
 		const initialXtermTheme = initialColors ? themeStore.toXtermTheme(initialColors) : {};
 
+		const scrollbarMarkers = p?.scrollbarMarkers !== false; // default true
 		const term = new Terminal({
 			allowProposedApi: true,
 			cursorBlink: p?.cursorStyle !== "underline", // blink except underline (xterm default)
@@ -88,6 +91,7 @@ export function useTerminal(
 			fontFamily: p?.fontFamily ?? '"Consolas", "Liberation Mono", "Courier New", monospace',
 			cursorStyle: p?.cursorStyle ?? "block",
 			scrollback: p?.scrollback ?? 5000,
+			overviewRulerWidth: scrollbarMarkers ? 15 : 0,
 			theme: initialXtermTheme,
 		});
 
@@ -96,6 +100,7 @@ export function useTerminal(
 		term.unicode.activeVersion = "11";
 		term.open(containerRef.value);
 		fitAddon.fit();
+		search.init(term, { scrollbarMarkers });
 		terminal.value = term;
 
 		// Keyboard input → send INPUT to hub (only when holding write lock)
@@ -301,7 +306,7 @@ export function useTerminal(
 		}
 	}
 
-	/** Re-apply profile options (font, cursor, scrollback) to the live terminal. */
+	/** Re-apply profile options (font, cursor, scrollback, scrollbar markers) to the live terminal. */
 	function applyProfile(p: TerminalProfile): void {
 		const term = terminal.value;
 		if (!term) return;
@@ -310,6 +315,9 @@ export function useTerminal(
 		term.options.fontSize = p.fontSize ?? 14;
 		term.options.cursorStyle = p.cursorStyle ?? "block";
 		term.options.scrollback = p.scrollback ?? 5000;
+		const markers = p.scrollbarMarkers !== false;
+		term.options.overviewRulerWidth = markers ? 15 : 0;
+		search.setScrollbarMarkers(markers);
 		fitAddon.fit();
 	}
 
@@ -324,6 +332,7 @@ export function useTerminal(
 		outputUnsubscribe = null;
 		resizeObserver?.disconnect();
 		resizeObserver = null;
+		search.dispose();
 		terminal.value?.dispose();
 		terminal.value = null;
 		channelId = null;
@@ -335,6 +344,7 @@ export function useTerminal(
 		terminal,
 		canWrite,
 		currentDynamicTitle,
+		search,
 		init,
 		attachChannel,
 		reattachChannel,

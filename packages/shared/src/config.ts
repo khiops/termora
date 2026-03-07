@@ -9,6 +9,8 @@ export interface TerminalProfile {
 	cursorStyle?: "block" | "underline" | "bar";
 	scrollback?: number;
 	bellSound?: boolean;
+	/** Show search match markers in the scrollbar overview ruler (default: true). */
+	scrollbarMarkers?: boolean;
 	[key: string]: unknown;
 }
 
@@ -121,6 +123,13 @@ export interface TitleConfig {
 	windowFormat?: string;
 }
 
+export interface SearchConfig {
+	position?: "top-right" | "bottom-right" | "bottom-bar";
+	highlightOnClose?: "clear" | "fade" | "persist";
+	scrollbarMarkers?: boolean;
+	historySize?: number;
+}
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',
@@ -129,4 +138,5 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	cursorStyle: "block",
 	scrollback: 5000,
 	bellSound: false,
+	scrollbarMarkers: true,
 };

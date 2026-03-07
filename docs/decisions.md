@@ -4,6 +4,33 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-04 — Scrollback Search (2026-03-07)
+
+- @xterm/addon-search ^0.16.0 via pnpm catalog
+- Decoration colors from CSS vars: --nt-search-highlight, --nt-search-highlight-active with yellow/pink fallbacks
+- Match count via SearchAddon.onDidChangeResults event
+- Regex validation client-side before passing to SearchAddon
+- SearchAddon loaded after term.open() + fitAddon.fit() per INV-09
+- SearchOverlay positioned absolute within TerminalPane
+- 3 position variants: top-right, bottom-right, bottom-bar
+- Ctrl+Shift+F via terminal.attachCustomKeyEventHandler
+- Alt+C/R/W shortcuts via useSearchShortcuts composable
+- Scrollbar markers: native xterm.js overview ruler (overviewRulerWidth: 15)
+- scrollbarMarkers in TerminalProfile (default true)
+- Multi-pane search: useMultiPaneSearch with PaneSearchHandle registry via provide/inject
+- collectTerminalChannelIds: layout tree walk, skips vacant nodes
+- Cross-pane navigation with wrap-around, skip zero-match panes
+- Scope toggle visible only when countPanes > 1
+- shallowRef for handle registry
+- Search history: localStorage nexterm:search-history, MRU order, dedup by query+regex
+- SearchConfig: position, highlightOnClose (clear/fade/persist), scrollbarMarkers, historySize
+- Hub [search] section parser with DEFAULT_SEARCH_CONFIG
+- highlightOnClose=fade uses 300ms setTimeout before clearDecorations
+- getDecorationColors always returns matchOverviewRuler (transparent when disabled)
+- historySize as MaybeRef<number> for reactive config
+
+---
+
 ## UX-02 — Terminal Title / OSC 0/2 (2026-03-07)
 
 - Dual approach: UI parses OSC locally for instant display (INV-04), agent sends TITLE_CHANGE to hub for DB persistence (INV-05)

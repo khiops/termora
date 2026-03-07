@@ -76,6 +76,7 @@
 							:node="layout.layouts.value[tab.channelId]!"
 							:host-id="channelsStore.activeHostId"
 							:tab-channel-id="tab.channelId"
+							:has-multiple-panes="tabHasMultiplePanes(tab.channelId)"
 							@split="onSplit"
 							@close-pane="onClosePane"
 							@update-ratio="layout.updateRatio"
@@ -84,7 +85,10 @@
 							@new-terminal-vacant="onNewTerminalVacant"
 							@rearrange-vacant="onRearrangeVacant"
 							@drop-pane="onDropPane"
-						@configure-command="onConfigureCommand"
+							@configure-command="onConfigureCommand"
+							@search-all-panes="onSearchAllPanes"
+							@find-next-all="onFindNextAll"
+							@find-previous-all="onFindPreviousAll"
 						/>
 					</div>
 					<div v-if="layout.tabs.value.length === 0" class="pane-empty">
@@ -97,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import { useAuthStore } from "./stores/auth.js";
@@ -110,6 +114,7 @@ import { countPanes, purgeDeadTabs, useLayout } from "./composables/useLayout.js
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { useWindowTitle } from "./composables/useWindowTitle.js";
+import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
 import TabBar from "./components/TabBar.vue";
@@ -128,6 +133,8 @@ const channelsStore = useChannelsStore();
 const configStore = useConfigStore();
 const themeStore = useThemeStore();
 const layout = useLayout();
+const multiPaneSearch = useMultiPaneSearch();
+provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
 const showAppearance = ref(false);
 const showConfigureDialog = ref(false);
@@ -608,6 +615,46 @@ function onSidebarOpenCurrentTab(channelId: string): void {
 	// Replace the active tab's root pane with this channel
 	layout.replaceChannelId(activeTab.channelId, channelId);
 }
+
+// ---------------------------------------------------------------------------
+// Multi-pane search (SC-11, SC-12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a tab has multiple panes (SC-12: scope toggle visibility).
+ */
+function tabHasMultiplePanes(tabChannelId: string): boolean {
+	const root = layout.layouts.value[tabChannelId];
+	if (root === null || root === undefined) return false;
+	return countPanes(root) > 1;
+}
+
+/**
+ * Broadcast search query to all panes in the active tab.
+ */
+function onSearchAllPanes(query: string): void {
+	multiPaneSearch.searchAll(query, layout.layout.value);
+}
+
+/**
+ * Navigate to next match across all panes (SC-11).
+ */
+function onFindNextAll(currentChannelId: string): void {
+	multiPaneSearch.findNextAll(currentChannelId, layout.layout.value);
+}
+
+/**
+ * Navigate to previous match across all panes.
+ */
+function onFindPreviousAll(currentChannelId: string): void {
+	multiPaneSearch.findPreviousAll(currentChannelId, layout.layout.value);
+}
+
+// Set up the focus-pane callback for cross-pane search navigation (SC-11).
+// When multi-pane search needs to focus a different pane, we could implement
+// pane focusing here. For MVP, the match indicator shows which pane has the
+// match — actual terminal focus would require a ref registry.
+// TODO: Implement pane focus for SC-11 (requires TerminalPane ref registry)
 </script>
 
 <style>

@@ -239,6 +239,21 @@ export function countPanes(node: PaneNode): number {
 }
 
 // ---------------------------------------------------------------------------
+// Exported helper: collect terminal channelIds in depth-first order
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk the pane tree depth-first and return all terminal channelIds.
+ * Skips vacant nodes (INV-06). Used by multi-pane search to iterate
+ * over all searchable panes in a tab.
+ */
+export function collectTerminalChannelIds(node: PaneNode): string[] {
+	if (node.type === "terminal") return [node.channelId];
+	if (node.type === "vacant") return [];
+	return [...collectTerminalChannelIds(node.first), ...collectTerminalChannelIds(node.second)];
+}
+
+// ---------------------------------------------------------------------------
 // Pure helper: resolve tab label
 // ---------------------------------------------------------------------------
 

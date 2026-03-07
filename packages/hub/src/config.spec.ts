@@ -9,6 +9,7 @@ import {
 	DEFAULT_CHANNELS_CONFIG,
 	DEFAULT_GC_CONFIG,
 	DEFAULT_PANES_CONFIG,
+	DEFAULT_SEARCH_CONFIG,
 	DEFAULT_STARTUP_CONFIG,
 	DEFAULT_TABS_CONFIG,
 	DEFAULT_TITLE_CONFIG,
@@ -895,5 +896,111 @@ describe("ConfigResolver.uiConfig — title", () => {
 		// Unchanged defaults
 		expect(resolver.uiConfig.title.maxLength).toBe(50);
 		expect(resolver.uiConfig.title.truncation).toBe("end");
+	});
+});
+
+// ─── extractUiConfig: search section ─────────────────────────────────────────
+
+describe("extractUiConfig — search section", () => {
+	it("returns default search config when no [search] section", () => {
+		const config = extractUiConfig({});
+		expect(config.search).toEqual(DEFAULT_SEARCH_CONFIG);
+	});
+
+	it('parses position = "bottom-right"', () => {
+		const config = extractUiConfig({ search: { position: "bottom-right" } });
+		expect(config.search.position).toBe("bottom-right");
+	});
+
+	it('parses position = "bottom-bar"', () => {
+		const config = extractUiConfig({ search: { position: "bottom-bar" } });
+		expect(config.search.position).toBe("bottom-bar");
+	});
+
+	it("ignores invalid position value", () => {
+		const config = extractUiConfig({ search: { position: "invalid" } });
+		expect(config.search.position).toBe(DEFAULT_SEARCH_CONFIG.position);
+	});
+
+	it('parses highlight_on_close = "fade"', () => {
+		const config = extractUiConfig({ search: { highlight_on_close: "fade" } });
+		expect(config.search.highlightOnClose).toBe("fade");
+	});
+
+	it('parses highlight_on_close = "persist"', () => {
+		const config = extractUiConfig({ search: { highlight_on_close: "persist" } });
+		expect(config.search.highlightOnClose).toBe("persist");
+	});
+
+	it("ignores invalid highlight_on_close value", () => {
+		const config = extractUiConfig({ search: { highlight_on_close: "invalid" } });
+		expect(config.search.highlightOnClose).toBe(DEFAULT_SEARCH_CONFIG.highlightOnClose);
+	});
+
+	it("parses scrollbar_markers = false", () => {
+		const config = extractUiConfig({ search: { scrollbar_markers: false } });
+		expect(config.search.scrollbarMarkers).toBe(false);
+	});
+
+	it("parses history_size", () => {
+		const config = extractUiConfig({ search: { history_size: 50 } });
+		expect(config.search.historySize).toBe(50);
+	});
+
+	it("ignores history_size < 1", () => {
+		const config = extractUiConfig({ search: { history_size: 0 } });
+		expect(config.search.historySize).toBe(DEFAULT_SEARCH_CONFIG.historySize);
+	});
+
+	it("parses all search fields together", () => {
+		const config = extractUiConfig({
+			search: {
+				position: "bottom-bar",
+				highlight_on_close: "persist",
+				scrollbar_markers: false,
+				history_size: 10,
+			},
+		});
+		expect(config.search).toEqual({
+			position: "bottom-bar",
+			highlightOnClose: "persist",
+			scrollbarMarkers: false,
+			historySize: 10,
+		});
+	});
+});
+
+describe("ConfigResolver.uiConfig — search", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns default search config when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.uiConfig.search).toEqual(DEFAULT_SEARCH_CONFIG);
+	});
+
+	it("returns overridden search values after loadFromFile", () => {
+		const dir = join(tmpdir(), `nexterm-search-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[search]\nposition = "bottom-right"\nhighlight_on_close = "fade"\nscrollbar_markers = false\nhistory_size = 30\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.uiConfig.search.position).toBe("bottom-right");
+		expect(resolver.uiConfig.search.highlightOnClose).toBe("fade");
+		expect(resolver.uiConfig.search.scrollbarMarkers).toBe(false);
+		expect(resolver.uiConfig.search.historySize).toBe(30);
 	});
 });

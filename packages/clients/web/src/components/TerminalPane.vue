@@ -44,6 +44,29 @@
 			<span class="reconnecting-text">Reconnecting<span class="reconnecting-dots" /></span>
 		</div>
 
+		<!-- Search overlay -->
+		<SearchOverlay
+			:is-open="search.isOpen.value"
+			:match-count="effectiveMatchCount"
+			:current-match="effectiveCurrentMatch"
+			:regex-error="search.regexError.value"
+			:query="search.query.value"
+			:options="search.options.value"
+			:position="searchPosition"
+			:show-scope-toggle="props.hasMultiplePanes"
+			:scope="searchScope"
+			:match-pane="matchPaneName"
+			:history="searchHistory.history.value"
+			@search="onSearchEmit"
+			@find-next="onFindNext"
+			@find-previous="onFindPrevious"
+			@close="onSearchClose"
+			@update:options="onSearchOptionsUpdate"
+			@update:scope="onScopeUpdate"
+			@select-history="onSelectHistory"
+			@add-to-history="onAddToHistory"
+		/>
+
 		<!-- Context menu -->
 		<div
 			v-if="contextMenuVisible"
@@ -63,13 +86,19 @@
 
 <script setup lang="ts">
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
-import { computed, ref, watch, onMounted, onUnmounted } from "vue";
+import { computed, inject, ref, watch, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useWriteLockStore } from "../stores/writelock.js";
 import { useConfigStore } from "../stores/config.js";
 import { useTerminal } from "../composables/useTerminal.js";
+import { useSearchHistory } from "../composables/useSearchHistory.js";
+import type { SearchHistoryEntry } from "../composables/useSearchHistory.js";
+import { useSearchShortcuts } from "../composables/useSearchShortcuts.js";
+import { MULTI_PANE_SEARCH_KEY } from "../composables/useMultiPaneSearch.js";
+import type { SearchScope } from "../composables/useMultiPaneSearch.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
+import SearchOverlay from "./SearchOverlay.vue";
 
 // ---------------------------------------------------------------------------
 // Props + emits
@@ -85,8 +114,10 @@ const props = withDefaults(
 		channelId?: string | null;
 		/** Stable pane identifier from the layout tree (for DnD targeting). */
 		paneId?: string | null;
+		/** Whether the current tab has multiple panes (SC-12). */
+		hasMultiplePanes?: boolean;
 	}>(),
-	{ channelId: null, paneId: null },
+	{ channelId: null, paneId: null, hasMultiplePanes: false },
 );
 
 const emit = defineEmits<{
@@ -95,6 +126,9 @@ const emit = defineEmits<{
 	(e: "close-pane", channelId: string): void;
 	(e: "channel-spawned", tempId: string, realId: string): void;
 	(e: "configure-command", channelId: string): void;
+	(e: "search-all-panes", query: string): void;
+	(e: "find-next-all", currentChannelId: string): void;
+	(e: "find-previous-all", currentChannelId: string): void;
 }>();
 
 // ---------------------------------------------------------------------------
@@ -109,11 +143,25 @@ const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
 
-const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle } = useTerminal(
+const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
 	configStore.profile,
 );
+
+// ---------------------------------------------------------------------------
+// Search config from config store
+// ---------------------------------------------------------------------------
+
+const searchConfig = computed(() => configStore.uiConfig.search ?? {});
+const searchPosition = computed<"top-right" | "bottom-right" | "bottom-bar">(
+	() => searchConfig.value.position ?? "top-right",
+);
+const highlightOnClose = computed<"clear" | "fade" | "persist">(
+	() => searchConfig.value.highlightOnClose ?? "clear",
+);
+const searchHistorySize = computed(() => searchConfig.value.historySize ?? 20);
+const searchHistory = useSearchHistory(searchHistorySize);
 
 /**
  * The channel this pane is currently showing. When channelId prop is set,
@@ -335,6 +383,210 @@ function onDocumentClick(): void {
 
 onMounted(() => document.addEventListener("click", onDocumentClick));
 onUnmounted(() => document.removeEventListener("click", onDocumentClick));
+
+// ---------------------------------------------------------------------------
+// Multi-pane search registry (SC-11, SC-12)
+// ---------------------------------------------------------------------------
+
+const multiPaneSearch = inject(MULTI_PANE_SEARCH_KEY, null);
+const searchScope = computed<SearchScope>(() => multiPaneSearch?.scope.value ?? "pane");
+
+/** Pane name shown in cross-pane match indicator. */
+const matchPaneName = computed<string | null>(() => {
+	if (!multiPaneSearch) return null;
+	if (searchScope.value !== "all") return null;
+	const matchChId = multiPaneSearch.matchPaneChannelId.value;
+	if (matchChId === null || matchChId === effectiveChannelId.value) return null;
+	// Resolve the name from channels store
+	const ch = channelsStore.channels.find((c) => c.id === matchChId);
+	return ch?.title ?? ch?.dynamicTitle ?? DEFAULT_CHANNEL_NAME;
+});
+
+/** Effective match count: aggregated when scope=all, local when scope=pane. */
+const effectiveMatchCount = computed(() => {
+	if (searchScope.value === "all" && multiPaneSearch) {
+		return multiPaneSearch.totalMatchCount.value;
+	}
+	return search.matchCount.value;
+});
+
+/** Effective current match: aggregated when scope=all, local when scope=pane. */
+const effectiveCurrentMatch = computed(() => {
+	if (searchScope.value === "all" && multiPaneSearch) {
+		return multiPaneSearch.totalCurrentMatch.value;
+	}
+	return search.currentMatch.value;
+});
+
+// Register this pane's search handle with the multi-pane registry
+onMounted(() => {
+	if (multiPaneSearch) {
+		const chId = effectiveChannelId.value;
+		if (chId) {
+			multiPaneSearch.register({
+				channelId: chId,
+				search: search.search,
+				findNext: search.findNext,
+				findPrevious: search.findPrevious,
+				clear: search.clear,
+				matchCount: search.matchCount,
+				currentMatch: search.currentMatch,
+			});
+		}
+	}
+});
+
+// Update registration when channelId changes (after pending spawn resolves)
+watch(effectiveChannelId, (newId, oldId) => {
+	if (!multiPaneSearch) return;
+	if (oldId) multiPaneSearch.unregister(oldId);
+	if (newId) {
+		multiPaneSearch.register({
+			channelId: newId,
+			search: search.search,
+			findNext: search.findNext,
+			findPrevious: search.findPrevious,
+			clear: search.clear,
+			matchCount: search.matchCount,
+			currentMatch: search.currentMatch,
+		});
+	}
+});
+
+onUnmounted(() => {
+	if (multiPaneSearch) {
+		const chId = effectiveChannelId.value;
+		if (chId) multiPaneSearch.unregister(chId);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Search overlay
+// ---------------------------------------------------------------------------
+
+function onSearchClose(): void {
+	const mode = highlightOnClose.value;
+
+	if (mode === "persist") {
+		// Close overlay but keep decorations visible
+		search.isOpen.value = false;
+	} else if (mode === "fade") {
+		// Close overlay, then fade decorations after 300ms
+		search.isOpen.value = false;
+		setTimeout(() => {
+			search.clear();
+		}, 300);
+	} else {
+		// "clear" (default): close and clear immediately
+		search.close();
+	}
+
+	if (multiPaneSearch && searchScope.value === "all") {
+		multiPaneSearch.clearAll();
+		multiPaneSearch.setScope("pane");
+	}
+	// Refocus the terminal so keyboard input resumes
+	terminal.value?.focus();
+}
+
+function onSearchOptionsUpdate(opts: import("../composables/useTerminalSearch.js").SearchOptions): void {
+	search.options.value = opts;
+	// Re-trigger search with new options
+	if (search.query.value) {
+		search.search(search.query.value);
+		// If scope=all, re-search on all panes
+		if (searchScope.value === "all" && multiPaneSearch) {
+			emit("search-all-panes", search.query.value);
+		}
+	}
+}
+
+function onScopeUpdate(newScope: SearchScope): void {
+	if (!multiPaneSearch) return;
+	multiPaneSearch.setScope(newScope);
+	if (newScope === "all" && search.query.value) {
+		// Broadcast current query to all panes
+		emit("search-all-panes", search.query.value);
+	}
+}
+
+function onSearchEmit(query: string): void {
+	search.search(query);
+	if (searchScope.value === "all" && multiPaneSearch) {
+		emit("search-all-panes", query);
+	}
+}
+
+function onFindNext(): void {
+	if (searchScope.value === "all" && multiPaneSearch && effectiveChannelId.value) {
+		emit("find-next-all", effectiveChannelId.value);
+	} else {
+		search.findNext();
+	}
+}
+
+function onFindPrevious(): void {
+	if (searchScope.value === "all" && multiPaneSearch && effectiveChannelId.value) {
+		emit("find-previous-all", effectiveChannelId.value);
+	} else {
+		search.findPrevious();
+	}
+}
+
+function onSelectHistory(entry: SearchHistoryEntry): void {
+	// Set regex state from history entry
+	search.options.value = { ...search.options.value, regex: entry.regex };
+	// Trigger search with the stored query
+	search.search(entry.query);
+	if (searchScope.value === "all" && multiPaneSearch) {
+		emit("search-all-panes", entry.query);
+	}
+}
+
+function onAddToHistory(query: string, regex: boolean): void {
+	searchHistory.add(query, regex);
+}
+
+function toggleSearchOption(key: keyof import("../composables/useTerminalSearch.js").SearchOptions): void {
+	onSearchOptionsUpdate({
+		...search.options.value,
+		[key]: !search.options.value[key],
+	});
+}
+
+useSearchShortcuts(search.isOpen, {
+	onToggleCase: () => toggleSearchOption("caseSensitive"),
+	onToggleRegex: () => toggleSearchOption("regex"),
+	onToggleWholeWord: () => toggleSearchOption("wholeWord"),
+});
+
+// Intercept Ctrl+Shift+F before xterm.js captures it.
+// attachCustomKeyEventHandler runs for every key event; returning false
+// prevents xterm from processing it (so the browser/our handler can act).
+watch(terminal, (term) => {
+	if (!term) return;
+	term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+		if (ev.ctrlKey && ev.shiftKey && ev.key === "F") {
+			if (ev.type === "keydown") {
+				search.open();
+			}
+			return false; // prevent xterm from processing
+		}
+		// When search overlay is open, let Escape propagate to the overlay
+		if (ev.key === "Escape" && search.isOpen.value) {
+			return false;
+		}
+		// When search is open, intercept Alt+C/R/W so they reach
+		// useSearchShortcuts instead of being sent to the PTY
+		if (ev.altKey && search.isOpen.value) {
+			const k = ev.key.toLowerCase();
+			if (k === "c" || k === "r" || k === "w") {
+				return false;
+			}
+		}
+		return true;
+	});
+});
 
 // ---------------------------------------------------------------------------
 // Drag-and-drop (cross-tab pane DnD)
