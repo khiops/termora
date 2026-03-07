@@ -1393,4 +1393,127 @@ describe("SessionManager", () => {
 			expect(channelsMap.get("ssh-warm-ch-1")?.status).toBe("orphan");
 		});
 	});
+
+	// ─── BELL + NOTIFICATION routing ────────────────────────────────────────
+
+	it("BELL message is forwarded to attached WS clients", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
+
+		agent.emit("message", {
+			type: "BELL",
+			channelId: "local-ch-1",
+		});
+
+		const bellMsgs = received.filter((m) => m.type === "BELL");
+		expect(bellMsgs).toHaveLength(1);
+		const bellMsg = bellMsgs[0] as unknown as { type: string; channelId: string };
+		expect(bellMsg.channelId).toBe("local-ch-1");
+	});
+
+	it("BELL is rate limited to 10 per second per channel", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
+
+		// Fire 15 BELL messages rapidly
+		for (let i = 0; i < 15; i++) {
+			agent.emit("message", {
+				type: "BELL",
+				channelId: "local-ch-1",
+			});
+		}
+
+		const bellMsgs = received.filter((m) => m.type === "BELL");
+		// At most 10 should pass through
+		expect(bellMsgs.length).toBeLessThanOrEqual(10);
+		expect(bellMsgs.length).toBeGreaterThan(0);
+	});
+
+	it("NOTIFICATION message is forwarded to attached WS clients", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
+
+		agent.emit("message", {
+			type: "NOTIFICATION",
+			channelId: "local-ch-1",
+			message: "Build complete!",
+		});
+
+		const notifMsgs = received.filter((m) => m.type === "NOTIFICATION");
+		expect(notifMsgs).toHaveLength(1);
+		const notifMsg = notifMsgs[0] as unknown as {
+			type: string;
+			channelId: string;
+			message: string;
+		};
+		expect(notifMsg.channelId).toBe("local-ch-1");
+		expect(notifMsg.message).toBe("Build complete!");
+	});
+
+	it("NOTIFICATION is rate limited to 5 per second per channel", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
+
+		// Fire 10 NOTIFICATION messages rapidly
+		for (let i = 0; i < 10; i++) {
+			agent.emit("message", {
+				type: "NOTIFICATION",
+				channelId: "local-ch-1",
+				message: `Notification ${i}`,
+			});
+		}
+
+		const notifMsgs = received.filter((m) => m.type === "NOTIFICATION");
+		// At most 5 should pass through
+		expect(notifMsgs.length).toBeLessThanOrEqual(5);
+		expect(notifMsgs.length).toBeGreaterThan(0);
+	});
 });

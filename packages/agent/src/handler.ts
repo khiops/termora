@@ -30,11 +30,19 @@ const SIGNAL_NAMES: Record<number, string> = {
 };
 
 const TITLE_DEBOUNCE_MS = 100;
+const BELL_THROTTLE_MS = 100;
+const OSC9_THROTTLE_MS = 500;
+const OSC9_MAX_LENGTH = 256;
+/** Matches C0 (except \n), DEL, and C1 control characters for OSC 9 sanitization. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — stripping terminal control chars while preserving newlines
+const OSC9_CONTROL_CHARS_RE = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g;
 
 export class AgentHandler {
 	private reader = new FrameReader();
 	private ptyManager: PtyManager;
 	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private lastBellTimestamps = new Map<string, number>();
+	private lastOsc9Timestamps = new Map<string, number>();
 
 	constructor(
 		private readonly sendMessage: (msg: ProtocolMessage) => void,
@@ -73,6 +81,8 @@ export class AgentHandler {
 			clearTimeout(timer);
 		}
 		this.titleDebounceTimers.clear();
+		this.lastBellTimestamps.clear();
+		this.lastOsc9Timestamps.clear();
 		this.ptyManager.destroyAll();
 	}
 
@@ -128,6 +138,8 @@ export class AgentHandler {
 
 			this.setupOutputBatching(channelId);
 			this.setupTitleChangeHandler(channelId);
+			this.setupBellHandler(channelId);
+			this.setupOsc9Handler(channelId);
 
 			this.ptyManager.onExit(channelId, (exit) => {
 				this.clearTitleDebounce(channelId);
@@ -253,6 +265,51 @@ export class AgentHandler {
 					});
 				}, TITLE_DEBOUNCE_MS),
 			);
+		});
+	}
+
+	/**
+	 * Throttle bell events per channel: max 1 BELL per BELL_THROTTLE_MS.
+	 * Uses a simple timestamp comparison (not debounce — first-write-wins).
+	 */
+	private setupBellHandler(channelId: string): void {
+		this.ptyManager.onBell(channelId, () => {
+			if (!this.ptyManager.has(channelId)) return;
+
+			const now = Date.now();
+			const last = this.lastBellTimestamps.get(channelId) ?? 0;
+			if (now - last < BELL_THROTTLE_MS) return;
+
+			this.lastBellTimestamps.set(channelId, now);
+			this.sendMessage({ type: "BELL", channelId });
+		});
+	}
+
+	/**
+	 * Throttle OSC 9 notifications per channel: max 1 NOTIFICATION per OSC9_THROTTLE_MS.
+	 * Sanitizes the message: strips control chars (except \n), strips HTML tags,
+	 * truncates to OSC9_MAX_LENGTH, and trims whitespace.
+	 */
+	private setupOsc9Handler(channelId: string): void {
+		this.ptyManager.onOsc9(channelId, (rawMessage: string): boolean => {
+			if (!this.ptyManager.has(channelId)) return true;
+
+			const now = Date.now();
+			const last = this.lastOsc9Timestamps.get(channelId) ?? 0;
+			if (now - last < OSC9_THROTTLE_MS) return true;
+
+			// Sanitize: strip HTML tags, strip control chars (keep \n), truncate, trim
+			const message = rawMessage
+				.replace(/<[^>]*>/g, "")
+				.replace(OSC9_CONTROL_CHARS_RE, "")
+				.trim()
+				.slice(0, OSC9_MAX_LENGTH);
+
+			if (message === "") return true;
+
+			this.lastOsc9Timestamps.set(channelId, now);
+			this.sendMessage({ type: "NOTIFICATION", channelId, message });
+			return true;
 		});
 	}
 

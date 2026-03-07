@@ -18,6 +18,8 @@ interface MockPtyManager {
 	onData: ReturnType<typeof vi.fn>;
 	onExit: ReturnType<typeof vi.fn>;
 	onTitleChange: ReturnType<typeof vi.fn>;
+	onBell: ReturnType<typeof vi.fn>;
+	onOsc9: ReturnType<typeof vi.fn>;
 	destroy: ReturnType<typeof vi.fn>;
 	has: ReturnType<typeof vi.fn>;
 	destroyAll: ReturnType<typeof vi.fn>;
@@ -25,12 +27,16 @@ interface MockPtyManager {
 	_triggerData: (channelId: string, raw: string) => void;
 	_triggerExit: (channelId: string, exit: { exitCode: number; signal?: number }) => void;
 	_triggerTitleChange: (channelId: string, title: string) => void;
+	_triggerBell: (channelId: string) => void;
+	_triggerOsc9: (channelId: string, message: string) => void;
 }
 
 function makeMockPtyManager(): MockPtyManager {
 	const dataCallbacks = new Map<string, (data: string) => void>();
 	const exitCallbacks = new Map<string, (exit: { exitCode: number; signal?: number }) => void>();
 	const titleCallbacks = new Map<string, (title: string) => void>();
+	const bellCallbacks = new Map<string, () => void>();
+	const osc9Callbacks = new Map<string, (message: string) => boolean>();
 
 	const defaultSnapshot = {
 		serialized: "\x1b[1;1Hhello world",
@@ -58,6 +64,12 @@ function makeMockPtyManager(): MockPtyManager {
 		onTitleChange: vi.fn((channelId: string, cb: (title: string) => void) => {
 			titleCallbacks.set(channelId, cb);
 		}),
+		onBell: vi.fn((channelId: string, cb: () => void) => {
+			bellCallbacks.set(channelId, cb);
+		}),
+		onOsc9: vi.fn((channelId: string, cb: (message: string) => boolean) => {
+			osc9Callbacks.set(channelId, cb);
+		}),
 		destroy: vi.fn(),
 		has: vi.fn().mockReturnValue(true),
 		destroyAll: vi.fn(),
@@ -69,6 +81,12 @@ function makeMockPtyManager(): MockPtyManager {
 		},
 		_triggerTitleChange: (channelId: string, title: string) => {
 			titleCallbacks.get(channelId)?.(title);
+		},
+		_triggerBell: (channelId: string) => {
+			bellCallbacks.get(channelId)?.();
+		},
+		_triggerOsc9: (channelId: string, message: string) => {
+			osc9Callbacks.get(channelId)?.(message);
 		},
 	};
 }
@@ -613,6 +631,160 @@ describe("AgentHandler", () => {
 		vi.advanceTimersByTime(100);
 
 		expect(sent.filter((m) => m.type === "TITLE_CHANGE")).toHaveLength(0);
+
+		vi.useRealTimers();
+	});
+
+	// -------------------------------------------------------------------------
+	// BELL (via headless terminal onBell)
+	// -------------------------------------------------------------------------
+
+	it("bell detection sends BELL message", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-bell",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		mock._triggerBell("chan-001");
+
+		const bellMsgs = sent.filter((m) => m.type === "BELL");
+		expect(bellMsgs).toHaveLength(1);
+		const msg = bellMsgs[0] as { type: string; channelId: string };
+		expect(msg.channelId).toBe("chan-001");
+	});
+
+	it("rapid bells are throttled to 1 per 100ms", () => {
+		vi.useFakeTimers();
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-bell-throttle",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		// Fire 5 bells rapidly at t=0
+		for (let i = 0; i < 5; i++) {
+			mock._triggerBell("chan-001");
+		}
+
+		// Only 1 should have been sent (first one at t=0, rest throttled)
+		expect(sent.filter((m) => m.type === "BELL")).toHaveLength(1);
+
+		// Advance past throttle window
+		vi.advanceTimersByTime(100);
+
+		// Now another bell should be allowed
+		mock._triggerBell("chan-001");
+		expect(sent.filter((m) => m.type === "BELL")).toHaveLength(2);
+
+		vi.useRealTimers();
+	});
+
+	// -------------------------------------------------------------------------
+	// OSC 9 NOTIFICATION (via headless terminal registerOsc9Handler)
+	// -------------------------------------------------------------------------
+
+	it("OSC 9 sends NOTIFICATION with message text", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-osc9",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		mock._triggerOsc9("chan-001", "Build complete!");
+
+		const notifMsgs = sent.filter((m) => m.type === "NOTIFICATION");
+		expect(notifMsgs).toHaveLength(1);
+		const msg = notifMsgs[0] as { type: string; channelId: string; message: string };
+		expect(msg.channelId).toBe("chan-001");
+		expect(msg.message).toBe("Build complete!");
+	});
+
+	it("OSC 9 sanitizes HTML and control chars", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-osc9-sanitize",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		mock._triggerOsc9("chan-001", '<script>alert("xss")</script>\x07Hello\x1bWorld');
+
+		const notifMsgs = sent.filter((m) => m.type === "NOTIFICATION");
+		expect(notifMsgs).toHaveLength(1);
+		const msg = notifMsgs[0] as { type: string; message: string };
+		expect(msg.message).toBe('alert("xss")HelloWorld');
+	});
+
+	it("OSC 9 truncates message to 256 chars", () => {
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-osc9-trunc",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		const longMessage = "A".repeat(500);
+		mock._triggerOsc9("chan-001", longMessage);
+
+		const notifMsgs = sent.filter((m) => m.type === "NOTIFICATION");
+		expect(notifMsgs).toHaveLength(1);
+		const msg = notifMsgs[0] as { type: string; message: string };
+		expect(msg.message).toHaveLength(256);
+	});
+
+	it("rapid OSC 9 notifications are throttled to 1 per 500ms", () => {
+		vi.useFakeTimers();
+		const { handler, sent } = makeHandler(mock);
+		pushMsg(handler, {
+			type: "SPAWN",
+			requestId: "req-osc9-throttle",
+			shell: "/bin/bash",
+			cwd: "/tmp",
+			env: {},
+			cols: 80,
+			rows: 24,
+		});
+
+		// Fire 5 OSC 9 notifications rapidly at t=0
+		for (let i = 0; i < 5; i++) {
+			mock._triggerOsc9("chan-001", `Notification ${i}`);
+		}
+
+		// Only 1 should have been sent
+		expect(sent.filter((m) => m.type === "NOTIFICATION")).toHaveLength(1);
+		const msg = sent.filter((m) => m.type === "NOTIFICATION")[0] as { message: string };
+		expect(msg.message).toBe("Notification 0");
+
+		// Advance past throttle window
+		vi.advanceTimersByTime(500);
+
+		// Now another should be allowed
+		mock._triggerOsc9("chan-001", "Notification 5");
+		expect(sent.filter((m) => m.type === "NOTIFICATION")).toHaveLength(2);
 
 		vi.useRealTimers();
 	});

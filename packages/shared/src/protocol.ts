@@ -173,6 +173,19 @@ export interface AgentTitleChangeMessage {
 	title: string; // already sanitized by agent
 }
 
+/** Agent → Hub: terminal bell (BEL character, \x07) */
+export interface AgentBellMessage {
+	type: "BELL";
+	channelId: string;
+}
+
+/** Agent → Hub: OSC 9 desktop notification */
+export interface AgentNotificationMessage {
+	type: "NOTIFICATION";
+	channelId: string;
+	message: string;
+}
+
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)
 // ---------------------------------------------------------------------------
@@ -375,6 +388,8 @@ export type AgentMessage =
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
 	| AgentTitleChangeMessage
+	| AgentBellMessage
+	| AgentNotificationMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the Agent */
@@ -421,6 +436,8 @@ export type HubToUiMessage =
 	| WriteRevokedMessage
 	| WriteLockMessage
 	| AgentTitleChangeMessage
+	| AgentBellMessage
+	| AgentNotificationMessage
 	| PongMessage
 	| HostVerifyMessage
 	| ErrorMessage;
@@ -468,4 +485,6 @@ export type ProtocolMessage =
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
 	| AgentTitleChangeMessage
+	| AgentBellMessage
+	| AgentNotificationMessage
 	| ErrorMessage;

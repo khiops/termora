@@ -1,7 +1,9 @@
 import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
+	AgentBellMessage,
 	AgentChannelStateMessage,
+	AgentNotificationMessage,
 	AgentSnapshotResMessage,
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
@@ -104,6 +106,10 @@ export class SessionManager {
 	private gc: SpoolGarbageCollector;
 	/** channelId → pending title debounce timer for DB writes */
 	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
+	private bellTimestamps = new Map<string, number[]>();
+	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
+	private notificationTimestamps = new Map<string, number[]>();
 
 	/**
 	 * Optional callback to resolve the current write-lock holder for a channel.
@@ -893,6 +899,16 @@ export class SessionManager {
 			} else if (msg.type === "TITLE_CHANGE") {
 				const titleMsg = msg as AgentTitleChangeMessage;
 				this._handleTitleChange(titleMsg);
+			} else if (msg.type === "BELL") {
+				const bellMsg = msg as AgentBellMessage;
+				if (this._rateLimitCheck(this.bellTimestamps, bellMsg.channelId, 10)) {
+					this._broadcastToChannel(bellMsg.channelId, bellMsg);
+				}
+			} else if (msg.type === "NOTIFICATION") {
+				const notifMsg = msg as AgentNotificationMessage;
+				if (this._rateLimitCheck(this.notificationTimestamps, notifMsg.channelId, 5)) {
+					this._broadcastToChannel(notifMsg.channelId, notifMsg);
+				}
 			}
 		});
 
@@ -1337,6 +1353,33 @@ export class SessionManager {
 		for (const client of this.clients.values()) {
 			client.send(msg);
 		}
+	}
+
+	/**
+	 * Sliding-window rate limiter: returns true if the event is allowed.
+	 * Keeps at most `maxPerSecond` timestamps within the last 1000ms per channel.
+	 */
+	private _rateLimitCheck(
+		store: Map<string, number[]>,
+		channelId: string,
+		maxPerSecond: number,
+	): boolean {
+		const now = Date.now();
+		const cutoff = now - 1000;
+		let timestamps = store.get(channelId);
+		if (!timestamps) {
+			timestamps = [];
+			store.set(channelId, timestamps);
+		}
+		// Evict entries older than 1 second
+		while (timestamps.length > 0 && (timestamps[0] ?? 0) < cutoff) {
+			timestamps.shift();
+		}
+		if (timestamps.length >= maxPerSecond) {
+			return false;
+		}
+		timestamps.push(now);
+		return true;
 	}
 
 	/**

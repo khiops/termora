@@ -93,6 +93,18 @@ export class PtyManager {
 		channel.headless.onTitleChange(callback);
 	}
 
+	/** Register an onBell callback on a channel's headless terminal (BEL). */
+	onBell(channelId: string, callback: () => void): void {
+		const channel = this.getChannel(channelId);
+		channel.headless.onBell(callback);
+	}
+
+	/** Register an OSC 9 handler on a channel's headless terminal. */
+	onOsc9(channelId: string, callback: (message: string) => boolean): void {
+		const channel = this.getChannel(channelId);
+		channel.headless.registerOsc9Handler(callback);
+	}
+
 	/**
 	 * Produce a serialized snapshot of a channel's headless terminal state.
 	 * Returns null if the channel does not exist.

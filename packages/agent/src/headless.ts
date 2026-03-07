@@ -18,6 +18,7 @@ const { Terminal } = xtermHeadless;
 export class HeadlessTerminal {
 	private readonly terminal: InstanceType<typeof Terminal>;
 	private readonly serializeAddon: InstanceType<typeof SerializeAddon>;
+	private readonly disposables: { dispose(): void }[] = [];
 
 	constructor(cols: number, rows: number, scrollback?: number) {
 		this.terminal = new Terminal({
@@ -77,7 +78,23 @@ export class HeadlessTerminal {
 		this.terminal.onTitleChange(callback);
 	}
 
+	/** Register a callback for terminal bell (BEL character). */
+	onBell(callback: () => void): void {
+		const disposable = this.terminal.onBell(callback);
+		this.disposables.push(disposable);
+	}
+
+	/** Register a handler for OSC 9 desktop notifications. */
+	registerOsc9Handler(callback: (message: string) => boolean): void {
+		const disposable = this.terminal.parser.registerOscHandler(9, callback);
+		this.disposables.push(disposable);
+	}
+
 	dispose(): void {
+		for (const d of this.disposables) {
+			d.dispose();
+		}
+		this.disposables.length = 0;
 		this.terminal.dispose();
 	}
 }

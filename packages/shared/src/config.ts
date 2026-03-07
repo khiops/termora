@@ -142,6 +142,68 @@ export interface HostsDefaultsConfig {
 	historyRetentionDays?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Notification configuration
+// ---------------------------------------------------------------------------
+
+export type ScrollMode = "auto" | "alwaysBottom" | "alwaysResume";
+export type BellSound = "system" | "custom" | "mute";
+
+export interface NotificationConfig {
+	desktopNotifications?: boolean;
+	groupingWindowMs?: number;
+	activity?: {
+		enabled?: boolean;
+		minLines?: number;
+		debounceMs?: number;
+	};
+	bell?: {
+		enabled?: boolean;
+		sound?: BellSound;
+		customSoundFile?: string;
+		desktopNotification?: boolean;
+	};
+	osc9?: {
+		enabled?: boolean;
+		desktopNotification?: boolean;
+	};
+	scroll?: {
+		mode?: ScrollMode;
+		autoThreshold?: number;
+	};
+}
+
+export const DEFAULT_NOTIFICATION_CONFIG: Required<
+	Pick<NotificationConfig, "desktopNotifications" | "groupingWindowMs">
+> & {
+	activity: Required<NonNullable<NotificationConfig["activity"]>>;
+	bell: Required<NonNullable<NotificationConfig["bell"]>>;
+	osc9: Required<NonNullable<NotificationConfig["osc9"]>>;
+	scroll: Required<NonNullable<NotificationConfig["scroll"]>>;
+} = {
+	desktopNotifications: true,
+	groupingWindowMs: 5000,
+	activity: {
+		enabled: true,
+		minLines: 1,
+		debounceMs: 500,
+	},
+	bell: {
+		enabled: true,
+		sound: "system",
+		customSoundFile: "",
+		desktopNotification: true,
+	},
+	osc9: {
+		enabled: true,
+		desktopNotification: true,
+	},
+	scroll: {
+		mode: "auto",
+		autoThreshold: 100,
+	},
+};
+
 /** Layer 1 built-in defaults for the terminal profile cascade. */
 export const DEFAULT_PROFILE: TerminalProfile = {
 	fontFamily: '"Consolas", "Liberation Mono", "Courier New", monospace',

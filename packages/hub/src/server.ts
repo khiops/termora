@@ -126,6 +126,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}
 		await registerUserFonts(server, configDir);
+		await registerUserSounds(server, configDir);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
@@ -181,6 +182,29 @@ async function registerUserFonts(server: FastifyInstance, configDir: string): Pr
 	});
 
 	server.log.info({ fontsDir }, "serving user fonts from config dir");
+}
+
+/**
+ * Register a @fastify/static instance to serve user-provided sound files
+ * from the config directory's `sounds/` subdirectory.
+ *
+ * The sounds directory is created on startup (mkdir -p) so users can just
+ * drop audio files in there for custom bell sounds.
+ */
+async function registerUserSounds(server: FastifyInstance, configDir: string): Promise<void> {
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const soundsDir = join(configDir, "sounds");
+	mkdirSync(soundsDir, { recursive: true });
+
+	const fastifyStatic = (await import("@fastify/static")).default;
+	await server.register(fastifyStatic, {
+		root: soundsDir,
+		prefix: "/public/sounds/",
+		decorateReply: false, // required for multiple @fastify/static plugins
+	});
+
+	server.log.info({ soundsDir }, "serving user sounds from config dir");
 }
 
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
