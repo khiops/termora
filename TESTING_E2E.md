@@ -1,7 +1,16 @@
 # E2E Testing Checklist
 
 Manual E2E tests run via Chrome DevTools (MCP) against `pnpm dev`.
-Run these after any change to channel/tab/sidebar/write-lock logic.
+Run these after any change to channel/tab/sidebar/write-lock/theme/search/title logic.
+
+Scenarios 1-18: Core (MVP + agent daemon)
+Scenarios 19-25: UX-06 Theming
+Scenarios 26-36: UX-01 Tab Actions & Split Panes
+Scenarios 37-43: UX-02 Terminal Title
+Scenarios 44-58: UX-04 Scrollback Search
+Scenarios 59-70: UX-03 Host Management
+Scenarios 71-80: UX-05 Notifications
+Scenarios 81-88: UX-07 Host Customization
 
 ## Prerequisites
 
@@ -144,6 +153,555 @@ Precondition: 2+ live channels with output, agent running as daemon.
 - [ ] Reload page (F5) → all 3 tabs restored
 - [ ] Each terminal shows its previous scrollback (snapshot restore)
 - [ ] Write lock auto-claimed on active tab
+
+---
+
+## Sprint 1 — Theming (UX-06)
+
+### 19. Theme switching
+
+- [ ] Open appearance panel → theme picker shows 9 bundled presets
+- [ ] Click "dracula" → chrome colors update immediately (sidebar, tab bar, host rail)
+- [ ] Terminal ANSI colors update (run `ls --color` → colors match dracula palette)
+- [ ] Click "solarized-light" → light theme applied (bright backgrounds, dark text)
+- [ ] Click "catppuccin-mocha" → back to default dark theme
+
+### 20. Theme live preview on hover
+
+- [ ] Hover over a theme in the picker → chrome + terminal preview instantly
+- [ ] Move mouse away → reverts to current theme (no commit)
+- [ ] Click the hovered theme → preview becomes permanent
+
+### 21. Theme editor
+
+- [ ] Open theme editor → color pickers for all 22 terminal + 15 UI colors
+- [ ] Change a terminal color (e.g. red) → terminal updates live
+- [ ] Change a UI color (e.g. --nt-bg-primary) → chrome updates live
+- [ ] Save → theme file written, appears in picker
+- [ ] Cancel → changes discarded, original theme restored
+
+### 22. Theme import/export
+
+- [ ] Export current theme → JSON file downloaded
+- [ ] Import a valid theme JSON → theme appears in picker and is selectable
+- [ ] Import invalid JSON → error message, no crash
+
+### 23. OS auto-switch (dark/light)
+
+- [ ] Enable auto-switch in appearance settings
+- [ ] Set light theme for "light" and dark theme for "dark"
+- [ ] Toggle OS dark mode → theme switches automatically
+- [ ] Manually select a theme → auto-switch disables (SC-14)
+
+### 24. Background opacity
+
+- [ ] Adjust opacity slider → terminal + chrome background becomes translucent
+- [ ] At 100% → fully opaque (default)
+- [ ] At ~80% → desktop visible behind terminal area
+- [ ] Reload page → opacity setting preserved
+
+### 25. Scrollbar styling
+
+- [ ] Set scrollbar style to "thin" → xterm scrollbar narrows
+- [ ] Set to "wide" → scrollbar widens
+- [ ] Set to "hidden" → scrollbar disappears (scroll still works via mouse wheel)
+- [ ] --nt-scrollbar-width CSS var applied correctly
+
+---
+
+## Sprint 1 — Tab Actions & Split Panes (UX-01)
+
+### 26. Tab context menu
+
+- [ ] Right-click a tab → context menu appears with: Close, Close Others, Close to the Right, Close All
+- [ ] Click away → menu dismisses
+- [ ] Menu positioned at click coordinates (no overflow off-screen)
+
+### 27. Close Others / Close to the Right / Close All
+
+Precondition: 4 tabs open (A, B, C, D), tab B selected.
+
+- [ ] Right-click B → "Close Others" → A, C, D tabs vacated, B remains
+- [ ] Undo: reopen channels. Right-click C → "Close to the Right" → D vacated, A, B, C remain
+- [ ] Right-click any → "Close All" → all tabs vacated (panes show vacant state, tabs stay)
+
+### 28. Confirm dialogs (close actions)
+
+- [ ] "Close All" triggers confirmation dialog (if confirmCloseAll enabled)
+- [ ] Dialog shows "Remember for host" and "Remember globally" checkboxes
+- [ ] Check "Remember globally" + confirm → next "Close All" skips dialog
+- [ ] Clear localStorage `nexterm:skipConfirm*` → dialogs return
+
+### 29. Split panes — horizontal and vertical
+
+- [ ] With 1 terminal open, use split action → pane splits into 2 (vacant + terminal)
+- [ ] Split again → 3 panes visible
+- [ ] Split once more → 4 panes (max reached)
+- [ ] Attempt 5th split → blocked (max 4 panes enforced, INV-02)
+- [ ] Each vacant pane shows channel picker
+
+### 30. Vacant pane — channel picker
+
+- [ ] Click a vacant pane → picker appears with available detached channels
+- [ ] Select a channel → terminal loads in that pane (attach)
+- [ ] Click "+" in picker → new channel created and assigned to pane
+- [ ] Vacant pane with no available channels → shows "+" only
+
+### 31. Pane close and collapse
+
+- [ ] Close a pane (X button on pane header) → pane becomes vacant
+- [ ] Close the last non-vacant pane in a split → split collapses, parent resizes
+- [ ] Root pane close → tab stays open with vacant pane (INV-04: tab never auto-closes)
+
+### 32. Cross-tab pane drag & drop
+
+Precondition: 2 tabs, each with 1 terminal pane.
+
+- [ ] Drag pane header from tab A → drop on tab B's center → replaces pane content
+- [ ] Tab A shows vacant pane (channel detached, not killed — INV-03)
+- [ ] Drop on left edge (25%) → horizontal split, dropped pane on left
+- [ ] Drop on right edge → horizontal split, dropped pane on right
+- [ ] Drop on top edge → vertical split, dropped pane on top
+- [ ] Drop on bottom edge → vertical split, dropped pane on bottom
+- [ ] Same-tab drag: move pane within a split → swaps positions
+
+### 33. Pane resize (splitter drag)
+
+- [ ] Drag the splitter between two panes → both resize proportionally
+- [ ] Release → ratio preserved
+- [ ] Resize persists after tab switch and return
+
+### 34. Welcome tab
+
+- [ ] First visit to host (or autoOpenWelcome=true) → welcome tab auto-opens with ★ icon
+- [ ] Welcome tab shows configurable content (per-host)
+- [ ] Star icon (★) visible in both tab bar and sidebar
+- [ ] Only one welcome tab per host (enforce via transaction)
+- [ ] Close welcome tab → can reopen via sidebar context menu
+
+### 35. Configure command + direct process
+
+- [ ] Right-click channel → "Configure Command" → dialog to set shell/args/directProcess
+- [ ] Set command to `htop` with directProcess=true → channel runs htop directly
+- [ ] When htop exits → exit overlay appears: Restart / Configure Command / Close
+- [ ] Click "Restart" → htop relaunches in same channel
+- [ ] Click "Configure Command" → back to dialog
+- [ ] Click "Close" → channel vacated
+
+### 36. Channel sidebar context menu
+
+- [ ] Right-click channel in sidebar → context menu: Open in Current Tab, Open in New Tab, Rename, Close Channel
+- [ ] "Open in Current Tab" → replaces active pane content with this channel
+- [ ] "Open in New Tab" → creates new tab with this channel
+- [ ] "Rename" → inline rename input
+- [ ] "Close Channel" → channel deleted (with confirmation if live)
+
+---
+
+## Sprint 1 — Terminal Title (UX-02)
+
+### 37. Dynamic title from OSC sequences
+
+- [ ] Run `vim` → tab title changes to "vim" (OSC 0/2 sequence)
+- [ ] Exit vim → tab title reverts to previous (title stack)
+- [ ] Run `ssh user@server` → title changes to "user@server"
+- [ ] Run `htop` → title changes to "htop"
+- [ ] Sidebar also shows dynamic title (without prefix)
+
+### 38. Title priority chain
+
+- [ ] Channel with no activity → shows fallback ("Terminal" or custom)
+- [ ] Run a command → dynamic title appears (live OSC override)
+- [ ] Double-click tab to rename (F2) → custom title overrides dynamic
+- [ ] While custom title set, run vim → custom title stays (custom > dynamic)
+
+### 39. Title truncation
+
+- [ ] Run a command that produces a very long title (e.g. deep nested path)
+- [ ] Tab title truncates with "…" at end (default position)
+- [ ] Full title visible on hover (tooltip)
+- [ ] Sidebar title also truncates appropriately
+
+### 40. Window title (document.title)
+
+- [ ] Switch to a tab → browser window/tab title updates to formatted string
+- [ ] Format includes host prefix, channel title (configurable tokens)
+- [ ] Switch tabs → window title follows active pane
+- [ ] With no tabs → window title shows app name only
+
+### 41. Per-host title prefix
+
+- [ ] Configure a host with prefix "PROD" → all channels on that host show "PROD: <title>"
+- [ ] Prefix applied before truncation (counts toward char limit)
+- [ ] Sidebar titles do NOT show prefix (SC-15)
+
+### 42. Reset title to dynamic
+
+- [ ] Rename a channel to custom title via double-click
+- [ ] Right-click tab → "Reset Title to Dynamic" appears (only when custom title set)
+- [ ] Click "Reset" → title reverts to current dynamic title (or fallback if no OSC)
+- [ ] Menu item grayed out when title is already dynamic
+
+### 43. Title persistence across reconnect
+
+- [ ] Run vim → dynamic title "vim" displayed
+- [ ] Reload page → after reattach, dynamic title restored from DB (ATTACH_OK carries dynamicTitle)
+- [ ] Custom title also preserved after reload
+
+---
+
+## Sprint 1 — Scrollback Search (UX-04)
+
+### 44. Open/close search overlay
+
+- [ ] Press Ctrl+Shift+F → search overlay appears in terminal pane (top-right default)
+- [ ] Input is auto-focused
+- [ ] Press Escape → overlay closes, terminal refocused
+- [ ] Press Ctrl+Shift+F again → overlay reopens with previous query
+
+### 45. Incremental search + highlighting
+
+- [ ] Type a query (e.g. "echo") → matches highlighted in terminal as you type
+- [ ] Match count displayed (e.g. "3/12" — current match / total)
+- [ ] Typing more characters narrows results (incremental)
+- [ ] Clear input → highlights removed, count resets to "0/0"
+
+### 46. Match navigation
+
+- [ ] Press Enter → scrolls to next match, current match counter increments
+- [ ] Press Shift+Enter → scrolls to previous match, counter decrements
+- [ ] Click "▼" button → next match
+- [ ] Click "▲" button → previous match
+- [ ] At last match + Enter → wraps to first match
+- [ ] At first match + Shift+Enter → wraps to last match
+
+### 47. Case-sensitive toggle
+
+- [ ] Click "Aa" button (or Alt+C) → case-sensitive mode enabled (button highlighted)
+- [ ] Search "Echo" case-sensitive → only matches exact case
+- [ ] Toggle off → "echo", "Echo", "ECHO" all match
+- [ ] Toggle state reflected in button appearance
+
+### 48. Regex search
+
+- [ ] Click ".*" button (or Alt+R) → regex mode enabled
+- [ ] Type `echo\s+\w+` → matches "echo" followed by word
+- [ ] Regex badge "[.*]" appears in input area
+- [ ] Type invalid regex (e.g. `[unclosed`) → inline error message displayed
+- [ ] Fix regex → error clears, matches appear
+
+### 49. Whole word toggle
+
+- [ ] Click "W" button (or Alt+W) → whole-word mode enabled
+- [ ] Search "echo" → matches standalone "echo" but not "echotest"
+- [ ] Toggle off → "echotest" also matches
+
+### 50. Scrollbar markers
+
+- [ ] Search a query with multiple matches → orange/yellow marks appear on scrollbar
+- [ ] Active match shown with different color (pink) on scrollbar
+- [ ] Navigate matches → active marker moves on scrollbar
+- [ ] Clear search → markers disappear
+- [ ] Scrollbar markers respect terminal profile setting (can be disabled)
+
+### 51. Search on dead/exited channel
+
+- [ ] Exit a channel (type `exit`)
+- [ ] Press Ctrl+Shift+F → search overlay opens on dead channel
+- [ ] Search previous output → matches found and highlighted
+- [ ] Navigation works normally on frozen buffer
+
+### 52. Highlight on close behavior
+
+- [ ] With highlightOnClose="clear" → close overlay → highlights removed immediately
+- [ ] With highlightOnClose="fade" → close overlay → highlights fade after ~300ms
+- [ ] With highlightOnClose="persist" → close overlay → highlights remain visible
+
+### 53. Multi-pane search — scope toggle
+
+Precondition: 2+ panes visible in current tab (split view).
+
+- [ ] Open search → scope toggle visible ("1" = current pane, "All" = all panes)
+- [ ] Default scope: current pane ("1" active)
+- [ ] Click "All" → search expands to all panes, total match count aggregates
+- [ ] Match count shows combined total across all panes
+
+### 54. Multi-pane search — cross-pane navigation
+
+Precondition: 2 panes with matches in both, scope="All".
+
+- [ ] Press Enter → navigates through current pane matches
+- [ ] After last match in current pane → focus jumps to next pane with matches
+- [ ] Next pane highlights and scrolls to its first match
+- [ ] Continue → cycles through all panes with wrap-around
+- [ ] Shift+Enter → reverse direction, same cross-pane behavior
+- [ ] Pane with zero matches → skipped during navigation
+
+### 55. Multi-pane search — single pane
+
+- [ ] With only 1 pane visible → scope toggle NOT visible
+- [ ] Search works normally (single-pane mode)
+
+### 56. Search history
+
+- [ ] Perform several searches: "foo", "bar", "baz"
+- [ ] Close and reopen search → click empty input or focus → history dropdown appears
+- [ ] History shows recent queries in MRU order: "baz", "bar", "foo"
+- [ ] Click a history entry → populates input, executes search
+- [ ] Search "foo" again → deduplicates, "foo" moves to top
+- [ ] Regex searches show [.*] badge in history dropdown
+- [ ] History persists across page reload (localStorage)
+
+### 57. Search overlay position
+
+- [ ] Default position: top-right of terminal pane
+- [ ] Change config to "bottom-right" → overlay moves to bottom-right
+- [ ] Change config to "bottom-bar" → overlay spans full width at bottom
+- [ ] Overlay does not cover terminal text (scrolls content if needed)
+
+### 58. Search keyboard shortcuts summary
+
+- [ ] Ctrl+Shift+F → open search (from terminal)
+- [ ] Escape → close search (refocus terminal)
+- [ ] Enter → next match
+- [ ] Shift+Enter → previous match
+- [ ] Alt+C → toggle case-sensitive
+- [ ] Alt+R → toggle regex
+- [ ] Alt+W → toggle whole word
+- [ ] Typing in search input does NOT send keystrokes to terminal
+
+---
+
+## Sprint 1 — Host Management (UX-03)
+
+### 59. Add host modal
+
+- [ ] Click [+] button in host rail → Add Host modal opens
+- [ ] Fill Name, Hostname, Port (default 22), Username, Auth method
+- [ ] Click Save → host appears in host rail with auto-generated icon + color
+- [ ] Click Cancel → modal closes, no host created
+
+### 60. Edit host
+
+- [ ] Right-click host in rail → context menu with "Edit Host"
+- [ ] Click "Edit Host" → modal opens pre-filled with current values
+- [ ] Modify hostname and username → Save
+- [ ] Verify changes persist (hover tooltip shows updated values)
+
+### 61. Delete host
+
+- [ ] Right-click host → "Delete Host" → confirmation dialog appears
+- [ ] Cancel deletion → host remains
+- [ ] Confirm deletion → host removed from rail, associated channels closed
+- [ ] Attempt delete on local host → option NOT available in context menu
+
+### 62. Duplicate host
+
+- [ ] Right-click host → "Duplicate" → new host appears as "hostname-copy"
+- [ ] Duplicate again → "hostname-copy-2" created
+- [ ] Verify duplicate inherits SSH config from original
+
+### 63. SSH config import (single)
+
+- [ ] Click [+] in host rail → select "From SSH config" source
+- [ ] Dropdown lists hosts from ~/.ssh/config
+- [ ] Select a host → fields auto-fill (hostname, port, user, key)
+- [ ] Click Save → host created with ssh_config_host field set
+- [ ] If ~/.ssh/config missing → error message shown
+
+### 64. Batch SSH config import
+
+- [ ] Open batch import dialog → all hosts from ~/.ssh/config listed
+- [ ] Git hosts (github.com, gitlab.com) unchecked by default with "(skipped)" label
+- [ ] Check/uncheck hosts → "Import N hosts" button updates count
+- [ ] Click Import → all selected hosts appear in rail
+- [ ] ProxyJump dependencies auto-checked with explanation tooltip
+
+### 65. Host groups — create & assign
+
+- [ ] In Add Host modal, click Group dropdown → existing groups listed
+- [ ] Click "+ New group" → type group name → group created
+- [ ] Save host → host appears under correct group separator in rail
+- [ ] New host without group → appears in default/ungrouped section
+
+### 66. Host groups — collapse/expand
+
+- [ ] Click group separator → group collapses (shows "N hosts hidden")
+- [ ] Click again → group expands showing all hosts
+- [ ] Collapse state persists across page reload
+
+### 67. Host groups — rename & delete
+
+- [ ] Right-click group separator → "Rename Group" → inline edit
+- [ ] Type new name + Enter → separator label updates
+- [ ] Right-click group → "Delete Group" → confirmation
+- [ ] Confirm → group removed, hosts move to ungrouped section
+- [ ] Active sessions on moved hosts continue uninterrupted
+
+### 68. Host DnD reorder
+
+- [ ] Drag host within same group → host moves to new position
+- [ ] Release → order persists after page reload
+- [ ] Drag host from one group to another → host moves to target group
+- [ ] Group host counts update accordingly
+
+### 69. Test connection
+
+- [ ] Fill Add Host form (do NOT save) → click "Test Connection"
+- [ ] Button shows "Testing..." spinner
+- [ ] Success → shows "Connected (Xms, OpenSSH X.Y)"
+- [ ] Auth failure → shows "Auth failed" error
+- [ ] Unreachable host → shows "Timeout after 10s"
+- [ ] Test does NOT save the host
+
+### 70. Host rail context menu & local host
+
+- [ ] Right-click SSH host → full menu: Edit, Delete, Duplicate, Move to Group
+- [ ] Right-click local host → only "Edit Name / Icon" available
+- [ ] Delete, Disconnect, Duplicate NOT shown for local host
+- [ ] Hover host → tooltip shows hostname, port, user, auth method
+
+---
+
+## Sprint 1 — Notifications (UX-05)
+
+### 71. Bell badge on inactive tab
+
+- [ ] Open 2 channels (A, B), switch to B
+- [ ] In A (background), run `echo -e '\a'` → red badge "1" appears on A's tab
+- [ ] Run bell again → badge increments to "2"
+- [ ] Bell on active tab (B) → no badge (already focused)
+
+### 72. Activity dot on background output
+
+- [ ] Switch to channel B, channel A is background
+- [ ] Channel A receives output (e.g., running script) → blue dot on A's tab
+- [ ] Whitespace-only output does NOT trigger dot
+- [ ] Activity dot is separate from bell badge (blue vs red)
+
+### 73. Badge/dot clear on tab focus
+
+- [ ] Channel A has activity dot + bell badge "3"
+- [ ] Click A's tab → terminal auto-scrolls to bottom
+- [ ] Both activity dot and bell badge clear
+- [ ] If not scrolled to bottom → badges remain, unread bar shows
+
+### 74. Unread line bar
+
+Precondition: channel A has 200+ new lines while inactive.
+
+- [ ] Click A's tab → unread bar appears: "200 new lines"
+- [ ] Click "Jump to bottom" → terminal scrolls to bottom, bar + badges clear
+- [ ] Alternatively, click "Mark as read" → badges clear, scroll position unchanged
+- [ ] Manually scroll to bottom → bar dismisses automatically
+- [ ] After reaching bottom, scrolling up does NOT re-show bar
+
+### 75. Desktop notification on bell
+
+Precondition: Notification API permission granted, window hidden (minimized/other tab).
+
+- [ ] Background channel outputs BEL → desktop notification: "nexterm - host / Bell in channel"
+- [ ] Multiple bells within 5s → grouped: "5 alerts in channel"
+- [ ] Click notification → browser focuses, channel tab activates
+- [ ] Permission denied → no notification, but badge still increments
+
+### 76. OSC 9 notification
+
+- [ ] Background channel outputs `echo -e '\e]9;Build done!\a'`
+- [ ] Desktop notification shows "Build done!" in body
+- [ ] Empty OSC 9 message → generic "Bell in channel" text
+- [ ] OSC 9 on active/focused tab → no notification
+- [ ] HTML in OSC 9 message → tags stripped (XSS prevention)
+
+### 77. Bell sound
+
+- [ ] Set bell sound to "system" → BEL char triggers system beep
+- [ ] Set to "mute" → no sound, badge still increments
+- [ ] Set to "custom" with valid .wav/.mp3 file → custom sound plays
+- [ ] Activity (OUTPUT) never triggers sound — only BEL does
+
+### 78. Scroll mode — auto
+
+- [ ] Set scroll.mode to "auto" with threshold 100
+- [ ] Channel receives 47 lines while inactive → activate tab → resumes position, unread bar "47 new lines"
+- [ ] Channel receives 150 lines → activate tab → scrolls to bottom, brief badge then clears
+
+### 79. Scroll mode — alwaysBottom / alwaysResume
+
+- [ ] Set scroll.mode to "alwaysBottom" → any new output, tab always scrolls to bottom on focus
+- [ ] Set scroll.mode to "alwaysResume" → always resumes position with unread bar, even for 500+ lines
+
+### 80. Host rail & sidebar indicators
+
+- [ ] Host "prod" has 3 channels with bells (5 + 3 + 0) → host rail shows aggregated badge "8"
+- [ ] Channel sidebar: activity → blue dot, bells → red badge with count
+- [ ] Both indicators visible simultaneously on different channels
+
+---
+
+## Sprint 1 — Host Customization (UX-07)
+
+### 81. Visual preset selection
+
+- [ ] Open host modal → Advanced section → Visual Profile
+- [ ] Select "None" → all visual elements disabled (default)
+- [ ] Select "Caution" → banner "STAGING - {host}" (yellow), subtle border, 3% yellow tint
+- [ ] Select "Danger" → banner "PRODUCTION - {host}" (red), strong border, 5% red tint
+- [ ] Save → open terminal for host → visual profile applied
+
+### 82. Custom preset (modify switches)
+
+- [ ] Select "Danger" preset → change tint opacity from 5% to 10%
+- [ ] Preset auto-switches to "Custom"
+- [ ] Other values (banner text, border) remain unchanged
+- [ ] Save → reload → "Custom" preset persisted with modified values
+
+### 83. Environment banner
+
+- [ ] Host with banner enabled → banner appears between pane header and terminal
+- [ ] Banner text centered, uppercase, bold
+- [ ] Banner background + text colors match configured values
+- [ ] Banner with `flex-shrink: 0` — does not collapse on small panes
+
+### 84. Banner token substitution
+
+- [ ] Set banner text to "ENV: {host} ({ip}) [{group}]"
+- [ ] Open terminal → banner shows "ENV: prod (1.2.3.4) [Servers]"
+- [ ] Host without group → {group} renders as literal "{group}"
+- [ ] Local host without sshHost → {ip} renders as "localhost"
+- [ ] HTML in host name → rendered as text, NOT executed (XSS safe)
+
+### 85. Accent border styles
+
+- [ ] Border "none" → no visible border on terminal pane
+- [ ] Border "subtle" → 2px left border in configured color
+- [ ] Border "strong" → 3px border on left, right, and bottom
+- [ ] Empty border color → falls back to host's primary color
+- [ ] Custom border color overrides host color
+
+### 86. Background tint
+
+- [ ] Enable tint with color + 5% opacity → colored overlay visible on terminal
+- [ ] Tint overlay: pointer-events: none (clicks pass through to terminal)
+- [ ] Text remains readable under tint
+- [ ] Attempt to set opacity > 15% → clamped to 15%
+
+### 87. Tint slider with live preview
+
+- [ ] Open Visual Profile settings → enable tint
+- [ ] TintPreview shows fake terminal lines with current tint applied
+- [ ] Drag opacity slider → preview updates in real-time
+- [ ] Color picker change → preview updates immediately
+
+### 88. Split panes with different host profiles
+
+Precondition: 2 hosts configured — "prod" (Danger preset) and "staging" (Caution preset).
+
+- [ ] Open terminal with pane A connected to "prod"
+- [ ] Split → assign pane B to "staging"
+- [ ] Pane A: red banner, strong red border, red tint
+- [ ] Pane B: yellow banner, subtle yellow border, yellow tint
+- [ ] Each pane renders its own host's profile independently (not global)
 
 ---
 

@@ -16,7 +16,7 @@
 - [ ] 🔧 [UI] useLayout localStorage load: validate max-pane-count (INV-10) — Priority: M (from /review F-011)
 - [ ] 🔧 [Hub] session-manager.spec.ts: crash-loop 60s window reset test skipped (timer cascade) — Priority: M (from /review F-003)
 - [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
-- [ ] 💡 [UI] E2E scenarios for UX-06 + UX-01 + UX-02 + UX-04 — update TESTING_E2E.md after all 4 stories — Priority: M
+- [x] ✅ [UI] E2E scenarios for all Sprint 1 stories — TESTING_E2E.md updated (scenarios 59-88) (2026-03-07)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 - [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
 - [ ] 🔧 [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll near-symmetric (~50 lines each) — Priority: M (from UX-04 /review F-007)
