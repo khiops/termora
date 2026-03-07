@@ -40,6 +40,9 @@ export function useScrollBehavior(opts: {
 		const chId = opts.channelId.value;
 		if (!chId) return;
 
+		// Always clear bell + activity on tab focus (unread lines handled below per mode)
+		notificationStore.clearBellAndActivity(chId);
+
 		const lines = notificationStore.unreadLines.get(chId) ?? 0;
 
 		if (mode === "alwaysBottom") {

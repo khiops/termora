@@ -89,6 +89,19 @@ describe("useNotificationStore", () => {
 		});
 	});
 
+	describe("clearBellAndActivity", () => {
+		it("clears bell and activity but keeps unreadLines", () => {
+			const store = useNotificationStore();
+			store.incrementBellCount("ch1");
+			store.setActivity("ch1");
+			store.addUnreadLines("ch1", 10);
+			store.clearBellAndActivity("ch1");
+			expect(store.bellCounts.get("ch1")).toBeUndefined();
+			expect(store.activityDots.get("ch1")).toBeUndefined();
+			expect(store.unreadLines.get("ch1")).toBe(10);
+		});
+	});
+
 	describe("clearAll", () => {
 		it("clears everything", () => {
 			const store = useNotificationStore();

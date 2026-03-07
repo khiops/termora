@@ -65,6 +65,19 @@ export const useNotificationStore = defineStore("notifications", () => {
 		void changed;
 	}
 
+	function clearBellAndActivity(channelId: string): void {
+		if (bellCounts.value.has(channelId)) {
+			const next = new Map(bellCounts.value);
+			next.delete(channelId);
+			bellCounts.value = next;
+		}
+		if (activityDots.value.has(channelId)) {
+			const next = new Map(activityDots.value);
+			next.delete(channelId);
+			activityDots.value = next;
+		}
+	}
+
 	function clearAll(): void {
 		bellCounts.value = new Map();
 		activityDots.value = new Map();
@@ -104,6 +117,7 @@ export const useNotificationStore = defineStore("notifications", () => {
 		setActivity,
 		addUnreadLines,
 		clearChannel,
+		clearBellAndActivity,
 		clearAll,
 		getBellCountForHost,
 		getHostActivity,
