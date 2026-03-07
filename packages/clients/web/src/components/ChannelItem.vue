@@ -27,7 +27,7 @@
 			aria-label="New activity"
 		></span>
 		<span
-			v-if="bellCount > 0 && !isSelected"
+			v-if="bellCount > 0"
 			class="channel-item__bell-badge"
 		>{{ bellCount }}</span>
 		<span v-if="isUnread" class="channel-item__unread" aria-label="Unread output"></span>

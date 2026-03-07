@@ -38,7 +38,7 @@
 				aria-label="New activity"
 			></span>
 			<span
-				v-if="(notificationStore.bellCounts.get(tab.channelId) ?? 0) > 0 && idx !== activeTabIndex"
+				v-if="(notificationStore.bellCounts.get(tab.channelId) ?? 0) > 0"
 				class="tab__bell-badge"
 			>{{ notificationStore.bellCounts.get(tab.channelId) }}</span>
 			<span
