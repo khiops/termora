@@ -91,11 +91,18 @@ export const useSessionStore = defineStore("session", () => {
 				// Play bell sound regardless of active/inactive tab
 				playBellSound({
 					sound: bellCfg.sound ?? DEFAULT_NOTIFICATION_CONFIG.bell.sound,
-					customSoundFile: bellCfg.customSoundFile,
+					...(bellCfg.customSoundFile !== undefined && {
+						customSoundFile: bellCfg.customSoundFile,
+					}),
 				});
-				// Badge only for inactive tabs
-				if (msg.channelId !== channelsStore.selectedChannelId) {
-					notificationStore.incrementBellCount(msg.channelId);
+				// Always show badge (brief flash on active tab, persistent on background)
+				notificationStore.incrementBellCount(msg.channelId);
+				if (msg.channelId === channelsStore.selectedChannelId) {
+					setTimeout(() => {
+						if (msg.channelId === channelsStore.selectedChannelId) {
+							notificationStore.clearBellAndActivity(msg.channelId);
+						}
+					}, 800);
 				}
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
@@ -111,9 +118,14 @@ export const useSessionStore = defineStore("session", () => {
 			if (msg.type === "NOTIFICATION") {
 				const osc9Cfg =
 					configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
-				// Badge only for inactive tabs
-				if (msg.channelId !== channelsStore.selectedChannelId) {
-					notificationStore.incrementBellCount(msg.channelId);
+				// Always show badge (brief flash on active tab, persistent on background)
+				notificationStore.incrementBellCount(msg.channelId);
+				if (msg.channelId === channelsStore.selectedChannelId) {
+					setTimeout(() => {
+						if (msg.channelId === channelsStore.selectedChannelId) {
+							notificationStore.clearBellAndActivity(msg.channelId);
+						}
+					}, 800);
 				}
 				// Desktop notification when document is hidden
 				if (osc9Cfg.desktopNotification !== false && document.hidden) {
