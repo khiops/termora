@@ -56,11 +56,15 @@ afterEach(() => {
 	document.documentElement.style.setProperty = originalSetProperty;
 });
 
-/** Track setTheme action calls via Pinia's $onAction. */
+/**
+ * Track applyTheme action calls via Pinia's $onAction.
+ * useAutoSwitch bypasses setTheme (which has SC-14 autoSwitch-disabling logic)
+ * and calls applyTheme directly, so we track that action instead.
+ */
 function trackSetTheme(store: ReturnType<typeof useThemeStore>): string[] {
 	const calls: string[] = [];
 	store.$onAction(({ name, args }) => {
-		if (name === "setTheme") {
+		if (name === "applyTheme") {
 			const theme = args[0] as { name: string };
 			calls.push(theme.name);
 		}
