@@ -28,6 +28,7 @@
 		"fastify": "catalog:",
 		"@fastify/websocket": "catalog:",
 		"@fastify/static": "catalog:",
+		"@fastify/multipart": "catalog:",
 		"ssh2": "catalog:",
 		"@iarna/toml": "catalog:",
 		"@rainbowatcher/toml-edit-js": "catalog:"

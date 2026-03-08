@@ -12,6 +12,9 @@ export interface TerminalProfile {
 	bellSound?: boolean;
 	/** Show search match markers in the scrollbar overview ruler (default: true). */
 	scrollbarMarkers?: boolean;
+	wallpaper?: string;
+	wallpaperBlur?: number;
+	wallpaperDim?: number;
 	[key: string]: unknown;
 }
 
@@ -240,6 +243,9 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	scrollback: 5000,
 	bellSound: false,
 	scrollbarMarkers: true,
+	wallpaper: "",
+	wallpaperBlur: 0,
+	wallpaperDim: 0,
 };
 
 // ─── UI behavioral config (combined) ─────────────────────────────────────────
@@ -291,7 +297,14 @@ export const TERMINAL_PROFILE_KEYS = [
 	"scrollback",
 	"bellSound",
 	"scrollbarMarkers",
+	"wallpaper",
+	"wallpaperBlur",
+	"wallpaperDim",
 ] as const;
+
+export const MAX_WALLPAPER_BLUR = 20;
+export const MAX_WALLPAPER_SIZE = 10 * 1024 * 1024; // 10 MB
+export const WALLPAPER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "avif"];
 
 export const UI_CONFIG_SECTIONS = [
 	"tabs",
