@@ -2,8 +2,6 @@ import type { CascadeResponse } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
-import { useChannelsStore } from "./channels.js";
-import { useHostsStore } from "./hosts.js";
 import { useToastStore } from "./toast.js";
 
 export type Scope = "global" | "host" | "channel";
@@ -54,12 +52,17 @@ export const useSettingsStore = defineStore("settings", () => {
 	const loading = ref(false);
 	const dirty = ref<Set<string>>(new Set());
 	const lastError = ref<string | null>(null);
+	const currentHostId = ref<string | null>(null);
+	const currentChannelId = ref<string | null>(null);
 
 	// ─── Load cascade from API ────────────────────────────────────────────
 
 	async function loadCascade(hostId?: string, channelId?: string): Promise<void> {
 		const authStore = useAuthStore();
 		if (authStore.token === null) return;
+
+		currentHostId.value = hostId ?? null;
+		currentChannelId.value = channelId ?? null;
 
 		loading.value = true;
 		try {
@@ -269,24 +272,26 @@ export const useSettingsStore = defineStore("settings", () => {
 							}
 						}
 					} else if (scope === "host") {
-						const hostsStore = useHostsStore();
-						const hostId = hostsStore.selectedHostId;
-						if (!hostId) return;
+						if (!currentHostId.value) {
+							console.error("updateSetting(host): no currentHostId set");
+							return;
+						}
 						// PATCH merge semantics: { profile: { key: value } }
 						const profile: Record<string, unknown> = {};
 						profile[key] = value;
-						await fetch(`/api/hosts/${hostId}/profile`, {
+						await fetch(`/api/hosts/${currentHostId.value}/profile`, {
 							method: "PATCH",
 							headers,
 							body: JSON.stringify({ profile }),
 						});
 					} else if (scope === "channel") {
-						const channelsStore = useChannelsStore();
-						const channelId = channelsStore.selectedChannelId;
-						if (!channelId) return;
+						if (!currentChannelId.value) {
+							console.error("updateSetting(channel): no currentChannelId set");
+							return;
+						}
 						const profile: Record<string, unknown> = {};
 						profile[key] = value;
-						await fetch(`/api/channels/${channelId}/profile`, {
+						await fetch(`/api/channels/${currentChannelId.value}/profile`, {
 							method: "PATCH",
 							headers,
 							body: JSON.stringify({ profile }),
@@ -321,6 +326,8 @@ export const useSettingsStore = defineStore("settings", () => {
 		loading,
 		dirty,
 		lastError,
+		currentHostId,
+		currentChannelId,
 		loadCascade,
 		getValue,
 		isOverridden,

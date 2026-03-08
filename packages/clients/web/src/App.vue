@@ -243,6 +243,74 @@ const groupContextMenu = ref<{
 const renameGroupName = ref<string | null>(null);
 const deleteGroupName = ref<string | null>(null);
 
+// ─── Per-channel theme cascade ───────────────────────────────────────────────
+
+/**
+ * When the active channel changes, fetch the resolved cascade for that
+ * host+channel and apply the correct theme. Falls back to global theme
+ * when no channel is selected.
+ */
+/**
+ * Resolve and apply the cascade theme for a given channel.
+ * Extracted so it can be called from both the watcher and onMounted.
+ */
+async function applyCascadeTheme(channelId: string): Promise<void> {
+	if (themeStore.availableThemes.length === 0) return;
+	const hostId = channelsStore.channelHostMap.get(channelId) ?? null;
+	if (authStore.token === null) return;
+	try {
+		const params = new URLSearchParams();
+		if (hostId) params.set("host_id", hostId);
+		params.set("channel_id", channelId);
+		const res = await fetch(`/api/config/cascade?${params.toString()}`, {
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return;
+		const data = await res.json() as {
+			terminal: {
+				resolved: { theme?: string };
+				host?: { theme?: string } | null;
+				channel?: { theme?: string } | null;
+			};
+		};
+		// Only apply scope override if there's an explicit host or channel theme
+		const hasChannelOverride = data.terminal.channel?.theme != null;
+		const hasHostOverride = data.terminal.host?.theme != null;
+		if (!hasChannelOverride && !hasHostOverride) {
+			// No explicit scope override — use global appearance theme
+			themeStore.setScopeOverride(null);
+			if (themeStore.currentTheme !== null) {
+				themeStore.applyTheme(themeStore.currentTheme);
+			}
+			return;
+		}
+		const themeName = data.terminal.resolved.theme;
+		if (!themeName) return;
+		const theme = themeStore.availableThemes.find((t) => t.name === themeName);
+		if (theme) {
+			themeStore.setScopeOverride(theme);
+			themeStore.applyTheme(theme);
+		}
+	} catch {
+		// Non-critical — leave current theme applied
+	}
+}
+
+watch(
+	() => channelsStore.selectedChannelId,
+	async (channelId) => {
+		if (channelId === null) {
+			// No channel selected — reapply global theme
+			themeStore.setScopeOverride(null);
+			if (themeStore.currentTheme !== null) {
+				themeStore.applyTheme(themeStore.currentTheme);
+			}
+			return;
+		}
+		await applyCascadeTheme(channelId);
+	},
+);
+
 // ─── Window title ────────────────────────────────────────────────────────────
 
 const windowTitleEnabled = computed(
@@ -367,6 +435,10 @@ onMounted(async () => {
 			themeStore.applyOpacity(themeStore.appearance.opacity);
 			themeStore.applyScrollbar(themeStore.appearance.scrollbar);
 			await hostsStore.fetchHosts();
+			// Apply channel/host theme override if an active channel exists
+			if (channelsStore.selectedChannelId) {
+				await applyCascadeTheme(channelsStore.selectedChannelId);
+			}
 		} catch (err) {
 			console.error("[App] startup connect failed:", err);
 		}
@@ -437,6 +509,7 @@ watch(
 			channelsStore.selectChannel(tab.channelId);
 		}
 	},
+	{ immediate: true },
 );
 
 /**

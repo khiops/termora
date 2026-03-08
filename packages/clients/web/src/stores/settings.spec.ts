@@ -178,6 +178,36 @@ describe("useSettingsStore", () => {
 
 			expect(mockFetch).not.toHaveBeenCalled();
 		});
+
+		it("stores hostId and channelId as current context", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve(makeCascade()),
+			});
+
+			const store = useSettingsStore();
+			await store.loadCascade("host-42", "chan-99");
+
+			expect(store.currentHostId).toBe("host-42");
+			expect(store.currentChannelId).toBe("chan-99");
+		});
+
+		it("clears context when called without IDs", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve(makeCascade()),
+			});
+
+			const store = useSettingsStore();
+			// Seed values first
+			store.currentHostId = "old-host";
+			store.currentChannelId = "old-chan";
+
+			await store.loadCascade();
+
+			expect(store.currentHostId).toBeNull();
+			expect(store.currentChannelId).toBeNull();
+		});
 	});
 
 	describe("getValue", () => {
@@ -386,6 +416,59 @@ describe("useSettingsStore", () => {
 
 			// Dirty should be cleared for this key
 			expect(store.dirty.has("global:terminal:fontSize")).toBe(false);
+
+			vi.useRealTimers();
+		});
+
+		it("uses currentHostId from loadCascade context for host scope", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+			store.currentHostId = "host-ctx";
+
+			mockFetch.mockResolvedValueOnce({ ok: true });
+
+			void store.updateSetting("host", "terminal", "fontSize", 20);
+			await vi.advanceTimersByTimeAsync(600);
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/hosts/host-ctx/profile",
+				expect.objectContaining({ method: "PATCH" }),
+			);
+
+			vi.useRealTimers();
+		});
+
+		it("uses currentChannelId from loadCascade context for channel scope", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+			store.currentChannelId = "chan-ctx";
+
+			mockFetch.mockResolvedValueOnce({ ok: true });
+
+			void store.updateSetting("channel", "terminal", "fontSize", 20);
+			await vi.advanceTimersByTimeAsync(600);
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/api/channels/chan-ctx/profile",
+				expect.objectContaining({ method: "PATCH" }),
+			);
+
+			vi.useRealTimers();
+		});
+
+		it("skips API call when currentHostId is null for host scope", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+			// currentHostId is null by default
+
+			void store.updateSetting("host", "terminal", "fontSize", 20);
+			await vi.advanceTimersByTimeAsync(600);
+
+			// fetch should not have been called (after the cascade fetch, which we skip by not calling loadCascade)
+			expect(mockFetch).not.toHaveBeenCalled();
 
 			vi.useRealTimers();
 		});

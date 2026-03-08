@@ -13,6 +13,12 @@ export const useThemeStore = defineStore("theme", () => {
 	const currentTheme = ref<NexTermTheme | null>(null);
 	const previewTheme = ref<NexTermTheme | null>(null);
 
+	/**
+	 * Scope-level theme override (host or channel).
+	 * When set, clearPreview reverts to this instead of the global currentTheme.
+	 */
+	const scopeOverride = ref<NexTermTheme | null>(null);
+
 	/** The active theme (preview if hovering, otherwise current). */
 	const activeTheme = computed(() => previewTheme.value ?? currentTheme.value);
 
@@ -196,9 +202,14 @@ export const useThemeStore = defineStore("theme", () => {
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		rafId = requestAnimationFrame(() => {
 			previewTheme.value = null;
-			if (currentTheme.value !== null) applyTheme(currentTheme.value);
+			const revertTo = scopeOverride.value ?? currentTheme.value;
+			if (revertTo !== null) applyTheme(revertTo);
 			rafId = null;
 		});
+	}
+
+	function setScopeOverride(theme: NexTermTheme | null): void {
+		scopeOverride.value = theme;
 	}
 
 	// ── Appearance config (opacity, scrollbar, auto-switch) ─────────────
@@ -298,6 +309,7 @@ export const useThemeStore = defineStore("theme", () => {
 		setTheme,
 		previewHover,
 		clearPreview,
+		setScopeOverride,
 		initialize,
 		onTerminalThemeChange,
 		toXtermTheme,

@@ -187,8 +187,18 @@ export function registerConfigRoutes(
 				});
 			}
 
-			const profileJson = JSON.stringify(profile);
-			metaDal.updateHostProfile(id, profileJson);
+			const existingRaw = metaDal.getHostProfile(id);
+			const existing = existingRaw ? (JSON.parse(existingRaw) as Record<string, unknown>) : {};
+			const merged: Record<string, unknown> = {
+				...existing,
+				...(profile as Record<string, unknown>),
+			};
+			for (const key of Object.keys(profile as Record<string, unknown>)) {
+				if ((profile as Record<string, unknown>)[key] === null) {
+					delete merged[key];
+				}
+			}
+			metaDal.updateHostProfile(id, JSON.stringify(merged));
 
 			return reply.code(200).send({ ok: true });
 		},
@@ -225,8 +235,18 @@ export function registerConfigRoutes(
 				});
 			}
 
-			const profileJson = JSON.stringify(profile);
-			metaDal.updateChannelProfile(id, profileJson);
+			const existingRaw = metaDal.getChannelProfile(id);
+			const existing = existingRaw ? (JSON.parse(existingRaw) as Record<string, unknown>) : {};
+			const merged: Record<string, unknown> = {
+				...existing,
+				...(profile as Record<string, unknown>),
+			};
+			for (const key of Object.keys(profile as Record<string, unknown>)) {
+				if ((profile as Record<string, unknown>)[key] === null) {
+					delete merged[key];
+				}
+			}
+			metaDal.updateChannelProfile(id, JSON.stringify(merged));
 
 			return reply.code(200).send({ ok: true });
 		},

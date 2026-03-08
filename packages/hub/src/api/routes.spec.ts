@@ -1271,3 +1271,141 @@ describe("Auth enforcement", () => {
 		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 });
+
+// ─── Profile PATCH — merge behaviour ─────────────────────────────────────────
+
+describe("PATCH /api/hosts/:id/profile — merge", () => {
+	async function createHost(label: string): Promise<string> {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		return res.json<{ id: string }>().id;
+	}
+
+	it("merges new keys with existing profile instead of replacing", async () => {
+		const hostId = await createHost("prof-host-merge");
+
+		// Set initial profile
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { fontSize: 20 } },
+		});
+
+		// Patch a different key
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: "solarized" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({ method: "GET", url: `/api/hosts/${hostId}/profile` });
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(20);
+		expect(profile.theme).toBe("solarized");
+	});
+
+	it("removes a key when its value is null (reset to inherited)", async () => {
+		const hostId = await createHost("prof-host-null");
+
+		// Set both keys
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: "solarized", fontSize: 20 } },
+		});
+
+		// Reset theme to null
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: null } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({ method: "GET", url: `/api/hosts/${hostId}/profile` });
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(20);
+		expect("theme" in profile).toBe(false);
+	});
+});
+
+describe("PATCH /api/channels/:id/profile — merge", () => {
+	let profChanCounter = 0;
+
+	async function createTestChannel(label: string): Promise<string> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		profChanCounter++;
+		const n = String(profChanCounter).padStart(3, "0");
+		const sessionId = `01TSTPROFSES0000000000${n}`;
+		const channelId = `01TSTPROFCHN0000000000${n}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+		return channelId;
+	}
+
+	it("merges new keys with existing profile instead of replacing", async () => {
+		const channelId = await createTestChannel("prof-chan-merge");
+
+		// Set initial profile
+		await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { fontSize: 16 } },
+		});
+
+		// Patch a different key
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: "bar" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({
+			method: "GET",
+			url: `/api/channels/${channelId}/profile`,
+		});
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(16);
+		expect(profile.cursorStyle).toBe("bar");
+	});
+
+	it("removes a key when its value is null (reset to inherited)", async () => {
+		const channelId = await createTestChannel("prof-chan-null");
+
+		// Set both keys
+		await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: "bar", fontSize: 16 } },
+		});
+
+		// Reset cursorStyle to null
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: null } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({
+			method: "GET",
+			url: `/api/channels/${channelId}/profile`,
+		});
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(16);
+		expect("cursorStyle" in profile).toBe(false);
+	});
+});

@@ -135,7 +135,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 	margin-top: 8px;
 	cursor: pointer;
 	user-select: none;
-	color: var(--nt-text-muted);
+	color: var(--nt-sidebar-text);
 	font-size: 11px;
 	font-weight: 600;
 	text-transform: uppercase;

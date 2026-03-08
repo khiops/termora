@@ -9,8 +9,10 @@
 		/>
 		<template v-else>
 			<ThemePicker
+				:active-theme-name="activeThemeForScope"
 				@create-theme="openNewTheme"
 				@edit-theme="openEditTheme"
+				@select="onThemeSelect"
 			/>
 
 			<!-- Auto-Switch (global scope only) -->
@@ -105,13 +107,15 @@ import SettingRow from "../SettingRow.vue";
 import SettingControl from "../SettingControl.vue";
 import { useAutoSwitch } from "../../../composables/useAutoSwitch.js";
 import { useThemeStore } from "../../../stores/theme.js";
+import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
 
-defineProps<{
+const props = defineProps<{
 	scope: Scope;
 }>();
 
 const themeStore = useThemeStore();
+const settingsStore = useSettingsStore();
 const autoSwitch = useAutoSwitch();
 
 // ── Editor state ──────────────────────────────────────────────────────
@@ -148,6 +152,32 @@ function handleEditorSaved(_theme: NexTermTheme) {
 	editorMode.value = "picker";
 	editingTheme.value = undefined;
 	baseTheme.value = undefined;
+}
+
+// ── Active theme for current scope ────────────────────────────────────
+
+const activeThemeForScope = computed(() => {
+	if (props.scope === "global") {
+		return themeStore.currentTheme?.name;
+	}
+	// For host/channel scope, read the resolved theme from the cascade
+	return settingsStore.getResolved("terminal", "theme") as string | undefined
+		?? themeStore.currentTheme?.name;
+});
+
+// ── Theme selection (scope-aware) ──────────────────────────────────────
+
+async function onThemeSelect(theme: NexTermTheme): Promise<void> {
+	// Always apply immediately for visual feedback
+	themeStore.applyTheme(theme);
+
+	if (props.scope === "global") {
+		themeStore.setScopeOverride(null);
+		await themeStore.setTheme(theme);
+	} else if (props.scope === "host" || props.scope === "channel") {
+		themeStore.setScopeOverride(theme);
+		await settingsStore.updateSetting(props.scope, "terminal", "theme", theme.name);
+	}
 }
 
 // ── Auto-switch ───────────────────────────────────────────────────────
