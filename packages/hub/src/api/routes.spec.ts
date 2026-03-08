@@ -1,9 +1,31 @@
+import { EventEmitter } from "node:events";
 import type { ProtocolMessage } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
+
+// ─── Mock ssh2 Client for testSshConnectivity ────────────────────────────────
+
+let mockSsh2Client: EventEmitter & {
+	connect: ReturnType<typeof vi.fn>;
+	end: ReturnType<typeof vi.fn>;
+	destroy: ReturnType<typeof vi.fn>;
+};
+
+vi.mock("ssh2", () => {
+	return {
+		Client: vi.fn().mockImplementation(() => {
+			mockSsh2Client = Object.assign(new EventEmitter(), {
+				connect: vi.fn(),
+				end: vi.fn(),
+				destroy: vi.fn(),
+			});
+			return mockSsh2Client;
+		}),
+	};
+});
 
 // ─── Mock agents so no real PTY / SSH is spawned ─────────────────────────────
 
@@ -261,6 +283,124 @@ describe("POST /api/hosts/:id/test", () => {
 	it("returns 404 for unknown host id", async () => {
 		const res = await server.inject({ method: "POST", url: "/api/hosts/nonexistent/test" });
 		expect(res.statusCode).toBe(404);
+	});
+
+	it("returns ok:true for SSH host when ready event fires", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "ssh-test-ready",
+				ssh_host: "example.com",
+				ssh_port: 22,
+				ssh_auth: "agent",
+			},
+		});
+		const created = createRes.json<Record<string, unknown>>();
+
+		// Schedule "ready" event to fire after connect is called
+		// Use unique auth header to avoid rate-limit collisions between tests
+		const resPromise = server.inject({
+			method: "POST",
+			url: `/api/hosts/${created.id}/test`,
+			headers: { authorization: "Bearer ssh-ready-test" },
+		});
+		// Wait a tick for the client to be created and connect called
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("ready");
+
+		const res = await resPromise;
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+	});
+
+	it("returns ok:false with auth message for SSH authentication errors", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "ssh-test-auth-fail",
+				ssh_host: "example.com",
+				ssh_port: 22,
+				ssh_auth: "password",
+			},
+		});
+		const created = createRes.json<Record<string, unknown>>();
+
+		const resPromise = server.inject({
+			method: "POST",
+			url: `/api/hosts/${created.id}/test`,
+			headers: { authorization: "Bearer ssh-auth-test" },
+		});
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("error", new Error("All configured authentication methods failed"));
+
+		const res = await resPromise;
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean; message?: string }>();
+		expect(body.ok).toBe(false);
+		expect(body.message).toBe("Authentication failed");
+	});
+
+	it("returns ok:false for SSH network errors", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "ssh-test-network-fail",
+				ssh_host: "192.168.1.99",
+				ssh_port: 22,
+				ssh_auth: "agent",
+			},
+		});
+		const created = createRes.json<Record<string, unknown>>();
+
+		const resPromise = server.inject({
+			method: "POST",
+			url: `/api/hosts/${created.id}/test`,
+			headers: { authorization: "Bearer ssh-network-test" },
+		});
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("error", new Error("connect ECONNREFUSED 192.168.1.99:22"));
+
+		const res = await resPromise;
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean; message?: string }>();
+		expect(body.ok).toBe(false);
+		expect(body.message).toContain("ECONNREFUSED");
+	});
+
+	it("returns ok:false with error message for unknown SSH errors", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "ssh-test-unknown-err",
+				ssh_host: "example.com",
+				ssh_port: 22,
+				ssh_auth: "agent",
+			},
+		});
+		const created = createRes.json<Record<string, unknown>>();
+
+		const resPromise = server.inject({
+			method: "POST",
+			url: `/api/hosts/${created.id}/test`,
+			headers: { authorization: "Bearer ssh-unknown-test" },
+		});
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("error", new Error("Unexpected protocol version"));
+
+		const res = await resPromise;
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean; message?: string }>();
+		expect(body.ok).toBe(false);
+		expect(body.message).toBe("Unexpected protocol version");
 	});
 });
 

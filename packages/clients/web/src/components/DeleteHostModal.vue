@@ -50,6 +50,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
 
 const props = defineProps<{
@@ -63,6 +64,7 @@ const emit = defineEmits<{
 }>();
 
 const hostsStore = useHostsStore();
+const channelsStore = useChannelsStore();
 const confirmText = ref("");
 
 const host = computed(() =>
@@ -72,6 +74,15 @@ const host = computed(() =>
 const hostLabel = computed(() => host.value?.label ?? "");
 
 const hasActiveSessions = computed(() => {
+	// Check channel-level status: any channel belonging to this host that is
+	// alive (live or orphan) means the host has active sessions.
+	for (const [chId, hId] of channelsStore.channelHostMap) {
+		if (hId !== props.hostId) continue;
+		const ch = channelsStore.channels.find((c) => c.id === chId);
+		if (ch && (ch.status === "live" || ch.status === "orphan")) return true;
+	}
+	// Fallback: session-level status for non-active hosts whose channels
+	// aren't loaded in the channels store.
 	const status = hostsStore.getHostStatus(props.hostId);
 	return status === "live" || status === "reconnecting";
 });

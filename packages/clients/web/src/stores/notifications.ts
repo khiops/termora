@@ -99,9 +99,9 @@ export const useNotificationStore = defineStore("notifications", () => {
 	function getBellCountForHost(hostId: string): number {
 		const channelsStore = useChannelsStore();
 		let total = 0;
-		for (const ch of channelsStore.channels) {
-			if (_channelBelongsToHost(ch.id, hostId, channelsStore)) {
-				total += bellCounts.value.get(ch.id) ?? 0;
+		for (const [channelId, count] of bellCounts.value) {
+			if (channelsStore.channelHostMap.get(channelId) === hostId) {
+				total += count;
 			}
 		}
 		return total;
@@ -109,9 +109,9 @@ export const useNotificationStore = defineStore("notifications", () => {
 
 	function getHostActivity(hostId: string): boolean {
 		const channelsStore = useChannelsStore();
-		for (const ch of channelsStore.channels) {
-			if (_channelBelongsToHost(ch.id, hostId, channelsStore)) {
-				if (activityDots.value.get(ch.id)) return true;
+		for (const [channelId, active] of activityDots.value) {
+			if (active && channelsStore.channelHostMap.get(channelId) === hostId) {
+				return true;
 			}
 		}
 		return false;
@@ -132,23 +132,3 @@ export const useNotificationStore = defineStore("notifications", () => {
 		getHostActivity,
 	};
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Check if a channel belongs to a host.
- * The channels store only loads channels for the active host, so we check
- * activeHostId. For aggregation across all hosts we'd need a mapping, but
- * the current UX only shows badges for the loaded host's channels plus
- * the host rail (which shows all hosts). Since channels are loaded per-host,
- * we treat all loaded channels as belonging to the active host.
- */
-function _channelBelongsToHost(
-	_channelId: string,
-	hostId: string,
-	channelsStore: ReturnType<typeof useChannelsStore>,
-): boolean {
-	return channelsStore.activeHostId === hostId;
-}

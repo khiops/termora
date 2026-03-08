@@ -93,6 +93,14 @@ export const useChannelsStore = defineStore("channels", () => {
 		new Map(),
 	);
 
+	/**
+	 * Persistent channelId → hostId mapping.
+	 * Populated by fetchChannels, addChannel, and registerChannelHost.
+	 * NOT cleared on host switch — accumulates across all visited hosts
+	 * so that bell/activity aggregation works for non-active hosts.
+	 */
+	const channelHostMap = ref<Map<string, string>>(new Map());
+
 	/** Channels that belong to the currently loaded host. */
 	const activeHostId = ref<string | null>(null);
 
@@ -158,6 +166,12 @@ export const useChannelsStore = defineStore("channels", () => {
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
 			channels.value = data;
+			// Populate persistent channelId → hostId map (survives host switch)
+			const nextHostMap = new Map(channelHostMap.value);
+			for (const ch of data) {
+				nextHostMap.set(ch.id, hostId);
+			}
+			channelHostMap.value = nextHostMap;
 			// Apply any WS status updates that arrived before the fetch completed
 			if (pendingStatuses.value.size > 0) {
 				const pending = pendingStatuses.value;
@@ -365,11 +379,28 @@ export const useChannelsStore = defineStore("channels", () => {
 		// Avoid duplicates if REST fetch races with WS event
 		if (channels.value.some((c) => c.id === channel.id)) return;
 		channels.value = [...channels.value, channel];
+		// Track channelId → hostId for the active host
+		if (activeHostId.value !== null) {
+			const next = new Map(channelHostMap.value);
+			next.set(channel.id, activeHostId.value);
+			channelHostMap.value = next;
+		}
 	}
 
 	// -------------------------------------------------------------------------
 	// Pending spawns: map tempId → hostId for deferred spawn flow
 	// -------------------------------------------------------------------------
+
+	/**
+	 * Register a channelId → hostId mapping from external sources
+	 * (e.g. STATE_SYNC that provides sessionId → hostId).
+	 */
+	function registerChannelHost(channelId: string, hostId: string): void {
+		if (channelHostMap.value.get(channelId) === hostId) return; // already correct
+		const next = new Map(channelHostMap.value);
+		next.set(channelId, hostId);
+		channelHostMap.value = next;
+	}
 
 	const pendingSpawns = ref<Map<string, string>>(new Map());
 
@@ -705,6 +736,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		unreadChannels,
 		activeHostId,
 		channelsByGroup,
+		channelHostMap,
 		welcomeChannel,
 		fetchGroups,
 		fetchChannels,
@@ -718,6 +750,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		spawnChannel,
 		registerPendingSpawn,
 		consumePendingSpawn,
+		registerChannelHost,
 		addGroup,
 		removeGroup,
 		renameGroup,

@@ -131,9 +131,9 @@ async function testSshConnectivity(
 
 		client.on("error", (err: Error) => {
 			clearTimeout(timer);
-			// A banner/handshake error means we reached the server — it's reachable
-			// even if auth fails. Only report connectivity errors as failure.
 			const msg = err.message ?? "Unknown error";
+			const lower = msg.toLowerCase();
+
 			if (
 				msg.includes("ECONNREFUSED") ||
 				msg.includes("ETIMEDOUT") ||
@@ -141,10 +141,18 @@ async function testSshConnectivity(
 				msg.includes("ENOTFOUND")
 			) {
 				resolve({ ok: false, message: msg });
-			} else {
-				// Auth/banner errors = server is reachable; close the client cleanly
+			} else if (
+				lower.includes("authentication") ||
+				lower.includes("permission denied") ||
+				lower.includes("publickey") ||
+				lower.includes("keyboard-interactive") ||
+				lower.includes("all configured authentication methods failed")
+			) {
 				client.end();
-				resolve({ ok: true });
+				resolve({ ok: false, message: "Authentication failed" });
+			} else {
+				client.end();
+				resolve({ ok: false, message: msg });
 			}
 		});
 

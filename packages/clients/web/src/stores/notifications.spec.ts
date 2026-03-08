@@ -1,9 +1,20 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useChannelsStore } from "./channels.js";
 import { useNotificationStore } from "./notifications.js";
+
+// Stub localStorage — useChannelsStore → useAuthStore reads from it
+const localStorageMap = new Map<string, string>();
+vi.stubGlobal("localStorage", {
+	getItem: (key: string) => localStorageMap.get(key) ?? null,
+	setItem: (key: string, value: string) => localStorageMap.set(key, value),
+	removeItem: (key: string) => localStorageMap.delete(key),
+	clear: () => localStorageMap.clear(),
+});
 
 describe("useNotificationStore", () => {
 	beforeEach(() => {
+		localStorageMap.clear();
 		setActivePinia(createPinia());
 	});
 
@@ -123,6 +134,73 @@ describe("useNotificationStore", () => {
 			const before = store.bellCounts;
 			store.incrementBellCount("ch1");
 			expect(store.bellCounts).not.toBe(before);
+		});
+	});
+
+	describe("getBellCountForHost", () => {
+		it("aggregates bells for channels mapped to a host", () => {
+			const notifStore = useNotificationStore();
+			const channelsStore = useChannelsStore();
+
+			// Register channel→host mappings
+			channelsStore.registerChannelHost("ch1", "host-A");
+			channelsStore.registerChannelHost("ch2", "host-A");
+			channelsStore.registerChannelHost("ch3", "host-B");
+
+			notifStore.incrementBellCount("ch1");
+			notifStore.incrementBellCount("ch1");
+			notifStore.incrementBellCount("ch2");
+			notifStore.incrementBellCount("ch3");
+
+			expect(notifStore.getBellCountForHost("host-A")).toBe(3);
+			expect(notifStore.getBellCountForHost("host-B")).toBe(1);
+		});
+
+		it("returns 0 for a host with no mapped channels", () => {
+			const notifStore = useNotificationStore();
+			notifStore.incrementBellCount("ch1");
+			expect(notifStore.getBellCountForHost("unknown-host")).toBe(0);
+		});
+
+		it("returns 0 for a host whose channels have no bells", () => {
+			const notifStore = useNotificationStore();
+			const channelsStore = useChannelsStore();
+
+			channelsStore.registerChannelHost("ch1", "host-A");
+			// No incrementBellCount calls
+			expect(notifStore.getBellCountForHost("host-A")).toBe(0);
+		});
+
+		it("ignores bells for unmapped channels", () => {
+			const notifStore = useNotificationStore();
+			const channelsStore = useChannelsStore();
+
+			channelsStore.registerChannelHost("ch1", "host-A");
+			notifStore.incrementBellCount("ch1");
+			notifStore.incrementBellCount("ch-unmapped"); // no host mapping
+
+			expect(notifStore.getBellCountForHost("host-A")).toBe(1);
+		});
+	});
+
+	describe("getHostActivity", () => {
+		it("returns true when any channel on that host has activity", () => {
+			const notifStore = useNotificationStore();
+			const channelsStore = useChannelsStore();
+
+			channelsStore.registerChannelHost("ch1", "host-A");
+			channelsStore.registerChannelHost("ch2", "host-B");
+
+			notifStore.setActivity("ch1");
+
+			expect(notifStore.getHostActivity("host-A")).toBe(true);
+			expect(notifStore.getHostActivity("host-B")).toBe(false);
+		});
+
+		it("returns false for unknown hosts", () => {
+			const notifStore = useNotificationStore();
+			notifStore.setActivity("ch1");
+			expect(notifStore.getHostActivity("unknown-host")).toBe(false);
 		});
 	});
 });

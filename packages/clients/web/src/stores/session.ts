@@ -137,8 +137,18 @@ export const useSessionStore = defineStore("session", () => {
 		// Handle STATE_SYNC — full state snapshot sent after AUTH_OK
 		wsClient.on("STATE_SYNC", (msg) => {
 			if (msg.type === "STATE_SYNC") {
+				// Build sessionId → hostId lookup for channel-host mapping
+				const sessionHostMap = new Map<string, string>();
 				for (const s of msg.sessions) {
 					hostsStore.updateSessionStatus(s.hostId, s.status);
+					sessionHostMap.set(s.sessionId, s.hostId);
+				}
+				// Populate channelId → hostId map from STATE_SYNC data
+				for (const ch of msg.channels) {
+					const hostId = sessionHostMap.get(ch.sessionId);
+					if (hostId) {
+						channelsStore.registerChannelHost(ch.channelId, hostId);
+					}
 				}
 				channelsStore.applyStateSync(msg.channels);
 			}
