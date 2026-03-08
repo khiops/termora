@@ -8,6 +8,7 @@ doc-meta:
   updated: 2026-03-08
   complexity: COMPLEX
   time-budget: 90min
+  adversarial_applied: true
 ---
 
 # Specification: UX-09 — Settings Panel (Config Cascade UI)
@@ -20,7 +21,7 @@ doc-meta:
 | Complexity | COMPLEX |
 | Time budget | ~90 min |
 | Blocks | 5 |
-| BDD scenarios | 16 |
+| BDD scenarios | 20 |
 | Risk level | MEDIUM |
 
 ## 1. Problem Statement
@@ -53,7 +54,7 @@ Users have no centralized UI to view or edit settings across the 4-layer config 
 
 ### 3.3 Effects
 
-- EFF-01: Changing a Global setting writes to config.toml [terminal] or [ui] section (section-targeted, preserves comments outside modified section)
+- EFF-01: Changing a Global setting writes to config.toml via full parse → modify → stringify (comments are not preserved; documented in UI). If config.toml does not exist, it is created in the XDG config dir.
 - EFF-02: Changing a Host setting writes to hosts.profile_json via PATCH /api/hosts/:id/profile
 - EFF-03: Changing a Channel setting writes to channels.profile_json via PATCH /api/channels/:id/profile
 - EFF-04: Appearance changes (opacity, scrollbar, autoSwitch) write to appearance.json via existing PATCH /api/config/appearance
@@ -65,6 +66,8 @@ Users have no centralized UI to view or edit settings across the 4-layer config 
 - ERR-01: When config.toml write fails (permissions, disk full) → show toast error, keep in-memory value, mark as "unsaved"
 - ERR-02: When host/channel profile PATCH fails → rollback optimistic update, show toast error
 - ERR-03: When config.toml is malformed on read → treat as empty (existing behavior in ConfigResolver.loadFromFile)
+- ERR-04: When host/channel profile_json is malformed JSON → return {} with warning log (defensive parse)
+- ERR-05: When host/channel is removed while its scope tab is active → auto-fall back to Global tab
 
 ## 4. Technical Design
 
@@ -135,6 +138,12 @@ interface CascadeResponse {
 
 Same pattern for `PUT /api/config/ui` (writes `[tabs]`, `[panes]`, `[search]`, `[startup]`, `[title]` sections).
 
+**Simplified write approach** (from /adversarial C-01): Use `@iarna/toml` parse → modify object → stringify full file. Comments in config.toml are not preserved on save. This avoids fragile section-boundary text manipulation. If config.toml doesn't exist, create it.
+
+**Input validation** (from /adversarial C-08): PUT /api/config/global must whitelist known TerminalProfile keys (fontFamily, fontSize, theme, cursorStyle, scrollback, bellSound, scrollbarMarkers). Reject unknown keys with 400 Bad Request. Same validation for PUT /api/config/ui with known UiConfig keys.
+
+**Debounce** (from /adversarial C-05): Client-side debounce 500ms on all setting mutations before API call. Optimistic UI update is immediate; API call is batched.
+
 ### 4.4 Store Design
 
 ```typescript
@@ -155,7 +164,27 @@ async function resetSetting(scope: Scope, path: string): Promise<void>;
 async function loadCascade(hostId?: string, channelId?: string): Promise<void>;
 ```
 
-### 4.5 Component Hierarchy
+### 4.5 Settings Schema (data-driven categories, from /adversarial C-13)
+
+Instead of per-category components with repetitive SettingRow lists, define a `settingsSchema` registry:
+
+```typescript
+interface SettingDefinition {
+	key: string;              // dot-path e.g. "fontSize", "tabs.closeButton"
+	label: string;
+	description?: string;
+	type: 'text' | 'number' | 'select' | 'toggle' | 'range' | 'color';
+	category: string;         // "appearance" | "terminal" | "tabs" | etc.
+	section?: string;         // config target: "terminal" | "ui" | "appearance"
+	scopes: ('global' | 'host' | 'channel')[];
+	options?: { label: string; value: string | number }[];
+	min?: number; max?: number; step?: number;
+}
+```
+
+A single `CategoryContent.vue` iterates the schema for the active category + scope. Category-specific components (AppearanceCategory for themes, KeybindingsCategory for keybindings) handle non-standard layouts.
+
+### 4.6 Component Hierarchy
 
 ```
 SettingsPanel.vue (overlay, Teleport to body)
@@ -170,7 +199,7 @@ SettingsPanel.vue (overlay, Teleport to body)
         └── reset button "[reset to <parent>]"
 ```
 
-### 4.6 SettingRow Visual States
+### 4.7 SettingRow Visual States
 
 | Scope | Has override? | Display |
 |-------|---------------|---------|
@@ -335,6 +364,38 @@ Scenario: SC-16 Settings panel not rendered before auth
   And the settings panel cannot be opened
 ```
 
+### Scenario Group: Edge Cases (from /adversarial)
+
+```gherkin
+@priority:medium @type:edge
+Scenario: SC-17 Host deleted while Host tab active
+  Given the settings panel is open on the Host tab for "prod-server"
+  When "prod-server" is deleted (by another session or via API)
+  Then the panel falls back to the Global tab automatically
+  And a toast notification appears
+
+@priority:medium @type:edge
+Scenario: SC-18 Config.toml does not exist on first save
+  Given no config.toml file exists in the XDG config dir
+  When the user changes a global terminal setting
+  Then config.toml is created with the [terminal] section
+  And the change is persisted
+
+@priority:medium @type:edge
+Scenario: SC-19 Rapid setting changes are debounced
+  Given the user is editing Font Size on the Global tab
+  When the user types "1", "6" rapidly (within 500ms)
+  Then only one PUT /api/config/global request is made (with fontSize: 16)
+  And the visual feedback is immediate (no lag)
+
+@priority:medium @type:security
+Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
+  Given a PUT request with { terminal: { fontSize: 16, __proto__: {} } }
+  When the request reaches the hub
+  Then the response is 400 Bad Request
+  And only whitelisted TerminalProfile keys are accepted
+```
+
 ### Coverage Matrix
 
 | Scenario | Nominal | Edge | Error | Security |
@@ -355,6 +416,10 @@ Scenario: SC-16 Settings panel not rendered before auth
 | SC-14 | ✓ | | | |
 | SC-15 | | | | ✓ |
 | SC-16 | | | | ✓ |
+| SC-17 | | ✓ | | |
+| SC-18 | | ✓ | | |
+| SC-19 | | ✓ | | |
+| SC-20 | | | | ✓ |
 
 ## 6. Implementation Plan
 
@@ -431,28 +496,24 @@ Scenario: SC-16 Settings panel not rendered before auth
 
 ---
 
-### Block 4: Terminal + Tabs + Panes + Search + Startup categories (~20 min)
+### Block 4: Settings schema + remaining categories (~20 min)
 
 **Type:** Feature slice (web)
 **Dependencies:** Block 2
 **Packages:** web
 
 **Files:**
-- `packages/clients/web/src/components/settings/categories/TerminalCategory.vue`
-- `packages/clients/web/src/components/settings/categories/TabsCategory.vue`
-- `packages/clients/web/src/components/settings/categories/PanesCategory.vue`
-- `packages/clients/web/src/components/settings/categories/SearchCategory.vue`
-- `packages/clients/web/src/components/settings/categories/StartupCategory.vue`
+- `packages/clients/web/src/components/settings/settingsSchema.ts` — schema registry
+- `packages/clients/web/src/components/settings/categories/SchemaCategory.vue` — generic data-driven category renderer
 
 **Exit criteria:**
-- [ ] Terminal: fontFamily (select from loaded fonts), fontSize (number), cursorStyle (select), scrollback (number), bellSound (toggle) — cascaded at all scopes
-- [ ] Terminal (Global only): title source, fallback, prefix, maxLength, windowTitle, windowFormat
-- [ ] Tabs (Global only): closeButton (toggle), newTabPosition (select), confirmCloseAll (toggle), confirmCloseOthers (toggle)
-- [ ] Panes (Global only): maxPanes (number), defaultSplitDirection (select)
-- [ ] Search (Global only): position (select), highlightOnClose (select), historySize (number)
-- [ ] Startup (Global only): autoOpenWelcome (toggle)
-- [ ] All rows use SettingRow with correct override indicators
+- [ ] settingsSchema defines all settings: Terminal (fontFamily, fontSize, cursorStyle, scrollback, bellSound + title settings), Tabs, Panes, Search, Startup
+- [ ] SchemaCategory renders SettingRow for each schema entry matching current category + scope
+- [ ] Terminal cascaded fields (font, cursor, scrollback, bell) available at all scopes
+- [ ] Terminal global-only fields (title settings) hidden on Host/Channel tabs
+- [ ] UiConfig categories (Tabs, Panes, Search, Startup) only visible on Global tab
 - [ ] Changes persist via appropriate API (PUT /api/config/global or /ui, PATCH host/channel profile)
+- [ ] Debounce 500ms on all mutations (from /adversarial C-05)
 
 **Acceptance criteria covered:** SC-10, SC-11
 
