@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppearanceConfig, NexTermTheme } from "@nexterm/shared";
+import type { NexTermTheme } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
@@ -247,36 +247,4 @@ describe("DELETE /api/themes/:name", () => {
 	});
 });
 
-// ─── Appearance Config Routes ────────────────────────────────────────────────
-
-describe("GET /api/config/appearance", () => {
-	it("returns appearance config with defaults", async () => {
-		const res = await server.inject({ method: "GET", url: "/api/config/appearance" });
-		expect(res.statusCode).toBe(200);
-		const body = res.json<AppearanceConfig>();
-		expect(body.theme).toBe("catppuccin-mocha");
-		expect(body.autoSwitch).toBeTruthy();
-		expect(body.opacity).toBeTruthy();
-		expect(body.scrollbar).toBeTruthy();
-	});
-});
-
-describe("PATCH /api/config/appearance", () => {
-	it("updates appearance config", async () => {
-		const res = await server.inject({
-			method: "PATCH",
-			url: "/api/config/appearance",
-			payload: { theme: "dracula" },
-		});
-		expect(res.statusCode).toBe(200);
-		const body = res.json<AppearanceConfig>();
-		expect(body.theme).toBe("dracula");
-		// Other fields should be preserved from defaults
-		expect(body.autoSwitch.enabled).toBe(false);
-		expect(body.opacity.terminal).toBe(100);
-
-		// Verify persistence via GET
-		const get = await server.inject({ method: "GET", url: "/api/config/appearance" });
-		expect(get.json<AppearanceConfig>().theme).toBe("dracula");
-	});
-});
+// Appearance config routes have been moved to config.ts (PUT /api/config/appearance)

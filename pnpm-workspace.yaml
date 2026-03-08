@@ -39,3 +39,4 @@ catalog:
   "@xterm/addon-serialize": "^0.13.0"
   "@xterm/addon-search": "^0.16.0"
   "@xterm/addon-unicode11": "^0.8.0"
+  "@rainbowatcher/toml-edit-js": "^0.6.0"

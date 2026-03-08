@@ -24,6 +24,14 @@ doc-meta:
 | BDD scenarios | 20 |
 | Risk level | MEDIUM |
 
+### Decisions Log
+
+| ID | Decision | Date |
+|----|----------|------|
+| D13 | Replace @iarna/toml with @rainbowatcher/toml-edit-js for writes (keep @iarna/toml for reads). 303 KB WASM wrapping Rust `toml_edit` crate. `edit(tomlString, 'dotted.key', value)` — surgical, comment-preserving round-trip. | 2026-03-08 |
+| D14 | Absorb appearance.json into config.toml `[appearance]` / `[appearance.auto_switch]` / `[appearance.opacity]` / `[appearance.scrollbar]`. themes/*.json files remain as individual files. | 2026-03-08 |
+| D15 | autoSwitch uses system `prefers-color-scheme` (matchMedia). `auto_switch.enabled = true` → follow OS dark/light mode using `light_theme`/`dark_theme`. No manual `day_start`/`night_start`. | 2026-03-08 |
+
 ## 1. Problem Statement
 
 Users have no centralized UI to view or edit settings across the 4-layer config cascade. The only settings surface is AppearancePanel (themes/opacity/scrollbar, global only). Host and channel profile overrides require API calls. Users cannot see which layer a setting comes from, nor reset overrides to parent values.
@@ -54,10 +62,10 @@ Users have no centralized UI to view or edit settings across the 4-layer config 
 
 ### 3.3 Effects
 
-- EFF-01: Changing a Global setting writes to config.toml via full parse → modify → stringify (comments are not preserved; documented in UI). If config.toml does not exist, it is created in the XDG config dir.
+- EFF-01: Changing a Global setting writes to config.toml via @rainbowatcher/toml-edit-js surgical edit (comments and formatting preserved). If config.toml does not exist, it is created in the XDG config dir.
 - EFF-02: Changing a Host setting writes to hosts.profile_json via PATCH /api/hosts/:id/profile
 - EFF-03: Changing a Channel setting writes to channels.profile_json via PATCH /api/channels/:id/profile
-- EFF-04: Appearance changes (opacity, scrollbar, autoSwitch) write to appearance.json via existing PATCH /api/config/appearance
+- EFF-04: Appearance changes (theme, opacity, scrollbar, autoSwitch) write to config.toml [appearance] section via toml-edit-js (appearance.json eliminated — D14)
 - EFF-05: Changes apply immediately to all open terminals (via existing profile resolution + CSS variable system)
 - EFF-06: Resetting a setting at a scope deletes that key from the scope's override object
 
@@ -84,7 +92,7 @@ New hub endpoint `GET /api/config/cascade` returns all 4 layers in a single resp
 
 | Category | Global | Host | Channel | Config target |
 |----------|--------|------|---------|---------------|
-| Appearance | ✅ themes, opacity, scrollbar, autoSwitch | ✅ theme override | ✅ theme override | appearance.json + profile_json.theme |
+| Appearance | ✅ themes, opacity, scrollbar, autoSwitch | ✅ theme override | ✅ theme override | config.toml [appearance] + profile_json.theme |
 | Terminal | ✅ font, cursor, scrollback, bell | ✅ same | ✅ same | config.toml [terminal] / profile_json |
 | Tabs | ✅ closeButton, newTabPosition, confirms | — | — | config.toml [tabs] |
 | Panes | ✅ maxPanes, defaultSplitDirection | — | — | config.toml [panes] |
@@ -122,7 +130,7 @@ interface CascadeResponse {
 		global: Partial<UiConfig>;          // config.toml overrides
 		resolved: UiConfig;
 	};
-	appearance: AppearanceConfig;           // from appearance.json (flat, not cascaded)
+	appearance: AppearanceConfig;           // from config.toml [appearance] (flat, not cascaded — D14)
 }
 ```
 
@@ -142,26 +150,26 @@ config.toml uses snake_case (`font_family`), TypeScript uses camelCase (`fontFam
 - **Write path:** PUT /api/config/global must convert camelCase → snake_case before TOML stringify
 - Use the existing `toSnakeCase`/`toCamelCase` utilities in shared package
 
-#### Theme Source Clarification (from /llm review)
+#### Theme Source Clarification (from /llm review, updated D14/D15)
 
 Two distinct theme storage locations serve different purposes:
-- `appearance.json` → global theme selection + autoSwitch + opacity/scrollbar (managed by AppearanceManager)
+- `config.toml [appearance]` → global theme selection + autoSwitch + opacity/scrollbar (was appearance.json — absorbed by D14)
 - `hosts.profile_json.theme` → per-host theme override (managed by cascade)
-- No conflict: appearance.json is the "which theme globally", profile_json.theme is "which theme for this host"
+- No conflict: [appearance].theme is the "which theme globally", profile_json.theme is "which theme for this host"
+- `auto_switch.enabled = true` → follows system `prefers-color-scheme` via `matchMedia` (uses `light_theme` / `dark_theme`); no manual day_start/night_start scheduling (D15)
 
 #### Config.toml section-targeted write
 
-`PUT /api/config/global` writes ONLY the `[terminal]` section of config.toml:
-1. Read raw file content
-2. Locate `[terminal]` section (start marker to next `[section]` or EOF)
-3. Serialize new terminal config as TOML fragment
-4. Replace section content, preserve rest of file
-5. Write atomically (write to temp file, rename)
-6. Reload ConfigResolver cache
+`PUT /api/config/global` writes to config.toml using toml-edit-js:
+1. Read raw file content (or empty string if file doesn't exist)
+2. For each changed key, call `edit(tomlString, 'terminal.<key>', value)` — surgical, comment-preserving
+3. Write atomically (write to temp file, rename)
+4. Reload ConfigResolver cache
 
-Same pattern for `PUT /api/config/ui` (writes `[tabs]`, `[panes]`, `[search]`, `[startup]`, `[title]` sections).
+Same pattern for `PUT /api/config/ui` (writes `tabs.*`, `panes.*`, `search.*`, `startup.*`, `title.*` keys).
+Same pattern for appearance settings (writes `appearance.*`, `appearance.auto_switch.*`, `appearance.opacity.*`, `appearance.scrollbar.*` keys).
 
-**Simplified write approach** (from /adversarial C-01): Use `@iarna/toml` parse → modify object → stringify full file. Comments in config.toml are not preserved on save. This avoids fragile section-boundary text manipulation. If config.toml doesn't exist, create it.
+**Comment-preserving write approach** (D13, supersedes /adversarial C-01): Use `@rainbowatcher/toml-edit-js` for writes — `edit(tomlString, 'dotted.key', value)` performs surgical modification preserving all comments and formatting (303 KB WASM, wraps Rust `toml_edit` crate). Keep `@iarna/toml` for parsing (read path). If config.toml doesn't exist, create it.
 
 **Input validation** (from /adversarial C-08): PUT /api/config/global must whitelist known TerminalProfile keys (fontFamily, fontSize, theme, cursorStyle, scrollback, bellSound, scrollbarMarkers). Reject unknown keys with 400 Bad Request. Same validation for PUT /api/config/ui with known UiConfig keys.
 
@@ -329,9 +337,8 @@ Scenario: SC-09 Reset channel override reveals host override
 Scenario: SC-10 Edit global terminal setting writes config.toml
   Given the settings panel is on the Global tab
   When the user changes Font Size from 14 to 16
-  Then the hub writes the [terminal] section of config.toml
-  And other sections of config.toml are preserved unchanged
-  And comments outside [terminal] are preserved
+  Then the hub writes the terminal.font_size key in config.toml via toml-edit-js
+  And all other sections, keys, comments, and formatting are preserved
 
 @priority:high @type:nominal
 Scenario: SC-11 Edit global UI setting writes config.toml
@@ -357,8 +364,10 @@ Scenario: SC-13 Theme picker in Appearance category
   Given the settings panel is open on the Global tab
   And the Appearance category is selected
   Then the theme picker grid is displayed (same as old AppearancePanel)
+  And auto-switch toggle is shown (follows system prefers-color-scheme when enabled — D15)
   And opacity sliders (terminal, sidebar, hostRail, tabBar) are shown
   And scrollbar style selector is shown
+  And all appearance settings read from config.toml [appearance] (not appearance.json — D14)
 
 @priority:medium @type:nominal
 Scenario: SC-14 Per-host theme override
@@ -453,18 +462,19 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 **Packages:** hub, shared
 
 **Files:**
-- `packages/hub/src/api/config.ts` — add GET /api/config/cascade, PUT /api/config/global, PUT /api/config/ui, GET /api/hosts/:id/profile, GET /api/channels/:id/profile
-- `packages/hub/src/config.ts` — add ConfigResolver.getGlobalOverrides(), saveSection()
-- `packages/shared/src/config.ts` — add CascadeResponse type, section write types
+- `packages/hub/src/api/config.ts` — add GET /api/config/cascade, PUT /api/config/global, PUT /api/config/ui, PUT /api/config/appearance, GET /api/hosts/:id/profile, GET /api/channels/:id/profile
+- `packages/hub/src/config.ts` — add ConfigResolver.getGlobalOverrides(), saveKey() using toml-edit-js
+- `packages/shared/src/config.ts` — add CascadeResponse type, AppearanceConfig type, section write types
 
 **Exit criteria:**
-- [ ] GET /api/config/cascade returns all 4 layers + resolved
-- [ ] PUT /api/config/global writes [terminal] section to config.toml (preserves other sections)
-- [ ] PUT /api/config/ui writes [ui]/[tabs]/[panes]/[search]/[startup]/[title] sections
+- [ ] GET /api/config/cascade returns all 4 layers + resolved (including appearance from config.toml [appearance])
+- [ ] PUT /api/config/global writes terminal.* keys to config.toml via toml-edit-js (comment-preserving)
+- [ ] PUT /api/config/ui writes tabs/panes/search/startup/title keys to config.toml
+- [ ] PUT /api/config/appearance writes appearance.* keys to config.toml (replaces old appearance.json API — D14)
 - [ ] GET /api/hosts/:id/profile returns raw profile_json
 - [ ] GET /api/channels/:id/profile returns raw profile_json
 - [ ] All new endpoints require auth (except cascade with no params)
-- [ ] Tests: 8+ (cascade response shape, write-back, section preservation, auth)
+- [ ] Tests: 10+ (cascade response shape, write-back, comment preservation, appearance config, auth)
 
 **Acceptance criteria covered:** SC-10, SC-11, SC-12, SC-15
 
@@ -510,8 +520,11 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 
 **Exit criteria:**
 - [ ] Theme picker/editor rendered inside Appearance category (reuse ThemePicker, ThemeEditor, ThemeCard)
-- [ ] Auto-switch, opacity sliders, scrollbar style shown in Global scope
+- [ ] Auto-switch toggle shown in Global scope: enabled → follows system `prefers-color-scheme` via `matchMedia('(prefers-color-scheme: dark)')`, uses `light_theme`/`dark_theme` fields; disabled → static theme from `[appearance].theme` (D15)
+- [ ] No day_start/night_start fields — OS handles dark mode scheduling (D15)
+- [ ] Opacity sliders, scrollbar style shown in Global scope
 - [ ] Host/Channel scope: only theme selection (with override indicators)
+- [ ] Reads from config cascade (config.toml [appearance]) instead of appearance.json (D14)
 - [ ] Old AppearancePanel deleted, gear icon opens SettingsPanel
 - [ ] Existing theme/appearance functionality preserved (no regressions)
 
@@ -577,7 +590,7 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 ### Test Data
 
 - **Fixtures:** config.toml with comments + multiple sections, host with profile_json overrides, channel with profile_json
-- **Mocks:** @iarna/toml (for TOML parse/stringify in tests), fetch (for store tests)
+- **Mocks:** @iarna/toml (parse), @rainbowatcher/toml-edit-js (edit writes) in tests, fetch (for store tests)
 - **In-memory DB:** better-sqlite3 `:memory:` for integration tests (existing pattern)
 
 ### Key Test Scenarios
@@ -595,7 +608,7 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 
 | Risk | Impact | Probability | Mitigation |
 |------|--------|-------------|------------|
-| config.toml write loses user comments within modified section | M | M | Document behavior: comments in [terminal] may be reformatted. Comments in other sections preserved. |
+| config.toml write loses user comments within modified section | M | L | Mitigated by D13: toml-edit-js preserves all comments and formatting (surgical key-level edits). |
 | Appearance migration breaks existing theme functionality | H | L | Reuse existing ThemePicker/ThemeEditor/ThemeCard components as-is. Only change parent container. |
 | SettingRow complexity (many visual states) | M | M | Start with simple states (overridden/inherited), add edge cases incrementally. |
 | Config.toml file locking on concurrent writes | L | L | Single hub per user per device. Use atomic write (temp + rename). |
@@ -615,5 +628,6 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 - [ ] All tests pass (unit + integration + e2e)
 - [ ] Lint + typecheck pass
 - [ ] Old AppearancePanel fully removed
-- [ ] config.toml write-back preserves non-modified sections
+- [ ] config.toml write-back preserves all comments and formatting (toml-edit-js — D13)
+- [ ] appearance.json eliminated — all appearance config in config.toml [appearance] (D14)
 - [ ] /review clean (no blocking findings)

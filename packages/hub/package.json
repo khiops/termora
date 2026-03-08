@@ -29,7 +29,8 @@
 		"@fastify/websocket": "catalog:",
 		"@fastify/static": "catalog:",
 		"ssh2": "catalog:",
-		"@iarna/toml": "catalog:"
+		"@iarna/toml": "catalog:",
+		"@rainbowatcher/toml-edit-js": "catalog:"
 	},
 	"devDependencies": {
 		"tsx": "catalog:",

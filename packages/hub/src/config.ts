@@ -10,11 +10,19 @@
  * Also parses the [gc] section for spool garbage collector configuration.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
-import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
+import {
+	DEFAULT_PROFILE,
+	TERMINAL_PROFILE_KEYS,
+	UI_CONFIG_SECTIONS,
+	deepMerge,
+} from "@nexterm/shared";
+import { DEFAULT_APPEARANCE } from "@nexterm/shared";
 import type {
+	AppearanceConfig,
+	CascadeResponse,
 	ChannelsConfig,
 	PanesConfig,
 	SearchConfig,
@@ -22,8 +30,13 @@ import type {
 	TabsConfig,
 	TerminalProfile,
 	TitleConfig,
+	UiConfig,
 } from "@nexterm/shared";
+import { edit, initSync } from "@rainbowatcher/toml-edit-js";
 import type { MetaDAL } from "./storage/meta.js";
+
+// Initialize toml-edit-js WASM (sync — called once at module load)
+initSync();
 
 // ─── GC configuration ──────────────────────────────────────────────────────────
 
@@ -78,23 +91,8 @@ export function loadGcConfig(configDir: string): GcConfig {
 
 // ─── UI configuration ───────────────────────────────────────────────────────
 
-/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search] in config.toml). */
-export interface UiConfig {
-	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
-	onChannelDead: "close" | "readonly";
-	/** Tab behavior configuration. */
-	tabs: TabsConfig;
-	/** Pane behavior configuration. */
-	panes: PanesConfig;
-	/** Channel defaults configuration. */
-	channels: ChannelsConfig;
-	/** Startup behavior configuration. */
-	startup: StartupConfig;
-	/** Terminal title configuration. */
-	title: TitleConfig;
-	/** Search behavior configuration. */
-	search: SearchConfig;
-}
+// UiConfig interface is now in @nexterm/shared — re-exported here for backward compat
+export type { UiConfig } from "@nexterm/shared";
 
 export const DEFAULT_TABS_CONFIG: TabsConfig = {
 	closeButton: true,
@@ -327,6 +325,70 @@ function tomlSectionToProfile(section: Record<string, unknown>): Partial<Termina
 	return result as Partial<TerminalProfile>;
 }
 
+// ─── camelCase ↔ snake_case helpers ───────────────────────────────────────────
+
+/** Convert a camelCase key to snake_case for config.toml. */
+function camelToSnake(s: string): string {
+	return s.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+}
+
+// ─── Appearance config extraction ────────────────────────────────────────────
+
+/** Extract AppearanceConfig from a parsed TOML map's [appearance] section. */
+export function extractAppearanceConfig(parsed: TOML.JsonMap): AppearanceConfig {
+	const config: AppearanceConfig = {
+		theme: DEFAULT_APPEARANCE.theme,
+		autoSwitch: { ...DEFAULT_APPEARANCE.autoSwitch },
+		opacity: { ...DEFAULT_APPEARANCE.opacity },
+		scrollbar: { ...DEFAULT_APPEARANCE.scrollbar },
+	};
+
+	const section = parsed.appearance;
+	if (section == null || typeof section !== "object") return config;
+	const raw = section as Record<string, unknown>;
+
+	if (typeof raw.theme === "string") {
+		config.theme = raw.theme;
+	}
+
+	// [appearance.auto_switch]
+	const autoSwitch = raw.auto_switch;
+	if (autoSwitch != null && typeof autoSwitch === "object") {
+		const as = autoSwitch as Record<string, unknown>;
+		if (typeof as.enabled === "boolean") config.autoSwitch.enabled = as.enabled;
+		if (typeof as.dark_theme === "string") config.autoSwitch.darkTheme = as.dark_theme;
+		if (typeof as.light_theme === "string") config.autoSwitch.lightTheme = as.light_theme;
+	}
+
+	// [appearance.opacity]
+	const opacity = raw.opacity;
+	if (opacity != null && typeof opacity === "object") {
+		const op = opacity as Record<string, unknown>;
+		if (typeof op.terminal === "number") config.opacity.terminal = op.terminal;
+		if (typeof op.sidebar === "number") config.opacity.sidebar = op.sidebar;
+		if (typeof op.host_rail === "number") config.opacity.hostRail = op.host_rail;
+		if (typeof op.tab_bar === "number") config.opacity.tabBar = op.tab_bar;
+	}
+
+	// [appearance.scrollbar]
+	const scrollbar = raw.scrollbar;
+	if (scrollbar != null && typeof scrollbar === "object") {
+		const sb = scrollbar as Record<string, unknown>;
+		if (
+			typeof sb.style === "string" &&
+			(sb.style === "thin" || sb.style === "wide" || sb.style === "hidden")
+		) {
+			config.scrollbar.style = sb.style;
+		}
+		if (typeof sb.thumb_color === "string") config.scrollbar.thumbColor = sb.thumb_color;
+		if (typeof sb.track_color === "string") config.scrollbar.trackColor = sb.track_color;
+		if (typeof sb.width_thin === "number") config.scrollbar.widthThin = sb.width_thin;
+		if (typeof sb.width_wide === "number") config.scrollbar.widthWide = sb.width_wide;
+	}
+
+	return config;
+}
+
 // ─── ConfigResolver ──────────────────────────────────────────────────────────
 
 export class ConfigResolver {
@@ -334,6 +396,8 @@ export class ConfigResolver {
 	private agentHints = new Map<string, Partial<TerminalProfile>>();
 	private _gcConfig: GcConfig = { ...DEFAULT_GC_CONFIG };
 	private _uiConfig: UiConfig = { ...DEFAULT_UI_CONFIG };
+	private _appearance: AppearanceConfig = { ...DEFAULT_APPEARANCE };
+	private _configDir: string | null = null;
 
 	constructor(private metaDal: MetaDAL) {}
 
@@ -347,12 +411,18 @@ export class ConfigResolver {
 		return this._uiConfig;
 	}
 
+	/** Returns the resolved appearance configuration (defaults merged with [appearance] from config.toml). */
+	get appearance(): AppearanceConfig {
+		return this._appearance;
+	}
+
 	/**
-	 * Load [terminal], [gc], [ui], [tabs], [panes], [channels], [startup], [title], and [search]
-	 * sections from config.toml at the given config directory.
+	 * Load [terminal], [gc], [ui], [tabs], [panes], [channels], [startup], [title], [search],
+	 * and [appearance] sections from config.toml at the given config directory.
 	 * Silently no-ops if the file does not exist or is malformed.
 	 */
 	loadFromFile(configDir: string): void {
+		this._configDir = configDir;
 		const configPath = join(configDir, "config.toml");
 		if (!existsSync(configPath)) return;
 
@@ -386,6 +456,143 @@ export class ConfigResolver {
 
 		// ── [ui] section ────────────────────────────────────────────────────
 		this._uiConfig = extractUiConfig(parsed);
+
+		// ── [appearance] section ────────────────────────────────────────────
+		this._appearance = extractAppearanceConfig(parsed);
+	}
+
+	/** Returns the Layer 2 terminal overrides from config.toml. */
+	getGlobalTerminalOverrides(): Partial<TerminalProfile> {
+		return this.fileConfig ?? {};
+	}
+
+	/** Returns only the UI config keys that differ from defaults (i.e. what was explicitly set). */
+	getGlobalUiOverrides(): Partial<UiConfig> {
+		const overrides: Record<string, unknown> = {};
+		const current = this._uiConfig;
+		const defaults = DEFAULT_UI_CONFIG;
+
+		if (current.onChannelDead !== defaults.onChannelDead) {
+			overrides.onChannelDead = current.onChannelDead;
+		}
+
+		for (const section of UI_CONFIG_SECTIONS) {
+			const currentSection = current[section];
+			const defaultSection = defaults[section];
+			if (currentSection == null || defaultSection == null) continue;
+			const diff: Record<string, unknown> = {};
+			let hasDiff = false;
+			for (const [key, val] of Object.entries(currentSection)) {
+				if (val !== (defaultSection as Record<string, unknown>)[key]) {
+					diff[key] = val;
+					hasDiff = true;
+				}
+			}
+			if (hasDiff) {
+				overrides[section] = diff;
+			}
+		}
+
+		return overrides as Partial<UiConfig>;
+	}
+
+	/** Returns the full cascade response for the settings panel. */
+	getCascade(hostId?: string, channelId?: string): CascadeResponse {
+		// Terminal layers
+		const terminalDefaults = DEFAULT_PROFILE;
+		const terminalGlobal = this.getGlobalTerminalOverrides();
+
+		let hostLayer: Partial<TerminalProfile> | undefined;
+		if (hostId) {
+			const hostProfileRaw = this.metaDal.getHostProfile(hostId);
+			if (hostProfileRaw) {
+				try {
+					hostLayer = JSON.parse(hostProfileRaw) as Partial<TerminalProfile>;
+				} catch {
+					// Invalid JSON — skip
+				}
+			}
+		}
+
+		let channelLayer: Partial<TerminalProfile> | undefined;
+		if (channelId) {
+			const channelProfileRaw = this.metaDal.getChannelProfile(channelId);
+			if (channelProfileRaw) {
+				try {
+					channelLayer = JSON.parse(channelProfileRaw) as Partial<TerminalProfile>;
+				} catch {
+					// Invalid JSON — skip
+				}
+			}
+		}
+
+		// Resolved terminal = all layers merged (excluding L3.5 agent hints)
+		const resolved = this.resolve(hostId, channelId);
+
+		const response: CascadeResponse = {
+			terminal: {
+				defaults: terminalDefaults,
+				global: terminalGlobal,
+				resolved,
+				...(hostLayer !== undefined && { host: hostLayer }),
+				...(channelLayer !== undefined && { channel: channelLayer }),
+			},
+			ui: {
+				defaults: DEFAULT_UI_CONFIG,
+				global: this.getGlobalUiOverrides(),
+				resolved: this._uiConfig,
+			},
+			appearance: this._appearance,
+		};
+
+		return response;
+	}
+
+	/**
+	 * Write a single key to a section in config.toml using comment-preserving editing.
+	 * Creates the file if missing. A null value removes the key.
+	 */
+	async saveGlobalKey(section: string, key: string, value: unknown): Promise<void> {
+		if (!this._configDir) {
+			throw new Error("ConfigResolver: configDir not set — call loadFromFile() first");
+		}
+
+		const configPath = join(this._configDir, "config.toml");
+		let tomlString = "";
+		if (existsSync(configPath)) {
+			tomlString = readFileSync(configPath, "utf8");
+		}
+
+		const snakeKey = camelToSnake(key);
+		const path = `${section}.${snakeKey}`;
+
+		// null = remove key (pass undefined to toml-edit)
+		const editValue = value === null ? undefined : value;
+		tomlString = edit(tomlString, path, editValue);
+
+		// Atomic write: write to temp, then rename
+		const tmpPath = `${configPath}.tmp`;
+		writeFileSync(tmpPath, tomlString, "utf8");
+		renameSync(tmpPath, configPath);
+
+		// Reload to update in-memory state
+		this.loadFromFile(this._configDir);
+	}
+
+	/** Write a terminal profile key to config.toml (validates against whitelist). */
+	async saveGlobalTerminal(key: string, value: unknown): Promise<void> {
+		if (!(TERMINAL_PROFILE_KEYS as readonly string[]).includes(key)) {
+			throw new Error(`Unknown terminal key: ${key}`);
+		}
+		await this.saveGlobalKey("terminal", key, value);
+	}
+
+	/** Write a UI config key to config.toml (validates section against whitelist). */
+	async saveGlobalUi(section: string, key: string, value: unknown): Promise<void> {
+		if (!(UI_CONFIG_SECTIONS as readonly string[]).includes(section)) {
+			throw new Error(`Unknown UI section: ${section}`);
+		}
+		await this.saveGlobalKey(section, key, value);
 	}
 
 	/**

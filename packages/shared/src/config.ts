@@ -1,4 +1,5 @@
 // Config types and deep merge utility for nexterm config cascade
+import type { AppearanceConfig } from "./appearance.js";
 import { isPlainObject } from "./utils.js";
 
 export interface TerminalProfile {
@@ -240,3 +241,63 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	bellSound: false,
 	scrollbarMarkers: true,
 };
+
+// ─── UI behavioral config (combined) ─────────────────────────────────────────
+
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search] in config.toml). */
+export interface UiConfig {
+	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
+	onChannelDead: "close" | "readonly";
+	/** Tab behavior configuration. */
+	tabs: TabsConfig;
+	/** Pane behavior configuration. */
+	panes: PanesConfig;
+	/** Channel defaults configuration. */
+	channels: ChannelsConfig;
+	/** Startup behavior configuration. */
+	startup: StartupConfig;
+	/** Terminal title configuration. */
+	title: TitleConfig;
+	/** Search behavior configuration. */
+	search: SearchConfig;
+}
+
+// ─── Cascade endpoint response ────────────────────────────────────────────────
+
+export interface CascadeResponse {
+	terminal: {
+		defaults: TerminalProfile;
+		global: Partial<TerminalProfile>;
+		host?: Partial<TerminalProfile>;
+		channel?: Partial<TerminalProfile>;
+		resolved: TerminalProfile;
+	};
+	ui: {
+		defaults: UiConfig;
+		global: Partial<UiConfig>;
+		resolved: UiConfig;
+	};
+	appearance: AppearanceConfig;
+}
+
+// ─── Key whitelists for config write-back validation ──────────────────────────
+
+export const TERMINAL_PROFILE_KEYS = [
+	"fontFamily",
+	"fontSize",
+	"theme",
+	"themeOverrides",
+	"cursorStyle",
+	"scrollback",
+	"bellSound",
+	"scrollbarMarkers",
+] as const;
+
+export const UI_CONFIG_SECTIONS = [
+	"tabs",
+	"panes",
+	"channels",
+	"startup",
+	"title",
+	"search",
+] as const;

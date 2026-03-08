@@ -121,7 +121,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await themeManager.init();
 		const appearanceManager = new AppearanceManager(configDir);
 		await appearanceManager.init();
-		registerThemeRoutes(server, themeManager, appearanceManager);
+		registerThemeRoutes(server, themeManager);
 		if (options.authToken) {
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}

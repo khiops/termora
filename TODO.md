@@ -3,7 +3,7 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [ ] 🟡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4) — spec drafted
+- [ ] 🟡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4) — Block 1/5 done (1116 tests)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
