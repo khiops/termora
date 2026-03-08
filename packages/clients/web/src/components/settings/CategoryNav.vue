@@ -24,6 +24,7 @@ interface CategoryDef {
 
 const ALL_CATEGORIES: CategoryDef[] = [
 	{ id: "appearance", label: "Appearance", scopes: ["global", "host", "channel"] },
+	{ id: "wallpaper", label: "Wallpaper", scopes: ["global", "host", "channel"] },
 	{ id: "terminal", label: "Terminal", scopes: ["global", "host", "channel"] },
 	{ id: "tabs", label: "Tabs", scopes: ["global"] },
 	{ id: "panes", label: "Panes", scopes: ["global"] },

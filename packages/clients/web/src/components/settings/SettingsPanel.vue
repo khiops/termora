@@ -50,6 +50,10 @@
 										v-if="settingsStore.activeCategory === 'appearance'"
 										:scope="settingsStore.activeScope"
 									/>
+									<WallpaperCategory
+										v-else-if="settingsStore.activeCategory === 'wallpaper'"
+										:scope="settingsStore.activeScope"
+									/>
 									<SchemaCategory
 										v-else-if="settingsStore.activeCategory !== 'keybindings'"
 										:category="settingsStore.activeCategory"
@@ -72,6 +76,7 @@ import { computed, watch } from "vue";
 import ScopeTabBar from "./ScopeTabBar.vue";
 import CategoryNav from "./CategoryNav.vue";
 import AppearanceCategory from "./categories/AppearanceCategory.vue";
+import WallpaperCategory from "./categories/WallpaperCategory.vue";
 import SchemaCategory from "./categories/SchemaCategory.vue";
 import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
 import { useSettingsStore } from "../../stores/settings.js";
