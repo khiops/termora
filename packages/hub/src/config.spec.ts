@@ -1510,6 +1510,29 @@ describe("PUT /api/config/ui", () => {
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
+
+	it("rejects unknown key within a valid UI section (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { unknownKey: true } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string; message: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+		expect(body.error.message).toContain("unknownKey");
+		expect(body.error.message).toContain("tabs");
+	});
+
+	it("accepts valid keys within a valid UI section (200)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { closeButton: false, newTabPosition: "afterActive" } },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+	});
 });
 
 // ─── REST endpoint: PUT /api/config/appearance ──────────────────────────────

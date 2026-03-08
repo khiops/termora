@@ -1,4 +1,9 @@
-import { DEFAULT_PROFILE, TERMINAL_PROFILE_KEYS, UI_CONFIG_SECTIONS } from "@nexterm/shared";
+import {
+	DEFAULT_PROFILE,
+	TERMINAL_PROFILE_KEYS,
+	UI_CONFIG_SECTIONS,
+	UI_SECTION_KEYS,
+} from "@nexterm/shared";
 import type { TerminalProfile } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { ConfigResolver } from "../config.js";
@@ -91,6 +96,22 @@ export function registerConfigRoutes(
 				}
 				const sectionData = body[section];
 				if (typeof sectionData !== "object" || sectionData === null) continue;
+
+				// Validate individual keys within the section
+				const allowedKeys = UI_SECTION_KEYS[section];
+				if (allowedKeys) {
+					for (const key of Object.keys(sectionData as Record<string, unknown>)) {
+						if (!allowedKeys.includes(key)) {
+							return reply.code(400).send({
+								error: {
+									code: "VALIDATION_ERROR",
+									message: `Unknown key "${key}" in UI section "${section}"`,
+								},
+							});
+						}
+					}
+				}
+
 				for (const [key, value] of Object.entries(sectionData as Record<string, unknown>)) {
 					await configResolver.saveGlobalKey(section, key, value);
 				}

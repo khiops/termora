@@ -301,3 +301,45 @@ export const UI_CONFIG_SECTIONS = [
 	"title",
 	"search",
 ] as const;
+
+/** Per-section key whitelists — derived from the TypeScript interfaces above. */
+export const TABS_CONFIG_KEYS = [
+	"closeButton",
+	"newTabPosition",
+	"confirmCloseAll",
+	"confirmCloseOthers",
+] as const;
+
+export const PANES_CONFIG_KEYS = ["maxPanes", "defaultSplitDirection"] as const;
+
+export const CHANNELS_CONFIG_KEYS = ["defaultShell"] as const;
+
+export const STARTUP_CONFIG_KEYS = ["autoOpenWelcome"] as const;
+
+export const TITLE_CONFIG_KEYS = [
+	"source",
+	"fallback",
+	"fallbackCustom",
+	"maxLength",
+	"truncation",
+	"prefix",
+	"windowTitle",
+	"windowFormat",
+] as const;
+
+export const SEARCH_CONFIG_KEYS = [
+	"position",
+	"highlightOnClose",
+	"scrollbarMarkers",
+	"historySize",
+] as const;
+
+/** Map from UI section name to its allowed keys. */
+export const UI_SECTION_KEYS: Record<string, readonly string[]> = {
+	tabs: TABS_CONFIG_KEYS,
+	panes: PANES_CONFIG_KEYS,
+	channels: CHANNELS_CONFIG_KEYS,
+	startup: STARTUP_CONFIG_KEYS,
+	title: TITLE_CONFIG_KEYS,
+	search: SEARCH_CONFIG_KEYS,
+};

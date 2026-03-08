@@ -3,7 +3,7 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [ ] 🟡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4) — Block 1/5 done (1116 tests)
+- [ ] 🟡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4) — 5/5 blocks, review CONDITIONAL → fixes applied, pending /finalize
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
@@ -61,6 +61,12 @@
 - [ ] 💡 [UI] Banner position 'aboveTabs' option — Priority: L (from UX-07 /adversarial C-01)
 - [ ] 💡 [UI] Collapsible banner with shortText — Priority: L (from UX-07 /adversarial C-02)
 - [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
+
+### Deferred from UX-09 /review
+- [ ] 🔧 [Hub] PUT /api/config/ui: add per-key validation for UI sections (C-08 completeness) — Priority: M (from /review F-002, partially fixed)
+- [ ] 🔧 [Web] SettingsPanel: toast notification on scope auto-fallback (SC-17) — Priority: L (from /review F-005)
+- [ ] 🔧 [Web] settings store: dead else branch for top-level UI key → would 400 — Priority: L (from /review F-006)
+- [ ] 🔧 [Hub] PATCH /api/hosts/:id/profile + channels: add TERMINAL_PROFILE_KEYS validation — Priority: L (from /review F-007)
 
 ### Deferred from UX-09 /spec + /adversarial
 - [ ] 💡 [UI] Settings panel search/filter (VS Code style) — Priority: L (from UX-09 spec, P2)

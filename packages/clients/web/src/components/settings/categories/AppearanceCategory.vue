@@ -262,7 +262,7 @@ function onOpacityInput(
 	opacityDebounce = setTimeout(() => {
 		themeStore.updateAppearance({ opacity: { ...opacity } });
 		opacityDebounce = null;
-	}, 300);
+	}, 500);
 }
 
 // ── Scrollbar ─────────────────────────────────────────────────────────

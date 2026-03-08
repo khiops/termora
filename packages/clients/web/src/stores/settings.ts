@@ -4,6 +4,7 @@ import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useHostsStore } from "./hosts.js";
+import { useToastStore } from "./toast.js";
 
 export type Scope = "global" | "host" | "channel";
 
@@ -51,6 +52,8 @@ export const useSettingsStore = defineStore("settings", () => {
 	const activeScope = ref<Scope>("global");
 	const activeCategory = ref<string>("appearance");
 	const loading = ref(false);
+	const dirty = ref<Set<string>>(new Set());
+	const lastError = ref<string | null>(null);
 
 	// ─── Load cascade from API ────────────────────────────────────────────
 
@@ -289,15 +292,16 @@ export const useSettingsStore = defineStore("settings", () => {
 							body: JSON.stringify({ profile }),
 						});
 					}
+					// On success, clear dirty state for this key
+					dirty.value = new Set([...dirty.value].filter((k) => k !== debounceKey));
 				} catch (err) {
-					// On failure, reload cascade to rollback optimistic update
+					// Keep optimistic value — mark as dirty instead of rolling back
 					console.error("Failed to save setting:", err);
-					const hostsStore = useHostsStore();
-					const channelsStore = useChannelsStore();
-					await loadCascade(
-						hostsStore.selectedHostId ?? undefined,
-						channelsStore.selectedChannelId ?? undefined,
-					);
+					dirty.value = new Set([...dirty.value, debounceKey]);
+					const message = err instanceof Error ? err.message : "Failed to save setting";
+					lastError.value = message;
+					const toastStore = useToastStore();
+					toastStore.show("error", `Setting save failed: ${message}`);
 				}
 			}, 500),
 		);
@@ -315,6 +319,8 @@ export const useSettingsStore = defineStore("settings", () => {
 		activeScope,
 		activeCategory,
 		loading,
+		dirty,
+		lastError,
 		loadCascade,
 		getValue,
 		isOverridden,

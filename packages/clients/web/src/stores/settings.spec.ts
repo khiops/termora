@@ -340,6 +340,55 @@ describe("useSettingsStore", () => {
 			expect(store.getValue("global", "terminal", "fontSize")).toBe(20);
 			expect(store.getResolved("terminal", "fontSize")).toBe(20);
 		});
+
+		it("marks key dirty and shows toast on API failure", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+
+			// Make fetch reject when the debounced call fires
+			mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+			void store.updateSetting("global", "terminal", "fontSize", 20);
+
+			// Optimistic value applied
+			expect(store.getValue("global", "terminal", "fontSize")).toBe(20);
+			expect(store.dirty.size).toBe(0);
+
+			// Advance past 500ms debounce
+			await vi.advanceTimersByTimeAsync(600);
+
+			// Dirty should contain the key
+			expect(store.dirty.has("global:terminal:fontSize")).toBe(true);
+			expect(store.lastError).toBe("Network error");
+
+			// Optimistic value is still there (no rollback)
+			expect(store.getValue("global", "terminal", "fontSize")).toBe(20);
+
+			vi.useRealTimers();
+		});
+
+		it("clears dirty state on successful save", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+
+			// Pre-seed dirty state
+			store.dirty = new Set(["global:terminal:fontSize"]);
+
+			// Make fetch succeed
+			mockFetch.mockResolvedValueOnce({ ok: true });
+
+			void store.updateSetting("global", "terminal", "fontSize", 22);
+
+			// Advance past debounce
+			await vi.advanceTimersByTimeAsync(600);
+
+			// Dirty should be cleared for this key
+			expect(store.dirty.has("global:terminal:fontSize")).toBe(false);
+
+			vi.useRealTimers();
+		});
 	});
 
 	describe("resetSetting", () => {
