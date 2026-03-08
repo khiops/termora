@@ -115,7 +115,7 @@ interface CascadeResponse {
 		global: Partial<TerminalProfile>;   // Layer 2 (config.toml)
 		host?: Partial<TerminalProfile>;    // Layer 3 (if host_id)
 		channel?: Partial<TerminalProfile>; // Layer 4 (if channel_id)
-		resolved: TerminalProfile;          // merged result
+		resolved: TerminalProfile;          // merged result (excludes Layer 3.5 agent hints — ephemeral, not user-editable)
 	};
 	ui: {
 		defaults: UiConfig;
@@ -125,6 +125,29 @@ interface CascadeResponse {
 	appearance: AppearanceConfig;           // from appearance.json (flat, not cascaded)
 }
 ```
+
+**Note on Layer 3.5 (Agent Hints):** Agent visual hints (from HELLO message) are ephemeral and per-session. They are NOT exposed in the Settings Panel UI — they're applied transparently by ConfigResolver.resolve() at runtime. The Settings Panel shows layers 1-4 only.
+
+#### PATCH Semantics (from /llm review)
+
+All profile PATCH endpoints use **merge-patch** semantics (existing deepMerge behavior):
+- Partial payloads are merged into existing data (other keys preserved)
+- Setting a key to `null` **removes** that override (reverts to parent inheritance)
+- This is the mechanism for "reset to parent" — PATCH with `{ key: null }`
+
+#### camelCase ↔ snake_case (from /llm review)
+
+config.toml uses snake_case (`font_family`), TypeScript uses camelCase (`fontFamily`).
+- **Read path:** ConfigResolver.loadFromFile() already converts snake_case → camelCase
+- **Write path:** PUT /api/config/global must convert camelCase → snake_case before TOML stringify
+- Use the existing `toSnakeCase`/`toCamelCase` utilities in shared package
+
+#### Theme Source Clarification (from /llm review)
+
+Two distinct theme storage locations serve different purposes:
+- `appearance.json` → global theme selection + autoSwitch + opacity/scrollbar (managed by AppearanceManager)
+- `hosts.profile_json.theme` → per-host theme override (managed by cascade)
+- No conflict: appearance.json is the "which theme globally", profile_json.theme is "which theme for this host"
 
 #### Config.toml section-targeted write
 
