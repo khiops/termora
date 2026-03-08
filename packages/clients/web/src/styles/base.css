@@ -1,0 +1,103 @@
+/*
+ * nexterm — CSS custom property system
+ *
+ * 42 variables total, organized in 3 tiers:
+ *   Tier 1: Terminal colors (from theme.colors)  — 22 vars
+ *   Tier 2: UI chrome (from theme.ui)            — 15 vars
+ *   Tier 3: Computed / derived                    — 11 vars (incl. 6 RGB triplets)
+ *
+ * Default values match catppuccin-mocha so the app renders
+ * correctly before JavaScript applies the active theme.
+ *
+ * At runtime, useThemeStore.applyTheme() overwrites these
+ * on document.documentElement.style.
+ */
+
+:root {
+	/* ── Tier 1 — Terminal colors ────────────────────────────────────── */
+
+	--nt-fg: #cdd6f4;
+	--nt-bg: #1e1e2e;
+	--nt-cursor: #f5e0dc;
+	--nt-cursor-accent: transparent;
+	--nt-selection-bg: #45475a;
+	--nt-selection-fg: transparent;
+
+	/* ANSI 16 */
+	--nt-black: #45475a;
+	--nt-red: #f38ba8;
+	--nt-green: #a6e3a1;
+	--nt-yellow: #f9e2af;
+	--nt-blue: #89b4fa;
+	--nt-magenta: #f5c2e7;
+	--nt-cyan: #94e2d5;
+	--nt-white: #bac2de;
+	--nt-bright-black: #585b70;
+	--nt-bright-red: #f38ba8;
+	--nt-bright-green: #a6e3a1;
+	--nt-bright-yellow: #f9e2af;
+	--nt-bright-blue: #89b4fa;
+	--nt-bright-magenta: #f5c2e7;
+	--nt-bright-cyan: #94e2d5;
+	--nt-bright-white: #a6adc8;
+
+	/* ── Tier 2 — UI chrome ──────────────────────────────────────────── */
+
+	--nt-tab-bar: #181825;
+	--nt-tab-active: #1e1e2e;
+	--nt-tab-inactive: #181825;
+	--nt-tab-hover: #313244;
+	--nt-sidebar: #181825;
+	--nt-sidebar-text: #bac2de;
+	--nt-sidebar-active: #313244;
+	--nt-host-rail: #11111b;
+	--nt-border: #313244;
+	--nt-accent: #89b4fa;
+	--nt-badge: #f38ba8;
+	--nt-scrollbar-thumb: #585b70;
+	--nt-scrollbar-track: #00000000;
+	--nt-search-highlight: #f9e2af40;
+	--nt-search-highlight-active: #f9e2afaa;
+
+	/* ── Tier 3 — Computed / derived ─────────────────────────────────── */
+
+	/* Text levels */
+	--nt-text-secondary: #585b70;
+	--nt-text-muted: #a6adc8;
+
+	/* RGB components for transparent variants via rgba(var(--nt-*-rgb), alpha) */
+	--nt-accent-rgb: 137, 180, 250;
+	--nt-badge-rgb: 243, 139, 168;
+	--nt-green-rgb: 166, 227, 161;
+	--nt-yellow-rgb: 249, 226, 175;
+	--nt-fg-rgb: 205, 214, 244;
+	--nt-bg-rgb: 30, 30, 46;
+
+	/* RGB components for opacity surfaces */
+	--nt-sidebar-rgb: 24, 24, 37;
+	--nt-host-rail-rgb: 17, 17, 27;
+	--nt-tab-bar-rgb: 24, 24, 37;
+
+	/* Opacity (Block 7) */
+	--nt-terminal-alpha: 1;
+	--nt-sidebar-alpha: 1;
+	--nt-host-rail-alpha: 1;
+	--nt-tab-bar-alpha: 1;
+
+	/* Scrollbar (Block 7) */
+	--nt-scrollbar-width: 6px;
+
+	/* Overlays */
+	--nt-overlay: rgba(0, 0, 0, 0.5);
+	--nt-overlay-heavy: rgba(0, 0, 0, 0.7);
+	--nt-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Base body styles ────────────────────────────────────────────────── */
+
+body {
+	background: var(--nt-bg);
+	color: var(--nt-fg);
+	margin: 0;
+	font-family: system-ui, -apple-system, sans-serif;
+}

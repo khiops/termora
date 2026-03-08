@@ -1,0 +1,33 @@
+{
+	"name": "@nexterm/shared",
+	"version": "0.1.0",
+	"description": "Shared TypeScript types and codec for nexterm (wire protocol, entities)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/nexterm/nexterm.git"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"type": "module",
+	"files": ["dist"],
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		}
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@msgpack/msgpack": "catalog:",
+		"ulid": "catalog:"
+	},
+	"devDependencies": {
+		"typescript": "catalog:",
+		"@types/node": "catalog:"
+	}
+}

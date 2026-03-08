@@ -1,0 +1,1438 @@
+import type {
+	AgentAttachMessage,
+	AgentAttachOkMessage,
+	AgentBellMessage,
+	AgentChannelStateMessage,
+	AgentNotificationMessage,
+	AgentSnapshotResMessage,
+	AgentSpawnErrMessage,
+	AgentSpawnMessage,
+	AgentSpawnOkMessage,
+	AgentTitleChangeMessage,
+	ChannelExitMessage,
+	ChannelStateMessage,
+	DestroyMessage,
+	ErrorMessage,
+	InputMessage,
+	OutputMessage,
+	ProtocolMessage,
+	ResizeMessage,
+	SessionStateMessage,
+	StateSyncMessage,
+	UiAttachOkMessage,
+	UiSpawnMessage,
+	UiSpawnOkMessage,
+} from "@nexterm/shared";
+import type { AgentConfig, ChannelStatus, SessionStatus } from "@nexterm/shared";
+import {
+	DEFAULT_AGENT_CONFIG,
+	DEFAULT_CHANNEL_NAME,
+	generateId,
+	getSocketPath,
+} from "@nexterm/shared";
+import type { GcConfig } from "../config.js";
+import type { DatabaseManager } from "../storage/db.js";
+import { MetaDAL } from "../storage/meta.js";
+import { SpoolDAL } from "../storage/spool.js";
+import type { AgentConnection } from "./agent-connection.js";
+import { connectOrLaunch } from "./agent-launcher.js";
+import { LocalAgent, resolveAgentPath } from "./local-agent.js";
+import { NextermAgent } from "./nexterm-agent.js";
+import { OutputChunker } from "./output-chunker.js";
+import { SnapshotScheduler } from "./snapshot-scheduler.js";
+import { SpoolGarbageCollector } from "./spool-gc.js";
+import { SshAgent } from "./ssh-agent.js";
+
+const SPAWN_TIMEOUT_MS = 10_000;
+const ATTACH_TIMEOUT_MS = 5_000;
+const TITLE_DEBOUNCE_MS = 100;
+
+/** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
+const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+const RECONNECT_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
+
+export interface WsClient {
+	id: string;
+	send: (msg: ProtocolMessage) => void;
+	attachedChannels: Set<string>;
+}
+
+interface ChannelState {
+	sessionId: string;
+	hostId: string;
+	status: ChannelStatus;
+	/** clientId set — empty when orphan */
+	clients: Set<string>;
+	shell: string;
+	args?: string[];
+	cwd?: string;
+	cols: number;
+	rows: number;
+	directProcess?: boolean;
+}
+
+interface SessionState {
+	id: string;
+	hostId: string;
+	status: SessionStatus;
+}
+
+export class SessionManager {
+	/** hostId → AgentConnection */
+	private agents = new Map<string, AgentConnection>();
+	/** Spool DAL for snapshot chunk storage */
+	private spoolDal: SpoolDAL;
+	/** hostId → SessionState */
+	private sessions = new Map<string, SessionState>();
+	/** channelId → ChannelState */
+	private channels = new Map<string, ChannelState>();
+	/** clientId → WsClient */
+	private clients = new Map<string, WsClient>();
+	/** hostId → pending reconnect timer */
+	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Crash-loop tracking for local agent restarts: hostId → { count, windowStart } */
+	private restartTracking = new Map<string, { count: number; windowStart: number }>();
+	/** requestId (or keyed token like "attach:<channelId>") → callback for pending agent responses */
+	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
+	private metaDal: MetaDAL;
+	/** Agent daemon configuration (socket path, buffer caps) */
+	private agentConfig: AgentConfig;
+
+	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
+	private scheduler: SnapshotScheduler;
+	/** Output chunker — buffers OUTPUT data and flushes to spool.db */
+	private chunker: OutputChunker;
+	/** Spool GC — periodically deletes old chunks and runs incremental vacuum */
+	private gc: SpoolGarbageCollector;
+	/** channelId → pending title debounce timer for DB writes */
+	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
+	private bellTimestamps = new Map<string, number[]>();
+	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
+	private notificationTimestamps = new Map<string, number[]>();
+
+	/**
+	 * Optional callback to resolve the current write-lock holder for a channel.
+	 * Injected by ws-handler.ts after WriteLockManager is created.
+	 */
+	private _getWriteLockHolder: ((channelId: string) => string | null) | null = null;
+
+	setGetWriteLockHolder(fn: (channelId: string) => string | null): void {
+		this._getWriteLockHolder = fn;
+	}
+
+	constructor(
+		private dbManager: DatabaseManager,
+		gcConfig?: GcConfig,
+		agentConfig?: AgentConfig,
+	) {
+		this.metaDal = new MetaDAL(dbManager.meta);
+		this.spoolDal = new SpoolDAL(dbManager.spool);
+		this.agentConfig = agentConfig ?? { ...DEFAULT_AGENT_CONFIG };
+		this.scheduler = new SnapshotScheduler((channelId) => {
+			// Find the agent for this channel via the channel's hostId
+			const ch = this.channels.get(channelId);
+			return ch ? this.agents.get(ch.hostId) : undefined;
+		});
+		this.chunker = new OutputChunker(this.spoolDal);
+		this.gc = new SpoolGarbageCollector(this.spoolDal, this.metaDal, gcConfig);
+		this.gc.start();
+	}
+
+	/**
+	 * Ensure the built-in "local" host exists in meta.db.
+	 * Idempotent — creates on first call, returns existing id thereafter.
+	 */
+	async ensureLocalHost(): Promise<string> {
+		const existing = this.metaDal.getHostByLabel("local");
+		if (existing) return existing.id;
+		const host = this.metaDal.createHost({ type: "local", label: "local" });
+		return host.id;
+	}
+
+	/**
+	 * On hub start, restore sessions that were alive before the previous shutdown.
+	 * Local hosts get a warm restart (respawn agent + PTYs under same channel IDs).
+	 * SSH hosts get their channels marked orphan (future: schedule reconnect).
+	 * If no alive channels exist, this is a no-op (fresh start).
+	 */
+	async startup(): Promise<void> {
+		const alive = this.metaDal.listAliveChannelsWithHost();
+		if (alive.length === 0) return;
+
+		// Group by hostId
+		const byHost = new Map<string, typeof alive>();
+		for (const ch of alive) {
+			const group = byHost.get(ch.hostId) ?? [];
+			group.push(ch);
+			byHost.set(ch.hostId, group);
+		}
+
+		for (const [hostId, channels] of byHost) {
+			const first = channels[0];
+			if (!first) continue;
+			const hostType = first.hostType;
+			// Find the non-closed session for this host
+			const sessions = this.metaDal.listSessions(hostId);
+			const session = sessions.find((s) => s.status !== "closed");
+			if (!session) {
+				// No active session — mark channels dead
+				for (const ch of channels) {
+					this.metaDal.updateChannelStatus(ch.id, "dead");
+				}
+				continue;
+			}
+
+			// Mark session disconnected (agent is gone after hub restart)
+			this.metaDal.markHostSessionDisconnected(hostId);
+			this.sessions.set(hostId, {
+				id: session.id,
+				hostId,
+				status: "disconnected",
+			});
+
+			// Mark channels orphan + restore in-memory state
+			this.metaDal.markHostChannelsOrphan(hostId);
+			for (const ch of channels) {
+				this.channels.set(ch.id, {
+					sessionId: session.id,
+					hostId,
+					status: "orphan",
+					clients: new Set(),
+					shell: ch.shell,
+					...(ch.args.length > 0 && { args: ch.args }),
+					cols: ch.cols,
+					rows: ch.rows,
+					...(ch.cwd !== null && { cwd: ch.cwd }),
+					...(ch.directProcess && { directProcess: true }),
+				});
+			}
+
+			if (hostType === "local") {
+				try {
+					await this._connectDaemonAgent(hostId, session.id);
+				} catch {
+					// Daemon connect failed — fall back to warm restart
+					await this._warmRestartLocal(hostId, session.id);
+				}
+			}
+			// SSH: channels stay orphan — future enhancement could schedule reconnect
+		}
+	}
+
+	/** Expose MetaDAL for REST API route handlers. */
+	getMetaDal(): MetaDAL {
+		return this.metaDal;
+	}
+
+	/**
+	 * Returns all WsClient instances currently attached to a channel.
+	 * Used by WriteLockManager's broadcastToChannel callback.
+	 */
+	getClientsForChannel(channelId: string): WsClient[] {
+		const channel = this.channels.get(channelId);
+		if (!channel) return [];
+		const result: WsClient[] = [];
+		for (const clientId of channel.clients) {
+			const client = this.clients.get(clientId);
+			if (client) result.push(client);
+		}
+		return result;
+	}
+
+	addClient(client: WsClient): void {
+		this.clients.set(client.id, client);
+	}
+
+	/** Build a STATE_SYNC payload with all current session and channel states. */
+	getStateSnapshot(): StateSyncMessage {
+		const sessions: StateSyncMessage["sessions"] = [];
+		for (const [hostId, state] of this.sessions) {
+			if (state.status !== "closed") {
+				sessions.push({ sessionId: state.id, hostId, status: state.status });
+			}
+		}
+		const channels: StateSyncMessage["channels"] = [];
+		for (const [channelId, ch] of this.channels) {
+			if (ch.status !== "dead") {
+				channels.push({
+					channelId,
+					sessionId: ch.sessionId,
+					status: ch.status,
+				});
+			}
+		}
+		return { type: "STATE_SYNC", sessions, channels };
+	}
+
+	removeClient(clientId: string): void {
+		const client = this.clients.get(clientId);
+		if (!client) return;
+		// Copy set to avoid mutating while iterating
+		for (const channelId of [...client.attachedChannels]) {
+			this._detachClient(clientId, channelId);
+		}
+		this.clients.delete(clientId);
+	}
+
+	/**
+	 * Handle a SPAWN message from a UI client.
+	 * For local hosts: always active (local agent starts immediately).
+	 * For SSH hosts: session starts as 'starting', transitions to 'active' on HELLO.
+	 */
+	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
+		const client = this.clients.get(clientId);
+		if (!client) return null;
+
+		// Resolve host: if hostId is "local" or missing, use the local host
+		const hostId = await this._resolveHostId(msg.hostId);
+		const host = this.metaDal.getHost(hostId);
+		if (!host) {
+			const errorMsg: ErrorMessage = {
+				type: "ERROR",
+				code: "HOST_NOT_FOUND",
+				message: `Host ${hostId} not found`,
+			};
+			client.send(errorMsg);
+			return null;
+		}
+
+		// Get or create session for this host
+		const session = await this._getOrCreateSession(hostId, host.type === "ssh");
+
+		// Get or create agent for this host
+		let agent = this.agents.get(hostId);
+		if (!agent?.connected) {
+			if (host.type === "ssh") {
+				const sshAgent = new SshAgent(host);
+				// Connect and wait for HELLO — session transitions to 'active' on success
+				try {
+					await sshAgent.start();
+				} catch (err) {
+					// Session failed to start — close it
+					this._updateSessionStatus(hostId, session.id, "closed");
+					const errorMsg: ErrorMessage = {
+						type: "ERROR",
+						code: "SSH_CONNECT_FAILED",
+						message: err instanceof Error ? err.message : "SSH connection failed",
+					};
+					client.send(errorMsg);
+					return null;
+				}
+				this._updateSessionStatus(hostId, session.id, "active");
+				this._wireAgentEvents(hostId, session.id, sshAgent);
+				this.agents.set(hostId, sshAgent);
+				agent = sshAgent;
+			} else {
+				// Local: try daemon first, fall back to child-process agent
+				try {
+					agent = await this._connectDaemonAgent(hostId, session.id);
+				} catch {
+					const la = new LocalAgent(resolveAgentPath());
+					await la.start();
+					this._wireAgentEvents(hostId, session.id, la);
+					this.agents.set(hostId, la);
+					agent = la;
+					this._updateSessionStatus(hostId, session.id, "active");
+				}
+			}
+		}
+
+		const requestId = generateId();
+		const shell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = msg.args ?? [];
+		const cwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
+		const cols = msg.cols ?? 80;
+		const rows = msg.rows ?? 24;
+		const directProcess = msg.directProcess ?? false;
+
+		const agentSpawn: AgentSpawnMessage = {
+			type: "SPAWN",
+			requestId,
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			env: msg.env ?? {},
+			cols,
+			rows,
+		};
+		agent.send(agentSpawn);
+
+		return new Promise<string | null>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				reject(new Error("Agent SPAWN timeout"));
+			}, SPAWN_TIMEOUT_MS);
+
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				if (incoming.type === "SPAWN_OK") {
+					const spawnOk = incoming as AgentSpawnOkMessage;
+					clearTimeout(timer);
+					this.pendingRequests.delete(requestId);
+
+					const { channelId } = spawnOk;
+
+					// Persist channel as 'born' then immediately 'live' (first client attaches)
+					const title = DEFAULT_CHANNEL_NAME;
+					this.metaDal.createChannel({
+						id: channelId,
+						sessionId: session.id,
+						status: "born",
+						shell,
+						...(args.length > 0 && { args }),
+						cwd,
+						title,
+						cols,
+						rows,
+						...(directProcess && { directProcess }),
+					});
+
+					this.channels.set(channelId, {
+						sessionId: session.id,
+						hostId,
+						status: "live",
+						clients: new Set([clientId]),
+						shell,
+						...(args.length > 0 && { args }),
+						cwd,
+						cols,
+						rows,
+						...(directProcess && { directProcess }),
+					});
+					this.metaDal.updateChannelStatus(channelId, "live");
+					this.scheduler.trackChannel(channelId);
+					this.chunker.trackChannel(channelId);
+					client.attachedChannels.add(channelId);
+
+					// Notify all clients of the channel state change
+					const channelStateMsg: ChannelStateMessage = {
+						type: "CHANNEL_STATE",
+						channelId,
+						sessionId: session.id,
+						status: "live",
+					};
+					this._broadcastToAllClients(channelStateMsg);
+
+					const response: UiSpawnOkMessage = {
+						type: "SPAWN_OK",
+						channelId,
+						hostId,
+						sessionId: session.id,
+					};
+					client.send(response);
+					resolve(channelId);
+				} else if (incoming.type === "SPAWN_ERR") {
+					const spawnErr = incoming as AgentSpawnErrMessage;
+					clearTimeout(timer);
+					this.pendingRequests.delete(requestId);
+
+					const errorMsg: ErrorMessage = {
+						type: "ERROR",
+						code: spawnErr.code,
+						message: spawnErr.message,
+					};
+					client.send(errorMsg);
+					reject(new Error(`SPAWN_ERR [${spawnErr.code}]: ${spawnErr.message}`));
+				}
+			});
+		});
+	}
+
+	async handleAttach(clientId: string, channelId: string): Promise<boolean> {
+		const client = this.clients.get(clientId);
+		if (!client) return false;
+
+		const channel = this.channels.get(channelId);
+		if (!channel) {
+			// Channel not in memory — check DB for dead/not-found
+			const dbChannel = this.metaDal.getChannel(channelId);
+			if (dbChannel?.status === "dead") {
+				// Dead channel — attempt transparent respawn under the same ID
+				const respawned = await this._respawnDeadChannel(channelId, client, clientId);
+				if (respawned) return true;
+				// Respawn failed — fall through to error
+			}
+			const code = dbChannel?.status === "dead" ? "CHANNEL_DEAD" : "CHANNEL_NOT_FOUND";
+			const errorMsg: ErrorMessage = {
+				type: "ERROR",
+				code,
+				message: `Channel ${channelId} ${code === "CHANNEL_DEAD" ? "is dead" : "not found"}`,
+			};
+			client.send(errorMsg);
+			return false;
+		}
+
+		const wasOrphan = channel.status === "orphan";
+		channel.clients.add(clientId);
+		client.attachedChannels.add(channelId);
+
+		// orphan → live on first reattach
+		if (wasOrphan) {
+			this._updateChannelStatus(channelId, channel.sessionId, "live");
+		}
+
+		const agent = this.agents.get(channel.hostId);
+
+		// handleAttach is only called for RE-attaches (tab switch, reconnect,
+		// sidebar click). The initial attach after SPAWN goes through
+		// handleSpawn + attachChannel. So every call here needs a snapshot.
+		//
+		// Case 1: agent connected — request fresh snapshot via ATTACH
+		// Case 2: agent disconnected — serve cached snapshot from spool.db
+
+		// Look up dynamic_title from DB once — used in all ATTACH_OK responses
+		const dbChannelForTitle = this.metaDal.getChannel(channelId);
+		const dynamicTitle = dbChannelForTitle?.dynamicTitle;
+
+		if (!agent?.connected) {
+			// Agent disconnected — serve cached snapshot from spool.db
+			const { snapshot, tail } = this._buildAttachPayload(channelId);
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot,
+				tail,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				cached: true,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
+			};
+			client.send(attachOk);
+			return true;
+		}
+
+		// Agent connected — request fresh snapshot via ATTACH
+		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
+		agent.send(agentAttach);
+
+		const pendingKey = `attach:${channelId}`;
+		try {
+			const agentResponse = await new Promise<AgentAttachOkMessage>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					this.pendingRequests.delete(pendingKey);
+					reject(new Error("Agent ATTACH timeout"));
+				}, ATTACH_TIMEOUT_MS);
+
+				this.pendingRequests.set(pendingKey, (incoming: ProtocolMessage) => {
+					if (incoming.type === "ATTACH_OK") {
+						const attachOkMsg = incoming as AgentAttachOkMessage;
+						clearTimeout(timer);
+						this.pendingRequests.delete(pendingKey);
+						resolve(attachOkMsg);
+					} else if (incoming.type === "ERROR") {
+						clearTimeout(timer);
+						this.pendingRequests.delete(pendingKey);
+						reject(new Error("Agent ATTACH error"));
+					}
+				});
+			});
+
+			// Store the fresh snapshot in spool.db (flush + seq coordination)
+			this._storeSnapshot(channelId, agentResponse.snapshot, agentResponse.lastSeq);
+
+			// Tail = output chunks after the snapshot's lastSeq
+			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+				kind: "output",
+				afterSeq: agentResponse.lastSeq,
+			});
+			const tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot: agentResponse.snapshot,
+				tail,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				cached: false,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
+			};
+			client.send(attachOk);
+		} catch {
+			// Agent ATTACH failed — fall back to cached snapshot
+			const { snapshot, tail } = this._buildAttachPayload(channelId);
+			const attachOk: UiAttachOkMessage = {
+				type: "ATTACH_OK",
+				channelId,
+				snapshot,
+				tail,
+				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				cached: true,
+				...(dynamicTitle !== undefined && { dynamicTitle }),
+			};
+			client.send(attachOk);
+		}
+		return true;
+	}
+
+	handleDetach(clientId: string, channelId: string): void {
+		this._detachClient(clientId, channelId);
+	}
+
+	handleInput(clientId: string, channelId: string, data: Uint8Array): void {
+		const channel = this.channels.get(channelId);
+		if (!channel) return;
+		const agent = this.agents.get(channel.hostId);
+		if (!agent) return;
+		const inputMsg: InputMessage = { type: "INPUT", channelId, data };
+		agent.send(inputMsg);
+	}
+
+	handleResize(clientId: string, channelId: string, cols: number, rows: number): void {
+		const channel = this.channels.get(channelId);
+		if (!channel) return;
+		const agent = this.agents.get(channel.hostId);
+		if (!agent) return;
+		const resizeMsg: ResizeMessage = { type: "RESIZE", channelId, cols, rows };
+		agent.send(resizeMsg);
+		// Persist last-known dimensions for warm restart
+		channel.cols = cols;
+		channel.rows = rows;
+		this.metaDal.updateChannelDimensions(channelId, cols, rows);
+	}
+
+	/**
+	 * Explicitly close a session by its ID. Called by the REST DELETE /api/sessions/:id endpoint.
+	 * Marks all channels dead, transitions session to 'closed', and closes the agent connection.
+	 */
+	async closeSession(sessionId: string): Promise<void> {
+		// Find which host owns this session
+		let hostId: string | undefined;
+		for (const [hId, state] of this.sessions.entries()) {
+			if (state.id === sessionId) {
+				hostId = hId;
+				break;
+			}
+		}
+
+		if (!hostId) {
+			// Session not in memory — still clean up DB state via metaDal
+			this.metaDal.updateSessionStatus(sessionId, "closed");
+			return;
+		}
+
+		// Close the agent connection for this host
+		const agent = this.agents.get(hostId);
+		if (agent) {
+			agent.close();
+			this.agents.delete(hostId);
+		}
+
+		this._closeSession(hostId, sessionId);
+	}
+
+	/**
+	 * Destroy a single channel: send DESTROY to the agent, mark dead in DB,
+	 * untrack from scheduler/chunker, and remove from in-memory map.
+	 * Returns true if the channel was found and destroyed.
+	 */
+	destroyChannel(channelId: string): boolean {
+		const ch = this.channels.get(channelId);
+		if (!ch) return false;
+
+		// Send DESTROY to the agent (if connected)
+		const agent = this.agents.get(ch.hostId);
+		if (agent?.connected) {
+			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
+		}
+
+		// Mark dead in DB + broadcast CHANNEL_STATE to clients
+		this._updateChannelStatus(channelId, ch.sessionId, "dead");
+
+		// Untrack from scheduler and chunker
+		this.scheduler.untrackChannel(channelId);
+		this.chunker.untrackChannel(channelId);
+
+		// Remove from in-memory map
+		this.channels.delete(channelId);
+
+		return true;
+	}
+
+	/**
+	 * Restart a channel: destroy the current PTY and respawn with the same config.
+	 * Used by POST /api/channels/:id/restart. Returns true on success.
+	 */
+	async restartChannel(channelId: string): Promise<boolean> {
+		// Load latest config from DB (may have been updated via PATCH)
+		const info = this.metaDal.getChannelWithHost(channelId);
+		if (!info) return false;
+
+		const { channel, hostId } = info;
+		const ch = this.channels.get(channelId);
+
+		// Kill existing PTY if alive
+		const agent = this.agents.get(hostId);
+		if (agent?.connected && ch && ch.status !== "dead") {
+			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
+		}
+
+		// Find active session
+		const sessionEntry = this.sessions.get(hostId);
+		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		if (!agent?.connected) return false;
+
+		// Build SPAWN from DB config
+		const requestId = generateId();
+		const shell = channel.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = channel.args ?? [];
+		const cwd = channel.cwd ?? process.env.HOME ?? "/";
+		const cols = channel.cols;
+		const rows = channel.rows;
+
+		agent.send({
+			type: "SPAWN",
+			requestId,
+			channelId,
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			env: {},
+			cols,
+			rows,
+		});
+
+		const ok = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				resolve(false);
+			}, SPAWN_TIMEOUT_MS);
+
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timer);
+				this.pendingRequests.delete(requestId);
+				resolve(incoming.type === "SPAWN_OK");
+			});
+		});
+
+		if (!ok) return false;
+
+		// Restore in-memory state
+		this.metaDal.updateChannelStatus(channelId, "live");
+		this.channels.set(channelId, {
+			sessionId: sessionEntry.id,
+			hostId,
+			status: "live",
+			clients: ch?.clients ?? new Set(),
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			cols,
+			rows,
+			...(channel.directProcess && { directProcess: true }),
+		});
+		this.scheduler.trackChannel(channelId);
+		this.chunker.trackChannel(channelId);
+
+		// Broadcast new state
+		const channelStateMsg: ChannelStateMessage = {
+			type: "CHANNEL_STATE",
+			channelId,
+			sessionId: sessionEntry.id,
+			status: "live",
+		};
+		this._broadcastToAllClients(channelStateMsg);
+
+		return true;
+	}
+
+	async shutdown(): Promise<void> {
+		for (const timer of this.reconnectTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.reconnectTimers.clear();
+		for (const timer of this.titleDebounceTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.titleDebounceTimers.clear();
+		this.scheduler.shutdown();
+		this.chunker.shutdown();
+		this.gc.stop();
+		for (const agent of this.agents.values()) {
+			agent.close();
+		}
+		this.agents.clear();
+		this.clients.clear();
+		this.channels.clear();
+		this.sessions.clear();
+	}
+
+	// ─── Private helpers ────────────────────────────────────────────────────
+
+	private async _resolveHostId(requestedId?: string): Promise<string> {
+		if (!requestedId || requestedId === "local") {
+			return this.ensureLocalHost();
+		}
+		return requestedId;
+	}
+
+	private async _getOrCreateSession(hostId: string, isSsh: boolean): Promise<SessionState> {
+		// Reuse existing session that is active or disconnected
+		const existing = this.sessions.get(hostId);
+		if (existing && (existing.status === "active" || existing.status === "disconnected")) {
+			return existing;
+		}
+
+		// Create a new session
+		const sessionId = generateId();
+		const initialStatus: SessionStatus = "starting";
+		this.metaDal.createSession({ id: sessionId, hostId, status: initialStatus });
+
+		const state: SessionState = { id: sessionId, hostId, status: initialStatus };
+		this.sessions.set(hostId, state);
+		return state;
+	}
+
+	private _updateSessionStatus(hostId: string, sessionId: string, status: SessionStatus): void {
+		const state = this.sessions.get(hostId);
+		if (state && state.id === sessionId) {
+			state.status = status;
+		}
+		this.metaDal.updateSessionStatus(sessionId, status);
+
+		const stateMsg: SessionStateMessage = {
+			type: "SESSION_STATE",
+			sessionId,
+			hostId,
+			status,
+		};
+		this._broadcastToAllClients(stateMsg);
+	}
+
+	private _updateChannelStatus(
+		channelId: string,
+		sessionId: string,
+		status: ChannelStatus,
+		exitCode?: number,
+	): void {
+		const ch = this.channels.get(channelId);
+		if (ch) {
+			ch.status = status;
+		}
+		this.metaDal.updateChannelStatus(channelId, status, exitCode);
+
+		const stateMsg: ChannelStateMessage = {
+			type: "CHANNEL_STATE",
+			channelId,
+			sessionId,
+			status,
+			...(exitCode !== undefined && { exitCode }),
+		};
+		// Broadcast to attached clients first; fall back to all clients for orphan/dead
+		// when the channel has no more clients (they just detached).
+		if (ch && ch.clients.size > 0) {
+			this._broadcastToChannel(channelId, stateMsg);
+		} else {
+			this._broadcastToAllClients(stateMsg);
+		}
+	}
+
+	private _detachClient(clientId: string, channelId: string): void {
+		const channel = this.channels.get(channelId);
+		if (channel) {
+			channel.clients.delete(clientId);
+			// live → orphan when last client detaches (and channel is still live)
+			if (channel.clients.size === 0 && channel.status === "live") {
+				this._updateChannelStatus(channelId, channel.sessionId, "orphan");
+				this.scheduler.onDetach(channelId);
+				this._checkSessionDetached(channel.hostId);
+			}
+		}
+		this.clients.get(clientId)?.attachedChannels.delete(channelId);
+	}
+
+	/** If all clients detached from all channels of a host, session → detached */
+	private _checkSessionDetached(hostId: string): void {
+		const session = this.sessions.get(hostId);
+		if (!session || session.status !== "active") return;
+
+		// Check if any channel for this session is still live
+		for (const ch of this.channels.values()) {
+			if (ch.hostId === hostId && ch.status === "live") return;
+		}
+
+		this._updateSessionStatus(hostId, session.id, "detached");
+	}
+
+	private _wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
+		agent.on("message", (msg: ProtocolMessage) => {
+			// Dispatch pending request responses (SPAWN_OK, SPAWN_ERR, etc.)
+			const rid = (msg as { requestId?: string }).requestId;
+			if (rid) {
+				const handler = this.pendingRequests.get(rid);
+				if (handler) {
+					handler(msg);
+					return;
+				}
+			}
+
+			// Dispatch pending attach responses (ATTACH_OK uses channelId, not requestId)
+			if (msg.type === "ATTACH_OK" || msg.type === "ERROR") {
+				const cid = (msg as { channelId?: string }).channelId;
+				if (cid) {
+					const handler = this.pendingRequests.get(`attach:${cid}`);
+					if (handler) {
+						handler(msg);
+						return;
+					}
+				}
+			}
+
+			if (msg.type === "OUTPUT") {
+				const outputMsg = msg as OutputMessage;
+				// Broadcast to clients first (real-time, no delay)
+				this._broadcastToChannel(outputMsg.channelId, outputMsg);
+				// Then notify scheduler and chunker (persistence, async)
+				this.scheduler.onOutput(outputMsg.channelId);
+				this.chunker.onOutput(outputMsg.channelId, outputMsg.data);
+			} else if (msg.type === "SNAPSHOT_RES") {
+				const res = msg as AgentSnapshotResMessage;
+				this.scheduler.onSnapshotResponse(res.channelId);
+				this._storeSnapshot(res.channelId, res.snapshot, res.lastSeq);
+			} else if (msg.type === "CHANNEL_EXIT") {
+				const exitMsg = msg as ChannelExitMessage;
+				const channel = this.channels.get(exitMsg.channelId);
+				if (channel) {
+					this._updateChannelStatus(exitMsg.channelId, channel.sessionId, "dead", exitMsg.exitCode);
+				}
+				this.scheduler.untrackChannel(exitMsg.channelId);
+				this.chunker.untrackChannel(exitMsg.channelId);
+				this._clearTitleDebounce(exitMsg.channelId);
+			} else if (msg.type === "TITLE_CHANGE") {
+				const titleMsg = msg as AgentTitleChangeMessage;
+				this._handleTitleChange(titleMsg);
+			} else if (msg.type === "BELL") {
+				const bellMsg = msg as AgentBellMessage;
+				if (this._rateLimitCheck(this.bellTimestamps, bellMsg.channelId, 10)) {
+					this._broadcastToChannel(bellMsg.channelId, bellMsg);
+				}
+			} else if (msg.type === "NOTIFICATION") {
+				const notifMsg = msg as AgentNotificationMessage;
+				if (this._rateLimitCheck(this.notificationTimestamps, notifMsg.channelId, 5)) {
+					this._broadcastToChannel(notifMsg.channelId, notifMsg);
+				}
+			}
+		});
+
+		agent.on("close", () => {
+			const session = this.sessions.get(hostId);
+			const host = this.metaDal.getHost(hostId);
+			this.agents.delete(hostId);
+
+			if (!session) return;
+
+			if (agent instanceof NextermAgent) {
+				// Daemon agent: attempt reconnect (daemon may still be alive)
+				this._updateSessionStatus(hostId, session.id, "disconnected");
+				this._reconnectDaemon(hostId, session.id).catch(() => {
+					this._closeSession(hostId, session.id);
+				});
+				return;
+			}
+
+			if (host?.type === "ssh") {
+				// SSH: attempt reconnect with exponential backoff
+				this._updateSessionStatus(hostId, session.id, "disconnected");
+				this._scheduleReconnect(hostId, session.id, 0, Date.now());
+			} else {
+				// Local: warm restart (respawn agent + PTYs)
+				this._warmRestartLocal(hostId, session.id).catch(() => {
+					this._closeSession(hostId, session.id);
+				});
+			}
+		});
+	}
+
+	private _scheduleReconnect(
+		hostId: string,
+		sessionId: string,
+		attemptIndex: number,
+		startTime: number,
+	): void {
+		const elapsed = Date.now() - startTime;
+		if (elapsed >= RECONNECT_TIMEOUT_MS) {
+			this._closeSession(hostId, sessionId);
+			return;
+		}
+
+		const delayMs =
+			RECONNECT_BACKOFF_MS[Math.min(attemptIndex, RECONNECT_BACKOFF_MS.length - 1)] ?? 30_000;
+
+		const timer = setTimeout(async () => {
+			this.reconnectTimers.delete(hostId);
+
+			// Check if session was explicitly closed in the meantime
+			const session = this.sessions.get(hostId);
+			if (!session || session.status === "closed") return;
+
+			const host = this.metaDal.getHost(hostId);
+			if (!host) {
+				this._closeSession(hostId, sessionId);
+				return;
+			}
+
+			try {
+				const sshAgent = new SshAgent(host);
+				await sshAgent.start();
+				this._updateSessionStatus(hostId, sessionId, "active");
+				this._wireAgentEvents(hostId, sessionId, sshAgent);
+				this.agents.set(hostId, sshAgent);
+
+				// Re-ATTACH all live/orphan channels for this session
+				this._reAttachChannels(hostId, sessionId, sshAgent);
+			} catch {
+				// Reconnect failed — try again
+				const nextElapsed = Date.now() - startTime;
+				if (nextElapsed >= RECONNECT_TIMEOUT_MS) {
+					this._closeSession(hostId, sessionId);
+				} else {
+					this._scheduleReconnect(hostId, sessionId, attemptIndex + 1, startTime);
+				}
+			}
+		}, delayMs);
+		this.reconnectTimers.set(hostId, timer);
+	}
+
+	private _reAttachChannels(hostId: string, sessionId: string, agent: AgentConnection): void {
+		this._spawnChannelsForHost(
+			hostId,
+			agent,
+			(channelId, ch) => {
+				if (ch.clients.size > 0) {
+					this._updateChannelStatus(channelId, sessionId, "live");
+				}
+				this.scheduler.trackChannel(channelId);
+				this.chunker.trackChannel(channelId);
+			},
+			(channelId, ch) => {
+				this._updateChannelStatus(channelId, ch.sessionId, "dead");
+			},
+		);
+	}
+
+	/**
+	 * Send SPAWN messages for every alive channel belonging to a host.
+	 * Extracted from _reAttachChannels and _warmRestartLocal to eliminate duplication.
+	 * The returned promise resolves once ALL SPAWN_OK/SPAWN_ERR responses (or timeouts) have fired.
+	 */
+	private _spawnChannelsForHost(
+		hostId: string,
+		agent: AgentConnection,
+		onSpawnOk: (channelId: string, ch: ChannelState) => void,
+		onSpawnErr: (channelId: string, ch: ChannelState) => void,
+	): Promise<void> {
+		let pending = 0;
+		let resolve: (() => void) | undefined;
+		const promise = new Promise<void>((r) => {
+			resolve = r;
+		});
+
+		const settle = (): void => {
+			pending--;
+			if (pending === 0) resolve?.();
+		};
+
+		for (const [channelId, ch] of this.channels.entries()) {
+			if (ch.hostId !== hostId || ch.status === "dead") continue;
+
+			pending++;
+			const requestId = generateId();
+			agent.send({
+				type: "SPAWN",
+				requestId,
+				channelId,
+				shell: ch.shell,
+				...(ch.args !== undefined && ch.args.length > 0 && { args: ch.args }),
+				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
+				env: {},
+				cols: ch.cols,
+				rows: ch.rows,
+			});
+
+			const timeout = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				console.warn(
+					`[session-manager] SPAWN timeout for channel ${channelId} (request ${requestId})`,
+				);
+				onSpawnErr(channelId, ch);
+				settle();
+			}, SPAWN_TIMEOUT_MS);
+
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timeout);
+				this.pendingRequests.delete(requestId);
+				if (incoming.type === "SPAWN_OK") {
+					onSpawnOk(channelId, ch);
+				} else {
+					onSpawnErr(channelId, ch);
+				}
+				settle();
+			});
+		}
+
+		// No channels to spawn — resolve immediately
+		if (pending === 0) resolve?.();
+
+		return promise;
+	}
+
+	private async _attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
+		const socketPath = getSocketPath(this.agentConfig.socketPath);
+		const agent = await connectOrLaunch(socketPath, this.agentConfig);
+
+		this._wireAgentEvents(hostId, sessionId, agent);
+
+		const states = await agent.waitForChannelState();
+		this._reconcileChannelState(hostId, states);
+
+		this.agents.set(hostId, agent);
+		this._updateSessionStatus(hostId, sessionId, "active");
+
+		return agent;
+	}
+
+	/**
+	 * Connect to (or launch) a local agent daemon.
+	 * Returns a NextermAgent that's ready to receive commands.
+	 * Performs channel state reconciliation after connecting.
+	 */
+	private async _connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
+		return this._attachDaemon(hostId, sessionId);
+	}
+
+	/**
+	 * Reconcile hub's channel tracking with agent's reported channel state.
+	 * Called after daemon connect/reconnect to sync which channels are alive/dead.
+	 */
+	private _reconcileChannelState(hostId: string, states: AgentChannelStateMessage[]): void {
+		const reportedIds = new Set(states.filter((s) => s.alive).map((s) => s.channelId));
+
+		for (const [channelId, channelState] of this.channels) {
+			if (channelState.hostId !== hostId) continue;
+
+			const session = this.sessions.get(hostId);
+			if (!session || channelState.sessionId !== session.id) continue;
+
+			if (reportedIds.has(channelId)) {
+				// Agent says alive — mark live if currently orphan
+				if (channelState.status === "orphan") {
+					this._updateChannelStatus(channelId, session.id, "live");
+				}
+			} else {
+				// Agent doesn't know about this channel — mark dead
+				if (channelState.status !== "dead") {
+					this._updateChannelStatus(channelId, session.id, "dead");
+				}
+			}
+		}
+	}
+
+	/**
+	 * Attempt to reconnect to a daemon agent after disconnect.
+	 * If the daemon is still running, reconnect. If not, connectOrLaunch will spawn a new one.
+	 */
+	private async _reconnectDaemon(hostId: string, sessionId: string): Promise<void> {
+		await this._attachDaemon(hostId, sessionId);
+	}
+
+	/**
+	 * Warm restart for local agent: respawn the agent process and re-create
+	 * PTYs under the SAME channel IDs so clients can reattach seamlessly.
+	 */
+	private async _warmRestartLocal(hostId: string, sessionId: string): Promise<void> {
+		// Crash-loop protection: max 3 restarts in 60s
+		const now = Date.now();
+		const tracking = this.restartTracking.get(hostId) ?? { count: 0, windowStart: now };
+		if (now - tracking.windowStart > 60_000) {
+			// Reset window
+			tracking.count = 0;
+			tracking.windowStart = now;
+		}
+		tracking.count++;
+		this.restartTracking.set(hostId, tracking);
+
+		if (tracking.count > 3) {
+			this._closeSession(hostId, sessionId);
+			return;
+		}
+
+		const agent = new LocalAgent(resolveAgentPath());
+		try {
+			await agent.start();
+		} catch {
+			this._closeSession(hostId, sessionId);
+			return;
+		}
+
+		this._wireAgentEvents(hostId, sessionId, agent);
+		this.agents.set(hostId, agent);
+		this._updateSessionStatus(hostId, sessionId, "active");
+
+		// Re-spawn PTYs for each orphan channel, using the SAME channel ID
+		await this._spawnChannelsForHost(
+			hostId,
+			agent,
+			(channelId) => {
+				this.scheduler.trackChannel(channelId);
+				this.chunker.trackChannel(channelId);
+			},
+			(channelId, ch) => {
+				this._updateChannelStatus(channelId, ch.sessionId, "dead");
+			},
+		);
+	}
+
+	/**
+	 * Attempt to transparently respawn a dead channel under the same ID.
+	 * Spawns a new PTY reusing deadChannelId, loads old spool snapshot,
+	 * and sends ATTACH_OK. Returns true on success, false if not possible.
+	 */
+	private async _respawnDeadChannel(
+		deadChannelId: string,
+		client: WsClient,
+		clientId: string,
+	): Promise<boolean> {
+		// 1. Look up dead channel in DB
+		const info = this.metaDal.getChannelWithHost(deadChannelId);
+		if (!info) return false;
+		const { channel: deadChannel, hostId } = info;
+
+		// 2. Find active session + agent
+		const sessionEntry = this.sessions.get(hostId);
+		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		const agent = this.agents.get(hostId);
+		if (!agent?.connected) return false;
+
+		// 3. Send SPAWN to agent reusing the same channel ID
+		const requestId = generateId();
+		const shell = deadChannel.shell ?? process.env.SHELL ?? "/bin/sh";
+		const args = deadChannel.args ?? [];
+		const cwd = deadChannel.cwd ?? process.env.HOME ?? "/";
+		const cols = deadChannel.cols;
+		const rows = deadChannel.rows;
+		const agentSpawn: AgentSpawnMessage = {
+			type: "SPAWN",
+			requestId,
+			channelId: deadChannelId,
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			env: {},
+			cols,
+			rows,
+		};
+		agent.send(agentSpawn);
+
+		// 4. Wait for SPAWN_OK
+		const spawnOk = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				resolve(false);
+			}, SPAWN_TIMEOUT_MS);
+
+			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
+				if (incoming.type === "SPAWN_OK") {
+					clearTimeout(timer);
+					this.pendingRequests.delete(requestId);
+					resolve(true);
+				} else if (incoming.type === "SPAWN_ERR") {
+					clearTimeout(timer);
+					this.pendingRequests.delete(requestId);
+					resolve(false);
+				}
+			});
+		});
+
+		if (!spawnOk) return false;
+
+		// 5. Update existing channel — no new channel created, same ID reused
+		this.metaDal.updateChannelStatus(deadChannelId, "live");
+
+		this.channels.set(deadChannelId, {
+			sessionId: sessionEntry.id,
+			hostId,
+			status: "live",
+			clients: new Set([clientId]),
+			shell,
+			...(args.length > 0 && { args }),
+			cwd,
+			cols,
+			rows,
+			...(deadChannel.directProcess && { directProcess: true }),
+		});
+
+		this.scheduler.trackChannel(deadChannelId);
+		this.chunker.trackChannel(deadChannelId);
+		client.attachedChannels.add(deadChannelId);
+
+		// 6. Broadcast CHANNEL_STATE for the same channel ID
+		const channelStateMsg: ChannelStateMessage = {
+			type: "CHANNEL_STATE",
+			channelId: deadChannelId,
+			sessionId: sessionEntry.id,
+			status: "live",
+		};
+		this._broadcastToAllClients(channelStateMsg);
+
+		// 7. Load snapshot from spool (same channel ID — no change needed)
+		const { snapshot, tail } = this._buildAttachPayload(deadChannelId);
+
+		// 8. Send ATTACH_OK with same channel ID (no respawnedFrom needed)
+		// Note: dynamic_title is intentionally omitted here — fresh PTY has no title yet
+		const attachOk: UiAttachOkMessage = {
+			type: "ATTACH_OK",
+			channelId: deadChannelId,
+			snapshot,
+			tail,
+			writeLockHolder: this._getWriteLockHolder?.(deadChannelId) ?? null,
+			cached: false,
+		};
+		client.send(attachOk);
+
+		return true;
+	}
+
+	private _closeSession(hostId: string, sessionId: string): void {
+		// Cancel any pending reconnect timer for this host
+		const pendingTimer = this.reconnectTimers.get(hostId);
+		if (pendingTimer !== undefined) {
+			clearTimeout(pendingTimer);
+			this.reconnectTimers.delete(hostId);
+		}
+		// Mark all channels for this session as dead and stop tracking them
+		for (const [channelId, ch] of this.channels.entries()) {
+			if (ch.hostId !== hostId || ch.status === "dead") continue;
+			this._updateChannelStatus(channelId, sessionId, "dead");
+			this.scheduler.untrackChannel(channelId);
+			this.chunker.untrackChannel(channelId);
+		}
+		this._updateSessionStatus(hostId, sessionId, "closed");
+		this.sessions.delete(hostId);
+	}
+
+	/**
+	 * Handle TITLE_CHANGE from agent: debounce DB writes (100ms, last-write-wins)
+	 * and forward to connected UI clients immediately.
+	 */
+	private _handleTitleChange(msg: AgentTitleChangeMessage): void {
+		const channel = this.channels.get(msg.channelId);
+		if (!channel) {
+			console.warn(`[session-manager] TITLE_CHANGE for unknown channel ${msg.channelId} — ignored`);
+			return;
+		}
+
+		// Forward to UI clients immediately (real-time)
+		this._broadcastToChannel(msg.channelId, msg);
+
+		// Debounce DB writes
+		this._clearTitleDebounce(msg.channelId);
+		this.titleDebounceTimers.set(
+			msg.channelId,
+			setTimeout(() => {
+				this.titleDebounceTimers.delete(msg.channelId);
+				this.metaDal.updateDynamicTitle(msg.channelId, msg.title);
+			}, TITLE_DEBOUNCE_MS),
+		);
+	}
+
+	private _clearTitleDebounce(channelId: string): void {
+		const timer = this.titleDebounceTimers.get(channelId);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			this.titleDebounceTimers.delete(channelId);
+		}
+	}
+
+	private _broadcastToChannel(channelId: string, msg: ProtocolMessage): void {
+		const channel = this.channels.get(channelId);
+		if (!channel) return;
+		for (const clientId of channel.clients) {
+			this.clients.get(clientId)?.send(msg);
+		}
+	}
+
+	private _broadcastToAllClients(msg: ProtocolMessage): void {
+		for (const client of this.clients.values()) {
+			client.send(msg);
+		}
+	}
+
+	/**
+	 * Sliding-window rate limiter: returns true if the event is allowed.
+	 * Keeps at most `maxPerSecond` timestamps within the last 1000ms per channel.
+	 */
+	private _rateLimitCheck(
+		store: Map<string, number[]>,
+		channelId: string,
+		maxPerSecond: number,
+	): boolean {
+		const now = Date.now();
+		const cutoff = now - 1000;
+		let timestamps = store.get(channelId);
+		if (!timestamps) {
+			timestamps = [];
+			store.set(channelId, timestamps);
+		}
+		// Evict entries older than 1 second
+		while (timestamps.length > 0 && (timestamps[0] ?? 0) < cutoff) {
+			timestamps.shift();
+		}
+		if (timestamps.length >= maxPerSecond) {
+			return false;
+		}
+		timestamps.push(now);
+		return true;
+	}
+
+	/**
+	 * Build the snapshot + tail payload for ATTACH_OK from spool.db.
+	 * Used by handleAttach (cached path, agent-error fallback) and _respawnDeadChannel.
+	 */
+	private _buildAttachPayload(channelId: string): {
+		snapshot: UiAttachOkMessage["snapshot"];
+		tail: Uint8Array[];
+	} {
+		let snapshot: UiAttachOkMessage["snapshot"] = null;
+		let tail: Uint8Array[] = [];
+
+		const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
+		if (snapshotChunk) {
+			try {
+				snapshot = JSON.parse(
+					snapshotChunk.dataBlob.toString("utf8"),
+				) as UiAttachOkMessage["snapshot"];
+			} catch {
+				snapshot = null;
+			}
+			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+				kind: "output",
+				afterSeq: snapshotChunk.seq,
+			});
+			tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
+		}
+
+		return { snapshot, tail };
+	}
+
+	/**
+	 * Persist a snapshot to spool.db with correct seq coordination.
+	 * Flushes the chunker first, computes next seq, inserts the snapshot,
+	 * bumps the chunker past it, and updates the cache index.
+	 * Returns the assigned chunkId.
+	 */
+	private _storeSnapshot(channelId: string, snapshot: unknown, agentLastSeq: number): string {
+		const snapshotJson = JSON.stringify(snapshot);
+		const dataBlob = Buffer.from(snapshotJson);
+		this.chunker.flush(channelId);
+		const maxSeq = this.spoolDal.getMaxSeq(channelId);
+		const snapshotSeq = Math.max(maxSeq, agentLastSeq) + 1;
+		const chunkId = this.spoolDal.insertChunk({
+			channelId,
+			seq: snapshotSeq,
+			kind: "snapshot",
+			dataBlob,
+			uncompressedLen: dataBlob.length,
+		});
+		this.chunker.bumpSeq(channelId, snapshotSeq + 1);
+		this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
+		return chunkId;
+	}
+}

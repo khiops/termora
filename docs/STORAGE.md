@@ -10,8 +10,10 @@ Two SQLite databases, both in WAL mode:
 
 | Database | Path | Purpose | Size profile |
 |----------|------|---------|-------------|
-| **meta.db** | `~/.config/nexterm/data/meta.db` | Config + relational data | Small (KB–MB) |
-| **spool.db** | `~/.config/nexterm/data/spool.db` | Output chunks + snapshots | Large (MB–GB) |
+| **meta.db** | `$NEXTERM_DATA_DIR/meta.db` | Config + relational data | Small (KB–MB) |
+| **spool.db** | `$NEXTERM_DATA_DIR/spool.db` | Output chunks + snapshots | Large (MB–GB) |
+
+Platform paths for `$NEXTERM_DATA_DIR`: see SPEC.md § 7 (Linux: `~/.local/share/nexterm/`, Windows: `%LOCALAPPDATA%\nexterm\`).
 
 **Why 2 databases:**
 - VACUUM spool without blocking meta reads
@@ -153,11 +155,16 @@ CREATE TABLE cache_index (
 
 ```sql
 CREATE TABLE pairing_codes (
-  code       TEXT PRIMARY KEY,                           -- 6-digit string
-  token      TEXT NOT NULL,                              -- the auth token to grant
+  id         TEXT PRIMARY KEY,                           -- ULID
+  code       TEXT NOT NULL UNIQUE,                       -- 6-digit string
+  created_at TEXT NOT NULL,                              -- ISO 8601
   expires_at TEXT NOT NULL,                              -- ISO 8601 (60s from creation)
-  used       INTEGER NOT NULL DEFAULT 0                  -- boolean
+  used       INTEGER NOT NULL DEFAULT 0,                 -- boolean
+  used_at    TEXT,                                       -- ISO 8601, set when redeemed
+  used_by_ip TEXT                                        -- IP of the client that redeemed
 );
+
+CREATE INDEX idx_pairing_codes_code ON pairing_codes(code);
 ```
 
 ### 3.8 Schema version
@@ -386,12 +393,12 @@ Each migration is a **SQL file**, run inside a transaction. Files are discovered
 ### 10.1 Backup
 
 ```bash
-# Full backup (both DBs)
-cp ~/.config/nexterm/data/meta.db backup/meta.db
-cp ~/.config/nexterm/data/spool.db backup/spool.db
+# Full backup (both DBs) — paths shown for Linux, see SPEC.md § 7 for Windows
+cp ~/.local/share/nexterm/meta.db backup/meta.db
+cp ~/.local/share/nexterm/spool.db backup/spool.db
 
 # Config-only backup (tiny, recommended for sync)
-cp ~/.config/nexterm/data/meta.db backup/meta.db
+cp ~/.local/share/nexterm/meta.db backup/meta.db
 cp ~/.config/nexterm/config.toml backup/config.toml
 # Spool is regeneratable — no need to backup
 ```

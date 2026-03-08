@@ -9,9 +9,9 @@
 ```
 M0: Foundation        ──── monorepo, shared types, build tooling
  │
-M1: Local Terminal    ──── hub + UI, local PTY, basic I/O
+M1: Local Terminal    ──── hub + agent + UI, local PTY via agent, basic I/O
  │
-M2: Remote Terminal   ──── agent, SSH transport, remote PTY
+M2: Remote Terminal   ──── SSH transport, session manager, host API
  │
 M3: Session Persist   ──── snapshot/restore, spool cache, reconnect
  │
@@ -48,17 +48,19 @@ MVP RELEASE
 
 ---
 
-### M1 — Local Terminal (Blocks 5–9)
+### M1 — Local Terminal (Blocks 5–11)
 
-**Goal:** Hub spawns local PTY, UI renders terminal, user can type and see output.
+**Goal:** Hub spawns local agent, agent manages PTY, UI renders terminal, user can type and see output.
 
 | Block | Description | Package(s) | Exit Criteria |
 |-------|-------------|------------|---------------|
-| 1.1 | Hub HTTP server | hub | Fastify server on 127.0.0.1:3100, health endpoint, static file serving |
-| 1.2 | Local PTY spawn | hub | node-pty integration, SPAWN creates PTY, channel status BORN→LIVE |
-| 1.3 | WS transport (hub side) | hub | WS upgrade on /ws, MessagePack frames, INPUT→PTY→OUTPUT pipeline |
-| 1.4 | UI shell (Vue 3) | web | Vite + Vue 3, 3-column layout scaffold (host rail empty, sidebar stub, main area) |
-| 1.5 | xterm.js integration | web | Terminal renders in main pane, WS connection, INPUT/OUTPUT flowing, fit addon for resize |
+| 1.1 | Hub HTTP server | hub | Fastify server on 127.0.0.1:4100, health endpoint, static file serving |
+| 1.2 | Agent core | agent | stdin/stdout framing, PTY spawn via node-pty, HELLO on start, SPAWN/SPAWN_OK/SPAWN_ERR (moved from M2 — agent needed for local sessions) |
+| 1.3 | Agent multiplexing | agent | Multiple channels per agent (HashMap<channel_id, PTY>), INPUT/OUTPUT routing, CHANNEL_EXIT (moved from M2) |
+| 1.4 | Local agent spawn | hub | Hub spawns agent via child_process (--stdio), HELLO handshake, SPAWN creates PTY via agent, channel status BORN→LIVE |
+| 1.5 | WS transport (hub side) | hub | WS upgrade on /ws, MessagePack frames, INPUT→Agent→PTY→OUTPUT pipeline |
+| 1.6 | UI shell (Vue 3) | web | Vite + Vue 3, 3-column layout scaffold (host rail empty, sidebar stub, main area) |
+| 1.7 | xterm.js integration | web | Terminal renders in main pane, WS connection, INPUT/OUTPUT flowing, fit addon for resize |
 
 **Dependencies:** M0 complete.
 
@@ -72,25 +74,23 @@ MVP RELEASE
 **Demo scenario:**
 ```
 $ pnpm dev
-→ Hub: listening on 127.0.0.1:3100
-→ Open browser: http://localhost:3100
+→ Hub: listening on 127.0.0.1:4100
+→ Open browser: http://localhost:4100
 → Terminal visible, type commands, see output
 → Resize window → terminal adapts
 ```
 
 ---
 
-### M2 — Remote Terminal (Blocks 10–14)
+### M2 — Remote Terminal (Blocks 12–14)
 
-**Goal:** Agent runs on remote machine via SSH, hub proxies I/O, user sees remote terminal.
+**Goal:** SSH transport to remote agents, session management, host CRUD API.
 
 | Block | Description | Package(s) | Exit Criteria |
 |-------|-------------|------------|---------------|
-| 2.1 | Agent core | agent | stdin/stdout frame reader, PTY spawn via node-pty, HELLO on start, SPAWN/SPAWN_OK/SPAWN_ERR |
-| 2.2 | Agent multiplexing | agent | Multiple channels per agent (HashMap<channel_id, PTY>), INPUT/OUTPUT routing, CHANNEL_EXIT |
-| 2.3 | SSH connector (hub) | hub | ssh2 connect, launch `nexterm-agent --stdio`, frame I/O over SSH stdin/stdout |
-| 2.4 | Session manager | hub | Session state machine (STARTING→ACTIVE→DISCONNECTED→CLOSED), channel state (BORN→LIVE→DEAD), DB persistence |
-| 2.5 | REST API: hosts + sessions | hub | CRUD /hosts, GET /sessions, POST /hosts/:id/test, host list in UI |
+| 2.1 | SSH connector (hub) | hub | ssh2 connect, launch `nexterm-agent --stdio`, frame I/O over SSH stdin/stdout |
+| 2.2 | Session manager | hub | Session state machine (STARTING→ACTIVE→DISCONNECTED→CLOSED), channel state (BORN→LIVE→DEAD), DB persistence |
+| 2.3 | REST API: hosts + sessions | hub | CRUD /hosts, GET /sessions, POST /hosts/:id/test, host list in UI |
 
 **Dependencies:** M1 complete.
 
@@ -104,7 +104,7 @@ $ pnpm dev
 
 **Demo scenario:**
 ```
-$ curl -X POST localhost:3100/api/hosts \
+$ curl -X POST localhost:4100/api/hosts \
     -H "Authorization: Bearer <token>" \
     -d '{"label":"dev-box","type":"ssh","ssh_host":"user@192.168.1.50"}'
 → Host created
@@ -213,14 +213,14 @@ M0: [0.1] → [0.2] → [0.3]
                 ↓       ↓
             [0.4] (parallel with 0.3)
 
-M1: [1.1] → [1.2] → [1.3]
-                        ↓
-     [1.4] ─────────→ [1.5]  (UI blocks can start once 0.2 done)
+M1: [1.1]                       (hub HTTP server)
+     [1.2] → [1.3]              (agent core → multiplexing)
+     [1.4] ← [1.2] + [1.1]     (local agent spawn needs agent + hub)
+     [1.4] → [1.5]              (WS transport needs local spawn)
+     [1.6] ─────────→ [1.7]     (UI blocks can start once 0.2 done)
 
-M2: [2.1] → [2.2]       (agent: independent of hub)
-     [2.3] → [2.4] → [2.5]  (hub: depends on M1)
-              ↕
-     (2.3 needs 2.1 for testing)
+M2: [2.1] → [2.2] → [2.3]  (hub SSH: connector → session mgr → REST API)
+     (2.1 reuses agent from M1 — no new agent work)
 
 M3: [3.1] ← SPIKE (can start during M2)
      [3.2] → [3.3] → [3.4]
@@ -241,8 +241,8 @@ M5: [5.1] → [5.2] → [5.3] → [5.4]  (UI progressive)
 | Phase | Parallel Tracks | Rationale |
 |-------|----------------|-----------|
 | M0 | 0.3 (storage) ∥ 0.4 (tooling) | Independent concerns |
-| M1 | 1.4 (UI scaffold) ∥ 1.1–1.3 (hub) | UI scaffold needs only shared types |
-| M2 | 2.1–2.2 (agent) ∥ 2.3–2.5 (hub SSH) | Agent developed independently, tested via mock stdin |
+| M1 | 1.6–1.7 (UI) ∥ 1.1–1.5 (hub + agent) | UI scaffold needs only shared types |
+| M2 | 2.1–2.3 (hub SSH, sequential) | Agent already built in M1 — no parallel track needed |
 | M3 | 3.1 (xterm headless spike) ∥ 3.2–3.3 (hub cache) | Spike can start early |
 | M5 | 5.1–5.4 (UI) ∥ 5.5 (config) ∥ 5.6 (CLI) | Three independent tracks |
 
@@ -251,7 +251,7 @@ M5: [5.1] → [5.2] → [5.3] → [5.4]  (UI progressive)
 | Risk | Milestone | Impact | Mitigation | Fallback |
 |------|-----------|--------|------------|----------|
 | xterm.js headless DOM polyfill too heavy | M3 | HIGH | Spike in block 3.1 before committing | Raw VT state buffer (lose serialize compatibility) |
-| node-pty Windows build issues | M1 | MEDIUM | Pin known-good version, CI matrix (Linux, macOS, Windows) | Windows: WSL-only initially |
+| node-pty Windows build issues | M1 | MEDIUM | Pin known-good version, CI matrix (Linux, macOS, Windows). node-pty only in agent, not hub. | Pin to known-good Windows version |
 | ssh2 library limitations | M2 | MEDIUM | Test early with key/agent/password auth | Spawn `ssh` process as fallback |
 | MessagePack debugging difficulty | M0 | LOW | Build CLI decode tool in block 0.2 | Hex dump mode in agent |
 | Spool DB growth | M3 | MEDIUM | GC mandatory from day 1 (block 3.3) | Aggressive defaults (3 days, 200MB) |

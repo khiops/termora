@@ -1,0 +1,703 @@
+import { toSnakeCase } from "@nexterm/shared";
+import type { SshConfigImport } from "@nexterm/shared";
+import type { FastifyInstance } from "fastify";
+import { Client } from "ssh2";
+import type { ParseResult } from "../ssh/ssh-config-parser.js";
+import { readSshConfig } from "../ssh/ssh-config-parser.js";
+import type { MetaDAL } from "../storage/meta.js";
+
+interface CreateHostBody {
+	type: "local" | "ssh";
+	label: string;
+	ssh_host?: string;
+	ssh_port?: number;
+	ssh_auth?: "agent" | "key" | "password";
+	ssh_key_path?: string;
+	icon_type?: "auto" | "emoji" | "image";
+	icon_value?: string;
+	color?: string;
+	default_shell?: string;
+	default_cwd?: string;
+	trust_remote_hints?: "apply" | "ask" | "ignore";
+	host_group?: string | null;
+	ssh_config_host?: string | null;
+	ssh_user?: string | null;
+	keep_alive_seconds?: number;
+	history_retention_days?: number;
+	profile_json?: string;
+}
+
+interface UpdateHostBody {
+	type?: "local" | "ssh";
+	label?: string;
+	ssh_host?: string;
+	ssh_port?: number;
+	ssh_auth?: "agent" | "key" | "password";
+	ssh_key_path?: string;
+	icon_type?: "auto" | "emoji" | "image";
+	icon_value?: string;
+	color?: string;
+	default_shell?: string;
+	default_cwd?: string;
+	trust_remote_hints?: "apply" | "ask" | "ignore";
+	host_group?: string | null;
+	ssh_config_host?: string | null;
+	ssh_user?: string | null;
+	keep_alive_seconds?: number;
+	history_retention_days?: number;
+	profile_json?: string;
+}
+
+const SSH_TEST_TIMEOUT_MS = 10_000;
+
+const testConnectionAttempts = new Map<string, number[]>();
+
+function checkTestConnectionRateLimit(token: string): boolean {
+	const now = Date.now();
+	const window = 60_000;
+	const limit = 5;
+	const attempts = (testConnectionAttempts.get(token) ?? []).filter((t) => now - t < window);
+	if (attempts.length >= limit) {
+		testConnectionAttempts.set(token, attempts);
+		return false;
+	}
+	attempts.push(now);
+	testConnectionAttempts.set(token, attempts);
+	return true;
+}
+
+function validateCreateHost(body: CreateHostBody): string | null {
+	if (!body.label || body.label.trim().length === 0) {
+		return "Label is required";
+	}
+	if (body.label.length > 64) {
+		return "Label must be 64 characters or fewer";
+	}
+	if (!/^[a-zA-Z0-9._-]+$/.test(body.label)) {
+		return "Label must contain only alphanumeric characters, dots, dashes, and underscores";
+	}
+	if (body.type !== "local" && body.type !== "ssh") {
+		return "type must be 'local' or 'ssh'";
+	}
+	if (body.type === "ssh") {
+		if (!body.ssh_host || body.ssh_host.includes("\0")) {
+			return "ssh_host is required for SSH hosts and must not contain null bytes";
+		}
+		if (!/^[a-zA-Z0-9@._:-]+$/.test(body.ssh_host)) {
+			return "ssh_host must contain only valid hostname characters";
+		}
+		if (
+			body.ssh_auth !== undefined &&
+			body.ssh_auth !== "agent" &&
+			body.ssh_auth !== "key" &&
+			body.ssh_auth !== "password"
+		) {
+			return "ssh_auth must be 'agent', 'key', or 'password'";
+		}
+		if (body.ssh_auth === "key" && (!body.ssh_key_path || body.ssh_key_path.trim().length === 0)) {
+			return "ssh_key_path is required when ssh_auth is 'key'";
+		}
+	}
+	if (body.ssh_port !== undefined) {
+		if (!Number.isInteger(body.ssh_port) || body.ssh_port < 1 || body.ssh_port > 65535) {
+			return "ssh_port must be an integer between 1 and 65535";
+		}
+	}
+	if (body.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
+		return "color must be in hex format #rrggbb";
+	}
+	return null;
+}
+
+async function testSshConnectivity(
+	host: string,
+	port: number,
+	auth: "agent" | "key" | "password",
+	keyPath?: string,
+): Promise<{ ok: boolean; message?: string }> {
+	return new Promise((resolve) => {
+		const client = new Client();
+
+		const timer = setTimeout(() => {
+			client.destroy();
+			resolve({ ok: false, message: "Connection timed out" });
+		}, SSH_TEST_TIMEOUT_MS);
+
+		client.on("ready", () => {
+			clearTimeout(timer);
+			client.end();
+			resolve({ ok: true });
+		});
+
+		client.on("error", (err: Error) => {
+			clearTimeout(timer);
+			const msg = err.message ?? "Unknown error";
+			const lower = msg.toLowerCase();
+
+			if (
+				msg.includes("ECONNREFUSED") ||
+				msg.includes("ETIMEDOUT") ||
+				msg.includes("EHOSTUNREACH") ||
+				msg.includes("ENOTFOUND")
+			) {
+				resolve({ ok: false, message: msg });
+			} else if (
+				lower.includes("authentication") ||
+				lower.includes("permission denied") ||
+				lower.includes("publickey") ||
+				lower.includes("keyboard-interactive") ||
+				lower.includes("all configured authentication methods failed")
+			) {
+				client.end();
+				resolve({ ok: false, message: "Authentication failed" });
+			} else {
+				client.end();
+				resolve({ ok: false, message: msg });
+			}
+		});
+
+		try {
+			const connectConfig: Parameters<InstanceType<typeof Client>["connect"]>[0] = {
+				host,
+				port,
+				username: process.env.USER ?? "root",
+				readyTimeout: SSH_TEST_TIMEOUT_MS,
+			};
+
+			if (auth === "agent" || auth === "key") {
+				// For key auth: we don't have the key content here, fall back to agent
+				const authSock = process.env.SSH_AUTH_SOCK;
+				if (authSock) {
+					connectConfig.agent = authSock;
+				}
+			} else {
+				// password: we cannot actually auth without credentials, but
+				// the connect attempt will verify reachability
+				connectConfig.password = "";
+			}
+
+			client.connect(connectConfig);
+		} catch (err) {
+			clearTimeout(timer);
+			resolve({
+				ok: false,
+				message: err instanceof Error ? err.message : "Connection failed",
+			});
+		}
+	});
+}
+
+export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
+	// GET /api/hosts
+	server.get("/api/hosts", async () => {
+		const hosts = metaDal.listHosts();
+		return toSnakeCase(hosts);
+	});
+
+	// POST /api/hosts
+	server.post<{ Body: CreateHostBody }>("/api/hosts", async (request, reply) => {
+		const body = request.body;
+
+		const validationError = validateCreateHost(body);
+		if (validationError) {
+			return reply
+				.code(400)
+				.send({ error: { code: "VALIDATION_ERROR", message: validationError } });
+		}
+
+		// Validate visual profile colors in profile_json (INV-09)
+		if (body.profile_json !== undefined) {
+			try {
+				const profileObj =
+					typeof body.profile_json === "string" ? JSON.parse(body.profile_json) : body.profile_json;
+				if (profileObj?.visualProfile) {
+					const vp = profileObj.visualProfile;
+					const hexRe = /^#[0-9a-fA-F]{6}$/;
+					const colorsToCheck = [
+						vp.banner?.bgColor,
+						vp.banner?.textColor,
+						vp.border?.color,
+						vp.tint?.color,
+					].filter((c: unknown): c is string => typeof c === "string" && c !== "");
+					for (const c of colorsToCheck) {
+						if (!hexRe.test(c)) {
+							return reply.code(400).send({
+								error: {
+									code: "VALIDATION_ERROR",
+									message: `Invalid color value: ${c}`,
+								},
+							});
+						}
+					}
+					if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
+						vp.tint.opacity = 15;
+					}
+				}
+			} catch {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "Invalid profile_json format",
+					},
+				});
+			}
+		}
+
+		// Duplicate label check
+		const existing = metaDal.getHostByLabel(body.label.trim());
+		if (existing) {
+			return reply
+				.code(409)
+				.send({ error: { code: "CONFLICT", message: "Host with this label already exists" } });
+		}
+
+		// Build create input conditionally to satisfy exactOptionalPropertyTypes
+		const host = metaDal.createHost({
+			type: body.type,
+			label: body.label.trim(),
+			...(body.ssh_host !== undefined && { sshHost: body.ssh_host }),
+			...(body.ssh_port !== undefined && { sshPort: body.ssh_port }),
+			...(body.ssh_auth !== undefined && { sshAuth: body.ssh_auth }),
+			...(body.ssh_key_path !== undefined && { sshKeyPath: body.ssh_key_path }),
+			...(body.icon_type !== undefined && { iconType: body.icon_type }),
+			...(body.icon_value !== undefined && { iconValue: body.icon_value }),
+			...(body.color !== undefined && { color: body.color }),
+			...(body.trust_remote_hints !== undefined && { trustRemoteHints: body.trust_remote_hints }),
+			...(body.default_shell !== undefined && { defaultShell: body.default_shell }),
+			...(body.default_cwd !== undefined && { defaultCwd: body.default_cwd }),
+			...(body.host_group !== undefined && { hostGroup: body.host_group }),
+			...(body.ssh_config_host !== undefined && { sshConfigHost: body.ssh_config_host }),
+			...(body.ssh_user !== undefined && { sshUser: body.ssh_user }),
+			...(body.keep_alive_seconds !== undefined && { keepAliveSeconds: body.keep_alive_seconds }),
+			...(body.history_retention_days !== undefined && {
+				historyRetentionDays: body.history_retention_days,
+			}),
+			...(body.profile_json !== undefined && { profileJson: body.profile_json }),
+		});
+
+		return reply.code(201).send(toSnakeCase(host));
+	});
+
+	// PUT /api/hosts/reorder — reorder hosts within a group
+	server.put<{ Body: { group: string | null; host_ids: string[] } }>(
+		"/api/hosts/reorder",
+		async (request, reply) => {
+			const { group, host_ids } = request.body;
+			if (!Array.isArray(host_ids) || host_ids.length === 0) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "host_ids must be a non-empty array",
+					},
+				});
+			}
+			metaDal.reorderHosts(group ?? null, host_ids);
+			return reply.code(204).send();
+		},
+	);
+
+	// PUT /api/hosts/groups/:name — rename a host group
+	server.put<{ Params: { name: string }; Body: { name: string } }>(
+		"/api/hosts/groups/:name",
+		async (request, reply) => {
+			const newName = request.body.name;
+			if (!newName || !/^[a-zA-Z0-9 _-]{1,32}$/.test(newName)) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message:
+							"Group name must be 1-32 characters, alphanumeric with spaces, dashes, underscores",
+					},
+				});
+			}
+			const count = metaDal.renameHostGroup(request.params.name, newName);
+			if (count === 0) {
+				return reply.code(404).send({
+					error: { code: "NOT_FOUND", message: "Group not found" },
+				});
+			}
+			return reply.code(204).send();
+		},
+	);
+
+	// DELETE /api/hosts/groups/:name — delete a host group (moves hosts to ungrouped)
+	server.delete<{ Params: { name: string } }>("/api/hosts/groups/:name", async (request, reply) => {
+		metaDal.deleteHostGroup(request.params.name);
+		return reply.code(204).send();
+	});
+
+	// GET /api/hosts/:id
+	server.get<{ Params: { id: string } }>("/api/hosts/:id", async (request, reply) => {
+		const host = metaDal.getHost(request.params.id);
+		if (!host) {
+			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+		}
+		return toSnakeCase(host);
+	});
+
+	// PUT /api/hosts/:id
+	server.put<{ Params: { id: string }; Body: UpdateHostBody }>(
+		"/api/hosts/:id",
+		async (request, reply) => {
+			const host = metaDal.getHost(request.params.id);
+			if (!host) {
+				return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+			}
+
+			const body = request.body;
+
+			// Validate color if provided
+			if (body.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
+				return reply.code(400).send({
+					error: { code: "VALIDATION_ERROR", message: "color must be in hex format #rrggbb" },
+				});
+			}
+
+			// Validate ssh_port if provided
+			if (body.ssh_port !== undefined) {
+				if (!Number.isInteger(body.ssh_port) || body.ssh_port < 1 || body.ssh_port > 65535) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: "ssh_port must be between 1 and 65535" },
+					});
+				}
+			}
+
+			// Validate visual profile colors (INV-09)
+			if (body.profile_json !== undefined) {
+				try {
+					const profileObj =
+						typeof body.profile_json === "string"
+							? JSON.parse(body.profile_json)
+							: body.profile_json;
+					if (profileObj?.visualProfile) {
+						const vp = profileObj.visualProfile;
+						const hexRe = /^#[0-9a-fA-F]{6}$/;
+						const colorsToCheck = [
+							vp.banner?.bgColor,
+							vp.banner?.textColor,
+							vp.border?.color,
+							vp.tint?.color,
+						].filter((c: unknown): c is string => typeof c === "string" && c !== "");
+						for (const c of colorsToCheck) {
+							if (!hexRe.test(c)) {
+								return reply.code(400).send({
+									error: {
+										code: "VALIDATION_ERROR",
+										message: `Invalid color value: ${c}`,
+									},
+								});
+							}
+						}
+						// Clamp tint opacity server-side
+						if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
+							vp.tint.opacity = 15;
+						}
+					}
+				} catch {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "Invalid profile_json format",
+						},
+					});
+				}
+			}
+
+			// Validate label if provided
+			if (body.label !== undefined) {
+				if (body.label.trim().length === 0 || body.label.length > 64) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: "Label must be 1-64 characters" },
+					});
+				}
+				if (!/^[a-zA-Z0-9._-]+$/.test(body.label)) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message:
+								"Label must contain only alphanumeric characters, dots, dashes, and underscores",
+						},
+					});
+				}
+				// Duplicate label check (excluding self)
+				const labelConflict = metaDal.getHostByLabel(body.label.trim());
+				if (labelConflict && labelConflict.id !== request.params.id) {
+					return reply
+						.code(409)
+						.send({ error: { code: "CONFLICT", message: "Host with this label already exists" } });
+				}
+			}
+
+			// Build a partial update — only include fields present in the request body.
+			// MetaDAL's updateHost uses `camel in input` to detect which columns to SET,
+			// so passing `key: undefined` would incorrectly NULL out required columns.
+			const updateInput: Parameters<typeof metaDal.updateHost>[1] = {};
+			if (body.type !== undefined) updateInput.type = body.type;
+			if (body.label !== undefined) updateInput.label = body.label.trim();
+			if (body.ssh_host !== undefined) updateInput.sshHost = body.ssh_host;
+			if (body.ssh_port !== undefined) updateInput.sshPort = body.ssh_port;
+			if (body.ssh_auth !== undefined) updateInput.sshAuth = body.ssh_auth;
+			if (body.ssh_key_path !== undefined) updateInput.sshKeyPath = body.ssh_key_path;
+			if (body.icon_type !== undefined) updateInput.iconType = body.icon_type;
+			if (body.icon_value !== undefined) updateInput.iconValue = body.icon_value;
+			if (body.color !== undefined) updateInput.color = body.color;
+			if (body.trust_remote_hints !== undefined)
+				updateInput.trustRemoteHints = body.trust_remote_hints;
+			if (body.default_shell !== undefined) updateInput.defaultShell = body.default_shell;
+			if (body.default_cwd !== undefined) updateInput.defaultCwd = body.default_cwd;
+			if (body.host_group !== undefined) updateInput.hostGroup = body.host_group;
+			if (body.ssh_config_host !== undefined) updateInput.sshConfigHost = body.ssh_config_host;
+			if (body.ssh_user !== undefined) updateInput.sshUser = body.ssh_user;
+			if (body.keep_alive_seconds !== undefined)
+				updateInput.keepAliveSeconds = body.keep_alive_seconds;
+			if (body.history_retention_days !== undefined)
+				updateInput.historyRetentionDays = body.history_retention_days;
+			if (body.profile_json !== undefined) updateInput.profileJson = body.profile_json;
+
+			const updated = metaDal.updateHost(request.params.id, updateInput);
+
+			return toSnakeCase(updated);
+		},
+	);
+
+	// DELETE /api/hosts/:id
+	server.delete<{ Params: { id: string } }>("/api/hosts/:id", async (request, reply) => {
+		const deleted = metaDal.deleteHost(request.params.id);
+		if (!deleted) {
+			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+		}
+		return reply.code(204).send();
+	});
+
+	// POST /api/hosts/:id/duplicate — duplicate a host
+	server.post<{ Params: { id: string } }>("/api/hosts/:id/duplicate", async (request, reply) => {
+		const result = metaDal.duplicateHost(request.params.id);
+		if (!result) {
+			return reply.code(400).send({
+				error: {
+					code: "VALIDATION_ERROR",
+					message: "Host not found or cannot be duplicated",
+				},
+			});
+		}
+		return reply.code(201).send(toSnakeCase(result));
+	});
+
+	// POST /api/hosts/:id/test
+	server.post<{ Params: { id: string } }>("/api/hosts/:id/test", async (request, reply) => {
+		const token = request.headers.authorization ?? "";
+		if (!checkTestConnectionRateLimit(token)) {
+			return reply.code(429).send({
+				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
+			});
+		}
+
+		const host = metaDal.getHost(request.params.id);
+		if (!host) {
+			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+		}
+
+		if (host.type === "local") {
+			return { ok: true };
+		}
+
+		// SSH connectivity test
+		if (!host.sshHost) {
+			return { ok: false, message: "Host has no ssh_host configured" };
+		}
+
+		const result = await testSshConnectivity(
+			host.sshHost,
+			host.sshPort ?? 22,
+			host.sshAuth ?? "agent",
+			host.sshKeyPath,
+		);
+
+		return result;
+	});
+
+	// PUT /api/hosts/:id/welcome — set welcome channel for a host
+	server.put<{ Params: { id: string }; Body: { channel_id: string } }>(
+		"/api/hosts/:id/welcome",
+		async (request, reply) => {
+			const host = metaDal.getHost(request.params.id);
+			if (!host) {
+				return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+			}
+
+			const { channel_id } = request.body;
+			if (!channel_id || typeof channel_id !== "string") {
+				return reply.code(400).send({
+					error: { code: "VALIDATION_ERROR", message: "channel_id is required" },
+				});
+			}
+
+			const channelWithHost = metaDal.getChannelWithHost(channel_id);
+			if (!channelWithHost) {
+				return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Channel not found" } });
+			}
+
+			if (channelWithHost.hostId !== request.params.id) {
+				return reply.code(400).send({
+					error: { code: "VALIDATION_ERROR", message: "Channel does not belong to this host" },
+				});
+			}
+
+			metaDal.setWelcomeChannel(channel_id);
+			return reply.code(200).send({ ok: true });
+		},
+	);
+
+	// DELETE /api/hosts/:id/welcome — clear welcome channel for a host
+	server.delete<{ Params: { id: string } }>("/api/hosts/:id/welcome", async (request, reply) => {
+		const { id } = request.params;
+		const welcome = metaDal.getWelcomeChannel(id);
+		if (welcome) {
+			metaDal.clearWelcomeChannel(welcome.id);
+		}
+		return reply.code(204).send();
+	});
+
+	// GET /api/ssh-config — parse user's ~/.ssh/config
+	server.get("/api/ssh-config", async (_request, reply) => {
+		try {
+			const result = readSshConfig();
+			return { entries: toSnakeCase(result.entries), has_include: result.hasInclude };
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+				return reply.code(404).send({
+					error: {
+						code: "NOT_FOUND",
+						message: "No SSH config file found at ~/.ssh/config",
+					},
+				});
+			}
+			throw err;
+		}
+	});
+
+	// POST /api/hosts/import — batch import hosts from SSH config
+	server.post<{ Body: { entries: SshConfigImport[] } }>(
+		"/api/hosts/import",
+		async (request, reply) => {
+			const { entries } = request.body;
+
+			if (!Array.isArray(entries) || entries.length === 0) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "entries must be a non-empty array",
+					},
+				});
+			}
+
+			// Parse SSH config to get full details
+			let sshResult: ParseResult;
+			try {
+				sshResult = readSshConfig();
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+					return reply.code(404).send({
+						error: {
+							code: "NOT_FOUND",
+							message: "No SSH config file found at ~/.ssh/config",
+						},
+					});
+				}
+				throw err;
+			}
+
+			// Build lookup map by name
+			const entryMap = new Map(sshResult.entries.map((e) => [e.name, e]));
+
+			// Validate all entries have matching SSH config entries
+			for (const entry of entries) {
+				if (!entry.name || !entry.label) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "Each entry must have name and label",
+						},
+					});
+				}
+				if (!entryMap.has(entry.name)) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: `SSH config entry not found: ${entry.name}`,
+						},
+					});
+				}
+			}
+
+			// Check ALL labels for conflicts before creating any
+			const conflictingLabels: string[] = [];
+			for (const entry of entries) {
+				const existing = metaDal.getHostByLabel(entry.label.trim());
+				if (existing) {
+					conflictingLabels.push(entry.label);
+				}
+			}
+			if (conflictingLabels.length > 0) {
+				return reply.code(409).send({
+					error: {
+						code: "CONFLICT",
+						message: `Labels already in use: ${conflictingLabels.join(", ")}`,
+						conflicting_labels: conflictingLabels,
+					},
+				});
+			}
+
+			// Build host inputs and create in a transaction
+			const inputs = entries.map((entry) => {
+				// Safe: validated above that all entries exist in entryMap
+				const sshEntry = entryMap.get(entry.name) as NonNullable<ReturnType<typeof entryMap.get>>;
+				return {
+					type: "ssh" as const,
+					label: entry.label.trim(),
+					sshHost: sshEntry.hostname ?? sshEntry.name,
+					sshPort: sshEntry.port,
+					...(sshEntry.user != null && { sshUser: sshEntry.user }),
+					...(sshEntry.identityFile != null && { sshKeyPath: sshEntry.identityFile }),
+					sshConfigHost: sshEntry.name,
+					...(entry.hostGroup !== undefined && { hostGroup: entry.hostGroup }),
+				};
+			});
+
+			const hosts = metaDal.importHosts(inputs);
+			return reply.code(201).send(toSnakeCase(hosts));
+		},
+	);
+
+	// POST /api/hosts/test — test connection to an unsaved host
+	server.post<{
+		Body: {
+			hostname: string;
+			port?: number;
+			ssh_auth?: string;
+			ssh_key_path?: string;
+			ssh_user?: string;
+		};
+	}>("/api/hosts/test", async (request, reply) => {
+		const token = request.headers.authorization ?? "";
+		if (!checkTestConnectionRateLimit(token)) {
+			return reply.code(429).send({
+				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
+			});
+		}
+
+		const { hostname, port, ssh_auth, ssh_key_path } = request.body;
+		if (!hostname) {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: "hostname is required" },
+			});
+		}
+		const result = await testSshConnectivity(
+			hostname,
+			port ?? 22,
+			(ssh_auth as "agent" | "key" | "password") ?? "agent",
+			ssh_key_path,
+		);
+		return result;
+	});
+}
