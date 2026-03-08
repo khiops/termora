@@ -50,10 +50,16 @@
 										v-if="settingsStore.activeCategory === 'appearance'"
 										:scope="settingsStore.activeScope"
 									/>
+									<SchemaCategory
+										v-else-if="settingsStore.activeCategory !== 'keybindings'"
+										:category="settingsStore.activeCategory"
+										:scope="settingsStore.activeScope"
+										:host-name="hostName"
+									/>
 									<div v-else class="settings-placeholder">
-										<!-- Block 4 will provide remaining category components here -->
+										<!-- Block 5 will provide KeybindingsCategory here -->
 										<p class="placeholder-text">
-											Select a category to configure settings.
+											Keybindings configuration coming soon.
 										</p>
 									</div>
 								</template>
@@ -71,6 +77,7 @@ import { computed, watch } from "vue";
 import ScopeTabBar from "./ScopeTabBar.vue";
 import CategoryNav from "./CategoryNav.vue";
 import AppearanceCategory from "./categories/AppearanceCategory.vue";
+import SchemaCategory from "./categories/SchemaCategory.vue";
 import { useSettingsStore } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";
