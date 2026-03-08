@@ -29,6 +29,10 @@
 			:text-color="visualProfile.banner.textColor"
 		/>
 
+			<!-- Wallpaper layers (UX-10) — behind terminal content -->
+		<div v-if="wallpaperStyle" class="wallpaper-bg" :style="wallpaperStyle" />
+		<div v-if="dimStyle" class="wallpaper-dim" :style="dimStyle" />
+
 		<div v-if="error" class="terminal-error">
 			<span>{{ error }}</span>
 		</div>
@@ -105,7 +109,7 @@
 
 <script setup lang="ts">
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
-import { computed, inject, ref, watch, onMounted, onUnmounted } from "vue";
+import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useWriteLockStore } from "../stores/writelock.js";
@@ -120,6 +124,7 @@ import { useNotificationStore } from "../stores/notifications.js";
 import { useActivityTracker } from "../composables/useActivityTracker.js";
 import { useScrollBehavior } from "../composables/useScrollBehavior.js";
 import { useVisualProfile } from "../composables/useVisualProfile.js";
+import { useWallpaper } from "../composables/useWallpaper.js";
 import { useHostsStore } from "../stores/hosts.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 import SearchOverlay from "./SearchOverlay.vue";
@@ -253,6 +258,7 @@ const paneHost = computed(() => {
 });
 
 const { profile: visualProfile, bannerText, borderStyle, tintStyle } = useVisualProfile(paneHost);
+const { wallpaperStyle, dimStyle } = useWallpaper(toRef(configStore, "profile"));
 
 // ---------------------------------------------------------------------------
 // Write-lock awareness
@@ -772,13 +778,29 @@ function onDragEnd(): void {
 	flex: 1;
 	overflow: hidden;
 	background: rgba(var(--nt-bg-rgb), var(--nt-terminal-alpha));
+	position: relative;
+	z-index: 2;
+}
+
+.wallpaper-bg {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+}
+
+.wallpaper-dim {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
 }
 
 .tint-overlay {
 	position: absolute;
 	inset: 0;
 	pointer-events: none;
-	z-index: 1;
+	z-index: 3; /* was 1 — moved above terminal for wallpaper layering */
 	will-change: opacity;
 }
 

@@ -244,6 +244,29 @@ describe("ConfigResolver.resolve", () => {
 		const result = resolver.resolve(undefined, undefined, "ses-x");
 		expect(result.fontSize).toBe(DEFAULT_PROFILE.fontSize);
 	});
+
+	it("wallpaper fields cascade through resolve()", () => {
+		// Layer 3: host sets wallpaper + blur
+		const host = metaDal.createHost({ type: "local", label: "cascade-wp-test" });
+		metaDal.updateHostProfile(host.id, JSON.stringify({ wallpaper: "host.jpg", wallpaperBlur: 5 }));
+
+		// Layer 4: channel adds dim
+		metaDal.createSession({ id: "ses-wp", hostId: host.id, status: "starting" });
+		metaDal.createChannel({ id: "ch-wp", sessionId: "ses-wp", status: "born" });
+		metaDal.updateChannelProfile("ch-wp", JSON.stringify({ wallpaperDim: 40 }));
+
+		const resolver = new ConfigResolver(metaDal);
+		const resolved = resolver.resolve(host.id, "ch-wp");
+
+		// Wallpaper fields merged across layers
+		expect(resolved.wallpaper).toBe("host.jpg");
+		expect(resolved.wallpaperBlur).toBe(5);
+		expect(resolved.wallpaperDim).toBe(40);
+
+		// Unrelated defaults still cascade correctly
+		expect(resolved.fontSize).toBe(DEFAULT_PROFILE.fontSize);
+		expect(resolved.cursorStyle).toBe(DEFAULT_PROFILE.cursorStyle);
+	});
 });
 
 // ─── loadGcConfig + ConfigResolver.gcConfig ──────────────────────────────────
