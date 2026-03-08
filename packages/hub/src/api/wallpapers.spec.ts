@@ -212,27 +212,21 @@ describe("Wallpaper endpoints", () => {
 			expect(res.json()).toEqual({ filename: "bg.png" });
 		});
 
-		it("should reject file exceeding size limit", async () => {
-			// Create a dedicated server with a tiny file size limit (100 bytes)
-			const smallServer = await createServer({
-				logger: false,
-				dbManager: dbs,
-				authToken: TEST_TOKEN,
-				configDir,
-			});
-			// @fastify/multipart limit is set in server.ts via MAX_WALLPAPER_SIZE.
-			// For a genuine limit test we verify the configured server rejects oversized uploads.
-			// Since we can't override the limit here, we test that a small file is accepted
-			// (limit enforcement is covered by @fastify/multipart's own test suite).
+		it("should accept files within size limit", async () => {
+			// Verifies that a small valid file is accepted end-to-end.
+			// The 10 MB ceiling enforced by @fastify/multipart (MAX_WALLPAPER_SIZE) is a
+			// framework-level feature trusted at framework level — sending an actual 10 MB+
+			// payload in tests would be slow and brittle, so we rely on @fastify/multipart's
+			// own test suite for the 413 rejection path and only assert the happy path here.
 			const { payload, headers } = buildMultipart("small.jpg", "x".repeat(50));
-			const res = await smallServer.inject({
+			const res = await server.inject({
 				method: "POST",
 				url: "/api/wallpapers",
 				headers,
 				payload,
 			});
-			await smallServer.close();
 			expect(res.statusCode).toBe(200);
+			expect(res.json()).toEqual({ filename: "small.jpg" });
 		});
 	});
 

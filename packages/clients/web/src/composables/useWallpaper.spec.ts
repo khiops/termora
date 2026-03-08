@@ -1,0 +1,161 @@
+import type { TerminalProfile } from "@nexterm/shared";
+import { describe, expect, it } from "vitest";
+import { ref } from "vue";
+import { useWallpaper } from "./useWallpaper.js";
+
+function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile {
+	return {
+		fontFamily: "monospace",
+		fontSize: 14,
+		theme: "dark",
+		cursorStyle: "block",
+		scrollback: 5000,
+		bellSound: false,
+		scrollbarMarkers: true,
+		wallpaper: "",
+		wallpaperBlur: 0,
+		wallpaperDim: 0,
+		...overrides,
+	};
+}
+
+describe("useWallpaper", () => {
+	describe("wallpaperStyle", () => {
+		it("should return null when wallpaper is empty", () => {
+			// Arrange
+			const profile = ref(makeProfile());
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value).toBeNull();
+		});
+
+		it("should return style with background-image when wallpaper is set", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "mountains.jpg" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value).not.toBeNull();
+			expect(wallpaperStyle.value?.backgroundImage).toContain("mountains.jpg");
+			expect(wallpaperStyle.value?.backgroundSize).toBe("cover");
+			expect(wallpaperStyle.value?.backgroundPosition).toBe("center");
+		});
+
+		it("should encode special characters in wallpaper filename", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "my image (1).jpg" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toContain(
+				encodeURIComponent("my image (1).jpg"),
+			);
+		});
+
+		it("should include blur filter when wallpaperBlur > 0", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png", wallpaperBlur: 10 }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.filter).toBe("blur(10px)");
+			expect(wallpaperStyle.value?.willChange).toBe("filter");
+		});
+
+		it("should not include blur filter when wallpaperBlur is 0", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png", wallpaperBlur: 0 }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.filter).toBeUndefined();
+			expect(wallpaperStyle.value?.willChange).toBeUndefined();
+		});
+
+		it("should include cache-busting query parameter", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toMatch(/\?t=\d+/);
+		});
+	});
+
+	describe("dimStyle", () => {
+		it("should return null when wallpaper is empty", () => {
+			// Arrange
+			const profile = ref(makeProfile());
+
+			// Act
+			const { dimStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(dimStyle.value).toBeNull();
+		});
+
+		it("should return null when wallpaperDim is 0", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png", wallpaperDim: 0 }));
+
+			// Act
+			const { dimStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(dimStyle.value).toBeNull();
+		});
+
+		it("should return rgba overlay when wallpaperDim > 0", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png", wallpaperDim: 40 }));
+
+			// Act
+			const { dimStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(dimStyle.value).not.toBeNull();
+			expect(dimStyle.value?.background).toBe("rgba(0, 0, 0, 0.4)");
+		});
+
+		it("should return full opacity at 100%", () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png", wallpaperDim: 100 }));
+
+			// Act
+			const { dimStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(dimStyle.value?.background).toBe("rgba(0, 0, 0, 1)");
+		});
+	});
+
+	describe("refreshCache", () => {
+		it("should change cache-busting parameter", async () => {
+			// Arrange
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+			const { wallpaperStyle, refreshCache } = useWallpaper(profile);
+			const urlBefore = wallpaperStyle.value?.backgroundImage;
+
+			// Act — wait a bit so Date.now() changes
+			await new Promise((r) => setTimeout(r, 5));
+			refreshCache();
+
+			// Assert
+			const urlAfter = wallpaperStyle.value?.backgroundImage;
+			expect(urlAfter).not.toBe(urlBefore);
+		});
+	});
+});
