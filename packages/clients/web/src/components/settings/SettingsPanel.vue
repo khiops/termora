@@ -56,12 +56,7 @@
 										:scope="settingsStore.activeScope"
 										:host-name="hostName"
 									/>
-									<div v-else class="settings-placeholder">
-										<!-- Block 5 will provide KeybindingsCategory here -->
-										<p class="placeholder-text">
-											Keybindings configuration coming soon.
-										</p>
-									</div>
+									<KeybindingsCategory v-else />
 								</template>
 							</div>
 						</div>
@@ -78,6 +73,7 @@ import ScopeTabBar from "./ScopeTabBar.vue";
 import CategoryNav from "./CategoryNav.vue";
 import AppearanceCategory from "./categories/AppearanceCategory.vue";
 import SchemaCategory from "./categories/SchemaCategory.vue";
+import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
 import { useSettingsStore } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";
@@ -232,18 +228,6 @@ watch(
 	align-items: center;
 	justify-content: center;
 	height: 100%;
-	color: var(--nt-text-secondary);
-	font-size: 13px;
-}
-
-.settings-placeholder {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	height: 100%;
-}
-
-.placeholder-text {
 	color: var(--nt-text-secondary);
 	font-size: 13px;
 }
