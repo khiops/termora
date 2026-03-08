@@ -8,6 +8,20 @@
 			@close="editorMode = 'picker'"
 		/>
 		<template v-else>
+			<!-- Scope override banner (host/channel only) -->
+			<div v-if="hasScopeOverride" class="scope-override-banner">
+				<span class="scope-override-text">
+					Theme overridden at {{ scope }} level
+				</span>
+				<button
+					class="scope-override-reset"
+					type="button"
+					@click="resetThemeOverride"
+				>
+					Reset to inherited
+				</button>
+			</div>
+
 			<ThemePicker
 				:active-theme-name="activeThemeForScope"
 				@create-theme="openNewTheme"
@@ -152,6 +166,22 @@ function handleEditorSaved(_theme: NexTermTheme) {
 	editorMode.value = "picker";
 	editingTheme.value = undefined;
 	baseTheme.value = undefined;
+}
+
+// ── Scope override detection ──────────────────────────────────────────
+
+const hasScopeOverride = computed(() => {
+	if (props.scope === "global") return false;
+	return settingsStore.isOverridden(props.scope, "terminal", "theme");
+});
+
+async function resetThemeOverride(): Promise<void> {
+	await settingsStore.resetSetting(props.scope, "terminal", "theme");
+	// Reapply the inherited theme (global)
+	themeStore.setScopeOverride(null);
+	if (themeStore.currentTheme !== null) {
+		themeStore.applyTheme(themeStore.currentTheme);
+	}
 }
 
 // ── Active theme for current scope ────────────────────────────────────
@@ -344,5 +374,39 @@ function onScrollbarChange(value: unknown) {
 	color: var(--nt-fg);
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
+}
+
+.scope-override-banner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px;
+	margin-bottom: 12px;
+	background: rgba(var(--nt-accent-rgb), 0.1);
+	border: 1px solid rgba(var(--nt-accent-rgb), 0.3);
+	border-radius: 6px;
+}
+
+.scope-override-text {
+	font-size: 12px;
+	color: var(--nt-fg);
+}
+
+.scope-override-reset {
+	padding: 4px 10px;
+	background: transparent;
+	border: 1px solid var(--nt-border);
+	border-radius: 4px;
+	color: var(--nt-fg);
+	font-size: 11px;
+	font-family: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.scope-override-reset:hover {
+	background: rgba(var(--nt-fg-rgb), 0.08);
+	border-color: var(--nt-accent);
 }
 </style>
