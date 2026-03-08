@@ -4,6 +4,26 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-09 — Settings Panel — Config Cascade UI (2026-03-08)
+
+- D1: Global config persisted to config.toml (4-layer cascade preserved, no 5th layer)
+- D2: Comment-preserving round-trip via @rainbowatcher/toml-edit-js (supersedes original D2)
+- D3: Absorb existing AppearancePanel into Settings Panel (Appearance category)
+- D4: @iarna/toml for parsing (read), @rainbowatcher/toml-edit-js for writes
+- D5: Single GET /api/config/cascade endpoint returns all 4 layers + resolved
+- D6: UiConfig (tabs/panes/search/startup) Global scope only — not cascaded to host/channel
+- D7: Keybindings = read-only grouped list for MVP (no editor, no conflict detection)
+- D8: Schema-driven categories (settingsSchema registry, generic CategoryContent renderer)
+- D9: Input validation — whitelist known TerminalProfile/UiConfig keys, reject unknown
+- D10: 500ms debounce on all setting mutations
+- D11: Auto-fallback to Global tab when host/channel removed
+- D12: Create config.toml on first write if missing
+- D13: @rainbowatcher/toml-edit-js (303KB WASM) for comment-preserving config.toml writes
+- D14: appearance.json absorbed into config.toml [appearance] — single portable config
+- D15: autoSwitch via prefers-color-scheme (system) — no manual day_start/night_start
+
+---
+
 ## UX-07 — Host Customization & Visual Profiles (2026-03-07)
 
 - Visual profile stored in hosts.profile_json (no DB migration)
