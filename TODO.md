@@ -3,7 +3,7 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
+- [ ] 🟡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4) — spec drafted
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
@@ -61,6 +61,12 @@
 - [ ] 💡 [UI] Banner position 'aboveTabs' option — Priority: L (from UX-07 /adversarial C-01)
 - [ ] 💡 [UI] Collapsible banner with shortText — Priority: L (from UX-07 /adversarial C-02)
 - [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
+
+### Deferred from UX-09 /spec
+- [ ] 💡 [UI] Settings panel search/filter (VS Code style) — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Settings sync across devices — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Settings export/import as JSON — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
 
 ### Phase 2 (follows AGENT-DAEMON)
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1
