@@ -66,6 +66,12 @@
 - [ ] 💡 [UI] Config.toml comment-preserving write (TOML AST editor) — Priority: L (from /adversarial C-01, deferred: full stringify approach simpler)
 - [ ] 💡 [Hub] WebSocket events for config changes (reactive settings across clients) — Priority: L (from /llm Copilot, deferred: single-user MVP)
 
+### Deferred from UX-10 /review
+- [ ] 🔧 [Web] vue-tsc pre-existing errors in SettingsPanel/AppearanceCategory/SchemaCategory (exactOptionalPropertyTypes) — Priority: L (from /review F-004)
+- [ ] 💡 [Hub] Magic-number MIME validation beyond extension check for wallpaper uploads — Priority: L (from /llm review)
+- [ ] 💡 [Hub] Disk quota enforcement for wallpapers directory — Priority: L (from /llm review)
+- [ ] 💡 [Hub] Image bomb detection (pixel dimension limits) for wallpaper uploads — Priority: L (from /llm review)
+
 ### Phase 2 (follows AGENT-DAEMON)
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1
 

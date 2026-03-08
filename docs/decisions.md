@@ -4,6 +4,23 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## WALLPAPER — Configurable terminal wallpaper with cascade (2026-03-08)
+
+- Wallpaper fields in TerminalProfile (cascades via existing 4-layer system)
+- Upload to ~/.config/nexterm/wallpapers/, served at /public/wallpapers/ (same pattern as fonts)
+- Cover only (no contain/tile), blur 0-20px, dim 0-100%
+- Layer stack: wallpaper-bg (z0) → wallpaper-dim (z1) → terminal (z2) → tint (z3)
+- Upload validation: jpg/jpeg/png/webp/gif/avif, max 10MB via @fastify/multipart
+- GET /api/wallpapers no auth (scoped to GET method), POST/DELETE auth required
+- Path traversal: basename + directory containment
+- X-Content-Type-Options: nosniff on static wallpapers route
+- Cache-busting ?t=timestamp on wallpaper URLs
+- useWallpaper composable: profile ref → wallpaperStyle + dimStyle computeds
+- TerminalPane z-index: wallpaper-bg(0) → dim(1) → terminal(2) → tint(3)
+- WallpaperCategory.vue: picker grid + upload + blur/dim sliders + scope override
+
+---
+
 ## UX-09 — Settings Panel — Config Cascade UI (2026-03-08)
 
 - D1: Global config persisted to config.toml (4-layer cascade preserved, no 5th layer)

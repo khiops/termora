@@ -1,4 +1,4 @@
-<!-- doc-meta: { status: reviewed, story_id: WALLPAPER, adversarial_applied: true, llm_reviewed: true } -->
+<!-- doc-meta: { status: canonical, story_id: WALLPAPER, adversarial_applied: true, llm_reviewed: true } -->
 
 # UX-10 — Terminal Wallpaper
 
