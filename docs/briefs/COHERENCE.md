@@ -18,11 +18,13 @@ ATTACH_OK extended with optional `dynamic_title` field (UX-02).
 - `dynamic_title TEXT DEFAULT NULL` (UX-02)
 
 ### hosts table
-- `icon TEXT DEFAULT 'server'` (UX-03)
-- `color TEXT DEFAULT NULL` (UX-03)
-- `group_name TEXT DEFAULT NULL` (UX-03)
-- `sort_order INTEGER DEFAULT 0` (UX-03)
+- `icon_type TEXT DEFAULT 'auto'` (existing — MVP)
+- `icon_value TEXT DEFAULT NULL` (existing — MVP)
+- `color TEXT DEFAULT NULL` (existing — MVP)
+- `host_group TEXT DEFAULT NULL` (UX-03)
+- `sort_order INTEGER DEFAULT 0` (UX-03, backfill existing rows on migration)
 - `ssh_config_host TEXT DEFAULT NULL` (UX-03)
+- `ssh_user TEXT DEFAULT NULL` (UX-03)
 - `keep_alive_seconds INTEGER DEFAULT 60` (UX-03)
 - `history_retention_days INTEGER DEFAULT 30` (UX-03)
 
