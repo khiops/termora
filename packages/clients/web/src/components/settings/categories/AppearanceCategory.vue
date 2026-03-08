@@ -177,7 +177,19 @@ const hasScopeOverride = computed(() => {
 
 async function resetThemeOverride(): Promise<void> {
 	await settingsStore.resetSetting(props.scope, "terminal", "theme");
-	// Reapply the inherited theme (global)
+	// Apply the inherited theme following the cascade: channel → host → global
+	if (props.scope === "channel") {
+		const hostThemeName = settingsStore.getValue("host", "terminal", "theme") as string | undefined;
+		if (hostThemeName) {
+			const hostTheme = themeStore.availableThemes.find((t) => t.name === hostThemeName);
+			if (hostTheme) {
+				themeStore.setScopeOverride(hostTheme);
+				themeStore.applyTheme(hostTheme);
+				return;
+			}
+		}
+	}
+	// Host scope reset, or no host override — fall back to global
 	themeStore.setScopeOverride(null);
 	if (themeStore.currentTheme !== null) {
 		themeStore.applyTheme(themeStore.currentTheme);
@@ -190,9 +202,15 @@ const activeThemeForScope = computed(() => {
 	if (props.scope === "global") {
 		return themeStore.currentTheme?.name;
 	}
-	// For host/channel scope, read the resolved theme from the cascade
-	return settingsStore.getResolved("terminal", "theme") as string | undefined
-		?? themeStore.currentTheme?.name;
+	// Show THIS scope's own value if set
+	const ownValue = settingsStore.getValue(props.scope, "terminal", "theme") as string | undefined;
+	if (ownValue) return ownValue;
+	// Otherwise show inherited: channel inherits from host, then global
+	if (props.scope === "channel") {
+		const hostValue = settingsStore.getValue("host", "terminal", "theme") as string | undefined;
+		if (hostValue) return hostValue;
+	}
+	return themeStore.currentTheme?.name;
 });
 
 // ── Theme selection (scope-aware) ──────────────────────────────────────
