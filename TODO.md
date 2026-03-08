@@ -33,15 +33,15 @@
 - [ ] 💡 [Agent] Unix socket path length validation (~100 char limit) — Priority: L (from /llm Copilot)
 
 ### Deferred from UX-03 /review
-- [ ] 🔧 [Web] DeleteHostModal: hasActiveSessions always false — needs session store data — Priority: M (from /review F-004)
-- [ ] 🔧 [Hub] testSshConnectivity returns ok:true for auth failures — confusing UX — Priority: M (from /review F-005)
+- [x] ✅ [Web] DeleteHostModal: hasActiveSessions — uses channelHostMap + channel status (2026-03-08)
+- [x] ✅ [Hub] testSshConnectivity: auth failures now return ok:false (2026-03-08)
 - [ ] 🔧 [Web] HostRail tooltip missing channel count + connection duration (SC-17) — Priority: L (from /review F-007)
 - [ ] 🔧 [Hub] SQL comment for COALESCE(host_group, '~') tilde sorting trick — Priority: L (from /review F-008)
 - [ ] 🔧 [Hub] Batch import: set sshAuth based on IdentityFile presence — Priority: L (from /review F-009)
 - [ ] 🔧 [Hub] SSH config parser: add test for alias-only Host block (no HostName) — Priority: L (from /review F-010)
 
 ### Deferred from UX-05 /review
-- [ ] 🔧 [Web] Host rail bell aggregation broken for non-active hosts — Priority: M (from /review F-004)
+- [x] ✅ [Web] Bell aggregation: channelHostMap enables cross-host bell counts (2026-03-08)
 - [ ] 🔧 [Web] SC-22 auto mode above threshold no brief badge — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] Grouped notification body says 'terminal' instead of channel name — Priority: L (from /review F-006)
 - [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
