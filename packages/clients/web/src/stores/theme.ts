@@ -167,7 +167,7 @@ export const useThemeStore = defineStore("theme", () => {
 		const authStore = useAuthStore();
 		try {
 			await fetch("/api/config/appearance", {
-				method: "PATCH",
+				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token ?? ""}`,
@@ -208,13 +208,14 @@ export const useThemeStore = defineStore("theme", () => {
 	async function loadAppearance(): Promise<void> {
 		const authStore = useAuthStore();
 		try {
-			const response = await fetch("/api/config/appearance", {
+			const response = await fetch("/api/config/cascade", {
 				headers: {
 					Authorization: `Bearer ${authStore.token ?? ""}`,
 				},
 			});
 			if (response.ok) {
-				appearance.value = (await response.json()) as AppearanceConfig;
+				const cascade = (await response.json()) as { appearance: AppearanceConfig };
+				appearance.value = cascade.appearance;
 			}
 		} catch {
 			// API may not exist yet — use defaults
@@ -250,19 +251,19 @@ export const useThemeStore = defineStore("theme", () => {
 
 	/** Update appearance setting and persist via API. */
 	async function updateAppearance(partial: Partial<AppearanceConfig>): Promise<void> {
+		// Apply optimistic update locally
+		appearance.value = { ...appearance.value, ...partial };
+
 		const authStore = useAuthStore();
 		try {
-			const response = await fetch("/api/config/appearance", {
-				method: "PATCH",
+			await fetch("/api/config/appearance", {
+				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token ?? ""}`,
 				},
 				body: JSON.stringify(partial),
 			});
-			if (response.ok) {
-				appearance.value = (await response.json()) as AppearanceConfig;
-			}
 		} catch {
 			// API may not exist yet
 		}

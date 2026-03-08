@@ -45,12 +45,18 @@
 								<div v-if="settingsStore.loading" class="settings-loading">
 									Loading settings...
 								</div>
-								<div v-else class="settings-placeholder">
-									<!-- Block 3/4 will provide category content components here -->
-									<p class="placeholder-text">
-										Select a category to configure settings.
-									</p>
-								</div>
+								<template v-else>
+									<AppearanceCategory
+										v-if="settingsStore.activeCategory === 'appearance'"
+										:scope="settingsStore.activeScope"
+									/>
+									<div v-else class="settings-placeholder">
+										<!-- Block 4 will provide remaining category components here -->
+										<p class="placeholder-text">
+											Select a category to configure settings.
+										</p>
+									</div>
+								</template>
 							</div>
 						</div>
 					</div>
@@ -64,6 +70,7 @@
 import { computed, watch } from "vue";
 import ScopeTabBar from "./ScopeTabBar.vue";
 import CategoryNav from "./CategoryNav.vue";
+import AppearanceCategory from "./categories/AppearanceCategory.vue";
 import { useSettingsStore } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";

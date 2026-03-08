@@ -6,8 +6,8 @@
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
-		<!-- Appearance panel — rendered globally, outside layout, via Teleport -->
-		<AppearancePanel :visible="showAppearance" @close="showAppearance = false" />
+		<!-- Settings panel — rendered globally, outside layout, via Teleport -->
+		<SettingsPanel :visible="showSettings" @close="showSettings = false" />
 
 		<!-- Configure Command dialog — opened from tab context menu or exit overlay -->
 		<ConfigureCommandDialog
@@ -112,7 +112,7 @@
 		<div v-else class="app-layout">
 			<HostRail
 			class="host-rail"
-			@toggle-appearance="showAppearance = !showAppearance"
+			@toggle-settings="showSettings = !showSettings"
 			@add-host="showHostModal = true"
 			@host-context-menu="onHostContextMenu"
 			@group-context-menu="onGroupContextMenu"
@@ -203,7 +203,7 @@ import PaneLayout from "./components/PaneLayout.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import CommandPalette from "./components/CommandPalette.vue";
-import AppearancePanel from "./components/settings/AppearancePanel.vue";
+import SettingsPanel from "./components/settings/SettingsPanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HostModal from "./components/HostModal.vue";
@@ -223,7 +223,7 @@ const layout = useLayout();
 const multiPaneSearch = useMultiPaneSearch();
 provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
-const showAppearance = ref(false);
+const showSettings = ref(false);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
 const showHostModal = ref(false);
@@ -486,8 +486,8 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 		commandPalette.toggle();
 		return;
 	}
-	if (event.key === "Escape" && showAppearance.value) {
-		showAppearance.value = false;
+	if (event.key === "Escape" && showSettings.value) {
+		showSettings.value = false;
 	}
 }
 

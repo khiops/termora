@@ -130,9 +130,9 @@
 		<div class="rail-footer">
 			<button
 				class="rail-icon-btn"
-				title="Appearance"
-				aria-label="Open appearance panel"
-				@click="$emit('toggle-appearance')"
+				title="Settings"
+				aria-label="Open settings panel"
+				@click="$emit('toggle-settings')"
 			>
 				<svg
 					class="rail-icon-svg"
@@ -177,7 +177,7 @@ import {
 import type { Host } from "@nexterm/shared";
 
 defineEmits<{
-	"toggle-appearance": [];
+	"toggle-settings": [];
 	"add-host": [];
 	"host-context-menu": [payload: { hostId: string; event: MouseEvent }];
 	"group-context-menu": [
