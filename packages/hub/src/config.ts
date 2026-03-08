@@ -563,8 +563,9 @@ export class ConfigResolver {
 			tomlString = readFileSync(configPath, "utf8");
 		}
 
+		const snakeSection = section.split(".").map(camelToSnake).join(".");
 		const snakeKey = camelToSnake(key);
-		const path = `${section}.${snakeKey}`;
+		const path = `${snakeSection}.${snakeKey}`;
 
 		// null = remove key (pass undefined to toml-edit)
 		const editValue = value === null ? undefined : value;

@@ -1582,6 +1582,21 @@ describe("PUT /api/config/appearance", () => {
 		expect(body.appearance.opacity.terminal).toBe(80);
 	});
 
+	it("writes nested autoSwitch keys with correct snake_case section name", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { autoSwitch: { enabled: true, darkTheme: "dark-one", lightTheme: "light-one" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.appearance.autoSwitch.enabled).toBe(true);
+		expect(body.appearance.autoSwitch.darkTheme).toBe("dark-one");
+		expect(body.appearance.autoSwitch.lightTheme).toBe("light-one");
+	});
+
 	it("rejects unknown appearance keys (400)", async () => {
 		const res = await server.inject({
 			method: "PUT",

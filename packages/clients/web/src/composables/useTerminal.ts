@@ -86,6 +86,7 @@ export function useTerminal(
 		const scrollbarMarkers = p?.scrollbarMarkers !== false; // default true
 		const term = new Terminal({
 			allowProposedApi: true,
+			allowTransparency: true,
 			cursorBlink: p?.cursorStyle !== "underline", // blink except underline (xterm default)
 			fontSize: p?.fontSize ?? 14,
 			fontFamily: p?.fontFamily ?? '"Consolas", "Liberation Mono", "Courier New", monospace',
