@@ -8,17 +8,23 @@ export interface AgentConfig {
 	bufferGlobal: number;
 	/** Log level for agent daemon */
 	logLevel: string;
+	/** Timeout in ms to wait for the Unix socket bind to succeed (default 5000) */
+	bindTimeout: number;
 }
 
 /** Default buffer caps */
 export const DEFAULT_BUFFER_PER_CHANNEL = 1024 * 1024; // 1 MB
 export const DEFAULT_BUFFER_GLOBAL = 20 * 1024 * 1024; // 20 MB
 
+/** Default socket bind timeout in ms */
+export const DEFAULT_BIND_TIMEOUT = 5000;
+
 /** Default agent config values */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
 	bufferPerChannel: DEFAULT_BUFFER_PER_CHANNEL,
 	bufferGlobal: DEFAULT_BUFFER_GLOBAL,
 	logLevel: "info",
+	bindTimeout: DEFAULT_BIND_TIMEOUT,
 };
 
 /**
@@ -65,5 +71,9 @@ export function parseAgentConfig(tomlAgent?: Record<string, unknown>): AgentConf
 			? parseSize(tomlAgent.buffer_global as string | number)
 			: DEFAULT_BUFFER_GLOBAL,
 		logLevel: typeof tomlAgent.log_level === "string" ? tomlAgent.log_level : "info",
+		bindTimeout:
+			typeof tomlAgent.bind_timeout === "number" && tomlAgent.bind_timeout > 0
+				? tomlAgent.bind_timeout
+				: DEFAULT_BIND_TIMEOUT,
 	};
 }

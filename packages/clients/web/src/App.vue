@@ -1,5 +1,5 @@
 <template>
-	<div class="app-root" @keydown="onGlobalKeydown">
+	<div class="app-root">
 		<!-- Write-request dialog — rendered globally, outside layout, via Teleport -->
 		<WriteRequestDialog />
 
@@ -113,6 +113,7 @@
 			<HostRail
 			class="host-rail"
 			@toggle-settings="showSettings = !showSettings"
+			@toggle-palette="commandPalette.toggle()"
 			@add-host="showHostModal = true"
 			@host-context-menu="onHostContextMenu"
 			@group-context-menu="onGroupContextMenu"
@@ -196,7 +197,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, toRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, provide, ref, toRef, watch } from "vue";
 import { useResizable } from "./composables/useResizable.js";
 import { generateId } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
@@ -300,6 +301,27 @@ const showHostModal = ref(false);
 const editingHost = ref<Host | null>(null);
 const deleteHostId = ref<string | null>(null);
 const showBatchImport = ref(false);
+
+// Wire up palette external actions (add-host, settings, ssh-import, toggle-sidebar)
+commandPalette.onExternalAction.value = (actionId: string) => {
+	switch (actionId) {
+		case "action:add-host":
+			editingHost.value = null;
+			showHostModal.value = true;
+			break;
+		case "action:settings":
+			showSettings.value = true;
+			break;
+		case "action:ssh-import":
+			showBatchImport.value = true;
+			break;
+		case "action:toggle-sidebar":
+			sidebarResize.collapsed.value = !sidebarResize.collapsed.value;
+			break;
+		default:
+			console.warn("[CommandPalette] unhandled external action:", actionId);
+	}
+};
 const hostContextMenu = ref<{
 	hostId: string;
 	x: number;
@@ -480,6 +502,9 @@ function openPendingTab(hostId: string): void {
  * On mount: if we have a token, connect the WebSocket and fetch hosts.
  */
 onMounted(async () => {
+	// Ctrl+K / Cmd+K must be captured before Chrome's omnibox intercepts it (SC-14)
+	window.addEventListener("keydown", onGlobalKeydown, { capture: true });
+
 	// Load fonts before terminals are created (no auth needed)
 	await configStore.loadFonts();
 
@@ -511,6 +536,10 @@ onMounted(async () => {
 			console.error("[App] startup connect failed:", err);
 		}
 	}
+});
+
+onUnmounted(() => {
+	window.removeEventListener("keydown", onGlobalKeydown, { capture: true });
 });
 
 /**
@@ -617,12 +646,12 @@ watch(
 
 /**
  * Global keydown handler attached to the app root.
- * Intercepts Ctrl+P (Windows/Linux) and Cmd+P (macOS) to toggle the palette.
+ * Intercepts Ctrl+K (Windows/Linux) and Cmd+K (macOS) to toggle the palette (SC-14).
  */
 function onGlobalKeydown(event: KeyboardEvent): void {
-	const isP = event.key === "p" || event.key === "P";
+	const isK = event.key === "k" || event.key === "K";
 	const modifier = event.ctrlKey || event.metaKey;
-	if (isP && modifier) {
+	if (isK && modifier) {
 		event.preventDefault();
 		commandPalette.toggle();
 		return;

@@ -32,12 +32,13 @@ describe("useScrollBehavior", () => {
 		expect(barLineCount.value).toBe(10);
 	});
 
-	it("scrolls to bottom when lines exceed threshold (auto mode)", async () => {
+	it("scrolls to bottom and briefly shows bar when lines exceed threshold (auto mode, SC-22)", async () => {
+		vi.useFakeTimers();
 		const notificationStore = useNotificationStore();
 		const isActive = ref(false);
 		const scrollFn = vi.fn();
 
-		const { showBar } = useScrollBehavior({
+		const { showBar, barLineCount } = useScrollBehavior({
 			channelId: computed(() => "ch1"),
 			isActiveTab: computed(() => isActive.value),
 			scrollMode: "auto",
@@ -50,8 +51,16 @@ describe("useScrollBehavior", () => {
 		isActive.value = true;
 		await nextTick();
 
-		expect(showBar.value).toBe(false);
+		// Bar should be briefly visible with the line count
+		expect(showBar.value).toBe(true);
+		expect(barLineCount.value).toBe(200);
 		expect(scrollFn).toHaveBeenCalled();
+
+		// After 1500ms the brief flash auto-dismisses
+		await vi.advanceTimersByTimeAsync(1500);
+		expect(showBar.value).toBe(false);
+
+		vi.useRealTimers();
 	});
 
 	it("always scrolls to bottom in alwaysBottom mode", async () => {

@@ -13,6 +13,22 @@ import { OutputBuffer } from "./buffer.js";
 import { AgentHandler } from "./handler.js";
 import { PtyManager } from "./pty.js";
 
+/** Maximum safe Unix socket path length (platform limit is 104-108 bytes) */
+const MAX_SOCKET_PATH_LENGTH = 100;
+
+/** Maximum EADDRINUSE retry attempts before giving up */
+const BIND_RETRY_MAX = 3;
+
+/** Returns a random integer in [min, max) */
+function randomIntBetween(min: number, max: number): number {
+	return Math.floor(Math.random() * (max - min)) + min;
+}
+
+/** Sleep for the given number of milliseconds */
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class DaemonServer {
 	private handler: AgentHandler;
 	private ptyManager: PtyManager;
@@ -20,6 +36,7 @@ export class DaemonServer {
 	private server: net.Server;
 	private activeSocket: net.Socket | null = null;
 	private socketPath: string;
+	private bindTimeout: number;
 
 	// Backpressure state
 	private draining = false;
@@ -27,7 +44,17 @@ export class DaemonServer {
 	private readonly maxQueueSize = 1000;
 
 	constructor(socketPath: string, config: AgentConfig) {
+		// Item 2: Validate socket path length before any I/O.
+		// Most platforms enforce a limit of 104-108 bytes; use 100 as a safe upper bound.
+		if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH_LENGTH) {
+			throw new Error(
+				`Unix socket path is too long (${Buffer.byteLength(socketPath)} bytes, max ${MAX_SOCKET_PATH_LENGTH}). Set a shorter XDG_STATE_HOME or socket_path in config.toml.`,
+			);
+		}
+
 		this.socketPath = socketPath;
+		// Item 3: Store configurable bind timeout (default 5000ms).
+		this.bindTimeout = config.bindTimeout;
 		this.buffer = new OutputBuffer(config.bufferPerChannel, config.bufferGlobal);
 		this.ptyManager = new PtyManager();
 
@@ -35,6 +62,28 @@ export class DaemonServer {
 		this.handler = new AgentHandler((msg) => this.routeMessage(msg), this.ptyManager);
 
 		this.server = net.createServer((socket) => this.onConnection(socket));
+	}
+
+	/** Attempt a single net.Server.listen(), resolving on success or rejecting on error. */
+	private bindOnce(): Promise<void> {
+		return new Promise((resolve, reject) => {
+			// Item 3: Enforce configurable bind timeout.
+			const timer = setTimeout(() => {
+				this.server.removeAllListeners("error");
+				reject(new Error(`Socket bind timed out after ${this.bindTimeout}ms: ${this.socketPath}`));
+			}, this.bindTimeout);
+
+			this.server.once("error", (err) => {
+				clearTimeout(timer);
+				reject(err);
+			});
+
+			this.server.listen(this.socketPath, () => {
+				clearTimeout(timer);
+				this.server.removeAllListeners("error");
+				resolve();
+			});
+		});
 	}
 
 	/** Start listening on the socket path. Creates runtime directory if needed. */
@@ -52,13 +101,29 @@ export class DaemonServer {
 			}
 		}
 
-		return new Promise((resolve, reject) => {
-			this.server.once("error", reject);
-			this.server.listen(this.socketPath, () => {
-				this.server.removeListener("error", reject);
-				resolve();
-			});
-		});
+		// Item 1: Retry up to BIND_RETRY_MAX times on EADDRINUSE with randomized backoff.
+		let lastError: unknown;
+		for (let attempt = 1; attempt <= BIND_RETRY_MAX; attempt++) {
+			try {
+				await this.bindOnce();
+				return;
+			} catch (err) {
+				const nodeErr = err as NodeJS.ErrnoException;
+				if (nodeErr.code !== "EADDRINUSE" || attempt === BIND_RETRY_MAX) {
+					throw err;
+				}
+				lastError = err;
+				const delayMs = randomIntBetween(100, 501);
+				console.error(
+					`[nexterm-agent] EADDRINUSE on ${this.socketPath} — retry ${attempt}/${BIND_RETRY_MAX - 1} in ${delayMs}ms`,
+				);
+				await sleep(delayMs);
+				// Remove stale error/listen listeners so the next bindOnce() starts clean.
+				this.server.removeAllListeners("error");
+				this.server.removeAllListeners("listening");
+			}
+		}
+		throw lastError;
 	}
 
 	/** Graceful shutdown: close all PTYs, close server, unlink socket. */

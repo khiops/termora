@@ -61,10 +61,15 @@ export function useScrollBehavior(opts: {
 		} else {
 			// "auto" mode
 			if (lines >= threshold) {
-				// Too many lines — scroll to bottom, flash brief info
+				// Too many lines — scroll to bottom, but briefly flash the bar
+				// so the user knows lines were skipped (SC-22)
+				barLineCount.value = lines;
+				showBar.value = true;
 				opts.scrollToBottom?.();
 				notificationStore.clearChannel(chId);
-				showBar.value = false;
+				setTimeout(() => {
+					showBar.value = false;
+				}, 1500);
 			} else if (lines > 0) {
 				// Manageable amount — resume position, show bar
 				barLineCount.value = lines;

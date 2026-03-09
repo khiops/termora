@@ -645,7 +645,10 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 					sshHost: sshEntry.hostname ?? sshEntry.name,
 					sshPort: sshEntry.port,
 					...(sshEntry.user != null && { sshUser: sshEntry.user }),
-					...(sshEntry.identityFile != null && { sshKeyPath: sshEntry.identityFile }),
+					...(sshEntry.identityFile != null && {
+						sshKeyPath: sshEntry.identityFile,
+						sshAuth: "key" as const,
+					}),
 					sshConfigHost: sshEntry.name,
 					...(entry.hostGroup !== undefined && { hostGroup: entry.hostGroup }),
 				};

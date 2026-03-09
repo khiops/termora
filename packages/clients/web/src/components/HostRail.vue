@@ -6,7 +6,7 @@
 				v-if="localHost"
 				class="badge-wrapper"
 				:class="{ selected: localHost.id === hostsStore.selectedHostId }"
-				:title="localHost.label"
+				:title="getTooltip(localHost)"
 				@click="hostsStore.selectHost(localHost.id)"
 				@contextmenu.prevent="
 					$emit('host-context-menu', {
@@ -18,11 +18,18 @@
 				<div
 					class="badge"
 					:style="{
-						backgroundColor: getColorFromLabel(localHost.label),
+						backgroundColor: localHost.color || getColorFromLabel(localHost.label),
 					}"
 				>
-					<span class="badge-initials">{{
-						getInitials(localHost.label)
+					<img
+						v-if="localHost.iconType === 'image' && localHost.iconValue"
+						:src="localHost.iconValue"
+						class="host-icon-img"
+					/>
+					<span v-else class="badge-initials">{{
+						localHost.iconType === 'emoji' && localHost.iconValue
+							? localHost.iconValue
+							: getInitials(localHost.label)
 					}}</span>
 					<span
 						class="status-dot"
@@ -104,8 +111,15 @@
 									getColorFromLabel(host.label),
 							}"
 						>
-							<span class="badge-initials">{{
-								getInitials(host.label)
+							<img
+								v-if="host.iconType === 'image' && host.iconValue"
+								:src="host.iconValue"
+								class="host-icon-img"
+							/>
+							<span v-else class="badge-initials">{{
+								host.iconType === 'emoji' && host.iconValue
+									? host.iconValue
+									: getInitials(host.label)
 							}}</span>
 							<span
 								class="status-dot"
@@ -128,6 +142,26 @@
 		</div>
 
 		<div class="rail-footer">
+			<button
+				class="rail-icon-btn"
+				title="Command palette (Ctrl+K)"
+				aria-label="Open command palette"
+				@click="$emit('toggle-palette')"
+			>
+				<svg
+					class="rail-icon-svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="11" cy="11" r="8" />
+					<line x1="21" y1="21" x2="16.65" y2="16.65" />
+				</svg>
+			</button>
 			<button
 				class="rail-icon-btn"
 				title="Settings"
@@ -161,9 +195,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useHostsStore } from "../stores/hosts.js";
 import { useNotificationStore } from "../stores/notifications.js";
+import { useChannelsStore } from "../stores/channels.js";
 import {
 	useHostGroups,
 	type HostSection,
@@ -176,6 +211,7 @@ import type { Host } from "@nexterm/shared";
 
 defineEmits<{
 	"toggle-settings": [];
+	"toggle-palette": [];
 	"add-host": [];
 	"host-context-menu": [payload: { hostId: string; event: MouseEvent }];
 	"group-context-menu": [
@@ -185,9 +221,56 @@ defineEmits<{
 
 const hostsStore = useHostsStore();
 const notificationStore = useNotificationStore();
+const channelsStore = useChannelsStore();
 const { sections, localHost, toggleGroup } = useHostGroups();
 
 let dragHostId: string | null = null;
+
+/**
+ * Track when each host became "live" (connected) to compute display duration.
+ * Key = hostId, value = timestamp when status first became "live".
+ */
+const connectedAtMap = ref<Map<string, number>>(new Map());
+
+watch(
+	() => hostsStore.hosts.map((h) => hostsStore.getHostStatus(h.id)),
+	() => {
+		const next = new Map(connectedAtMap.value);
+		for (const host of hostsStore.hosts) {
+			const status = hostsStore.getHostStatus(host.id);
+			const wasTracked = next.has(host.id);
+			if (status === "live" && !wasTracked) {
+				next.set(host.id, Date.now());
+			} else if (status !== "live" && wasTracked) {
+				next.delete(host.id);
+			}
+		}
+		connectedAtMap.value = next;
+	},
+	{ deep: false },
+);
+
+/** Format elapsed ms into human-readable duration string. */
+function formatDuration(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	if (hours > 0) return `${hours}h ${minutes}m`;
+	if (minutes > 0) return `${minutes}m ${seconds}s`;
+	return `${seconds}s`;
+}
+
+/** Count active (non-dead) channels for a host using the persistent channelHostMap. */
+function getChannelCount(hostId: string): number {
+	let count = 0;
+	for (const [channelId, hId] of channelsStore.channelHostMap) {
+		if (hId !== hostId) continue;
+		const ch = channelsStore.channels.find((c) => c.id === channelId);
+		if (ch && ch.status !== "dead") count++;
+	}
+	return count;
+}
 
 function getTooltip(host: Host): string {
 	const parts = [host.label];
@@ -196,6 +279,17 @@ function getTooltip(host: Host): string {
 			`${host.sshUser ?? ""}@${host.sshHost}:${host.sshPort ?? 22}`,
 		);
 	if (host.hostGroup) parts.push(`Group: ${host.hostGroup}`);
+
+	// Channel count
+	const channelCount = getChannelCount(host.id);
+	parts.push(`Channels: ${channelCount}`);
+
+	// Connection duration (only when live)
+	const connectedAt = connectedAtMap.value.get(host.id);
+	if (connectedAt !== undefined) {
+		parts.push(`Connected: ${formatDuration(Date.now() - connectedAt)}`);
+	}
+
 	return parts.join("\n");
 }
 
@@ -321,6 +415,13 @@ onMounted(() => {
 	color: var(--nt-bright-white);
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 	line-height: 1;
+}
+
+.host-icon-img {
+	width: 100%;
+	height: 100%;
+	border-radius: 50%;
+	object-fit: cover;
 }
 
 /* Status dot — bottom-right corner of badge */

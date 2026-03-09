@@ -234,4 +234,21 @@ Host abs-path
 		expect(result.entries).toHaveLength(1);
 		expect(result.entries[0].identityFile).toBe("/etc/ssh/keys/id_rsa");
 	});
+
+	it("handles alias-only Host block (no HostName directive)", () => {
+		// When a Host block has no HostName, the alias is NOT treated as a hostname.
+		// hostname should be undefined; the caller uses the alias as the connect target.
+		const config = `
+Host myalias
+  User admin
+  Port 2222
+`;
+		const result = parseSshConfig(config);
+		expect(result.entries).toHaveLength(1);
+		const entry = result.entries[0];
+		expect(entry.name).toBe("myalias");
+		expect(entry.hostname).toBeNull();
+		expect(entry.user).toBe("admin");
+		expect(entry.port).toBe(2222);
+	});
 });

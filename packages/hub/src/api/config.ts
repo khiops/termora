@@ -237,6 +237,14 @@ export function registerConfigRoutes(
 				});
 			}
 
+			for (const key of Object.keys(profile as Record<string, unknown>)) {
+				if (key !== null && !(TERMINAL_PROFILE_KEYS as readonly string[]).includes(key)) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: `Unknown profile key: ${key}` },
+					});
+				}
+			}
+
 			const existingRaw = metaDal.getHostProfile(id);
 			const existing = existingRaw ? (JSON.parse(existingRaw) as Record<string, unknown>) : {};
 			const merged: Record<string, unknown> = {
@@ -283,6 +291,14 @@ export function registerConfigRoutes(
 				return reply.code(400).send({
 					error: { code: "VALIDATION_ERROR", message: "body.profile must be an object" },
 				});
+			}
+
+			for (const key of Object.keys(profile as Record<string, unknown>)) {
+				if (key !== null && !(TERMINAL_PROFILE_KEYS as readonly string[]).includes(key)) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: `Unknown profile key: ${key}` },
+					});
+				}
 			}
 
 			const existingRaw = metaDal.getChannelProfile(id);

@@ -4,6 +4,24 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## UX-11 — Connection Experience (2026-03-09)
+
+- Fuzzy matching: custom scoring (~40 lines), no external dep, char-by-char (no regex on user input)
+- Quick connect parser: char-by-char for IPv6 bracket detection, ssh:// prefix support
+- Modal tabs: Vue component-level (no router), v-show for state preservation, full ARIA (tablist/tab/tabpanel with id linkage)
+- Recent items: localStorage-backed composable (useRecentPaletteItems), max 8, MRU eviction, graceful degradation
+- Keybinding: Cmd+K/Ctrl+K replaces Ctrl+P/Cmd+P
+- Prefix filters: single-char (> @ #), stripped from query before fuzzy match
+- UI-only: no schema/protocol/API changes
+- sshPort type: number|undefined (not number), placeholder "22", omit from API when empty
+- Auth method UX: watcher clears sshKeyPath on switch away from "key"
+- Host preview: previewInitials computed (first 2 chars uppercase), emoji support
+- Connection string display: formatConnectionString shared utility (DRY), used by both palette descriptions and rail subtitles
+- Fuzzy scoring hierarchy: EXACT(1000) > PREFIX(500) > SUBSTRING(200) > FUZZY(10+boundary bonus)
+- Review fixes: ARIA id/aria-controls/aria-hidden linkage, SC-05 invalid port splits host from port, explicit port 0 check
+
+---
+
 ## WALLPAPER — Configurable terminal wallpaper with cascade (2026-03-08)
 
 - Wallpaper fields in TerminalProfile (cascades via existing 4-layer system)

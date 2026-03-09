@@ -2,9 +2,28 @@ import { describe, expect, it } from "vitest";
 import { getColorFromLabel, getInitials } from "./useHostIcon.js";
 
 describe("getInitials", () => {
-	it("returns uppercased first letter of the label", () => {
-		expect(getInitials("server-01")).toBe("S");
-		expect(getInitials("myHost")).toBe("M");
+	it("returns first letters of two words joined by hyphen", () => {
+		expect(getInitials("staging-web")).toBe("SW");
+	});
+
+	it("returns first letters of two words joined by underscore", () => {
+		expect(getInitials("my_server")).toBe("MS");
+	});
+
+	it("returns first letters of two space-separated words", () => {
+		expect(getInitials("my server")).toBe("MS");
+	});
+
+	it("returns first letters of two words joined by dot", () => {
+		expect(getInitials("dev.api")).toBe("DA");
+	});
+
+	it("returns first 2 chars uppercased for single word", () => {
+		expect(getInitials("production")).toBe("PR");
+	});
+
+	it("returns single char uppercased for single-char label", () => {
+		expect(getInitials("a")).toBe("A");
 	});
 
 	it("returns '?' for empty string", () => {
@@ -15,15 +34,19 @@ describe("getInitials", () => {
 		expect(getInitials("   ")).toBe("?");
 	});
 
-	it("trims leading whitespace before extracting", () => {
-		expect(getInitials("  hello")).toBe("H");
+	it("trims whitespace before computing", () => {
+		expect(getInitials("  hello world  ")).toBe("HW");
+	});
+
+	it("uppercases both letters", () => {
+		expect(getInitials("foo-bar")).toBe("FB");
 	});
 });
 
 describe("getColorFromLabel", () => {
-	it("returns a valid HSL string", () => {
+	it("returns a valid hex color string", () => {
 		const color = getColorFromLabel("my-host");
-		expect(color).toMatch(/^hsl\(\d+, 65%, 52%\)$/);
+		expect(color).toMatch(/^#[0-9a-f]{6}$/);
 	});
 
 	it("is deterministic for the same label", () => {
@@ -39,19 +62,15 @@ describe("getColorFromLabel", () => {
 		expect(a).not.toBe(b);
 	});
 
-	it("returns a valid hue from the palette (0–330 range)", () => {
+	it("returns a hex color for each label in the palette", () => {
 		const labels = ["a", "bb", "ccc", "dddd", "eeee", "server-01", "prod-db", "web-frontend"];
-		const validHues = [210, 145, 20, 280, 0, 170, 330, 60, 240, 100];
 		for (const label of labels) {
-			const match = getColorFromLabel(label).match(/^hsl\((\d+), 65%, 52%\)$/);
-			expect(match).not.toBeNull();
-			const hue = Number(match?.[1]);
-			expect(validHues).toContain(hue);
+			expect(getColorFromLabel(label)).toMatch(/^#[0-9a-f]{6}$/);
 		}
 	});
 
 	it("handles empty string without throwing", () => {
 		const color = getColorFromLabel("");
-		expect(color).toMatch(/^hsl\(\d+, 65%, 52%\)$/);
+		expect(color).toMatch(/^#[0-9a-f]{6}$/);
 	});
 });

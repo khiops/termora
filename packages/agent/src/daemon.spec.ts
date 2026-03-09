@@ -4,13 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { FrameReader, PROTOCOL_VERSION } from "@nexterm/shared";
 import type { ProtocolMessage } from "@nexterm/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DaemonServer } from "./daemon.js";
 
 const DEFAULT_CONFIG = {
 	bufferPerChannel: 1024 * 1024,
 	bufferGlobal: 20 * 1024 * 1024,
 	logLevel: "info",
+	bindTimeout: 5000,
 };
 
 /**
@@ -227,5 +228,166 @@ describe("DaemonServer", () => {
 
 			expect(connectResult).not.toBe("connected");
 		});
+	});
+});
+
+// ─── Item 1: EADDRINUSE randomized backoff ────────────────────────────────────
+//
+// On Unix, listen() unlinks the stale socket before binding, so a real
+// EADDRINUSE from a live blocker process cannot normally occur (the file is
+// gone before we bind). The retry logic guards against genuine races (e.g.
+// two processes starting simultaneously, Windows named pipes).
+//
+// We test the retry loop by injecting EADDRINUSE errors via a factory that
+// returns a mock net.Server whose `listen` emits an error on the first N calls
+// and succeeds on the (N+1)th.
+
+/** Build a fake net.Server whose listen() emits EADDRINUSE the first `failTimes` calls. */
+function makeFlakyServer(failTimes: number): net.Server {
+	let calls = 0;
+	const emitter = new net.Server();
+
+	// Intercept listen by replacing the method on this instance
+	const realListen = emitter.listen.bind(emitter);
+	// @ts-expect-error — intentional override for testing
+	emitter.listen = (socketPath: string, cb: () => void) => {
+		calls += 1;
+		if (calls <= failTimes) {
+			// Emit EADDRINUSE asynchronously so event listeners are attached first
+			setImmediate(() => {
+				const err = Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE" });
+				emitter.emit("error", err);
+			});
+			return emitter;
+		}
+		return realListen(socketPath, cb);
+	};
+
+	return emitter;
+}
+
+describe("DaemonServer — EADDRINUSE backoff", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(path.join(os.tmpdir(), "nexterm-daemon-backoff-"));
+	});
+
+	afterEach(async () => {
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	it("succeeds on second attempt when first bind fails with EADDRINUSE", async () => {
+		const socketPath = path.join(tmpDir, "retry.sock");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		// Use the exported helper to inject one failure then succeed
+		const server = new DaemonServer(socketPath, { ...DEFAULT_CONFIG });
+		// Swap in a flaky server (fails once, succeeds on attempt 2)
+		// @ts-expect-error — accessing private field for testing
+		server.server = makeFlakyServer(1);
+
+		await expect(server.listen()).resolves.toBeUndefined();
+		await server.shutdown();
+
+		const retryCalls = errorSpy.mock.calls.filter((args) => String(args[0]).includes("EADDRINUSE"));
+		expect(retryCalls.length).toBeGreaterThanOrEqual(1);
+
+		errorSpy.mockRestore();
+	});
+
+	it("throws after exhausting all retries (3 consecutive EADDRINUSE)", async () => {
+		const socketPath = path.join(tmpDir, "exhaust.sock");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const server = new DaemonServer(socketPath, { ...DEFAULT_CONFIG });
+		// Fail all 3 attempts
+		// @ts-expect-error — accessing private field for testing
+		server.server = makeFlakyServer(3);
+
+		await expect(server.listen()).rejects.toMatchObject({ code: "EADDRINUSE" });
+
+		errorSpy.mockRestore();
+	});
+
+	it("logs a retry message for each EADDRINUSE attempt", async () => {
+		const socketPath = path.join(tmpDir, "log.sock");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const server = new DaemonServer(socketPath, { ...DEFAULT_CONFIG });
+		// @ts-expect-error — accessing private field for testing
+		server.server = makeFlakyServer(3);
+
+		await expect(server.listen()).rejects.toMatchObject({ code: "EADDRINUSE" });
+
+		// Should have logged 2 retry messages (attempts 1 and 2 before final throw)
+		const retryCalls = errorSpy.mock.calls.filter((args) => String(args[0]).includes("EADDRINUSE"));
+		expect(retryCalls.length).toBe(2);
+
+		errorSpy.mockRestore();
+	});
+});
+
+// ─── Item 2: Socket path length validation ────────────────────────────────────
+
+describe("DaemonServer — socket path length validation", () => {
+	it("throws when socket path exceeds 100 bytes", () => {
+		const longPath = `/${"a".repeat(101)}`;
+		expect(() => new DaemonServer(longPath, { ...DEFAULT_CONFIG })).toThrow(/too long/);
+	});
+
+	it("accepts a socket path of exactly 100 bytes", () => {
+		// Build a path that is exactly 100 bytes: 1 slash + 99 chars
+		const exactPath = `/${"a".repeat(99)}`;
+		expect(Buffer.byteLength(exactPath)).toBe(100);
+		expect(() => new DaemonServer(exactPath, { ...DEFAULT_CONFIG })).not.toThrow();
+	});
+
+	it("error message mentions max limit and suggests remedy", () => {
+		const longPath = `/${"b".repeat(110)}`;
+		expect(() => new DaemonServer(longPath, { ...DEFAULT_CONFIG })).toThrow(/max 100/);
+	});
+});
+
+// ─── Item 3: Configurable bind timeout ───────────────────────────────────────
+
+describe("DaemonServer — configurable bind timeout", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(path.join(os.tmpdir(), "nexterm-daemon-timeout-"));
+	});
+
+	afterEach(async () => {
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	it("uses default bindTimeout of 5000ms from DEFAULT_CONFIG", () => {
+		const socketPath = path.join(tmpDir, "timeout.sock");
+		// Constructing does not throw — merely validates the path, stores bindTimeout
+		const s = new DaemonServer(socketPath, { ...DEFAULT_CONFIG });
+		// Expose via listen resolving quickly (valid path, no contention)
+		return s.listen().then(() => s.shutdown());
+	});
+
+	it("fires the timeout error when server.listen never calls back", async () => {
+		const socketPath = path.join(tmpDir, "slow.sock");
+
+		// Build a server whose listen() hangs indefinitely (never resolves, never errors).
+		const hangingServer = new net.Server();
+		// @ts-expect-error — intentional override for testing
+		hangingServer.listen = () => hangingServer; // no-op: callback never called
+
+		const failServer = new DaemonServer(socketPath, {
+			...DEFAULT_CONFIG,
+			// 50ms timeout is generous enough for CI but catches the hang quickly
+			bindTimeout: 50,
+		});
+		// Swap in the hanging server AFTER listen() has set up the dir/unlink
+		// We replace it before the first bindOnce() runs by hooking via the flaky approach:
+		// @ts-expect-error — accessing private field for testing
+		failServer.server = hangingServer;
+
+		await expect(failServer.listen()).rejects.toThrow(/timed out/);
 	});
 });

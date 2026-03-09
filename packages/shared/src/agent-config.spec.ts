@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	DEFAULT_BIND_TIMEOUT,
 	DEFAULT_BUFFER_GLOBAL,
 	DEFAULT_BUFFER_PER_CHANNEL,
 	parseAgentConfig,
@@ -40,6 +41,7 @@ describe("parseAgentConfig", () => {
 		expect(config.bufferGlobal).toBe(DEFAULT_BUFFER_GLOBAL);
 		expect(config.logLevel).toBe("info");
 		expect(config.socketPath).toBeUndefined();
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
 
 	it("returns defaults when undefined passed", () => {
@@ -49,6 +51,7 @@ describe("parseAgentConfig", () => {
 		expect(config.bufferGlobal).toBe(DEFAULT_BUFFER_GLOBAL);
 		expect(config.logLevel).toBe("info");
 		expect(config.socketPath).toBeUndefined();
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
 
 	it("parses buffer_per_channel as size string", () => {
@@ -81,5 +84,29 @@ describe("parseAgentConfig", () => {
 		const config = parseAgentConfig({ log_level: "debug" });
 
 		expect(config.logLevel).toBe("debug");
+	});
+
+	it("reads bind_timeout as a positive integer", () => {
+		const config = parseAgentConfig({ bind_timeout: 3000 });
+
+		expect(config.bindTimeout).toBe(3000);
+	});
+
+	it("falls back to default bindTimeout when bind_timeout is zero", () => {
+		const config = parseAgentConfig({ bind_timeout: 0 });
+
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
+	});
+
+	it("falls back to default bindTimeout when bind_timeout is negative", () => {
+		const config = parseAgentConfig({ bind_timeout: -1 });
+
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
+	});
+
+	it("falls back to default bindTimeout when bind_timeout is not a number", () => {
+		const config = parseAgentConfig({ bind_timeout: "fast" });
+
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
 });
