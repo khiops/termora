@@ -10,10 +10,10 @@
 
 ### Review Findings
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
-- [ ] 🔧 [UI] VacantPane: filter detached channels by hostId (currently shows all hosts) — Priority: M (from /review F-006)
-- [ ] 🔧 [UI] TerminalPane: channel?.hostId references non-existent field, falls back silently — Priority: M (from /review F-009)
-- [ ] 🔧 [UI] useLayout localStorage load: validate max-pane-count (INV-10) — Priority: M (from /review F-011)
-- [ ] 🔧 [Hub] session-manager.spec.ts: crash-loop 60s window reset test skipped (timer cascade) — Priority: M (from /review F-003)
+- [x] ✅ [UI] VacantPane: filter detached channels by hostId (2026-03-09)
+- [x] ✅ [UI] TerminalPane: channel?.hostId stale reference removed (2026-03-09)
+- [x] ✅ [UI] useLayout localStorage load: max-pane-count validation (INV-10) (2026-03-09)
+- [x] ✅ [Hub] session-manager.spec.ts: crash-loop 60s window reset test — fixed with vi.setSystemTime (2026-03-09)
 - [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 - [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
@@ -37,9 +37,9 @@
 - [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
 
 ### Deferred from UX-07 /review
-- [ ] 🔧 [Hub] DRY: extract validateVisualProfileColors helper (duplicated in POST+PUT) — Priority: M (from /review F-002)
+- [x] ✅ [Hub] DRY: extract validateVisualProfileColors helper (2026-03-09)
 - [ ] 🔧 [Web] useVisualProfile getVisualProfile: shallow merge drops nested defaults — Priority: L (from /review F-003)
-- [ ] 🔧 [Web] VisualProfileSettings: add unit tests for SC-04, SC-06 — Priority: M (from /review F-005)
+- [x] ✅ [Web] VisualProfileSettings: unit tests for SC-04/SC-06 logic (38 tests) (2026-03-09)
 
 ### Deferred from /adversarial Sprint 1
 - [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)

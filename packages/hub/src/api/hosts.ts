@@ -187,6 +187,24 @@ async function testSshConnectivity(
 	});
 }
 
+function validateAndClampVisualProfile(vp: Record<string, unknown>): string | null {
+	const hexRe = /^#[0-9a-fA-F]{6}$/;
+	const colorsToCheck = [
+		(vp.banner as Record<string, unknown> | undefined)?.bgColor,
+		(vp.banner as Record<string, unknown> | undefined)?.textColor,
+		(vp.border as Record<string, unknown> | undefined)?.color,
+		(vp.tint as Record<string, unknown> | undefined)?.color,
+	].filter((c): c is string => typeof c === "string" && c !== "");
+	for (const c of colorsToCheck) {
+		if (!hexRe.test(c)) return `Invalid color value: ${c}`;
+	}
+	const tint = vp.tint as Record<string, unknown> | undefined;
+	if (typeof tint?.opacity === "number" && tint.opacity > 15) {
+		tint.opacity = 15;
+	}
+	return null;
+}
+
 export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
 	// GET /api/hosts
 	server.get("/api/hosts", async () => {
@@ -211,26 +229,11 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				const profileObj =
 					typeof body.profile_json === "string" ? JSON.parse(body.profile_json) : body.profile_json;
 				if (profileObj?.visualProfile) {
-					const vp = profileObj.visualProfile;
-					const hexRe = /^#[0-9a-fA-F]{6}$/;
-					const colorsToCheck = [
-						vp.banner?.bgColor,
-						vp.banner?.textColor,
-						vp.border?.color,
-						vp.tint?.color,
-					].filter((c: unknown): c is string => typeof c === "string" && c !== "");
-					for (const c of colorsToCheck) {
-						if (!hexRe.test(c)) {
-							return reply.code(400).send({
-								error: {
-									code: "VALIDATION_ERROR",
-									message: `Invalid color value: ${c}`,
-								},
-							});
-						}
-					}
-					if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
-						vp.tint.opacity = 15;
+					const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
+					if (colorError) {
+						return reply.code(400).send({
+							error: { code: "VALIDATION_ERROR", message: colorError },
+						});
 					}
 				}
 			} catch {
@@ -370,27 +373,11 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 							? JSON.parse(body.profile_json)
 							: body.profile_json;
 					if (profileObj?.visualProfile) {
-						const vp = profileObj.visualProfile;
-						const hexRe = /^#[0-9a-fA-F]{6}$/;
-						const colorsToCheck = [
-							vp.banner?.bgColor,
-							vp.banner?.textColor,
-							vp.border?.color,
-							vp.tint?.color,
-						].filter((c: unknown): c is string => typeof c === "string" && c !== "");
-						for (const c of colorsToCheck) {
-							if (!hexRe.test(c)) {
-								return reply.code(400).send({
-									error: {
-										code: "VALIDATION_ERROR",
-										message: `Invalid color value: ${c}`,
-									},
-								});
-							}
-						}
-						// Clamp tint opacity server-side
-						if (typeof vp.tint?.opacity === "number" && vp.tint.opacity > 15) {
-							vp.tint.opacity = 15;
+						const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
+						if (colorError) {
+							return reply.code(400).send({
+								error: { code: "VALIDATION_ERROR", message: colorError },
+							});
 						}
 					}
 				} catch {

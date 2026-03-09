@@ -121,65 +121,11 @@ export function useMultiPaneSearch(): MultiPaneSearchRegistry {
 		matchPaneChannelId.value = null;
 	}
 
-	/**
-	 * Navigate to the next match across all panes (SC-11).
-	 * When the current pane's matches are exhausted, move to the next pane
-	 * in depth-first order that has matches. Wraps around.
-	 */
-	function findNextAll(currentChannelId: string, layoutNode: PaneNode | null): void {
-		const orderedIds = getOrderedIds(layoutNode);
-		if (orderedIds.length === 0) return;
-
-		// Find current pane index
-		let startIdx = orderedIds.indexOf(currentChannelId);
-		if (startIdx === -1) startIdx = 0;
-
-		const startId = orderedIds[startIdx];
-		if (startId === undefined) return;
-
-		const currentHandle = handles.value[startId];
-		if (currentHandle && currentHandle.matchCount.value > 0) {
-			// Check if we're at the last match in the current pane
-			const atLast = currentHandle.currentMatch.value >= currentHandle.matchCount.value;
-
-			if (!atLast) {
-				// Still have matches in current pane
-				currentHandle.findNext();
-				matchPaneChannelId.value = startId;
-				return;
-			}
-		}
-
-		// Move to the next pane with matches (wrap-around)
-		for (let offset = 1; offset <= orderedIds.length; offset++) {
-			const idx = (startIdx + offset) % orderedIds.length;
-			const nextId = orderedIds[idx];
-			if (nextId === undefined) continue;
-			const handle = handles.value[nextId];
-			if (handle && handle.matchCount.value > 0) {
-				// Jump to this pane's first match
-				handle.findNext();
-				matchPaneChannelId.value = nextId;
-				// Focus the pane (SC-11)
-				if (idx !== startIdx && onFocusPane.value) {
-					onFocusPane.value(nextId);
-				}
-				return;
-			}
-		}
-
-		// No matches anywhere — try current pane (wrap within single pane)
-		if (currentHandle && currentHandle.matchCount.value > 0) {
-			currentHandle.findNext();
-			matchPaneChannelId.value = startId;
-		}
-	}
-
-	/**
-	 * Navigate to the previous match across all panes.
-	 * Mirror of findNextAll but in reverse direction.
-	 */
-	function findPreviousAll(currentChannelId: string, layoutNode: PaneNode | null): void {
+	function navigateMatches(
+		direction: "next" | "previous",
+		currentChannelId: string,
+		layoutNode: PaneNode | null,
+	): void {
 		const orderedIds = getOrderedIds(layoutNode);
 		if (orderedIds.length === 0) return;
 
@@ -189,29 +135,34 @@ export function useMultiPaneSearch(): MultiPaneSearchRegistry {
 		const startId = orderedIds[startIdx];
 		if (startId === undefined) return;
 
+		const isNext = direction === "next";
+		const move = (h: PaneSearchHandle) => (isNext ? h.findNext() : h.findPrevious());
+		const atBoundary = (h: PaneSearchHandle) =>
+			isNext ? h.currentMatch.value >= h.matchCount.value : h.currentMatch.value <= 1;
+		const nextIdx = (offset: number) =>
+			isNext
+				? (startIdx + offset) % orderedIds.length
+				: (startIdx - offset + orderedIds.length) % orderedIds.length;
+
 		const currentHandle = handles.value[startId];
 		if (currentHandle && currentHandle.matchCount.value > 0) {
-			// Check if we're at the first match in the current pane
-			const atFirst = currentHandle.currentMatch.value <= 1;
-
-			if (!atFirst) {
-				currentHandle.findPrevious();
+			if (!atBoundary(currentHandle)) {
+				move(currentHandle);
 				matchPaneChannelId.value = startId;
 				return;
 			}
 		}
 
-		// Move to the previous pane with matches (wrap-around)
 		for (let offset = 1; offset <= orderedIds.length; offset++) {
-			const idx = (startIdx - offset + orderedIds.length) % orderedIds.length;
-			const prevId = orderedIds[idx];
-			if (prevId === undefined) continue;
-			const handle = handles.value[prevId];
+			const idx = nextIdx(offset);
+			const peerId = orderedIds[idx];
+			if (peerId === undefined) continue;
+			const handle = handles.value[peerId];
 			if (handle && handle.matchCount.value > 0) {
-				handle.findPrevious();
-				matchPaneChannelId.value = prevId;
+				move(handle);
+				matchPaneChannelId.value = peerId;
 				if (idx !== startIdx && onFocusPane.value) {
-					onFocusPane.value(prevId);
+					onFocusPane.value(peerId);
 				}
 				return;
 			}
@@ -219,9 +170,17 @@ export function useMultiPaneSearch(): MultiPaneSearchRegistry {
 
 		// Wrap within single pane
 		if (currentHandle && currentHandle.matchCount.value > 0) {
-			currentHandle.findPrevious();
+			move(currentHandle);
 			matchPaneChannelId.value = startId;
 		}
+	}
+
+	function findNextAll(currentChannelId: string, layoutNode: PaneNode | null): void {
+		navigateMatches("next", currentChannelId, layoutNode);
+	}
+
+	function findPreviousAll(currentChannelId: string, layoutNode: PaneNode | null): void {
+		navigateMatches("previous", currentChannelId, layoutNode);
 	}
 
 	const totalMatchCount = computed(() => {

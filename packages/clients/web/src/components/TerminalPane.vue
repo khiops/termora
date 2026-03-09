@@ -110,6 +110,7 @@
 <script setup lang="ts">
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
+import { useTabTitle } from "../composables/useTabTitle.js";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useWriteLockStore } from "../stores/writelock.js";
@@ -237,16 +238,11 @@ const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBo
 	},
 });
 
-const paneTitle = computed(() => {
-	const ch = effectiveChannelId.value;
-	if (ch === null) return DEFAULT_CHANNEL_NAME;
-	const channel = channelsStore.channels.find((c) => c.id === ch);
-	// Title priority: custom > live dynamic > stored dynamic > fallback
-	if (channel?.title) return channel.title;
-	if (currentDynamicTitle.value) return currentDynamicTitle.value;
-	if (channel?.dynamicTitle) return channel.dynamicTitle;
-	return DEFAULT_CHANNEL_NAME;
-});
+const { tabTitle: paneTitle } = useTabTitle(
+	effectiveChannelId,
+	toRef(channelsStore, "channels"),
+	currentDynamicTitle,
+);
 
 // ---------------------------------------------------------------------------
 // Visual profile (UX-07)
@@ -690,8 +686,6 @@ function onDragStart(event: DragEvent): void {
 
 	event.dataTransfer.effectAllowed = "move";
 
-	// Find host ID from channels store
-	const channel = channelsStore.channels.find((c) => c.id === chId);
 	const hostId = channelsStore.activeHostId ?? null;
 
 	event.dataTransfer.setData(
