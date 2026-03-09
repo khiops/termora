@@ -42,6 +42,7 @@
 				class="tab__bell-badge"
 			>{{ notificationStore.bellCounts.get(tab.channelId) }}</span>
 			<span
+				v-show="showCloseButton"
 				class="tab__close"
 				role="button"
 				:aria-label="`Close ${getTabLabel(tab.channelId)}`"
@@ -86,11 +87,15 @@ import { computed, reactive, ref, watch, nextTick } from "vue";
 import type { Tab } from "../composables/useLayout.js";
 import { useRename } from "../composables/useRename.js";
 import { useChannelsStore } from "../stores/channels.js";
+import { useConfigStore } from "../stores/config.js";
 import { useNotificationStore } from "../stores/notifications.js";
 import TabContextMenu from "./TabContextMenu.vue";
 
 const channelsStore = useChannelsStore();
+const configStore = useConfigStore();
 const notificationStore = useNotificationStore();
+
+const showCloseButton = computed(() => configStore.uiConfig.tabs?.closeButton !== false);
 
 const props = defineProps<{
 	tabs: Tab[];

@@ -2,6 +2,7 @@ import type { CascadeResponse } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
+import { useConfigStore } from "./config.js";
 import { useToastStore } from "./toast.js";
 
 export type Scope = "global" | "host" | "channel";
@@ -299,6 +300,13 @@ export const useSettingsStore = defineStore("settings", () => {
 					}
 					// On success, clear dirty state for this key
 					dirty.value = new Set([...dirty.value].filter((k) => k !== debounceKey));
+					// Refresh the configStore so components react without a page reload
+					const configStore = useConfigStore();
+					if (scope === "global" && section === "terminal") {
+						await configStore.loadProfile();
+					} else if (scope === "global" && section !== "appearance") {
+						await configStore.loadUiConfig();
+					}
 				} catch (err) {
 					// Keep optimistic value — mark as dirty instead of rolling back
 					console.error("Failed to save setting:", err);
