@@ -14,11 +14,14 @@
 			:key="tab.channelId"
 			role="tab"
 			:aria-selected="idx === activeTabIndex"
-			:class="['tab', { 'tab--active': idx === activeTabIndex, 'tab--drop-before': dropInsertIndex === idx, 'tab--drop-after': dropInsertIndex === idx + 1 && idx === tabs.length - 1 }]"
+			:draggable="editingTabIndex !== idx"
+			:class="['tab', { 'tab--active': idx === activeTabIndex, 'tab--drop-before': dropInsertIndex === idx, 'tab--drop-after': dropInsertIndex === idx + 1 && idx === tabs.length - 1, 'tab--dragging': dragTabIndex === idx }]"
 			:title="getTabLabel(tab.channelId)"
 			@click="emit('select-tab', idx)"
 			@mousedown.middle.prevent="emit('close-tab', idx)"
 			@contextmenu.prevent="onTabContextMenu(idx, $event)"
+			@dragstart="onTabDragStart(idx, $event)"
+			@dragend="onTabDragEnd"
 		>
 			<span v-if="isWelcomeTab(tab.channelId)" class="tab__welcome-star" title="Welcome Tab">&#x2605;</span>
 			<input
@@ -114,6 +117,7 @@ const emit = defineEmits<{
 	(e: "split", channelId: string, direction: "horizontal" | "vertical"): void;
 	(e: "set-welcome", channelId: string): void;
 	(e: "move-to-new-tab", sourceChannelId: string, insertAtIndex: number): void;
+	(e: "reorder-tab", fromIndex: number, toIndex: number): void;
 	(e: "configure-command", channelId: string): void;
 }>();
 
@@ -233,7 +237,9 @@ function getDropInsertIndex(event: DragEvent): number {
 }
 
 function onTabBarDragOver(event: DragEvent): void {
-	if (!event.dataTransfer?.types.includes("text/x-nexterm-pane")) return;
+	if (!event.dataTransfer) return;
+	const types = event.dataTransfer.types;
+	if (!types.includes("text/x-nexterm-pane") && !types.includes("text/x-nexterm-tab")) return;
 	event.dataTransfer.dropEffect = "move";
 	dropInsertIndex.value = getDropInsertIndex(event);
 }
@@ -249,6 +255,21 @@ function onTabBarDrop(event: DragEvent): void {
 	dropInsertIndex.value = null;
 
 	if (!event.dataTransfer) return;
+
+	// Tab reorder drop takes priority
+	const tabData = event.dataTransfer.getData("text/x-nexterm-tab");
+	if (tabData !== "") {
+		event.stopPropagation();
+		const fromIndex = Number.parseInt(tabData, 10);
+		if (Number.isNaN(fromIndex)) return;
+		const toIndex = getDropInsertIndex(event);
+		// When dragging right, the removal shifts indices left by 1
+		const adjustedTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+		emit("reorder-tab", fromIndex, adjustedTo);
+		return;
+	}
+
+	// Pane-to-new-tab drop (existing behavior)
 	const raw = event.dataTransfer.getData("text/x-nexterm-pane");
 	if (!raw) return;
 
@@ -264,6 +285,26 @@ function onTabBarDrop(event: DragEvent): void {
 
 	const insertIdx = getDropInsertIndex(event);
 	emit("move-to-new-tab", data.channelId, insertIdx);
+}
+
+// -------------------------------------------------------------------------
+// Tab DnD reorder
+// -------------------------------------------------------------------------
+
+const dragTabIndex = ref<number | null>(null);
+
+function onTabDragStart(idx: number, event: DragEvent): void {
+	// Don't drag while renaming
+	if (editingTabIndex.value === idx) return;
+	if (!event.dataTransfer) return;
+	dragTabIndex.value = idx;
+	event.dataTransfer.effectAllowed = "move";
+	event.dataTransfer.setData("text/x-nexterm-tab", String(idx));
+}
+
+function onTabDragEnd(): void {
+	dragTabIndex.value = null;
+	dropInsertIndex.value = null;
 }
 </script>
 
@@ -328,6 +369,10 @@ function onTabBarDrop(event: DragEvent): void {
 
 .tab--active:hover {
 	background: var(--nt-border);
+}
+
+.tab--dragging {
+	opacity: 0.5;
 }
 
 .tab--drop-before::before {

@@ -441,6 +441,38 @@ export function useLayout() {
 		}
 	}
 
+	/**
+	 * Reorder a tab from one position to another (drag-and-drop).
+	 * Adjusts activeTabIndex so the currently active tab stays active.
+	 */
+	function reorderTab(fromIndex: number, toIndex: number): void {
+		if (fromIndex === toIndex) return;
+		if (fromIndex < 0 || fromIndex >= tabs.value.length) return;
+		// Clamp toIndex to valid range
+		const clampedTo = Math.max(0, Math.min(toIndex, tabs.value.length - 1));
+		if (fromIndex === clampedTo) return;
+
+		const newTabs = [...tabs.value];
+		const [moved] = newTabs.splice(fromIndex, 1);
+		if (moved === undefined) return;
+		newTabs.splice(clampedTo, 0, moved);
+		tabs.value = newTabs;
+
+		// Adjust active tab index to follow the active tab
+		const currentActive = activeTabIndex.value;
+		if (currentActive === fromIndex) {
+			// The active tab was dragged
+			activeTabIndex.value = clampedTo;
+		} else if (fromIndex < currentActive && clampedTo >= currentActive) {
+			// Moved from before active to after → active shifts left
+			activeTabIndex.value = currentActive - 1;
+		} else if (fromIndex > currentActive && clampedTo <= currentActive) {
+			// Moved from after active to before → active shifts right
+			activeTabIndex.value = currentActive + 1;
+		}
+		// Otherwise active tab index is unaffected
+	}
+
 	// ------------------------------------------------------------------
 	// Bulk close operations
 	// ------------------------------------------------------------------
@@ -872,6 +904,7 @@ export function useLayout() {
 		closeAll,
 		vacateAllPanesInTab,
 		setActiveTab,
+		reorderTab,
 		setLayout,
 		splitPane,
 		unsplitPane,

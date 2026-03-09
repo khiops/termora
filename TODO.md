@@ -5,7 +5,6 @@
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — same pattern as wallpapers — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
-- [ ] 🔧 [Web] Tab DnD reorder in tab bar (SC-21) — Priority: M (from UX-01, missed in Block 4)
 - [ ] 💡 [Web] Host group DnD reorder (group separators) — Priority: M (from UX-03 /adversarial C-02)
 - [ ] 💡 [Web] Settings panel search/filter (VS Code style) — Priority: M (from UX-09 spec, P2)
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
@@ -38,13 +37,6 @@
 - [ ] 💡 [Hub] Multi-writer collaboration (CRDT) — Priority: P2
 - [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: P2 (needs native addon; 0700 dir perms sufficient)
 - [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: P2 (needs native FFI/WinAPI)
-
-## Closed (not actionable)
-
-- [x] ⏭️ [UI] UX-08: Multi-host Groups — covered by UX-03 host groups
-- [x] ⏭️ [UI] UX-10: Advanced Theming — absorbed into UX-06
-- [x] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, not actionable
-- [x] ⏭️ [UI] Config.toml comment-preserving write — already solved by @rainbowatcher/toml-edit-js
 
 ## Completed
 

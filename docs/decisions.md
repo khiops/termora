@@ -4,6 +4,17 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## SC-21 — Tab DnD reorder in tab bar (2026-03-09)
+
+- Client-side only — no server API for tab order (localStorage via useLayout persist)
+- dataTransfer type 'text/x-nexterm-tab' distinguishes tab DnD from pane DnD
+- Reuse existing getDropInsertIndex() and CSS drop indicators
+- reorderTab(from, to) splices tabs.value — existing watch auto-persists
+- Guard against drag-during-rename (editingTabIndex check in onTabDragStart)
+- toIndex adjusted by -1 when dragging right (removal shifts indices)
+
+---
+
 ## UX-11 — Connection Experience (2026-03-09)
 
 - Fuzzy matching: custom scoring (~40 lines), no external dep, char-by-char (no regex on user input)

@@ -158,7 +158,8 @@
 					@split="onSplit"
 					@set-welcome="onSetWelcome"
 					@move-to-new-tab="onMoveToNewTab"
-				@configure-command="onConfigureCommand"
+					@reorder-tab="layout.reorderTab"
+					@configure-command="onConfigureCommand"
 				/>
 				<div class="pane-area">
 					<div
