@@ -279,7 +279,7 @@ export class MetaDAL {
 			.prepare(
 				`SELECT * FROM hosts ORDER BY
 				CASE WHEN type = 'local' THEN 0 ELSE 1 END,
-				COALESCE(host_group, '~') ASC,
+				COALESCE(host_group, '~') ASC, -- '~' sorts after all alphanumeric chars in ASCII, placing ungrouped hosts last
 				sort_order ASC`,
 			)
 			.all() as HostRow[];

@@ -68,6 +68,43 @@ describe("getVisualProfile", () => {
 		const p = getVisualProfile(host);
 		expect(p.preset).toBe("none");
 	});
+
+	it("deep-merges partial nested overrides — default sub-keys are preserved", () => {
+		// Override only banner.enabled — bgColor/textColor/text should come from defaults
+		const host = makeHost({
+			profileJson: JSON.stringify({
+				visualProfile: {
+					preset: "custom",
+					banner: { enabled: true },
+				},
+			}),
+		});
+		const p = getVisualProfile(host);
+		expect(p.preset).toBe("custom");
+		expect(p.banner.enabled).toBe(true);
+		// Sub-keys not in override must come from DEFAULT_VISUAL_PROFILE
+		expect(p.banner.text).toBe("");
+		expect(p.banner.bgColor).toBe("#e06c75");
+		expect(p.banner.textColor).toBe("#ffffff");
+		// Untouched nested objects also preserve their defaults
+		expect(p.border.style).toBe("none");
+		expect(p.tint.enabled).toBe(false);
+	});
+
+	it("deep-merges partial tint override without losing default tint color", () => {
+		const host = makeHost({
+			profileJson: JSON.stringify({
+				visualProfile: {
+					tint: { enabled: true },
+				},
+			}),
+		});
+		const p = getVisualProfile(host);
+		expect(p.tint.enabled).toBe(true);
+		// default tint color preserved
+		expect(p.tint.color).toBe("#e06c75");
+		expect(p.tint.opacity).toBe(0);
+	});
 });
 
 describe("resolveBannerTokens", () => {

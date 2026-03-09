@@ -19,7 +19,7 @@
 						v-model="localQuery"
 						class="palette-input"
 						type="text"
-						placeholder="Type a command..."
+						placeholder="Search... (> actions, @ hosts, # channels)"
 						autocomplete="off"
 						spellcheck="false"
 						@input="palette.search(localQuery)"

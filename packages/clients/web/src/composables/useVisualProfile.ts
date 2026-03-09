@@ -3,15 +3,37 @@ import { type Ref, computed } from "vue";
 import { DEFAULT_VISUAL_PROFILE, HEX_COLOR_RE } from "../utils/visual-presets.js";
 
 /**
+ * Deep-merge two VisualProfile objects: defaults first, then overrides.
+ * Each nested object (banner, border, tint) is merged independently so
+ * a partial override (e.g. only `banner.enabled`) does not lose the
+ * other default sub-keys.
+ */
+function deepMergeProfile(
+	defaults: VisualProfile,
+	overrides: Partial<VisualProfile>,
+): VisualProfile {
+	return {
+		preset: overrides.preset ?? defaults.preset,
+		banner: { ...defaults.banner, ...overrides.banner },
+		border: { ...defaults.border, ...overrides.border },
+		tint: { ...defaults.tint, ...overrides.tint },
+	};
+}
+
+/**
  * Resolve a host's visual profile from its profileJson field.
  * Falls back to DEFAULT_VISUAL_PROFILE for missing/invalid data.
+ * Uses a deep merge so partial nested overrides preserve sub-key defaults.
  */
 export function getVisualProfile(host: Host | undefined | null): VisualProfile {
 	if (!host?.profileJson) return { ...DEFAULT_VISUAL_PROFILE };
 	try {
 		const parsed = JSON.parse(host.profileJson);
 		if (parsed?.visualProfile) {
-			return { ...DEFAULT_VISUAL_PROFILE, ...parsed.visualProfile };
+			return deepMergeProfile(
+				DEFAULT_VISUAL_PROFILE,
+				parsed.visualProfile as Partial<VisualProfile>,
+			);
 		}
 	} catch {
 		// Invalid JSON — fall back

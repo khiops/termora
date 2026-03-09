@@ -257,18 +257,16 @@ export const useSettingsStore = defineStore("settings", () => {
 							const parts = key.split(".");
 							const uiSection = parts[0] as string;
 							const uiKey = parts.slice(1).join(".");
+							// key must be "section.subKey" (e.g. "tabs.closeButton")
+							// Top-level UI keys are not valid API targets -- all UI settings
+							// live under a named section. A bare key with no dot would produce
+							// { ui: { key: value } } which the PUT /api/config/ui endpoint
+							// rejects with 400 (no such top-level UI key).
 							if (uiKey) {
 								await fetch("/api/config/ui", {
 									method: "PUT",
 									headers,
 									body: JSON.stringify({ [uiSection]: { [uiKey]: value } }),
-								});
-							} else {
-								// Top-level UI key (e.g. onChannelDead)
-								await fetch("/api/config/ui", {
-									method: "PUT",
-									headers,
-									body: JSON.stringify({ ui: { [key]: value } }),
 								});
 							}
 						}

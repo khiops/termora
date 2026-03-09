@@ -23,7 +23,7 @@
 			</div>
 
 			<ThemePicker
-				:active-theme-name="activeThemeForScope"
+				v-bind="activeThemeForScope !== undefined ? { activeThemeName: activeThemeForScope } : {}"
 				@create-theme="openNewTheme"
 				@edit-theme="openEditTheme"
 				@select="onThemeSelect"

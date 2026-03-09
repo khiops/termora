@@ -474,6 +474,33 @@ describe("useSettingsStore", () => {
 
 			vi.useRealTimers();
 		});
+
+		it("does not call PUT /api/config/ui for a bare top-level UI key without a dot (dead branch removed)", async () => {
+			// A key without a dot (e.g. "onChannelDead") splits into uiSection="onChannelDead",
+			// uiKey="" — the dead else branch would have sent { ui: { onChannelDead: value } }
+			// which the PUT /api/config/ui endpoint rejects (400). After the fix, the PUT is
+			// simply skipped for this degenerate case (no valid sub-key to update).
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+
+			// Allow any subsequent configStore refresh calls to succeed
+			mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+
+			void store.updateSetting("global", "ui", "onChannelDead", "readonly");
+			await vi.advanceTimersByTimeAsync(600);
+
+			// PUT /api/config/ui must NOT have been called — no valid sub-key.
+			// (A GET /api/config/ui from the configStore refresh is expected and fine.)
+			const putConfigUiCalls = mockFetch.mock.calls.filter(
+				(args: unknown[]) =>
+					(args[0] as string) === "/api/config/ui" &&
+					(args[1] as RequestInit | undefined)?.method === "PUT",
+			);
+			expect(putConfigUiCalls).toHaveLength(0);
+
+			vi.useRealTimers();
+		});
 	});
 
 	describe("resetSetting", () => {

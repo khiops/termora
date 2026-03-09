@@ -6,6 +6,13 @@ import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
 
+// ─── Mock ssh-config-parser (controls readSshConfig in tests) ────────────────
+
+vi.mock("../ssh/ssh-config-parser.js", () => ({
+	readSshConfig: vi.fn(() => ({ entries: [], hasInclude: false })),
+	parseSshConfig: vi.fn(() => ({ entries: [], hasInclude: false })),
+}));
+
 // ─── Mock ssh2 Client for testSshConnectivity ────────────────────────────────
 
 let mockSsh2Client: EventEmitter & {
@@ -1527,5 +1534,166 @@ describe("PATCH /api/channels/:id/profile — merge", () => {
 		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
 		expect(profile.fontSize).toBe(16);
 		expect("cursorStyle" in profile).toBe(false);
+	});
+});
+
+// ─── PATCH /api/hosts/:id/profile — TERMINAL_PROFILE_KEYS validation ──────────
+
+describe("PATCH /api/hosts/:id/profile — key validation", () => {
+	async function createHost(label: string): Promise<string> {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		return res.json<{ id: string }>().id;
+	}
+
+	it("accepts known terminal profile keys", async () => {
+		const hostId = await createHost("prof-key-valid");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { fontSize: 14, fontFamily: "Fira Code", cursorStyle: "bar" } },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("rejects unknown profile keys with 400", async () => {
+		const hostId = await createHost("prof-key-invalid");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { unknownKey: "value" } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string; message: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+		expect(body.error.message).toContain("unknownKey");
+	});
+
+	it("rejects a mix of known and unknown keys", async () => {
+		const hostId = await createHost("prof-key-mixed");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { fontSize: 12, injected: "evil" } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── PATCH /api/channels/:id/profile — TERMINAL_PROFILE_KEYS validation ───────
+
+describe("PATCH /api/channels/:id/profile — key validation", () => {
+	let profChanCounter = 0;
+
+	async function createTestChannelForProfKey(label: string): Promise<string> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		profChanCounter++;
+		const n = String(profChanCounter).padStart(3, "0");
+		const sessionId = `01TSTPKVSESS00000000000${n}`;
+		const channelId = `01TSTPKVCHAN00000000000${n}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+		return channelId;
+	}
+
+	it("accepts known terminal profile keys for channel", async () => {
+		const channelId = await createTestChannelForProfKey("chan-prof-key-valid");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { scrollback: 5000, theme: "dracula" } },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("rejects unknown profile keys for channel with 400", async () => {
+		const channelId = await createTestChannelForProfKey("chan-prof-key-invalid");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { badKey: 42 } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string; message: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+		expect(body.error.message).toContain("badKey");
+	});
+});
+
+// ─── POST /api/hosts/import — sshAuth set from identityFile ──────────────────
+
+describe("POST /api/hosts/import — sshAuth inferred from identityFile", () => {
+	it("sets sshAuth to 'key' when identityFile is present in SSH config entry", async () => {
+		const { readSshConfig } = await import("../ssh/ssh-config-parser.js");
+		vi.mocked(readSshConfig).mockReturnValueOnce({
+			entries: [
+				{
+					name: "myserver",
+					hostname: "10.0.0.1",
+					port: 22,
+					user: "deploy",
+					identityFile: "/home/user/.ssh/id_ed25519",
+					proxyJump: null,
+					isGitHost: false,
+				},
+			],
+			hasInclude: false,
+		});
+
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts/import",
+			payload: {
+				entries: [{ name: "myserver", label: "my-server" }],
+			},
+		});
+
+		expect(res.statusCode).toBe(201);
+		const hosts = res.json<Array<{ ssh_auth: string; ssh_key_path: string }>>();
+		expect(hosts[0].ssh_auth).toBe("key");
+		expect(hosts[0].ssh_key_path).toBe("/home/user/.ssh/id_ed25519");
+	});
+
+	it("does not set sshAuth when identityFile is absent", async () => {
+		const { readSshConfig } = await import("../ssh/ssh-config-parser.js");
+		vi.mocked(readSshConfig).mockReturnValueOnce({
+			entries: [
+				{
+					name: "nokey",
+					hostname: "10.0.0.2",
+					port: 22,
+					user: "admin",
+					identityFile: null,
+					proxyJump: null,
+					isGitHost: false,
+				},
+			],
+			hasInclude: false,
+		});
+
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts/import",
+			payload: {
+				entries: [{ name: "nokey", label: "no-key-host" }],
+			},
+		});
+
+		expect(res.statusCode).toBe(201);
+		const hosts = res.json<Array<{ ssh_auth: string | null }>>();
+		// ssh_auth should be null/undefined (not set to "key")
+		expect(hosts[0].ssh_auth == null).toBe(true);
 	});
 });

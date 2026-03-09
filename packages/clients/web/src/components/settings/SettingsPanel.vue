@@ -30,8 +30,10 @@
 
 						<ScopeTabBar
 							v-model="settingsStore.activeScope"
-							:host-name="hostName"
-							:channel-name="channelName"
+							v-bind="{
+								...(hostName !== undefined && { hostName }),
+								...(channelName !== undefined && { channelName }),
+							}"
 							:show-host="showHost"
 							:show-channel="showChannel"
 						/>
@@ -58,7 +60,7 @@
 										v-else-if="settingsStore.activeCategory !== 'keybindings'"
 										:category="settingsStore.activeCategory"
 										:scope="settingsStore.activeScope"
-										:host-name="hostName"
+										v-bind="hostName !== undefined ? { hostName } : {}"
 									/>
 									<KeybindingsCategory v-else />
 								</template>
@@ -79,9 +81,10 @@ import AppearanceCategory from "./categories/AppearanceCategory.vue";
 import WallpaperCategory from "./categories/WallpaperCategory.vue";
 import SchemaCategory from "./categories/SchemaCategory.vue";
 import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
-import { useSettingsStore } from "../../stores/settings.js";
+import { useSettingsStore, type Scope } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";
+import { useToastStore } from "../../stores/toast.js";
 
 const props = defineProps<{
 	visible: boolean;
@@ -94,6 +97,7 @@ defineEmits<{
 const settingsStore = useSettingsStore();
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
+const toastStore = useToastStore();
 
 // ─── Derived context ──────────────────────────────────────────────────
 
@@ -142,6 +146,42 @@ watch(
 	(hasChannel) => {
 		if (!hasChannel && settingsStore.activeScope === "channel") {
 			settingsStore.activeScope = "global";
+		}
+	},
+);
+
+// ─── Toast when no overrides at the active scope (auto-fallback) ───────
+
+/**
+ * Returns true if the terminal section has zero explicit overrides at
+ * the given scope (i.e. every value will fall back to a higher scope).
+ */
+function hasNoScopeOverrides(scope: Scope): boolean {
+	if (scope === "global") return false;
+	if (!settingsStore.cascade) return false;
+	const layer =
+		scope === "host"
+			? settingsStore.cascade.terminal.host
+			: settingsStore.cascade.terminal.channel;
+	if (!layer) return true;
+	// If every own key is null/undefined the scope has no overrides
+	return Object.values(layer as Record<string, unknown>).every(
+		(v) => v === null || v === undefined,
+	);
+}
+
+watch(
+	() => settingsStore.activeScope,
+	(scope) => {
+		if (scope === "global") return;
+		if (!settingsStore.cascade) return;
+		if (hasNoScopeOverrides(scope)) {
+			const scopeName = scope === "host" ? hostName.value ?? "host" : "channel";
+			toastStore.show(
+				"info",
+				`No overrides at ${scopeName} level — showing inherited values`,
+				3000,
+			);
 		}
 	},
 );

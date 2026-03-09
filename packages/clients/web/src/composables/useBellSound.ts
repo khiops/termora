@@ -83,6 +83,18 @@ function _playCustomSound(filename: string): void {
 		return;
 	}
 
+	// Validate audio file extension
+	const VALID_AUDIO_EXTENSIONS = [".wav", ".mp3", ".ogg", ".m4a"];
+	const lower = filename.toLowerCase();
+	if (!VALID_AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+		console.warn(
+			`[useBellSound] Invalid audio extension for custom bell sound: "${filename}". ` +
+				`Supported formats: ${VALID_AUDIO_EXTENSIONS.join(", ")}. Falling back to system bell.`,
+		);
+		_playSystemBell();
+		return;
+	}
+
 	try {
 		const audio = new Audio(`/public/sounds/${filename}`);
 		audio.volume = 0.5;

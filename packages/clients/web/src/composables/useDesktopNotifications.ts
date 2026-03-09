@@ -3,6 +3,7 @@ import { onUnmounted } from "vue";
 interface GroupEntry {
 	count: number;
 	channelId: string;
+	channelTitle: string;
 	timer: ReturnType<typeof setTimeout>;
 }
 
@@ -55,7 +56,13 @@ export function useDesktopNotifications(opts?: {
 		}
 	}
 
-	function showNotification(title: string, body: string, channelId: string, tag?: string): void {
+	function showNotification(
+		title: string,
+		body: string,
+		channelId: string,
+		channelTitle?: string,
+		tag?: string,
+	): void {
 		if (typeof Notification === "undefined") return;
 		if (Notification.permission !== "granted") return;
 
@@ -74,15 +81,17 @@ export function useDesktopNotifications(opts?: {
 		}
 
 		// Start a new grouping window
+		const label = channelTitle ?? "terminal";
 		const entry: GroupEntry = {
 			count: 1,
 			channelId,
+			channelTitle: label,
 			timer: setTimeout(() => {
 				// Timer fired — show the grouped notification
 				pendingGroups.delete(groupKey);
 				_showNative(
 					entry.count > 1 ? `${title} (${entry.count} alerts)` : title,
-					entry.count > 1 ? `${entry.count} alerts in terminal` : body,
+					entry.count > 1 ? `${entry.count} alerts in ${entry.channelTitle}` : body,
 					channelId,
 					effectiveTag,
 				);

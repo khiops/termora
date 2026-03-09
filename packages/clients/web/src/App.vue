@@ -113,6 +113,7 @@
 			<HostRail
 			class="host-rail"
 			@toggle-settings="showSettings = !showSettings"
+			@toggle-palette="commandPalette.toggle()"
 			@add-host="showHostModal = true"
 			@host-context-menu="onHostContextMenu"
 			@group-context-menu="onGroupContextMenu"
