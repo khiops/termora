@@ -109,7 +109,7 @@
 		/>
 
 		<!-- Main layout — only shown when authenticated and WS ready -->
-		<div v-else class="app-layout">
+		<div v-else class="app-layout" :style="layoutStyle">
 			<HostRail
 			class="host-rail"
 			@toggle-settings="showSettings = !showSettings"
@@ -117,7 +117,15 @@
 			@host-context-menu="onHostContextMenu"
 			@group-context-menu="onGroupContextMenu"
 		/>
+			<!-- Resize handle after host rail -->
+			<div
+				class="resize-handle"
+				:style="{ left: railResize.width.value + 'px' }"
+				@mousedown="railResize.onMouseDown"
+				@dblclick="railResize.reset"
+			/>
 			<ChannelSidebar
+			v-show="!sidebarResize.collapsed.value"
 			class="channel-sidebar"
 			@select-channel="onSelectChannel"
 			@open-new-tab="onSidebarOpenNewTab"
@@ -125,6 +133,13 @@
 			@configure-command="onConfigureCommand"
 			@set-welcome="onSetWelcome"
 		/>
+			<!-- Resize handle after channel sidebar -->
+			<div
+				class="resize-handle"
+				:style="{ left: (railResize.width.value + (sidebarResize.collapsed.value ? 0 : sidebarResize.width.value)) + 'px' }"
+				@mousedown="sidebarResize.onMouseDown"
+				@dblclick="sidebarResize.reset"
+			/>
 
 			<!-- Terminal main: tab bar + recursive pane layout -->
 			<div class="terminal-main">
@@ -182,6 +197,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch } from "vue";
+import { useResizable } from "./composables/useResizable.js";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
@@ -215,6 +231,26 @@ import GroupActionDialog from "./components/GroupActionDialog.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
+
+// ─── Resizable panels ────────────────────────────────────────────────────────
+
+const railResize = useResizable({
+	initialWidth: 48,
+	minWidth: 48,
+	maxWidth: 120,
+});
+
+const sidebarResize = useResizable({
+	initialWidth: 200,
+	minWidth: 140,
+	maxWidth: 400,
+	collapseThreshold: 80,
+});
+
+const layoutStyle = computed(() => ({
+	"--rail-w": `${railResize.width.value}px`,
+	"--sidebar-w": `${sidebarResize.collapsed.value ? 0 : sidebarResize.width.value}px`,
+}));
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
 const configStore = useConfigStore();
@@ -963,10 +999,27 @@ body,
 
 .app-layout {
 	display: grid;
-	grid-template-columns: 48px 200px 1fr;
+	grid-template-columns: var(--rail-w, 48px) var(--sidebar-w, 200px) 1fr;
 	height: 100vh;
 	background: var(--nt-bg);
 	color: var(--nt-fg);
+	position: relative;
+}
+
+.resize-handle {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 6px;
+	margin-left: -3px;
+	cursor: col-resize;
+	z-index: 20;
+	transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+	background: rgba(var(--nt-accent-rgb), 0.3);
 }
 
 .host-rail {
