@@ -48,12 +48,12 @@ describe("openTestDatabases", () => {
 		expect(fk).toBe(1);
 	});
 
-	it("meta.db: schema_version is 6 after migration", () => {
+	it("meta.db: schema_version is 7 after migration", () => {
 		dbs = openTestDatabases();
 		const row = dbs.meta.prepare("SELECT MAX(version) as v FROM schema_version").get() as {
 			v: number;
 		};
-		expect(row.v).toBe(6);
+		expect(row.v).toBe(7);
 	});
 
 	it("spool.db: schema_version is 1 after migration", () => {
@@ -75,6 +75,7 @@ describe("openTestDatabases", () => {
 		expect(tableNames).toContain("sessions");
 		expect(tableNames).toContain("channels");
 		expect(tableNames).toContain("channel_groups");
+		expect(tableNames).toContain("host_groups");
 		expect(tableNames).toContain("workspaces");
 		expect(tableNames).toContain("cache_index");
 		expect(tableNames).toContain("pairing_codes");
@@ -90,7 +91,7 @@ describe("openTestDatabases", () => {
 		expect(table?.name).toBe("chunks");
 	});
 
-	it("migration runner is idempotent (running twice produces same schema_version = 6)", () => {
+	it("migration runner is idempotent (running twice produces same schema_version = 7)", () => {
 		// First open
 		const dbs1 = openTestDatabases();
 		const v1 = (
@@ -105,8 +106,8 @@ describe("openTestDatabases", () => {
 		).v;
 		dbs2.close();
 
-		expect(v1).toBe(6);
-		expect(v2).toBe(6);
+		expect(v1).toBe(7);
+		expect(v2).toBe(7);
 	});
 
 	it("close() does not throw", () => {

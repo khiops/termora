@@ -40,7 +40,7 @@ export function useHostForm(editHost?: Host) {
 		iconType: editHost?.iconType ?? "auto",
 		iconValue: editHost?.iconValue ?? "",
 		color: editHost?.color ?? "",
-		hostGroup: editHost?.hostGroup ?? "",
+		hostGroup: editHost?.hostGroupId ?? "",
 		defaultShell: editHost?.defaultShell ?? "",
 		keepAliveSeconds: editHost?.keepAliveSeconds ?? 60,
 		historyRetentionDays: editHost?.historyRetentionDays ?? 30,
@@ -175,10 +175,16 @@ export function useHostForm(editHost?: Host) {
 		if (!canSave.value) return null;
 		saving.value = true;
 		try {
-			const group =
-				showNewGroup.value && newGroupName.value.trim()
-					? newGroupName.value.trim()
-					: form.value.hostGroup || undefined;
+			// Inline group creation: create the group first, then assign by ID
+			let groupId: string | null = form.value.hostGroup || null;
+			if (showNewGroup.value && newGroupName.value.trim()) {
+				const created = await hostsStore.createHostGroup(newGroupName.value.trim());
+				if (created) {
+					groupId = created.id;
+					showNewGroup.value = false;
+					newGroupName.value = "";
+				}
+			}
 
 			const body: Record<string, unknown> = {
 				label: form.value.label.trim(),
@@ -201,7 +207,7 @@ export function useHostForm(editHost?: Host) {
 							: form.value.iconValue,
 				}),
 				...(form.value.color && { color: form.value.color }),
-				...(group !== undefined && { host_group: group }),
+				host_group_id: groupId,
 				...(form.value.defaultShell && {
 					default_shell: form.value.defaultShell,
 				}),

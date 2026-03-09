@@ -4,6 +4,32 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## SC-23 — Host Groups as First-Class Entities (2026-03-09)
+
+- host_groups table is global (not per-workspace) — same as current behavior
+- ON DELETE SET NULL on FK — deleting group moves hosts to ungrouped
+- Collapsed state stays localStorage (per-device UI pref, not worth syncing)
+- Migration 007 creates table + FK column; migrateHostGroupData() auto-migrates existing host_group strings at startup
+- Old host_group TEXT column stays (SQLite can't drop columns) — becomes unused
+- DAL methods named listHostGroupEntities/getHostGroupEntity/deleteHostGroupEntity to avoid collision with existing string-based methods (legacy cleanup deferred)
+- API: /api/host-groups CRUD + /reorder replaces old /api/hosts/groups/:name routes
+- PUT /api/hosts/reorder body changed from group (name string) to group_id (ULID)
+- Frontend: hostGroups ref populated via fetchHostGroups API, auto-called from fetchHosts
+- useHostGroups composable: sections from hostsStore.hostGroups (DB-backed), collapsed by ID in localStorage, empty groups visible
+- RailContextMenu.vue: right-click rail background → "Add host" / "Add group"
+- DnD cross-group: drop host on group header moves to that group, drop on ungrouped removes from group
+- Group reorder via DnD persists to DB (reorderHostGroups API), no more localStorage for group order
+
+---
+
+## SC-22 — Host group DnD reorder in host rail (2026-03-09)
+
+- localStorage-based group ordering (not API) — host rail groups are derived from host.hostGroup strings, not ChannelGroup entities. Existing PUT /api/groups/reorder is for channel groups per host, not rail sections
+- HTML5 DnD with text/x-nexterm-group dataTransfer type — same pattern as SC-21 tab reorder
+- Splice index adjustment for forward drag: insertIdx = toIdx > fromIdx ? toIdx - 1 : toIdx (same pattern as TabBar.vue)
+
+---
+
 ## SC-21 — Tab DnD reorder in tab bar (2026-03-09)
 
 - Client-side only — no server API for tab order (localStorage via useLayout persist)

@@ -48,19 +48,19 @@
 					<div v-if="showGroupSubmenu" class="ctx-submenu">
 						<button
 							class="ctx-item"
-							:class="{ active: !host.hostGroup }"
+							:class="{ active: !host.hostGroupId }"
 							@click="moveToGroup(null)"
 						>
 							Ungrouped
 						</button>
 						<button
 							v-for="g in groups"
-							:key="g"
+							:key="g.id"
 							class="ctx-item"
-							:class="{ active: host.hostGroup === g }"
-							@click="moveToGroup(g)"
+							:class="{ active: host.hostGroupId === g.id }"
+							@click="moveToGroup(g.id)"
 						>
-							{{ g }}
+							{{ g.name }}
 						</button>
 						<div class="ctx-sep" />
 						<button class="ctx-item" @click="onNewGroup">
@@ -165,12 +165,9 @@ async function onDuplicate(): Promise<void> {
 	emit("close");
 }
 
-async function moveToGroup(group: string | null): Promise<void> {
+async function moveToGroup(groupId: string | null): Promise<void> {
 	if (!host.value) return;
-	await hostsStore.updateHost(host.value.id, {
-		host_group: group,
-	});
-	await hostsStore.fetchHosts();
+	await hostsStore.moveHostToGroup(host.value.id, groupId);
 	showGroupSubmenu.value = false;
 	emit("close");
 }

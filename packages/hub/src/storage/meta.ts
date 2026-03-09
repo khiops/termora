@@ -3,6 +3,7 @@ import type {
 	ChannelGroup,
 	ChannelStatus,
 	Host,
+	HostGroup,
 	Session,
 	SessionStatus,
 	SshAuthMethod,
@@ -25,6 +26,7 @@ export interface CreateHostInput {
 	defaultShell?: string;
 	defaultCwd?: string;
 	hostGroup?: string | null;
+	hostGroupId?: string | null;
 	sortOrder?: number;
 	sshConfigHost?: string | null;
 	sshUser?: string | null;
@@ -68,6 +70,7 @@ interface HostRow {
 	default_shell: string | null;
 	default_cwd: string | null;
 	host_group: string | null;
+	host_group_id: string | null;
 	sort_order: number;
 	ssh_config_host: string | null;
 	ssh_user: string | null;
@@ -149,6 +152,7 @@ function rowToHost(row: HostRow): Host {
 	if (row.default_shell != null) host.defaultShell = row.default_shell;
 	if (row.default_cwd != null) host.defaultCwd = row.default_cwd;
 	if (row.host_group != null) host.hostGroup = row.host_group;
+	if (row.host_group_id != null) host.hostGroupId = row.host_group_id;
 	if (row.ssh_config_host != null) host.sshConfigHost = row.ssh_config_host;
 	if (row.ssh_user != null) host.sshUser = row.ssh_user;
 	return host;
@@ -207,6 +211,26 @@ function rowToGroup(row: GroupRow): ChannelGroup {
 	};
 }
 
+interface HostGroupRow {
+	id: string;
+	name: string;
+	sort_order: number;
+	color: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+function rowToHostGroup(row: HostGroupRow): HostGroup {
+	return {
+		id: row.id,
+		name: row.name,
+		sortOrder: row.sort_order,
+		color: row.color,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
 export class MetaDAL {
 	constructor(private db: Database.Database) {}
 
@@ -222,14 +246,14 @@ export class MetaDAL {
 					id, type, label, ssh_host, ssh_port, ssh_auth, ssh_key_path,
 					icon_type, icon_value, color, profile_json, trust_remote_hints,
 					default_shell, default_cwd,
-					host_group, sort_order, ssh_config_host, ssh_user,
+					host_group, host_group_id, sort_order, ssh_config_host, ssh_user,
 					keep_alive_seconds, history_retention_days,
 					created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?,
 					?, ?,
-					?, ?, ?, ?,
+					?, ?, ?, ?, ?,
 					?, ?,
 					?, ?
 				)`,
@@ -250,6 +274,7 @@ export class MetaDAL {
 				input.defaultShell ?? null,
 				input.defaultCwd ?? null,
 				input.hostGroup ?? null,
+				input.hostGroupId ?? null,
 				input.sortOrder ?? 0,
 				input.sshConfigHost ?? null,
 				input.sshUser ?? null,
@@ -304,6 +329,7 @@ export class MetaDAL {
 			defaultShell: "default_shell",
 			defaultCwd: "default_cwd",
 			hostGroup: "host_group",
+			hostGroupId: "host_group_id",
 			sortOrder: "sort_order",
 			sshConfigHost: "ssh_config_host",
 			sshUser: "ssh_user",
@@ -345,12 +371,14 @@ export class MetaDAL {
 		return txn();
 	}
 
-	reorderHosts(group: string | null, hostIds: string[]): void {
+	reorderHosts(groupId: string | null, hostIds: string[]): void {
 		const txn = this.db.transaction(() => {
 			for (let i = 0; i < hostIds.length; i++) {
 				this.db
-					.prepare("UPDATE hosts SET sort_order = ?, host_group = ?, updated_at = ? WHERE id = ?")
-					.run(i, group, new Date().toISOString(), hostIds[i]);
+					.prepare(
+						"UPDATE hosts SET sort_order = ?, host_group_id = ?, updated_at = ? WHERE id = ?",
+					)
+					.run(i, groupId, new Date().toISOString(), hostIds[i]);
 			}
 		});
 		txn();
@@ -416,6 +444,127 @@ export class MetaDAL {
 			)
 			.all() as Array<{ host_group: string }>;
 		return rows.map((r) => r.host_group);
+	}
+
+	// ─── Host Groups (first-class) ───────────────────────────────────────────
+
+	listHostGroupEntities(): HostGroup[] {
+		const rows = this.db
+			.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC")
+			.all() as HostGroupRow[];
+		return rows.map(rowToHostGroup);
+	}
+
+	createHostGroup(name: string, color?: string | null): HostGroup {
+		const now = new Date().toISOString();
+		const id = generateId();
+
+		const maxRow = this.db
+			.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM host_groups")
+			.get() as { next_sort: number };
+		const sortOrder = maxRow.next_sort;
+
+		this.db
+			.prepare(
+				`INSERT INTO host_groups (id, name, sort_order, color, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)`,
+			)
+			.run(id, name, sortOrder, color ?? null, now, now);
+
+		return rowToHostGroup(
+			this.db.prepare("SELECT * FROM host_groups WHERE id = ?").get(id) as HostGroupRow,
+		);
+	}
+
+	getHostGroupEntity(id: string): HostGroup | null {
+		const row = this.db.prepare("SELECT * FROM host_groups WHERE id = ?").get(id) as
+			| HostGroupRow
+			| undefined;
+		return row ? rowToHostGroup(row) : null;
+	}
+
+	updateHostGroup(id: string, fields: { name?: string; color?: string | null }): HostGroup | null {
+		const now = new Date().toISOString();
+		const setClauses: string[] = ["updated_at = ?"];
+		const values: unknown[] = [now];
+
+		if (fields.name !== undefined) {
+			setClauses.push("name = ?");
+			values.push(fields.name);
+		}
+		if ("color" in fields) {
+			setClauses.push("color = ?");
+			values.push(fields.color ?? null);
+		}
+
+		values.push(id);
+		const result = this.db
+			.prepare(`UPDATE host_groups SET ${setClauses.join(", ")} WHERE id = ?`)
+			.run(...values);
+
+		if (result.changes === 0) return null;
+		return rowToHostGroup(
+			this.db.prepare("SELECT * FROM host_groups WHERE id = ?").get(id) as HostGroupRow,
+		);
+	}
+
+	deleteHostGroupEntity(id: string): boolean {
+		// ON DELETE SET NULL handles hosts.host_group_id automatically
+		const result = this.db.prepare("DELETE FROM host_groups WHERE id = ?").run(id);
+		return result.changes > 0;
+	}
+
+	reorderHostGroups(groupIds: string[]): void {
+		const now = new Date().toISOString();
+		const txn = this.db.transaction(() => {
+			for (let i = 0; i < groupIds.length; i++) {
+				this.db
+					.prepare("UPDATE host_groups SET sort_order = ?, updated_at = ? WHERE id = ?")
+					.run(i, now, groupIds[i]);
+			}
+		});
+		txn();
+	}
+
+	migrateHostGroupData(): void {
+		const txn = this.db.transaction(() => {
+			// Find distinct legacy host_group strings
+			const distinctGroups = this.db
+				.prepare(
+					"SELECT DISTINCT host_group FROM hosts WHERE host_group IS NOT NULL AND host_group != ''",
+				)
+				.all() as Array<{ host_group: string }>;
+
+			const now = new Date().toISOString();
+			for (const { host_group } of distinctGroups) {
+				// Check if an entity already exists for this name
+				const existing = this.db
+					.prepare("SELECT id FROM host_groups WHERE name = ?")
+					.get(host_group) as { id: string } | undefined;
+				if (!existing) {
+					const newId = generateId();
+					const maxRow = this.db
+						.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM host_groups")
+						.get() as { next_sort: number };
+					this.db
+						.prepare(
+							`INSERT INTO host_groups (id, name, sort_order, color, created_at, updated_at)
+							VALUES (?, ?, ?, NULL, ?, ?)`,
+						)
+						.run(newId, host_group, maxRow.next_sort, now, now);
+				}
+			}
+
+			// Update host_group_id for all hosts that have a legacy host_group
+			this.db
+				.prepare(
+					`UPDATE hosts
+					SET host_group_id = (SELECT id FROM host_groups WHERE name = hosts.host_group)
+					WHERE host_group IS NOT NULL AND host_group != '' AND host_group_id IS NULL`,
+				)
+				.run();
+		});
+		txn();
 	}
 
 	// ─── Groups ─────────────────────────────────────────────────────────────

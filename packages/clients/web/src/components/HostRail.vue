@@ -1,6 +1,10 @@
 <template>
 	<div class="host-rail">
-		<div class="rail-hosts">
+		<div
+			class="rail-hosts"
+			@dragover.prevent
+			@contextmenu.prevent="onRailContextMenu"
+		>
 			<!-- Local host always first -->
 			<div
 				v-if="localHost"
@@ -9,7 +13,7 @@
 				:title="getTooltip(localHost)"
 				@click="hostsStore.selectHost(localHost.id)"
 				@contextmenu.prevent="
-					$emit('host-context-menu', {
+					emit('host-context-menu', {
 						hostId: localHost.id,
 						event: $event,
 					})
@@ -52,21 +56,30 @@
 			<template
 				v-for="section in sections"
 				:key="
-					section.type === 'group' ? section.name : 'ungrouped'
+					section.type === 'group' ? section.id : 'ungrouped'
 				"
 			>
 				<!-- Group header -->
 				<div
 					v-if="section.type === 'group'"
 					class="group-header"
+					:class="{ 'drop-target': dropTargetGroup === section.id }"
 					:title="`${section.name} (${section.hosts.length} hosts)`"
-					@click="toggleGroup(section.name)"
+					draggable="true"
+					@click="toggleGroup(section.id)"
 					@contextmenu.prevent="
-						$emit('group-context-menu', {
+						emit('group-context-menu', {
+							groupId: section.id,
 							groupName: section.name,
 							event: $event,
 						})
 					"
+					@dragstart="onGroupDragStart($event, section.id)"
+					@dragenter.prevent
+					@dragover.prevent="onGroupDragOver($event, section.id)"
+					@dragleave="onGroupHeaderDragLeave"
+					@drop.prevent="onUnifiedGroupDrop($event, section.id)"
+					@dragend="onGroupDragEnd"
 				>
 					<span
 						class="group-chevron"
@@ -74,6 +87,19 @@
 						>&#x25B8;</span
 					>
 					<span class="group-label">{{ section.name }}</span>
+				</div>
+
+				<!-- Ungrouped section header (drop target to move host to ungrouped) -->
+				<div
+					v-if="section.type === 'ungrouped'"
+					class="group-header ungrouped-header"
+					:class="{ 'drop-target': dropTargetGroup === 'ungrouped' }"
+					@dragenter.prevent
+					@dragover.prevent="onGroupHeaderDragOver($event, 'ungrouped')"
+					@dragleave="onGroupHeaderDragLeave"
+					@drop.prevent="onGroupHeaderDrop($event, null)"
+				>
+					<span class="group-label">Ungrouped</span>
 				</div>
 
 				<!-- Hosts in section (hidden if collapsed) -->
@@ -89,18 +115,22 @@
 						:class="{
 							selected:
 								host.id === hostsStore.selectedHostId,
+							'drop-target': dropTargetHostId === host.id,
 						}"
 						:title="getTooltip(host)"
 						draggable="true"
 						@click="hostsStore.selectHost(host.id)"
 						@contextmenu.prevent="
-							$emit('host-context-menu', {
+							emit('host-context-menu', {
 								hostId: host.id,
 								event: $event,
 							})
 						"
 						@dragstart="onDragStart($event, host)"
-						@dragover.prevent="onDragOver($event)"
+						@dragenter.prevent
+						@dragover.prevent="onDragOver($event, host.id)"
+						@dragleave="onHostDragLeave($event)"
+						@dragend="onHostDragEnd"
 						@drop.prevent="onDrop($event, host, section)"
 					>
 						<div
@@ -209,22 +239,27 @@ import {
 } from "../composables/useHostIcon.js";
 import type { Host } from "@nexterm/shared";
 
-defineEmits<{
+const emit = defineEmits<{
 	"toggle-settings": [];
 	"toggle-palette": [];
 	"add-host": [];
+	"add-group": [];
+	"rail-context-menu": [payload: { x: number; y: number }];
 	"host-context-menu": [payload: { hostId: string; event: MouseEvent }];
 	"group-context-menu": [
-		payload: { groupName: string; event: MouseEvent },
+		payload: { groupId: string; groupName: string; event: MouseEvent },
 	];
 }>();
 
 const hostsStore = useHostsStore();
 const notificationStore = useNotificationStore();
 const channelsStore = useChannelsStore();
-const { sections, localHost, toggleGroup } = useHostGroups();
+const { sections, localHost, toggleGroup, reorderGroups } = useHostGroups();
 
-let dragHostId: string | null = null;
+const dragHostId = ref<string | null>(null);
+let dragGroupId: string | null = null;
+const dropTargetGroup = ref<string | null>(null);
+const dropTargetHostId = ref<string | null>(null);
 
 /**
  * Track when each host became "live" (connected) to compute display duration.
@@ -294,17 +329,29 @@ function getTooltip(host: Host): string {
 }
 
 function onDragStart(event: DragEvent, host: Host): void {
-	dragHostId = host.id;
+	dragHostId.value = host.id;
 	if (event.dataTransfer) {
 		event.dataTransfer.effectAllowed = "move";
-		event.dataTransfer.setData("text/plain", host.id);
+		event.dataTransfer.setData("text/x-nexterm-host", host.id);
 	}
 }
 
-function onDragOver(event: DragEvent): void {
+function onDragOver(event: DragEvent, hostId: string): void {
+	if (!dragHostId.value || dragHostId.value === hostId) {
+		dropTargetHostId.value = null;
+		return;
+	}
 	if (event.dataTransfer) {
 		event.dataTransfer.dropEffect = "move";
 	}
+	dropTargetHostId.value = hostId;
+}
+
+function onHostDragLeave(event: DragEvent): void {
+	const el = event.currentTarget as HTMLElement;
+	const related = event.relatedTarget as Node | null;
+	if (related && el.contains(related)) return;
+	dropTargetHostId.value = null;
 }
 
 function onDrop(
@@ -312,12 +359,13 @@ function onDrop(
 	targetHost: Host,
 	section: HostSection,
 ): void {
-	if (!dragHostId || dragHostId === targetHost.id) return;
+	dropTargetHostId.value = null;
+	if (!dragHostId.value || dragHostId.value === targetHost.id) return;
 
-	const group = section.type === "group" ? section.name : null;
+	const group = section.type === "group" ? section.id : null;
 	const hostsInSection = section.hosts;
 	const draggedIdx = hostsInSection.findIndex(
-		(h) => h.id === dragHostId,
+		(h) => h.id === dragHostId.value,
 	);
 	const targetIdx = hostsInSection.findIndex(
 		(h) => h.id === targetHost.id,
@@ -328,14 +376,111 @@ function onDrop(
 	if (draggedIdx >= 0) {
 		// Reorder within same section
 		orderedIds.splice(draggedIdx, 1);
-		orderedIds.splice(targetIdx, 0, dragHostId);
+		const insertIdx = targetIdx > draggedIdx ? targetIdx - 1 : targetIdx;
+		orderedIds.splice(insertIdx, 0, dragHostId.value);
 	} else {
 		// Move from different section
-		orderedIds.splice(targetIdx, 0, dragHostId);
+		orderedIds.splice(targetIdx, 0, dragHostId.value);
 	}
 
-	hostsStore.reorderHosts(group, orderedIds).then(() => hostsStore.fetchHosts());
-	dragHostId = null;
+	hostsStore
+		.reorderHosts(group, orderedIds)
+		.then(() => hostsStore.fetchHosts());
+	dragHostId.value = null;
+}
+
+function onHostDragEnd(): void {
+	dragHostId.value = null;
+	dropTargetHostId.value = null;
+}
+
+function onGroupDragStart(event: DragEvent, groupId: string): void {
+	dragGroupId = groupId;
+	if (event.dataTransfer) {
+		event.dataTransfer.effectAllowed = "move";
+		event.dataTransfer.setData("text/x-nexterm-group", groupId);
+	}
+}
+
+function onGroupDragOver(event: DragEvent, groupId: string): void {
+	// Accept host drags (cross-group move) or group drags (reorder)
+	const isHostDrag = event.dataTransfer?.types.includes("text/x-nexterm-host") ?? false;
+	const isGroupDrag = dragGroupId !== null && dragGroupId !== groupId;
+
+	if (!isHostDrag && !isGroupDrag) {
+		dropTargetGroup.value = null;
+		return;
+	}
+	// For group reorder: skip self
+	if (isGroupDrag && dragGroupId === groupId) {
+		dropTargetGroup.value = null;
+		return;
+	}
+	event.preventDefault();
+	if (event.dataTransfer) {
+		event.dataTransfer.dropEffect = "move";
+	}
+	dropTargetGroup.value = groupId;
+}
+
+function onUnifiedGroupDrop(event: DragEvent, targetGroupId: string): void {
+	dropTargetGroup.value = null;
+	// Host drag takes priority
+	const hostId = event.dataTransfer?.getData("text/x-nexterm-host");
+	if (hostId && !dragGroupId) {
+		hostsStore
+			.moveHostToGroup(hostId, targetGroupId)
+			.then(() => hostsStore.fetchHosts());
+		dragHostId.value = null;
+		return;
+	}
+	// Group reorder
+	if (!dragGroupId || dragGroupId === targetGroupId) return;
+	reorderGroups(dragGroupId, targetGroupId);
+	dragGroupId = null;
+}
+
+function onGroupDragEnd(): void {
+	dragGroupId = null;
+	dropTargetGroup.value = null;
+}
+
+// ── Cross-group host DnD: drop host onto group header ────────────────────
+
+function onGroupHeaderDragOver(event: DragEvent, groupId: string): void {
+	// Only accept host drags (not group drags)
+	if (dragGroupId) return;
+	if (!event.dataTransfer?.types.includes("text/x-nexterm-host")) return;
+	event.preventDefault();
+	if (event.dataTransfer) {
+		event.dataTransfer.dropEffect = "move";
+	}
+	dropTargetGroup.value = groupId;
+}
+
+function onGroupHeaderDragLeave(event: DragEvent): void {
+	// Only clear if not entering a child element
+	const el = event.currentTarget as HTMLElement;
+	const related = event.relatedTarget as Node | null;
+	if (related && el.contains(related)) return;
+	dropTargetGroup.value = null;
+}
+
+function onGroupHeaderDrop(event: DragEvent, targetGroupId: string | null): void {
+	dropTargetGroup.value = null;
+	if (dragGroupId) return; // ignore group drags
+	const hostId = event.dataTransfer?.getData("text/x-nexterm-host");
+	if (!hostId) return;
+	hostsStore
+		.moveHostToGroup(hostId, targetGroupId)
+		.then(() => hostsStore.fetchHosts());
+	dragHostId.value = null;
+}
+
+function onRailContextMenu(event: MouseEvent): void {
+	// Only fire when clicking the background itself, not a host or group header
+	if (event.target !== event.currentTarget) return;
+	emit("rail-context-menu", { x: event.clientX, y: event.clientY });
 }
 
 onMounted(() => {
@@ -395,6 +540,18 @@ onMounted(() => {
 
 .badge-wrapper:not(.selected):hover .badge {
 	border-radius: 12px;
+}
+
+/* Drop indicator — horizontal line above target host */
+.badge-wrapper.drop-target::after {
+	content: "";
+	position: absolute;
+	top: -3px;
+	left: 4px;
+	right: 4px;
+	height: 2px;
+	background: var(--nt-accent);
+	border-radius: 1px;
 }
 
 .badge {
@@ -507,6 +664,20 @@ onMounted(() => {
 	color: var(--nt-fg);
 }
 
+.group-header.drop-target {
+	border-top: 2px solid var(--nt-accent);
+}
+
+/* Ungrouped header — no chevron, not draggable, drop-target only */
+.ungrouped-header {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.ungrouped-header:hover {
+	opacity: 1;
+}
+
 .group-chevron {
 	display: inline-block;
 	font-size: 10px;
@@ -590,4 +761,5 @@ onMounted(() => {
 	line-height: 1;
 	margin-top: -1px; /* optical centering */
 }
+
 </style>

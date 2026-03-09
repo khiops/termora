@@ -20,6 +20,7 @@ interface CreateHostBody {
 	default_cwd?: string;
 	trust_remote_hints?: "apply" | "ask" | "ignore";
 	host_group?: string | null;
+	host_group_id?: string | null;
 	ssh_config_host?: string | null;
 	ssh_user?: string | null;
 	keep_alive_seconds?: number;
@@ -41,6 +42,7 @@ interface UpdateHostBody {
 	default_cwd?: string;
 	trust_remote_hints?: "apply" | "ask" | "ignore";
 	host_group?: string | null;
+	host_group_id?: string | null;
 	ssh_config_host?: string | null;
 	ssh_user?: string | null;
 	keep_alive_seconds?: number;
@@ -269,6 +271,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			...(body.default_shell !== undefined && { defaultShell: body.default_shell }),
 			...(body.default_cwd !== undefined && { defaultCwd: body.default_cwd }),
 			...(body.host_group !== undefined && { hostGroup: body.host_group }),
+			...(body.host_group_id !== undefined && { hostGroupId: body.host_group_id }),
 			...(body.ssh_config_host !== undefined && { sshConfigHost: body.ssh_config_host }),
 			...(body.ssh_user !== undefined && { sshUser: body.ssh_user }),
 			...(body.keep_alive_seconds !== undefined && { keepAliveSeconds: body.keep_alive_seconds }),
@@ -282,10 +285,10 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 	});
 
 	// PUT /api/hosts/reorder — reorder hosts within a group
-	server.put<{ Body: { group: string | null; host_ids: string[] } }>(
+	server.put<{ Body: { group_id: string | null; host_ids: string[] } }>(
 		"/api/hosts/reorder",
 		async (request, reply) => {
-			const { group, host_ids } = request.body;
+			const { group_id, host_ids } = request.body;
 			if (!Array.isArray(host_ids) || host_ids.length === 0) {
 				return reply.code(400).send({
 					error: {
@@ -294,40 +297,10 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 					},
 				});
 			}
-			metaDal.reorderHosts(group ?? null, host_ids);
+			metaDal.reorderHosts(group_id ?? null, host_ids);
 			return reply.code(204).send();
 		},
 	);
-
-	// PUT /api/hosts/groups/:name — rename a host group
-	server.put<{ Params: { name: string }; Body: { name: string } }>(
-		"/api/hosts/groups/:name",
-		async (request, reply) => {
-			const newName = request.body.name;
-			if (!newName || !/^[a-zA-Z0-9 _-]{1,32}$/.test(newName)) {
-				return reply.code(400).send({
-					error: {
-						code: "VALIDATION_ERROR",
-						message:
-							"Group name must be 1-32 characters, alphanumeric with spaces, dashes, underscores",
-					},
-				});
-			}
-			const count = metaDal.renameHostGroup(request.params.name, newName);
-			if (count === 0) {
-				return reply.code(404).send({
-					error: { code: "NOT_FOUND", message: "Group not found" },
-				});
-			}
-			return reply.code(204).send();
-		},
-	);
-
-	// DELETE /api/hosts/groups/:name — delete a host group (moves hosts to ungrouped)
-	server.delete<{ Params: { name: string } }>("/api/hosts/groups/:name", async (request, reply) => {
-		metaDal.deleteHostGroup(request.params.name);
-		return reply.code(204).send();
-	});
 
 	// GET /api/hosts/:id
 	server.get<{ Params: { id: string } }>("/api/hosts/:id", async (request, reply) => {
@@ -433,6 +406,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			if (body.default_shell !== undefined) updateInput.defaultShell = body.default_shell;
 			if (body.default_cwd !== undefined) updateInput.defaultCwd = body.default_cwd;
 			if (body.host_group !== undefined) updateInput.hostGroup = body.host_group;
+			if (body.host_group_id !== undefined) updateInput.hostGroupId = body.host_group_id;
 			if (body.ssh_config_host !== undefined) updateInput.sshConfigHost = body.ssh_config_host;
 			if (body.ssh_user !== undefined) updateInput.sshUser = body.ssh_user;
 			if (body.keep_alive_seconds !== undefined)

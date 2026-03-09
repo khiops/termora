@@ -6,6 +6,7 @@ const COLLAPSED_KEY = "nexterm:collapsed-host-groups";
 
 export interface HostGroupSection {
 	type: "group";
+	id: string;
 	name: string;
 	hosts: Host[];
 	collapsed: boolean;
@@ -37,32 +38,33 @@ export function useHostGroups() {
 	const collapsedGroups = ref(loadCollapsedGroups());
 
 	const sections = computed<HostSection[]>(() => {
-		const grouped = new Map<string, Host[]>();
+		const result: HostSection[] = [];
 		const ungrouped: Host[] = [];
 
+		// Build a host lookup by hostGroupId for fast grouping
+		const byGroupId = new Map<string, Host[]>();
 		for (const host of hostsStore.sortedHosts) {
-			if (host.type === "local") {
-				// Local host rendered separately, skip
-				continue;
-			}
-			if (host.hostGroup) {
-				const list = grouped.get(host.hostGroup) ?? [];
+			if (host.type === "local") continue;
+			if (host.hostGroupId) {
+				const list = byGroupId.get(host.hostGroupId) ?? [];
 				list.push(host);
-				grouped.set(host.hostGroup, list);
+				byGroupId.set(host.hostGroupId, list);
 			} else {
 				ungrouped.push(host);
 			}
 		}
 
-		const result: HostSection[] = [];
-
-		// Groups follow alphabetically
-		for (const [name, hosts] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+		// Iterate DB-backed groups in sortOrder order (API already returns them sorted)
+		for (const group of hostsStore.hostGroups) {
+			const hosts = (byGroupId.get(group.id) ?? [])
+				.slice()
+				.sort((a, b) => a.sortOrder - b.sortOrder);
 			result.push({
 				type: "group",
-				name,
+				id: group.id,
+				name: group.name,
 				hosts,
-				collapsed: collapsedGroups.value.has(name),
+				collapsed: collapsedGroups.value.has(group.id),
 			});
 		}
 
@@ -77,12 +79,31 @@ export function useHostGroups() {
 	// The local host, always rendered first separately
 	const localHost = computed(() => hostsStore.sortedHosts.find((h) => h.type === "local") ?? null);
 
-	function toggleGroup(name: string): void {
+	function toggleGroup(groupId: string): void {
 		const set = new Set(collapsedGroups.value);
-		if (set.has(name)) set.delete(name);
-		else set.add(name);
+		if (set.has(groupId)) set.delete(groupId);
+		else set.add(groupId);
 		collapsedGroups.value = set;
 		saveCollapsedGroups(set);
+	}
+
+	function reorderGroups(fromId: string, toId: string): void {
+		if (fromId === toId) return;
+
+		const currentIds = sections.value
+			.filter((s): s is HostGroupSection => s.type === "group")
+			.map((s) => s.id);
+
+		const fromIdx = currentIds.indexOf(fromId);
+		const toIdx = currentIds.indexOf(toId);
+		if (fromIdx === -1 || toIdx === -1) return;
+
+		const newOrder = [...currentIds];
+		newOrder.splice(fromIdx, 1);
+		const insertIdx = toIdx > fromIdx ? toIdx - 1 : toIdx;
+		newOrder.splice(insertIdx, 0, fromId);
+
+		void hostsStore.reorderHostGroups(newOrder);
 	}
 
 	return {
@@ -90,5 +111,6 @@ export function useHostGroups() {
 		localHost,
 		collapsedGroups,
 		toggleGroup,
+		reorderGroups,
 	};
 }

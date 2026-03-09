@@ -1,4 +1,4 @@
-import { type Host, type SessionStatus, toCamelCase } from "@nexterm/shared";
+import { type Host, type HostGroup, type SessionStatus, toCamelCase } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -30,6 +30,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	const authStore = useAuthStore();
 
 	const hosts = ref<Host[]>([]);
+	const hostGroups = ref<HostGroup[]>([]);
 	const selectedHostId = ref<string | null>(null);
 	const loading = ref(false);
 	const error = ref<string | null>(null);
@@ -45,6 +46,30 @@ export const useHostsStore = defineStore("hosts", () => {
 	 * (local first, then by group/sort_order).
 	 */
 	const sortedHosts = computed(() => hosts.value);
+
+	async function fetchHostGroups(): Promise<void> {
+		if (authStore.token === null) return;
+		const res = await fetch("/api/host-groups", {
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return;
+		const raw = (await res.json()) as Array<{
+			id: string;
+			name: string;
+			sort_order: number;
+			color?: string | null;
+			created_at: string;
+			updated_at: string;
+		}>;
+		hostGroups.value = raw.map((g) => ({
+			id: g.id,
+			name: g.name,
+			sortOrder: g.sort_order,
+			color: g.color ?? null,
+			createdAt: g.created_at,
+			updatedAt: g.updated_at,
+		}));
+	}
 
 	async function fetchHosts(): Promise<void> {
 		if (authStore.token === null) return;
@@ -62,6 +87,10 @@ export const useHostsStore = defineStore("hosts", () => {
 			// Auto-select the first host if nothing is selected yet
 			if (selectedHostId.value === null && data.length > 0) {
 				selectedHostId.value = data[0]?.id ?? null;
+			}
+			// Populate groups on first load
+			if (hostGroups.value.length === 0) {
+				await fetchHostGroups();
 			}
 		} catch (err) {
 			error.value = err instanceof Error ? err.message : String(err);
@@ -88,21 +117,21 @@ export const useHostsStore = defineStore("hosts", () => {
 		return sessionStatusToHostStatus(_sessionStatuses.value.get(hostId));
 	}
 
-	async function reorderHosts(group: string | null, hostIds: string[]): Promise<void> {
+	async function reorderHosts(groupId: string | null, hostIds: string[]): Promise<void> {
 		await fetch("/api/hosts/reorder", {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ group, host_ids: hostIds }),
+			body: JSON.stringify({ group_id: groupId, host_ids: hostIds }),
 		});
 		// Update local state optimistically
 		for (let i = 0; i < hostIds.length; i++) {
 			const host = hosts.value.find((h) => h.id === hostIds[i]);
 			if (host) {
 				host.sortOrder = i;
-				host.hostGroup = group ?? null;
+				host.hostGroupId = groupId ?? null;
 			}
 		}
 	}
@@ -170,21 +199,131 @@ export const useHostsStore = defineStore("hosts", () => {
 		return (await res.json()) as { ok: boolean; message?: string };
 	}
 
-	function getHostGroups(): string[] {
-		const groups = new Set<string>();
-		for (const host of hosts.value) {
-			if (host.hostGroup) groups.add(host.hostGroup);
+	/** Returns the DB-backed HostGroup entities sorted by sortOrder. */
+	function getHostGroups(): HostGroup[] {
+		return hostGroups.value;
+	}
+
+	async function createHostGroup(name: string): Promise<HostGroup | null> {
+		if (authStore.token === null) return null;
+		const res = await fetch("/api/host-groups", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ name }),
+		});
+		if (!res.ok) return null;
+		const raw = (await res.json()) as {
+			id: string;
+			name: string;
+			sort_order: number;
+			color?: string | null;
+			created_at: string;
+			updated_at: string;
+		};
+		const group: HostGroup = {
+			id: raw.id,
+			name: raw.name,
+			sortOrder: raw.sort_order,
+			color: raw.color ?? null,
+			createdAt: raw.created_at,
+			updatedAt: raw.updated_at,
+		};
+		hostGroups.value = [...hostGroups.value, group];
+		return group;
+	}
+
+	async function renameHostGroup(id: string, name: string): Promise<void> {
+		if (authStore.token === null) return;
+		const res = await fetch(`/api/host-groups/${id}`, {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ name }),
+		});
+		if (!res.ok) return;
+		const idx = hostGroups.value.findIndex((g) => g.id === id);
+		if (idx >= 0) {
+			const existing = hostGroups.value[idx];
+			if (existing) hostGroups.value[idx] = { ...existing, name };
 		}
-		return [...groups].sort();
+	}
+
+	async function deleteHostGroup(id: string): Promise<void> {
+		if (authStore.token === null) return;
+		const res = await fetch(`/api/host-groups/${id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return;
+		hostGroups.value = hostGroups.value.filter((g) => g.id !== id);
+		// Clear hostGroupId on any hosts that belonged to the deleted group
+		for (const host of hosts.value) {
+			if (host.hostGroupId === id) {
+				host.hostGroupId = null;
+			}
+		}
+	}
+
+	async function reorderHostGroups(groupIds: string[]): Promise<void> {
+		if (authStore.token === null) return;
+		// Optimistic update
+		const original = [...hostGroups.value];
+		const reordered: HostGroup[] = [];
+		for (const id of groupIds) {
+			const g = hostGroups.value.find((g) => g.id === id);
+			if (g) reordered.push({ ...g });
+		}
+		// Include any groups not in the provided list (shouldn't happen, but safe)
+		for (const g of hostGroups.value) {
+			if (!groupIds.includes(g.id)) reordered.push(g);
+		}
+		hostGroups.value = reordered;
+
+		const res = await fetch("/api/host-groups/reorder", {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ group_ids: groupIds }),
+		});
+		if (!res.ok) {
+			// Rollback on failure
+			hostGroups.value = original;
+		}
+	}
+
+	async function moveHostToGroup(hostId: string, groupId: string | null): Promise<void> {
+		if (authStore.token === null) return;
+		const res = await fetch(`/api/hosts/${hostId}`, {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ host_group_id: groupId }),
+		});
+		if (!res.ok) return;
+		const host = hosts.value.find((h) => h.id === hostId);
+		if (host) {
+			host.hostGroupId = groupId;
+		}
 	}
 
 	return {
 		hosts,
+		hostGroups,
 		sortedHosts,
 		selectedHostId,
 		loading,
 		error,
 		fetchHosts,
+		fetchHostGroups,
 		selectHost,
 		updateSessionStatus,
 		getHostStatus,
@@ -195,5 +334,10 @@ export const useHostsStore = defineStore("hosts", () => {
 		duplicateHost,
 		testConnection,
 		getHostGroups,
+		createHostGroup,
+		renameHostGroup,
+		deleteHostGroup,
+		reorderHostGroups,
+		moveHostToGroup,
 	};
 });

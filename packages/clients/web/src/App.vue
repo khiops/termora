@@ -54,6 +54,7 @@
 
 		<GroupContextMenu
 			:visible="groupContextMenu !== null"
+			:group-id="groupContextMenu?.groupId ?? ''"
 			:group-name="groupContextMenu?.groupName ?? ''"
 			:x="groupContextMenu?.x ?? 0"
 			:y="groupContextMenu?.y ?? 0"
@@ -62,30 +63,111 @@
 			@delete-group="onDeleteGroup"
 		/>
 
+		<!-- Rail background context menu -->
+		<RailContextMenu
+			:visible="railContextMenu !== null"
+			:x="railContextMenu?.x ?? 0"
+			:y="railContextMenu?.y ?? 0"
+			@close="railContextMenu = null"
+			@add-host="showHostModal = true"
+			@add-group="onAddGroupFromRail"
+		/>
+
 		<!-- Rename group dialog -->
 		<GroupActionDialog
-			v-if="renameGroupName !== null"
+			v-if="renameGroupId !== null"
 			:visible="true"
 			title="Rename Group"
-			:message="`Rename group '${renameGroupName}'.`"
+			:message="`Rename group '${renameGroupCurrentName}'.`"
 			confirm-label="Rename"
 			input-label="NEW NAME"
-			:input-value="renameGroupName"
+			:input-value="renameGroupCurrentName"
 			input-placeholder="Group name"
-			@close="renameGroupName = null"
+			@close="renameGroupId = null"
 			@confirm="onRenameGroupConfirmed"
 		/>
 
 		<!-- Delete group confirmation -->
 		<GroupActionDialog
-			v-if="deleteGroupName !== null"
+			v-if="deleteGroupId !== null"
 			:visible="true"
 			title="Delete Group"
-			:message="`Delete group '${deleteGroupName}'? Hosts will move to Ungrouped.`"
+			:message="`Delete group '${deleteGroupCurrentName}'? Hosts will move to Ungrouped.`"
 			confirm-label="Delete"
 			:confirm-danger="true"
-			@close="deleteGroupName = null"
+			@close="deleteGroupId = null"
 			@confirm="onDeleteGroupConfirmed"
+		/>
+
+		<!-- Create host-group dialog (triggered from rail context menu) -->
+		<GroupActionDialog
+			:visible="createGroupDialogVisible"
+			title="Create Group"
+			message="Create a new host group."
+			confirm-label="Create"
+			input-label="GROUP NAME"
+			input-placeholder="Enter group name"
+			@close="createGroupDialogVisible = false"
+			@confirm="onCreateGroupConfirmed"
+		/>
+
+		<!-- Channel-group context menu -->
+		<GroupContextMenu
+			:visible="channelGroupContextMenu !== null"
+			:group-id="channelGroupContextMenu?.groupId ?? ''"
+			:group-name="channelGroupContextMenu?.groupName ?? ''"
+			:x="channelGroupContextMenu?.x ?? 0"
+			:y="channelGroupContextMenu?.y ?? 0"
+			@close="channelGroupContextMenu = null"
+			@rename="onRenameChannelGroup"
+			@delete-group="onDeleteChannelGroup"
+		/>
+
+		<!-- Sidebar background context menu -->
+		<SidebarContextMenu
+			:visible="sidebarContextMenu !== null"
+			:x="sidebarContextMenu?.x ?? 0"
+			:y="sidebarContextMenu?.y ?? 0"
+			@close="sidebarContextMenu = null"
+			@add-group="onAddChannelGroupFromSidebar"
+		/>
+
+		<!-- Rename channel-group dialog -->
+		<GroupActionDialog
+			v-if="renameChannelGroupId !== null"
+			:visible="true"
+			title="Rename Group"
+			:message="`Rename group '${renameChannelGroupCurrentName}'.`"
+			confirm-label="Rename"
+			input-label="NEW NAME"
+			:input-value="renameChannelGroupCurrentName"
+			input-placeholder="Group name"
+			@close="renameChannelGroupId = null"
+			@confirm="onRenameChannelGroupConfirmed"
+		/>
+
+		<!-- Delete channel-group confirmation -->
+		<GroupActionDialog
+			v-if="deleteChannelGroupId !== null"
+			:visible="true"
+			title="Delete Group"
+			:message="`Delete group '${deleteChannelGroupCurrentName}'? Channels will move to General.`"
+			confirm-label="Delete"
+			:confirm-danger="true"
+			@close="deleteChannelGroupId = null"
+			@confirm="onDeleteChannelGroupConfirmed"
+		/>
+
+		<!-- Create channel-group dialog -->
+		<GroupActionDialog
+			:visible="createChannelGroupDialogVisible"
+			title="Create Group"
+			message="Create a new channel group."
+			confirm-label="Create"
+			input-label="GROUP NAME"
+			input-placeholder="Enter group name"
+			@close="createChannelGroupDialogVisible = false"
+			@confirm="onCreateChannelGroupConfirmed"
 		/>
 
 		<!-- Delete host confirmation modal -->
@@ -111,13 +193,14 @@
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout" :style="layoutStyle">
 			<HostRail
-			class="host-rail"
-			@toggle-settings="showSettings = !showSettings"
-			@toggle-palette="commandPalette.toggle()"
-			@add-host="showHostModal = true"
-			@host-context-menu="onHostContextMenu"
-			@group-context-menu="onGroupContextMenu"
-		/>
+				class="host-rail"
+				@toggle-settings="showSettings = !showSettings"
+				@toggle-palette="commandPalette.toggle()"
+				@add-host="showHostModal = true"
+				@rail-context-menu="onRailContextMenu"
+				@host-context-menu="onHostContextMenu"
+				@group-context-menu="onGroupContextMenu"
+			/>
 			<!-- Resize handle after host rail -->
 			<div
 				class="resize-handle"
@@ -126,14 +209,17 @@
 				@dblclick="railResize.reset"
 			/>
 			<ChannelSidebar
-			v-show="!sidebarResize.collapsed.value"
-			class="channel-sidebar"
-			@select-channel="onSelectChannel"
-			@open-new-tab="onSidebarOpenNewTab"
-			@open-current-tab="onSidebarOpenCurrentTab"
-			@configure-command="onConfigureCommand"
-			@set-welcome="onSetWelcome"
-		/>
+				v-show="!sidebarResize.collapsed.value"
+				class="channel-sidebar"
+				@select-channel="onSelectChannel"
+				@open-new-tab="onSidebarOpenNewTab"
+				@open-current-tab="onSidebarOpenCurrentTab"
+				@configure-command="onConfigureCommand"
+				@set-welcome="onSetWelcome"
+				@channel-group-context-menu="onChannelGroupContextMenu"
+				@sidebar-context-menu="onSidebarContextMenu"
+				@add-channel-group="onAddChannelGroupFromSidebar"
+			/>
 			<!-- Resize handle after channel sidebar -->
 			<div
 				class="resize-handle"
@@ -227,9 +313,11 @@ import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HostModal from "./components/HostModal.vue";
 import HostContextMenu from "./components/HostContextMenu.vue";
 import GroupContextMenu from "./components/GroupContextMenu.vue";
+import RailContextMenu from "./components/RailContextMenu.vue";
 import DeleteHostModal from "./components/DeleteHostModal.vue";
 import BatchImportModal from "./components/BatchImportModal.vue";
 import GroupActionDialog from "./components/GroupActionDialog.vue";
+import SidebarContextMenu from "./components/SidebarContextMenu.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -329,12 +417,32 @@ const hostContextMenu = ref<{
 	y: number;
 } | null>(null);
 const groupContextMenu = ref<{
+	groupId: string;
 	groupName: string;
 	x: number;
 	y: number;
 } | null>(null);
-const renameGroupName = ref<string | null>(null);
-const deleteGroupName = ref<string | null>(null);
+const railContextMenu = ref<{ x: number; y: number } | null>(null);
+// Create host-group dialog
+const createGroupDialogVisible = ref(false);
+// ID of the group being renamed/deleted
+const renameGroupId = ref<string | null>(null);
+const renameGroupCurrentName = ref<string>("");
+const deleteGroupId = ref<string | null>(null);
+const deleteGroupCurrentName = ref<string>("");
+// Channel-group context menu + create/rename/delete dialogs
+const channelGroupContextMenu = ref<{
+	groupId: string;
+	groupName: string;
+	x: number;
+	y: number;
+} | null>(null);
+const sidebarContextMenu = ref<{ x: number; y: number } | null>(null);
+const createChannelGroupDialogVisible = ref(false);
+const renameChannelGroupId = ref<string | null>(null);
+const renameChannelGroupCurrentName = ref<string>("");
+const deleteChannelGroupId = ref<string | null>(null);
+const deleteChannelGroupCurrentName = ref<string>("");
 
 // ─── Per-channel theme cascade ───────────────────────────────────────────────
 
@@ -688,17 +796,34 @@ function onHostContextMenu(payload: {
 
 /**
  * Handle right-click on a group header in the rail.
- * Stores position + groupName for the context menu component (Block 6).
  */
 function onGroupContextMenu(payload: {
+	groupId: string;
 	groupName: string;
 	event: MouseEvent;
 }): void {
 	groupContextMenu.value = {
+		groupId: payload.groupId,
 		groupName: payload.groupName,
 		x: payload.event.clientX,
 		y: payload.event.clientY,
 	};
+}
+
+function onRailContextMenu(payload: { x: number; y: number }): void {
+	railContextMenu.value = { x: payload.x, y: payload.y };
+}
+
+function onAddGroupFromRail(): void {
+	railContextMenu.value = null;
+	createGroupDialogVisible.value = true;
+}
+
+async function onCreateGroupConfirmed(name?: string): Promise<void> {
+	createGroupDialogVisible.value = false;
+	if (!name?.trim()) return;
+	await hostsStore.createHostGroup(name.trim());
+	await hostsStore.fetchHosts();
 }
 
 // ─── Context menu action handlers ─────────────────────────────────────────
@@ -726,44 +851,88 @@ function onNewGroupForHost(hostId: string): void {
 	onEditHost(hostId);
 }
 
-function onRenameGroup(groupName: string): void {
-	renameGroupName.value = groupName;
+function onRenameGroup(groupId: string): void {
+	const group = hostsStore.hostGroups.find((g) => g.id === groupId) ?? null;
+	if (!group) return;
+	renameGroupId.value = groupId;
+	renameGroupCurrentName.value = group.name;
 }
 
 function onRenameGroupConfirmed(newName?: string): void {
-	const oldName = renameGroupName.value;
-	renameGroupName.value = null;
-	if (!oldName || !newName?.trim()) return;
-	void fetch(
-		`/api/hosts/groups/${encodeURIComponent(oldName)}`,
-		{
-			method: "PUT",
-			headers: {
-				Authorization: `Bearer ${authStore.token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ name: newName.trim() }),
-		},
-	).then(() => hostsStore.fetchHosts());
+	const id = renameGroupId.value;
+	renameGroupId.value = null;
+	if (!id || !newName?.trim()) return;
+	void hostsStore.renameHostGroup(id, newName.trim());
 }
 
-function onDeleteGroup(groupName: string): void {
-	deleteGroupName.value = groupName;
+function onDeleteGroup(groupId: string): void {
+	const group = hostsStore.hostGroups.find((g) => g.id === groupId) ?? null;
+	if (!group) return;
+	deleteGroupId.value = groupId;
+	deleteGroupCurrentName.value = group.name;
 }
 
 function onDeleteGroupConfirmed(): void {
-	const name = deleteGroupName.value;
-	deleteGroupName.value = null;
-	if (!name) return;
-	void fetch(
-		`/api/hosts/groups/${encodeURIComponent(name)}`,
-		{
-			method: "DELETE",
-			headers: {
-				Authorization: `Bearer ${authStore.token}`,
-			},
-		},
-	).then(() => hostsStore.fetchHosts());
+	const id = deleteGroupId.value;
+	deleteGroupId.value = null;
+	if (!id) return;
+	void hostsStore.deleteHostGroup(id).then(() => hostsStore.fetchHosts());
+}
+
+// ─── Channel-group context menu handlers ─────────────────────────────────────
+
+function onChannelGroupContextMenu(payload: { groupId: string; groupName: string; event: MouseEvent }): void {
+	channelGroupContextMenu.value = {
+		groupId: payload.groupId,
+		groupName: payload.groupName,
+		x: payload.event.clientX,
+		y: payload.event.clientY,
+	};
+}
+
+function onSidebarContextMenu(event: MouseEvent): void {
+	sidebarContextMenu.value = { x: event.clientX, y: event.clientY };
+}
+
+function onRenameChannelGroup(groupId: string): void {
+	channelGroupContextMenu.value = null;
+	const group = channelsStore.groups.find((g) => g.id === groupId) ?? null;
+	if (!group) return;
+	renameChannelGroupId.value = groupId;
+	renameChannelGroupCurrentName.value = group.name;
+}
+
+function onRenameChannelGroupConfirmed(newName?: string): void {
+	const id = renameChannelGroupId.value;
+	renameChannelGroupId.value = null;
+	if (!id || !newName?.trim()) return;
+	void channelsStore.renameGroup(id, newName.trim());
+}
+
+function onDeleteChannelGroup(groupId: string): void {
+	channelGroupContextMenu.value = null;
+	const group = channelsStore.groups.find((g) => g.id === groupId) ?? null;
+	if (!group) return;
+	deleteChannelGroupId.value = groupId;
+	deleteChannelGroupCurrentName.value = group.name;
+}
+
+function onDeleteChannelGroupConfirmed(): void {
+	const id = deleteChannelGroupId.value;
+	deleteChannelGroupId.value = null;
+	if (!id) return;
+	void channelsStore.removeGroup(id);
+}
+
+function onAddChannelGroupFromSidebar(): void {
+	sidebarContextMenu.value = null;
+	createChannelGroupDialogVisible.value = true;
+}
+
+async function onCreateChannelGroupConfirmed(name?: string): Promise<void> {
+	createChannelGroupDialogVisible.value = false;
+	if (!name?.trim()) return;
+	await channelsStore.addGroup(name.trim());
 }
 
 /**
