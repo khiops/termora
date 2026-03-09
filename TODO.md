@@ -16,13 +16,13 @@
 - [x] ✅ [Hub] session-manager.spec.ts: crash-loop 60s window reset test — fixed with vi.setSystemTime (2026-03-09)
 - [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
-- [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
-- [ ] 🔧 [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll near-symmetric (~50 lines each) — Priority: M (from UX-04 /review F-007)
+- [x] ✅ [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable (2026-03-09)
+- [x] ✅ [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll unified via navigateMatches (2026-03-09)
 
 ### Deferred from /adversarial + /llm
 - [ ] 💡 [Agent] Configurable socket bind timeout (currently hardcoded 5s) — Priority: L (from /adversarial C-07)
-- [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: M (from /adversarial C-08)
-- [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: M (from /llm Codex)
+- [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: L (needs native C++ addon; 0700 dir perms sufficient for MVP)
+- [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: L (needs native FFI/WinAPI binding)
 - [ ] 💡 [Agent] Unix socket path length validation (~100 char limit) — Priority: L (from /llm Copilot)
 
 ### Deferred from UX-03 /review
@@ -42,7 +42,7 @@
 - [x] ✅ [Web] VisualProfileSettings: unit tests for SC-04/SC-06 logic (38 tests) (2026-03-09)
 
 ### Deferred from /adversarial Sprint 1
-- [ ] 💡 [Docs] Config schema documentation — all 4 sprint 1 stories add [sections] to config.toml — Priority: M (from /adversarial X-02)
+- [x] ✅ [Docs] Config schema documentation — docs/CONFIG_REFERENCE.md covers all 12 sections (2026-03-09)
 
 ### Deferred from /adversarial Sprint 2
 - [ ] 💡 [UI] Windows Terminal import in Add Host modal — Priority: L (from UX-03 /adversarial C-01)
@@ -53,7 +53,7 @@
 - [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
 
 ### Deferred from UX-09 /review
-- [ ] 🔧 [Hub] PUT /api/config/ui: add per-key validation for UI sections (C-08 completeness) — Priority: M (from /review F-002, partially fixed)
+- [x] ✅ [Hub] PUT /api/config/ui: per-key validation complete — all 24 keys × 7 sections validated (2026-03-09)
 - [ ] 🔧 [Web] SettingsPanel: toast notification on scope auto-fallback (SC-17) — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] settings store: dead else branch for top-level UI key → would 400 — Priority: L (from /review F-006)
 - [ ] 🔧 [Hub] PATCH /api/hosts/:id/profile + channels: add TERMINAL_PROFILE_KEYS validation — Priority: L (from /review F-007)
