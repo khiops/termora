@@ -272,6 +272,8 @@ export const useThemeStore = defineStore("theme", () => {
 		if (scrollbar.trackColor) {
 			root.setProperty("--nt-scrollbar-track", scrollbar.trackColor);
 		}
+		document.documentElement.classList.toggle("nt-scrollbar-hidden", scrollbar.style === "hidden");
+		window.dispatchEvent(new CustomEvent("nt:scrollbar-changed"));
 	}
 
 	/** Update appearance setting and persist via API. */

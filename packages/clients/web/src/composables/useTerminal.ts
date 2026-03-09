@@ -25,6 +25,7 @@ export function useTerminal(
 	const search = useTerminalSearch();
 	let channelId: string | null = null;
 	let resizeObserver: ResizeObserver | null = null;
+	let onScrollbarChanged: (() => void) | null = null;
 	let outputUnsubscribe: (() => void) | null = null;
 	let themeUnsubscribe: (() => void) | null = null;
 
@@ -129,6 +130,10 @@ export function useTerminal(
 			fitAddon.fit();
 		});
 		resizeObserver.observe(containerRef.value);
+		onScrollbarChanged = (): void => {
+			fitAddon.fit();
+		};
+		window.addEventListener("nt:scrollbar-changed", onScrollbarChanged);
 
 		// Terminal title change (OSC 0/2) → push to title stack
 		titleChangeDispose?.();
@@ -331,6 +336,10 @@ export function useTerminal(
 		themeUnsubscribe = null;
 		outputUnsubscribe?.();
 		outputUnsubscribe = null;
+		if (onScrollbarChanged) {
+			window.removeEventListener("nt:scrollbar-changed", onScrollbarChanged);
+			onScrollbarChanged = null;
+		}
 		resizeObserver?.disconnect();
 		resizeObserver = null;
 		search.dispose();

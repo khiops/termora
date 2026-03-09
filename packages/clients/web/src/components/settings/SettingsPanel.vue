@@ -215,19 +215,6 @@ watch(
 	scrollbar-color: var(--nt-scrollbar-thumb) var(--nt-scrollbar-track);
 }
 
-.settings-content::-webkit-scrollbar {
-	width: var(--nt-scrollbar-width);
-}
-
-.settings-content::-webkit-scrollbar-track {
-	background: var(--nt-scrollbar-track);
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-	background: var(--nt-scrollbar-thumb);
-	border-radius: 3px;
-}
-
 .settings-loading {
 	display: flex;
 	align-items: center;
