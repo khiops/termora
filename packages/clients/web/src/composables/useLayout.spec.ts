@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { effectScope } from "vue";
+import { effectScope, nextTick } from "vue";
 import { countPanes, useLayout } from "./useLayout.js";
 import type { PaneNode } from "./useLayout.js";
 
@@ -522,5 +522,77 @@ describe("findTabForChannel", () => {
 	it("returns null for unknown channel", () => {
 		openTabs("A");
 		expect(layout.findTabForChannel("ch-unknown")).toBeNull();
+	});
+});
+
+// -- reorderTab ----------------------------------------------------------------
+
+describe("reorderTab", () => {
+	it("moves tab B before tab A: [A,B,C] → [B,A,C]", () => {
+		openTabs("A", "B", "C");
+		layout.reorderTab(1, 0);
+		expect(layout.tabs.value.map((t) => t.channelId)).toEqual(["ch-B", "ch-A", "ch-C"]);
+	});
+
+	it("moves last tab to first: [A,B,C] → [C,A,B]", () => {
+		openTabs("A", "B", "C");
+		layout.reorderTab(2, 0);
+		expect(layout.tabs.value.map((t) => t.channelId)).toEqual(["ch-C", "ch-A", "ch-B"]);
+	});
+
+	it("moves first tab to last: [A,B,C] → [B,C,A]", () => {
+		openTabs("A", "B", "C");
+		layout.reorderTab(0, 2);
+		expect(layout.tabs.value.map((t) => t.channelId)).toEqual(["ch-B", "ch-C", "ch-A"]);
+	});
+
+	it("same index is a no-op", () => {
+		openTabs("A", "B", "C");
+		layout.reorderTab(1, 1);
+		expect(layout.tabs.value.map((t) => t.channelId)).toEqual(["ch-A", "ch-B", "ch-C"]);
+	});
+
+	it("active tab follows drag: active=B(1), reorder(1,0) → active=0", () => {
+		openTabs("A", "B", "C");
+		layout.setActiveTab(1); // B is active
+		layout.reorderTab(1, 0);
+		expect(layout.tabs.value[0]?.channelId).toBe("ch-B");
+		expect(layout.activeTabIndex.value).toBe(0);
+	});
+
+	it("active tab shifts left: active=C(2), reorder(0,2) → active=1", () => {
+		openTabs("A", "B", "C");
+		layout.setActiveTab(2); // C is active
+		layout.reorderTab(0, 2);
+		// A moved from before C to after C → C shifts left
+		expect(layout.activeTabIndex.value).toBe(1);
+	});
+
+	it("active tab shifts right: active=A(0), reorder(2,0) → active=1", () => {
+		openTabs("A", "B", "C");
+		layout.setActiveTab(0); // A is active
+		layout.reorderTab(2, 0);
+		// C moved from after A to before A → A shifts right
+		expect(layout.activeTabIndex.value).toBe(1);
+	});
+
+	it("out-of-range fromIndex is a no-op", () => {
+		openTabs("A", "B", "C");
+		const before = layout.tabs.value.map((t) => t.channelId);
+		layout.reorderTab(-1, 0);
+		expect(layout.tabs.value.map((t) => t.channelId)).toEqual(before);
+	});
+
+	it("persists to localStorage after reorder", async () => {
+		openTabs("A", "B", "C");
+		layout.reorderTab(1, 0);
+		// Flush the Vue watcher (deep watch runs post-flush)
+		await nextTick();
+		const stored = localStorage.getItem("nexterm:layout");
+		expect(stored).not.toBeNull();
+		if (!stored) return;
+		const parsed = JSON.parse(stored) as { tabs: { channelId: string }[] };
+		expect(parsed.tabs[0]?.channelId).toBe("ch-B");
+		expect(parsed.tabs[1]?.channelId).toBe("ch-A");
 	});
 });
