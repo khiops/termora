@@ -18,11 +18,18 @@
 				<div
 					class="badge"
 					:style="{
-						backgroundColor: getColorFromLabel(localHost.label),
+						backgroundColor: localHost.color || getColorFromLabel(localHost.label),
 					}"
 				>
-					<span class="badge-initials">{{
-						getInitials(localHost.label)
+					<img
+						v-if="localHost.iconType === 'image' && localHost.iconValue"
+						:src="localHost.iconValue"
+						class="host-icon-img"
+					/>
+					<span v-else class="badge-initials">{{
+						localHost.iconType === 'emoji' && localHost.iconValue
+							? localHost.iconValue
+							: getInitials(localHost.label)
 					}}</span>
 					<span
 						class="status-dot"
@@ -104,8 +111,15 @@
 									getColorFromLabel(host.label),
 							}"
 						>
-							<span class="badge-initials">{{
-								getInitials(host.label)
+							<img
+								v-if="host.iconType === 'image' && host.iconValue"
+								:src="host.iconValue"
+								class="host-icon-img"
+							/>
+							<span v-else class="badge-initials">{{
+								host.iconType === 'emoji' && host.iconValue
+									? host.iconValue
+									: getInitials(host.label)
 							}}</span>
 							<span
 								class="status-dot"
@@ -321,6 +335,13 @@ onMounted(() => {
 	color: var(--nt-bright-white);
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 	line-height: 1;
+}
+
+.host-icon-img {
+	width: 100%;
+	height: 100%;
+	border-radius: 50%;
+	object-fit: cover;
 }
 
 /* Status dot — bottom-right corner of badge */

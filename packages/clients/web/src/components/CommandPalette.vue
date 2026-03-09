@@ -52,8 +52,14 @@
 							@click="palette.execute(item)"
 							@mouseenter="palette.selectedIndex.value = palette.results.value.indexOf(item)"
 						>
-							<span class="palette-item-icon" aria-hidden="true">{{ item.icon }}</span>
-							<span class="palette-item-label">{{ item.label }}</span>
+							<span class="palette-item-icon" aria-hidden="true">
+							<img v-if="item.iconUrl" :src="item.iconUrl" class="palette-icon-img" />
+							<template v-else>{{ item.icon }}</template>
+						</span>
+							<span class="palette-item-text">
+								<span class="palette-item-label">{{ item.label }}</span>
+								<span v-if="item.description" class="palette-item-desc">{{ item.description }}</span>
+							</span>
 							<span class="palette-item-badge" :data-type="item.type">
 								{{ typeBadge(item.type) }}
 							</span>
@@ -73,7 +79,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from "vue";
-import { useCommandPalette, type PaletteItemType } from "../composables/useCommandPalette.js";
+import { useCommandPalette, type PaletteItem, type PaletteItemType } from "../composables/useCommandPalette.js";
 
 const palette = useCommandPalette();
 
@@ -94,22 +100,45 @@ watch(
 
 // ── Grouping ──────────────────────────────────────────────────────────────────
 
+type GroupKey = PaletteItemType | "recent";
+
 /**
  * Returns an ordered array of [groupKey, items] tuples so v-for can
  * iterate with fully-typed destructuring in the template.
+ *
+ * When query is empty and there are recent items, they appear first under
+ * a "Recent" heading (SC-21). The remaining items are grouped by type.
  */
-const groupedResults = computed((): [PaletteItemType, typeof palette.results.value][] => {
-	const map = new Map<PaletteItemType, typeof palette.results.value>();
-	for (const item of palette.results.value) {
+const groupedResults = computed((): [GroupKey, PaletteItem[]][] => {
+	const groups: [GroupKey, PaletteItem[]][] = [];
+
+	// Recent section (SC-21) — only shown on empty query / no prefix
+	const recent = palette.recentResults.value;
+	if (recent.length > 0) {
+		groups.push(["recent", recent]);
+	}
+
+	// Non-recent items grouped by type
+	const recentIds = new Set(recent.map((it) => it.id));
+	const remaining = palette.results.value.filter((it) => !recentIds.has(it.id));
+
+	const map = new Map<PaletteItemType, PaletteItem[]>();
+	for (const item of remaining) {
 		const bucket = map.get(item.type) ?? [];
 		bucket.push(item);
 		map.set(item.type, bucket);
 	}
-	return Array.from(map.entries()) as [PaletteItemType, typeof palette.results.value][];
+	for (const [type, items] of map.entries()) {
+		groups.push([type, items]);
+	}
+
+	return groups;
 });
 
-function groupLabel(type: PaletteItemType): string {
+function groupLabel(type: GroupKey): string {
 	switch (type) {
+		case "recent":
+			return "Recent";
 		case "host":
 			return "Hosts";
 		case "channel":
@@ -246,11 +275,36 @@ function typeBadge(type: PaletteItemType): string {
 	font-size: 14px;
 	flex-shrink: 0;
 	width: 20px;
+	height: 20px;
 	text-align: center;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.palette-icon-img {
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	object-fit: cover;
+}
+
+.palette-item-text {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 .palette-item-label {
-	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.palette-item-desc {
+	font-size: 11px;
+	color: var(--nt-text-secondary);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;

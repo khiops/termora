@@ -2,14 +2,6 @@
 
 ## In Progress
 
-### UX-11 — Connection Experience
-- [ ] 🟡 [Web] Block 1: Port placeholder + auth method UX (A3, A2)
-- [ ] [Web] Block 2: Quick connect parser (A1)
-- [ ] [Web] Block 3: Modal tabs refactor (B3)
-- [ ] [Web] Block 4: Host preview in modal (A4)
-- [ ] [Web] Block 5: Connection string in rail (B2)
-- [ ] [Web] Block 6: Command palette v2 — fuzzy, prefix, recent, Cmd+K (B1')
-
 ### UI/UX Sprint — Phase B (deferred)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
@@ -18,14 +10,8 @@
 
 ### Review Findings
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
-- [x] ✅ [UI] VacantPane: filter detached channels by hostId (2026-03-09)
-- [x] ✅ [UI] TerminalPane: channel?.hostId stale reference removed (2026-03-09)
-- [x] ✅ [UI] useLayout localStorage load: max-pane-count validation (INV-10) (2026-03-09)
-- [x] ✅ [Hub] session-manager.spec.ts: crash-loop 60s window reset test — fixed with vi.setSystemTime (2026-03-09)
 - [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
-- [x] ✅ [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable (2026-03-09)
-- [x] ✅ [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll unified via navigateMatches (2026-03-09)
 
 ### Deferred from /adversarial + /llm
 - [ ] 💡 [Agent] Configurable socket bind timeout (currently hardcoded 5s) — Priority: L (from /adversarial C-07)
@@ -45,12 +31,10 @@
 - [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
 
 ### Deferred from UX-07 /review
-- [x] ✅ [Hub] DRY: extract validateVisualProfileColors helper (2026-03-09)
 - [ ] 🔧 [Web] useVisualProfile getVisualProfile: shallow merge drops nested defaults — Priority: L (from /review F-003)
-- [x] ✅ [Web] VisualProfileSettings: unit tests for SC-04/SC-06 logic (38 tests) (2026-03-09)
 
 ### Deferred from /adversarial Sprint 1
-- [x] ✅ [Docs] Config schema documentation — docs/CONFIG_REFERENCE.md covers all 12 sections (2026-03-09)
+(Archived → docs/historic/done-2026-03.md)
 
 ### Deferred from /adversarial Sprint 2
 - [ ] 💡 [UI] Windows Terminal import in Add Host modal — Priority: L (from UX-03 /adversarial C-01)
@@ -61,7 +45,6 @@
 - [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
 
 ### Deferred from UX-09 /review
-- [x] ✅ [Hub] PUT /api/config/ui: per-key validation complete — all 24 keys × 7 sections validated (2026-03-09)
 - [ ] 🔧 [Web] SettingsPanel: toast notification on scope auto-fallback (SC-17) — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] settings store: dead else branch for top-level UI key → would 400 — Priority: L (from /review F-006)
 - [ ] 🔧 [Hub] PATCH /api/hosts/:id/profile + channels: add TERMINAL_PROFILE_KEYS validation — Priority: L (from /review F-007)
@@ -84,6 +67,10 @@
 - [ ] 💡 [Hub] Magic-number MIME validation beyond extension check for wallpaper uploads — Priority: L (from /llm review)
 - [ ] 💡 [Hub] Disk quota enforcement for wallpapers directory — Priority: L (from /llm review)
 - [ ] 💡 [Hub] Image bomb detection (pixel dimension limits) for wallpaper uploads — Priority: L (from /llm review)
+
+### UX-11 user feedback
+- [ ] 💡 [Hub+Web] SSH key path file picker — requires server-side file browser API (GET /api/files?dir=~/.ssh), web <input type="file"> gives client files not hub files — Priority: M
+- [ ] 💡 [Hub+Web] Host icon image upload — same pattern as wallpapers: POST /api/icons, serve at /public/icons/, DnD in modal — Priority: M
 
 ### Phase 2 (follows AGENT-DAEMON)
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1

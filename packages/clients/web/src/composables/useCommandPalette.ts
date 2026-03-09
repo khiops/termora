@@ -3,7 +3,9 @@ import { useAuthStore } from "../stores/auth.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
 import { useWriteLockStore } from "../stores/writelock.js";
+import { formatConnectionString } from "../utils/host-display.js";
 import { useLayout } from "./useLayout.js";
+import { useRecentPaletteItems } from "./useRecentPaletteItems.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,11 +14,81 @@ export type PaletteItemType = "host" | "channel" | "action";
 export interface PaletteItem {
 	id: string;
 	label: string;
+	description?: string | undefined; // connection info, action description (SC-20)
 	type: PaletteItemType;
 	icon: string;
+	/** URL for image-type host icons (overrides icon text when set) */
+	iconUrl?: string | undefined;
 	shortcut?: string;
 	/** Opaque payload used by execute() */
 	payload?: unknown;
+}
+
+// ─── Fuzzy Scoring Constants (INV-08) ─────────────────────────────────────────
+
+const EXACT_MATCH_SCORE = 1000;
+const PREFIX_MATCH_SCORE = 500;
+const SUBSTRING_MATCH_SCORE = 200;
+const FUZZY_MATCH_BASE = 10;
+const WORD_BOUNDARY_BONUS = 20;
+
+/**
+ * Character-by-character fuzzy match. No regex on user input (INV-08).
+ * Returns 0 for no match, higher scores for better matches (SC-15).
+ * Scores are deterministic for the same (query, text) pair (INV-04).
+ */
+export function fuzzyMatch(query: string, text: string): number {
+	if (!query) return 0;
+	const q = query.toLowerCase();
+	const t = text.toLowerCase();
+
+	// Exact match
+	if (t === q) return EXACT_MATCH_SCORE;
+
+	// Prefix match
+	if (t.startsWith(q)) return PREFIX_MATCH_SCORE + q.length;
+
+	// Substring match
+	const subIdx = t.indexOf(q);
+	if (subIdx !== -1) return SUBSTRING_MATCH_SCORE + (100 - subIdx);
+
+	// Fuzzy: character-by-character
+	let score = 0;
+	let qi = 0;
+	for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+		if (t[ti] === q[qi]) {
+			score += FUZZY_MATCH_BASE + (100 - ti);
+			// Word boundary bonus (SC-19b)
+			if (ti === 0 || t[ti - 1] === "-" || t[ti - 1] === "_" || t[ti - 1] === ".") {
+				score += WORD_BOUNDARY_BONUS;
+			}
+			qi++;
+		}
+	}
+
+	// All query chars must be found
+	return qi === q.length ? score : 0;
+}
+
+// ─── Prefix parsing (INV-06) ──────────────────────────────────────────────────
+
+interface PrefixResult {
+	prefix: PaletteItemType | null;
+	searchQuery: string;
+}
+
+function parsePrefix(raw: string): PrefixResult {
+	if (raw.startsWith(">")) return { prefix: "action", searchQuery: raw.slice(1).trim() };
+	if (raw.startsWith("@")) return { prefix: "host", searchQuery: raw.slice(1).trim() };
+	if (raw.startsWith("#")) return { prefix: "channel", searchQuery: raw.slice(1).trim() };
+	return { prefix: null, searchQuery: raw.trim() };
+}
+
+// ─── Internal scored item ─────────────────────────────────────────────────────
+
+interface ScoredItem {
+	item: PaletteItem;
+	score: number;
 }
 
 // ─── Module-level singleton state (one palette across the whole app) ──────────
@@ -24,6 +96,9 @@ export interface PaletteItem {
 const isOpen = ref(false);
 const query = ref("");
 const selectedIndex = ref(0);
+
+// Module-level callback for external actions (add-host, settings, etc.)
+const onExternalAction = ref<((actionId: string) => void) | null>(null);
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -33,83 +108,182 @@ export function useCommandPalette() {
 	const writeLockStore = useWriteLockStore();
 	const authStore = useAuthStore();
 	const layout = useLayout();
+	const { recentIds, pushRecent } = useRecentPaletteItems();
 
 	// ── Result computation ────────────────────────────────────────────────────
 
 	const results = computed<PaletteItem[]>(() => {
-		const q = query.value.trim().toLowerCase();
-
-		const hostItems: PaletteItem[] = hostsStore.sortedHosts
-			.filter((h) => q === "" || h.label.toLowerCase().includes(q))
-			.map((h) => ({
-				id: `host:${h.id}`,
-				label: h.label,
-				type: "host" as const,
-				icon: "🖥",
-				payload: h.id,
-			}));
-
-		const channelItems: PaletteItem[] = channelsStore.channels
-			.filter((c) => q === "" || (c.title ?? "").toLowerCase().includes(q))
-			.map((c) => ({
-				id: `channel:${c.id}`,
-				label: c.title ?? `Terminal ${c.id.slice(-8)}`,
-				type: "channel" as const,
-				icon: "📟",
-				payload: c.id,
-			}));
+		const raw = query.value;
+		const { prefix, searchQuery } = parsePrefix(raw);
+		const q = searchQuery.toLowerCase();
 
 		// Determine current write-lock state for the active channel.
-		// writeLockStore.isWriter is a Pinia-unwrapped computed — call it directly.
 		const activeChannelId = channelsStore.selectedChannelId;
 		const holdsLock = activeChannelId !== null && writeLockStore.isWriter(activeChannelId);
 
-		const builtinActions: PaletteItem[] = (
-			[
+		const scored: ScoredItem[] = [];
+
+		// ── Hosts (SC-16, SC-19) ──────────────────────────────────────────────
+		if (prefix === null || prefix === "host") {
+			for (const h of hostsStore.sortedHosts) {
+				// Search both label and sshHost (SC-19)
+				const searchText = h.label + (h.sshHost ? ` ${h.sshHost}` : "");
+				const score = q ? fuzzyMatch(q, searchText) : 1;
+				if (score > 0) {
+					// Build description (SC-20)
+					const desc = h.type === "ssh" ? formatConnectionString(h) : "Local";
+					const hostIcon = h.iconType === "emoji" && h.iconValue ? h.iconValue : "🖥";
+					const hostIconUrl = h.iconType === "image" && h.iconValue ? h.iconValue : undefined;
+					scored.push({
+						item: {
+							id: `host:${h.id}`,
+							label: h.label,
+							description: desc || undefined,
+							type: "host",
+							icon: hostIcon,
+							...(hostIconUrl !== undefined && { iconUrl: hostIconUrl }),
+							payload: h.id,
+						},
+						score,
+					});
+				}
+			}
+		}
+
+		// ── Channels (SC-18) ──────────────────────────────────────────────────
+		if (prefix === null || prefix === "channel") {
+			for (const c of channelsStore.channels) {
+				const title = c.title ?? `Terminal ${c.id.slice(-8)}`;
+				const score = q ? fuzzyMatch(q, title) : 1;
+				if (score > 0) {
+					scored.push({
+						item: {
+							id: `channel:${c.id}`,
+							label: title,
+							type: "channel",
+							icon: "📟",
+							payload: c.id,
+						},
+						score,
+					});
+				}
+			}
+		}
+
+		// ── Actions (SC-17, SC-22, SC-23) ────────────────────────────────────
+		if (prefix === null || prefix === "action") {
+			const actions: PaletteItem[] = [
 				{
 					id: "action:new-channel",
 					label: "New Channel",
-					type: "action" as const,
+					type: "action",
 					icon: "⊕",
 					shortcut: "Ctrl+T",
 				},
 				{
 					id: "action:split-right",
 					label: "Split Right",
-					type: "action" as const,
+					type: "action",
 					icon: "⬌",
 					shortcut: "Ctrl+\\",
 				},
 				{
 					id: "action:split-down",
 					label: "Split Down",
-					type: "action" as const,
+					type: "action",
 					icon: "⬍",
 					shortcut: "Ctrl+-",
 				},
 				{
 					id: "action:close-tab",
 					label: "Close Tab",
-					type: "action" as const,
+					type: "action",
 					icon: "✕",
 					shortcut: "Ctrl+W",
 				},
 				{
 					id: "action:pairing-code",
 					label: "Generate Pairing Code",
-					type: "action" as const,
+					type: "action",
 					icon: "🔗",
 				},
 				{
 					id: "action:toggle-writelock",
 					label: holdsLock ? "Release Write Lock" : "Claim Write Lock",
-					type: "action" as const,
+					type: "action",
 					icon: holdsLock ? "🔓" : "🔒",
 				},
-			] as PaletteItem[]
-		).filter((a) => q === "" || a.label.toLowerCase().includes(q));
+				// New actions (SC-22/23)
+				{
+					id: "action:add-host",
+					label: "Add Host",
+					type: "action",
+					icon: "➕",
+				},
+				{
+					id: "action:settings",
+					label: "Settings",
+					type: "action",
+					icon: "⚙",
+				},
+				{
+					id: "action:ssh-import",
+					label: "Import SSH Config",
+					type: "action",
+					icon: "📥",
+				},
+				{
+					id: "action:toggle-sidebar",
+					label: "Toggle Sidebar",
+					type: "action",
+					icon: "◧",
+				},
+			];
 
-		return [...hostItems, ...channelItems, ...builtinActions];
+			for (const a of actions) {
+				const score = q ? fuzzyMatch(q, a.label) : 1;
+				if (score > 0) {
+					scored.push({ item: a, score });
+				}
+			}
+		}
+
+		// Sort by score descending (INV-04: deterministic)
+		scored.sort((a, b) => b.score - a.score);
+
+		// When query is empty and no prefix, recent items float to the top (SC-21)
+		if (!q && prefix === null && recentIds.value.length > 0) {
+			const allItems = scored.map((s) => s.item);
+			const recentSet = new Set(recentIds.value);
+
+			// Filter for items whose IDs are in recent list (SC-24b: deletes are filtered)
+			const recentItems = recentIds.value
+				.map((rid) => allItems.find((it) => it.id === rid))
+				.filter((it): it is PaletteItem => it !== undefined);
+
+			const remainingItems = allItems.filter((it) => !recentSet.has(it.id));
+
+			return [...recentItems, ...remainingItems];
+		}
+
+		return scored.map((s) => s.item);
+	});
+
+	// ── Recent items section (exposed for component "Recent" heading) ──────────
+
+	const recentResults = computed<PaletteItem[]>(() => {
+		const raw = query.value;
+		const { prefix, searchQuery } = parsePrefix(raw);
+		const q = searchQuery.toLowerCase();
+
+		// Only show recent section on empty query with no prefix
+		if (q || prefix !== null) return [];
+
+		const allIds = new Set(results.value.map((it) => it.id));
+		return recentIds.value
+			.filter((rid) => allIds.has(rid))
+			.map((rid) => results.value.find((it) => it.id === rid))
+			.filter((it): it is PaletteItem => it !== undefined);
 	});
 
 	// ── Navigation helpers ────────────────────────────────────────────────────
@@ -152,6 +326,8 @@ export function useCommandPalette() {
 	// ── Execute ───────────────────────────────────────────────────────────────
 
 	function execute(item: PaletteItem): void {
+		// Track in recent items (INV-07)
+		pushRecent(item.id);
 		close();
 
 		switch (item.type) {
@@ -218,7 +394,6 @@ export function useCommandPalette() {
 
 			case "action:pairing-code": {
 				// Re-open pairing dialog by clearing the token.
-				// The PairingScreen will appear and let the user generate a new code.
 				authStore.clearToken();
 				break;
 			}
@@ -235,7 +410,12 @@ export function useCommandPalette() {
 			}
 
 			default:
-				console.warn("[CommandPalette] unknown action:", actionId);
+				// Delegate to external handler (add-host, settings, ssh-import, toggle-sidebar)
+				if (onExternalAction.value !== null) {
+					onExternalAction.value(actionId);
+				} else {
+					console.warn("[CommandPalette] unknown action:", actionId);
+				}
 		}
 	}
 
@@ -263,7 +443,9 @@ export function useCommandPalette() {
 		isOpen,
 		query,
 		results,
+		recentResults,
 		selectedIndex,
+		onExternalAction,
 		open,
 		close,
 		toggle,

@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   adversarial_applied: true
   llm_reviewed: true
   scope: web

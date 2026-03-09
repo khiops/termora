@@ -22,18 +22,43 @@ function hashString(s: string): number {
  * Return the first letter of `label` uppercased.
  * Falls back to "?" when the label is empty.
  */
+/**
+ * Return initials from `label`:
+ * - Multi-word (split on `-`, `_`, space, `.`): first letter of each of first 2 words, uppercased.
+ * - Single word: first 2 chars uppercased.
+ * - Empty / whitespace-only: "?".
+ */
 export function getInitials(label: string): string {
 	const trimmed = label.trim();
-	if (trimmed.length === 0) return "?";
-	return (trimmed[0] ?? "?").toUpperCase();
+	if (!trimmed) return "?";
+	const words = trimmed.split(/[-_\s.]+/).filter(Boolean);
+	if (words.length >= 2) {
+		return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? "")).toUpperCase();
+	}
+	return trimmed.slice(0, 2).toUpperCase();
 }
 
 /**
- * Return a deterministic HSL CSS color string derived from `label`.
+ * Convert an HSL color (H in degrees, S and L as 0–1 fractions) to a `#rrggbb` hex string.
+ */
+function hslToHex(h: number, s: number, l: number): string {
+	const a = s * Math.min(l, 1 - l);
+	const f = (n: number): string => {
+		const k = (n + h / 30) % 12;
+		const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+		return Math.round(255 * color)
+			.toString(16)
+			.padStart(2, "0");
+	};
+	return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Return a deterministic hex CSS color string derived from `label`.
  * Saturation is fixed at 65 %, lightness at 52 % — readable on a dark background
- * without being garish.
+ * without being garish. Returns hex so it is compatible with `<input type="color">`.
  */
 export function getColorFromLabel(label: string): string {
 	const hue = HUE_PALETTE[hashString(label) % HUE_PALETTE.length] ?? 210;
-	return `hsl(${hue}, 65%, 52%)`;
+	return hslToHex(hue, 0.65, 0.52);
 }

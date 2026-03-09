@@ -1,13 +1,15 @@
 import type { Host, SshConfigEntry } from "@nexterm/shared";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAuthStore } from "../stores/auth.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { resolveEmojiShortcode } from "../utils/emoji-shortcodes.js";
+import { getInitials } from "./useHostIcon.js";
 
 export interface HostFormData {
 	label: string;
 	type: "local" | "ssh";
 	sshHost: string;
-	sshPort: number;
+	sshPort: number | undefined;
 	sshUser: string;
 	sshAuth: "agent" | "key" | "password";
 	sshKeyPath: string;
@@ -31,7 +33,7 @@ export function useHostForm(editHost?: Host) {
 		label: editHost?.label ?? "",
 		type: editHost?.type ?? "ssh",
 		sshHost: editHost?.sshHost ?? "",
-		sshPort: editHost?.sshPort ?? 22,
+		sshPort: editHost?.sshPort ?? undefined,
 		sshUser: editHost?.sshUser ?? "",
 		sshAuth: editHost?.sshAuth ?? "key",
 		sshKeyPath: editHost?.sshKeyPath ?? "",
@@ -44,6 +46,16 @@ export function useHostForm(editHost?: Host) {
 		historyRetentionDays: editHost?.historyRetentionDays ?? 30,
 		trustRemoteHints: editHost?.trustRemoteHints ?? "apply",
 	});
+
+	// INV-13: clear key path when switching away from key auth
+	watch(
+		() => form.value.sshAuth,
+		(auth) => {
+			if (auth !== "key") {
+				form.value.sshKeyPath = "";
+			}
+		},
+	);
 
 	// Source: "manual" or "ssh-config"
 	const source = ref<"manual" | "ssh-config">("manual");
@@ -69,6 +81,12 @@ export function useHostForm(editHost?: Host) {
 		const existing = hostsStore.hosts.find((h) => h.label.toLowerCase() === label.toLowerCase());
 		if (existing && (!isEdit || existing.id !== editHost?.id)) return "Host name already exists";
 		return null;
+	});
+
+	const previewInitials = computed(() => {
+		const label = form.value.label.trim();
+		if (!label) return "";
+		return getInitials(label);
 	});
 
 	const canSave = computed(() => {
@@ -134,7 +152,8 @@ export function useHostForm(editHost?: Host) {
 					},
 					body: JSON.stringify({
 						hostname: form.value.sshHost,
-						port: form.value.sshPort,
+						...(form.value.sshPort !== undefined &&
+							form.value.sshPort > 0 && { port: form.value.sshPort }),
 						ssh_auth: form.value.sshAuth,
 						ssh_key_path: form.value.sshKeyPath || undefined,
 						ssh_user: form.value.sshUser || undefined,
@@ -166,7 +185,8 @@ export function useHostForm(editHost?: Host) {
 				type: form.value.type,
 				...(form.value.type === "ssh" && {
 					ssh_host: form.value.sshHost,
-					ssh_port: form.value.sshPort,
+					...(form.value.sshPort !== undefined &&
+						form.value.sshPort > 0 && { ssh_port: form.value.sshPort }),
 					...(form.value.sshUser && { ssh_user: form.value.sshUser }),
 					ssh_auth: form.value.sshAuth,
 					...(form.value.sshAuth === "key" && {
@@ -174,7 +194,12 @@ export function useHostForm(editHost?: Host) {
 					}),
 				}),
 				icon_type: form.value.iconType,
-				...(form.value.iconValue && { icon_value: form.value.iconValue }),
+				...(form.value.iconValue && {
+					icon_value:
+						form.value.iconType === "emoji"
+							? resolveEmojiShortcode(form.value.iconValue)
+							: form.value.iconValue,
+				}),
 				...(form.value.color && { color: form.value.color }),
 				...(group !== undefined && { host_group: group }),
 				...(form.value.defaultShell && {
@@ -195,6 +220,73 @@ export function useHostForm(editHost?: Host) {
 		}
 	}
 
+	// Quick connect parser (A1)
+	const quickConnect = ref("");
+
+	function parseConnectionString(input: string): {
+		host?: string | undefined;
+		user?: string | undefined;
+		port?: number | undefined;
+	} {
+		let str = input.trim();
+		if (!str) return {};
+
+		// Strip ssh:// prefix (INV-14)
+		if (str.startsWith("ssh://")) {
+			str = str.slice(6);
+		}
+
+		let user: string | undefined;
+		let host: string | undefined;
+		let port: number | undefined;
+
+		// Extract user@ prefix (before any brackets or host)
+		const atIdx = str.indexOf("@");
+		if (atIdx > 0) {
+			user = str.slice(0, atIdx);
+			str = str.slice(atIdx + 1);
+		}
+
+		// Check for IPv6 bracket syntax: [addr]:port or [addr]
+		if (str.startsWith("[")) {
+			const closeBracket = str.indexOf("]");
+			if (closeBracket > 0) {
+				host = str.slice(1, closeBracket);
+				const after = str.slice(closeBracket + 1);
+				if (after.startsWith(":")) {
+					const p = Number.parseInt(after.slice(1), 10);
+					if (p > 0 && p <= 65535) port = p;
+				}
+			}
+		} else {
+			// Regular host:port or host
+			const colonIdx = str.lastIndexOf(":");
+			if (colonIdx > 0) {
+				const portStr = str.slice(colonIdx + 1);
+				const p = Number.parseInt(portStr, 10);
+				if (!Number.isNaN(p) && p > 0 && p <= 65535) {
+					host = str.slice(0, colonIdx);
+					port = p;
+				} else {
+					// Invalid port — use host part only, leave port undefined
+					host = str.slice(0, colonIdx);
+				}
+			} else {
+				host = str;
+			}
+		}
+
+		return { host, user, port };
+	}
+
+	// Watch quick connect input and auto-fill form fields (INV-02, INV-15)
+	watch(quickConnect, (val) => {
+		const parsed = parseConnectionString(val);
+		if (parsed.host !== undefined) form.value.sshHost = parsed.host;
+		if (parsed.user !== undefined) form.value.sshUser = parsed.user;
+		if (parsed.port !== undefined) form.value.sshPort = parsed.port;
+	});
+
 	return {
 		form,
 		isEdit,
@@ -208,11 +300,14 @@ export function useHostForm(editHost?: Host) {
 		saving,
 		labelError,
 		canSave,
+		previewInitials,
 		newGroupName,
 		showNewGroup,
 		loadSshConfig,
 		applySshConfigEntry,
 		testConnectionInline,
 		save,
+		quickConnect,
+		parseConnectionString,
 	};
 }

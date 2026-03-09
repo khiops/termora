@@ -17,6 +17,7 @@ export interface SettingDefinition {
 	min?: number;
 	max?: number;
 	step?: number;
+	default?: string | number | boolean | undefined;
 }
 
 /** UI config sub-sections — these route through PUT /api/config/ui */
