@@ -31,6 +31,9 @@ export interface Tab {
 
 const LAYOUT_KEY = "nexterm:layout";
 
+/** Hard invariant INV-10: maximum panes per tab. Not user-configurable. */
+const MAX_PANE_COUNT = 4;
+
 interface PersistedState {
 	tabs: Tab[];
 	activeTabIndex: number;
@@ -68,7 +71,7 @@ function loadFromStorage(): PersistedState | null {
 			let tree = state.layouts[key];
 			if (tree !== null && tree !== undefined) {
 				tree = ensurePaneIds(tree);
-				tree = truncateToMaxPanes(tree, 4);
+				tree = truncateToMaxPanes(tree, MAX_PANE_COUNT);
 				state.layouts[key] = tree;
 			}
 		}

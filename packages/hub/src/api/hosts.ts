@@ -187,7 +187,7 @@ async function testSshConnectivity(
 	});
 }
 
-function validateVisualProfileColors(vp: Record<string, unknown>): string | null {
+function validateAndClampVisualProfile(vp: Record<string, unknown>): string | null {
 	const hexRe = /^#[0-9a-fA-F]{6}$/;
 	const colorsToCheck = [
 		(vp.banner as Record<string, unknown> | undefined)?.bgColor,
@@ -229,7 +229,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				const profileObj =
 					typeof body.profile_json === "string" ? JSON.parse(body.profile_json) : body.profile_json;
 				if (profileObj?.visualProfile) {
-					const colorError = validateVisualProfileColors(profileObj.visualProfile);
+					const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
 					if (colorError) {
 						return reply.code(400).send({
 							error: { code: "VALIDATION_ERROR", message: colorError },
@@ -373,7 +373,7 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 							? JSON.parse(body.profile_json)
 							: body.profile_json;
 					if (profileObj?.visualProfile) {
-						const colorError = validateVisualProfileColors(profileObj.visualProfile);
+						const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
 						if (colorError) {
 							return reply.code(400).send({
 								error: { code: "VALIDATION_ERROR", message: colorError },
