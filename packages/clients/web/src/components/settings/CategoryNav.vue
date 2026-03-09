@@ -27,6 +27,7 @@ const ALL_CATEGORIES: CategoryDef[] = [
 	{ id: "wallpaper", label: "Wallpaper", scopes: ["global", "host", "channel"] },
 	{ id: "terminal", label: "Terminal", scopes: ["global", "host", "channel"] },
 	{ id: "tabs", label: "Tabs", scopes: ["global"] },
+	{ id: "channels", label: "Channels", scopes: ["global"] },
 	{ id: "panes", label: "Panes", scopes: ["global"] },
 	{ id: "search", label: "Search", scopes: ["global"] },
 	{ id: "startup", label: "Startup", scopes: ["global"] },
