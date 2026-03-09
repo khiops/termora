@@ -68,6 +68,7 @@ function makeCascade(overrides?: Partial<CascadeResponse>): CascadeResponse {
 					scrollbarMarkers: true,
 					historySize: 20,
 				},
+				layout: { hostRailWidth: 48, sidebarWidth: 200 },
 			},
 			global: {
 				tabs: { closeButton: false },
@@ -97,6 +98,7 @@ function makeCascade(overrides?: Partial<CascadeResponse>): CascadeResponse {
 					scrollbarMarkers: true,
 					historySize: 20,
 				},
+				layout: { hostRailWidth: 48, sidebarWidth: 200 },
 			},
 		},
 		appearance: {

@@ -67,6 +67,11 @@ function injectFontFaces(families: FontFamily[]): void {
  * Config store — holds the resolved terminal profile and available fonts.
  * Fetches both from the hub on load.
  */
+interface LayoutConfig {
+	hostRailWidth: number;
+	sidebarWidth: number;
+}
+
 interface UiConfig {
 	onChannelDead: "close" | "readonly";
 	tabs?: TabsConfig;
@@ -76,6 +81,7 @@ interface UiConfig {
 	title?: TitleConfig;
 	search?: SearchConfig;
 	notifications?: NotificationConfig;
+	layout?: LayoutConfig;
 }
 
 export const useConfigStore = defineStore("config", () => {

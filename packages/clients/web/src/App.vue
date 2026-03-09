@@ -231,13 +231,27 @@ import GroupActionDialog from "./components/GroupActionDialog.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
+const configStore = useConfigStore();
 
 // ─── Resizable panels ────────────────────────────────────────────────────────
+
+function saveLayoutWidth(key: string, value: number): void {
+	if (authStore.token === null) return;
+	void fetch("/api/config/ui", {
+		method: "PUT",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${authStore.token}`,
+		},
+		body: JSON.stringify({ layout: { [key]: value } }),
+	}).then(() => configStore.loadUiConfig());
+}
 
 const railResize = useResizable({
 	initialWidth: 48,
 	minWidth: 48,
 	maxWidth: 120,
+	onResizeEnd: (width) => saveLayoutWidth("hostRailWidth", width),
 });
 
 const sidebarResize = useResizable({
@@ -245,7 +259,28 @@ const sidebarResize = useResizable({
 	minWidth: 140,
 	maxWidth: 400,
 	collapseThreshold: 80,
+	onResizeEnd: (width) => saveLayoutWidth("sidebarWidth", width),
 });
+
+// Apply persisted layout widths once the config loads (after auth).
+watch(
+	() => configStore.uiConfig.layout,
+	(layout) => {
+		if (!layout) return;
+		if (layout.hostRailWidth > 0) {
+			railResize.width.value = layout.hostRailWidth;
+		}
+		const sw = layout.sidebarWidth;
+		if (sw === 0) {
+			sidebarResize.collapsed.value = true;
+			sidebarResize.width.value = 0;
+		} else if (sw > 0) {
+			sidebarResize.collapsed.value = false;
+			sidebarResize.width.value = sw;
+		}
+	},
+	{ once: true },
+);
 
 const layoutStyle = computed(() => ({
 	"--rail-w": `${railResize.width.value}px`,
@@ -253,7 +288,6 @@ const layoutStyle = computed(() => ({
 }));
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
-const configStore = useConfigStore();
 const themeStore = useThemeStore();
 const layout = useLayout();
 const multiPaneSearch = useMultiPaneSearch();

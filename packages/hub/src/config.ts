@@ -20,10 +20,12 @@ import {
 	deepMerge,
 } from "@nexterm/shared";
 import { DEFAULT_APPEARANCE } from "@nexterm/shared";
+import { DEFAULT_LAYOUT_CONFIG } from "@nexterm/shared";
 import type {
 	AppearanceConfig,
 	CascadeResponse,
 	ChannelsConfig,
+	LayoutConfig,
 	PanesConfig,
 	SearchConfig,
 	StartupConfig,
@@ -128,6 +130,9 @@ export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
 	historySize: 20,
 };
 
+export { DEFAULT_LAYOUT_CONFIG };
+export type { LayoutConfig };
+
 export const DEFAULT_UI_CONFIG: UiConfig = {
 	onChannelDead: "readonly",
 	tabs: { ...DEFAULT_TABS_CONFIG },
@@ -136,6 +141,7 @@ export const DEFAULT_UI_CONFIG: UiConfig = {
 	startup: { ...DEFAULT_STARTUP_CONFIG },
 	title: { ...DEFAULT_TITLE_CONFIG },
 	search: { ...DEFAULT_SEARCH_CONFIG },
+	layout: { ...DEFAULT_LAYOUT_CONFIG },
 };
 
 /**
@@ -151,6 +157,7 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		startup: { ...DEFAULT_STARTUP_CONFIG },
 		title: { ...DEFAULT_TITLE_CONFIG },
 		search: { ...DEFAULT_SEARCH_CONFIG },
+		layout: { ...DEFAULT_LAYOUT_CONFIG },
 	};
 
 	// ── [ui] section ────────────────────────────────────────────────────
@@ -280,6 +287,18 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		}
 		if (typeof raw.history_size === "number" && raw.history_size >= 1) {
 			config.search.historySize = raw.history_size;
+		}
+	}
+
+	// ── [layout] section ────────────────────────────────────────────────
+	const layoutSection = parsed.layout;
+	if (layoutSection != null && typeof layoutSection === "object") {
+		const raw = layoutSection as Record<string, unknown>;
+		if (typeof raw.host_rail_width === "number" && raw.host_rail_width >= 0) {
+			config.layout.hostRailWidth = raw.host_rail_width;
+		}
+		if (typeof raw.sidebar_width === "number" && raw.sidebar_width >= 0) {
+			config.layout.sidebarWidth = raw.sidebar_width;
 		}
 	}
 

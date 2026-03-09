@@ -250,7 +250,20 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 
 // ─── UI behavioral config (combined) ─────────────────────────────────────────
 
-/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search] in config.toml). */
+/** Persisted layout dimensions for resizable panels. */
+export interface LayoutConfig {
+	/** Host rail width in pixels. Default: 48. */
+	hostRailWidth: number;
+	/** Channel sidebar width in pixels. 0 means collapsed. Default: 200. */
+	sidebarWidth: number;
+}
+
+export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
+	hostRailWidth: 48,
+	sidebarWidth: 200,
+};
+
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search], [layout] in config.toml). */
 export interface UiConfig {
 	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
 	onChannelDead: "close" | "readonly";
@@ -266,6 +279,8 @@ export interface UiConfig {
 	title: TitleConfig;
 	/** Search behavior configuration. */
 	search: SearchConfig;
+	/** Persisted panel layout dimensions. */
+	layout: LayoutConfig;
 }
 
 // ─── Cascade endpoint response ────────────────────────────────────────────────
@@ -313,6 +328,7 @@ export const UI_CONFIG_SECTIONS = [
 	"startup",
 	"title",
 	"search",
+	"layout",
 ] as const;
 
 /** Per-section key whitelists — derived from the TypeScript interfaces above. */
@@ -347,6 +363,8 @@ export const SEARCH_CONFIG_KEYS = [
 	"historySize",
 ] as const;
 
+export const LAYOUT_CONFIG_KEYS = ["hostRailWidth", "sidebarWidth"] as const;
+
 /** Map from UI section name to its allowed keys. */
 export const UI_SECTION_KEYS: Record<string, readonly string[]> = {
 	tabs: TABS_CONFIG_KEYS,
@@ -355,4 +373,5 @@ export const UI_SECTION_KEYS: Record<string, readonly string[]> = {
 	startup: STARTUP_CONFIG_KEYS,
 	title: TITLE_CONFIG_KEYS,
 	search: SEARCH_CONFIG_KEYS,
+	layout: LAYOUT_CONFIG_KEYS,
 };
