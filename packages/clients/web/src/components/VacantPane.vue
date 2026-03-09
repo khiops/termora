@@ -45,7 +45,9 @@ const channelsStore = useChannelsStore();
  */
 const detachedChannels = computed(() => {
 	if (!props.hostId) return [];
-	return channelsStore.channels.filter((c) => c.status !== "dead");
+	return channelsStore.channels.filter(
+		(c) => c.status !== "dead" && channelsStore.channelHostMap.get(c.id) === props.hostId,
+	);
 });
 </script>
 

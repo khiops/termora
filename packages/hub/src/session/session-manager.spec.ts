@@ -1310,10 +1310,7 @@ describe("SessionManager", () => {
 			}
 		});
 
-		// TODO: fix timer interaction — vi.advanceTimersByTimeAsync(61_000) triggers
-		// MockLocalAgent close → _warmRestartLocal re-entry → infinite timer cascade.
-		// The crash-loop protection logic itself works (covered by the >3 restart test).
-		it.skip("crash-loop protection: window resets after 60s", async () => {
+		it("crash-loop protection: window resets after 60s", async () => {
 			vi.useFakeTimers();
 			try {
 				const { MetaDAL } = await import("../storage/meta.js");
@@ -1350,8 +1347,11 @@ describe("SessionManager", () => {
 
 				expect(smAny.restartTracking.get(host.id)?.count).toBe(3);
 
-				// Advance past the 60s window
-				await vi.advanceTimersByTimeAsync(61_000);
+				// Advance Date.now() past the 60s window WITHOUT firing any timers.
+				// vi.advanceTimersByTimeAsync(61_000) would trigger MockLocalAgent's
+				// close event → _warmRestartLocal re-entry → infinite timer cascade.
+				// vi.setSystemTime only moves the clock — no event-loop callbacks fire.
+				vi.setSystemTime(Date.now() + 61_000);
 
 				// 4th restart — but window has reset, so count becomes 1 again
 				p = smAny._warmRestartLocal(host.id, sessionId);

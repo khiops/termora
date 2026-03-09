@@ -15,6 +15,47 @@ interface ProfilePatchBody {
 
 const APPEARANCE_KEYS = ["theme", "autoSwitch", "opacity", "scrollbar"] as const;
 
+const UI_VALUE_VALIDATORS: Record<string, Record<string, (v: unknown) => boolean>> = {
+	tabs: {
+		closeButton: (v) => typeof v === "boolean",
+		newTabPosition: (v) => v === "end" || v === "afterActive",
+		confirmCloseAll: (v) => typeof v === "boolean",
+		confirmCloseOthers: (v) => typeof v === "boolean",
+	},
+	panes: {
+		maxPanes: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1,
+		defaultSplitDirection: (v) => v === "horizontal" || v === "vertical",
+	},
+	channels: {
+		defaultShell: (v) => typeof v === "string",
+		defaultGroupName: (v) => typeof v === "string",
+		autoGroup: (v) => v === "none" || v === "first",
+	},
+	startup: {
+		autoOpenWelcome: (v) => typeof v === "boolean",
+	},
+	title: {
+		source: (v) => v === "dynamic" || v === "static",
+		fallback: (v) => v === "channel" || v === "shell" || v === "custom",
+		fallbackCustom: (v) => typeof v === "string",
+		maxLength: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1,
+		truncation: (v) => v === "end" || v === "middle" || v === "start",
+		prefix: (v) => typeof v === "string",
+		windowTitle: (v) => typeof v === "boolean",
+		windowFormat: (v) => typeof v === "string",
+	},
+	search: {
+		position: (v) => v === "top-right" || v === "bottom-right" || v === "bottom-bar",
+		highlightOnClose: (v) => v === "clear" || v === "fade" || v === "persist",
+		scrollbarMarkers: (v) => typeof v === "boolean",
+		historySize: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 100,
+	},
+	layout: {
+		hostRailWidth: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0,
+		sidebarWidth: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0,
+	},
+};
+
 export function registerConfigRoutes(
 	server: FastifyInstance,
 	metaDal: MetaDAL,
@@ -100,12 +141,21 @@ export function registerConfigRoutes(
 				// Validate individual keys within the section
 				const allowedKeys = UI_SECTION_KEYS[section];
 				if (allowedKeys) {
-					for (const key of Object.keys(sectionData as Record<string, unknown>)) {
+					for (const [key, value] of Object.entries(sectionData as Record<string, unknown>)) {
 						if (!allowedKeys.includes(key)) {
 							return reply.code(400).send({
 								error: {
 									code: "VALIDATION_ERROR",
 									message: `Unknown key "${key}" in UI section "${section}"`,
+								},
+							});
+						}
+						const validator = UI_VALUE_VALIDATORS[section]?.[key];
+						if (validator && !validator(value)) {
+							return reply.code(400).send({
+								error: {
+									code: "INVALID_VALUE",
+									message: `Invalid value for "${section}.${key}": ${JSON.stringify(value)}`,
 								},
 							});
 						}

@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: web,hub,shared
   type: specification
   target_project: /mnt/wsl/shared/dev/nexterm

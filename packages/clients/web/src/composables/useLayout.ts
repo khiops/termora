@@ -46,15 +46,31 @@ function ensurePaneIds(node: PaneNode): PaneNode {
 	return { ...node, first: ensurePaneIds(node.first), second: ensurePaneIds(node.second) };
 }
 
+function countLeaves(node: PaneNode): number {
+	if (node.type !== "split") return 1;
+	return countLeaves(node.first) + countLeaves(node.second);
+}
+
+function truncateToMaxPanes(node: PaneNode, max: number): PaneNode {
+	if (countLeaves(node) <= max) return node;
+	// Too many panes — reset to the first leaf
+	if (node.type === "split") return truncateToMaxPanes(node.first, max);
+	return node;
+}
+
 function loadFromStorage(): PersistedState | null {
 	try {
 		const raw = localStorage.getItem(LAYOUT_KEY);
 		if (raw === null) return null;
 		const state = JSON.parse(raw) as PersistedState;
-		// Migrate old layouts that lack paneId
+		// Migrate old layouts that lack paneId; enforce max pane count (INV-10)
 		for (const key of Object.keys(state.layouts)) {
-			const tree = state.layouts[key];
-			if (tree !== null && tree !== undefined) state.layouts[key] = ensurePaneIds(tree);
+			let tree = state.layouts[key];
+			if (tree !== null && tree !== undefined) {
+				tree = ensurePaneIds(tree);
+				tree = truncateToMaxPanes(tree, 4);
+				state.layouts[key] = tree;
+			}
 		}
 		return state;
 	} catch {

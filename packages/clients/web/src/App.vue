@@ -196,9 +196,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, toRef, watch } from "vue";
 import { useResizable } from "./composables/useResizable.js";
-import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { useAuthStore } from "./stores/auth.js";
@@ -211,6 +210,7 @@ import { countPanes, purgeDeadTabs, useLayout } from "./composables/useLayout.js
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { useWindowTitle } from "./composables/useWindowTitle.js";
+import { useTabTitle } from "./composables/useTabTitle.js";
 import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
@@ -391,15 +391,13 @@ const windowTitleFormat = computed(
 	() => configStore.uiConfig.title?.windowFormat ?? "nexterm - {prefix}{host} - {title}",
 );
 
+const activeChannelId = computed(() => layout.activeTab.value?.channelId ?? null);
 /** Resolved title of the active tab's channel (no prefix, no truncation). */
-const activeTitle = computed(() => {
-	const tab = layout.activeTab.value;
-	if (tab === null) return "";
-	const ch = channelsStore.channels.find((c) => c.id === tab.channelId);
-	if (ch?.title) return ch.title;
-	if (ch?.dynamicTitle) return ch.dynamicTitle;
-	return DEFAULT_CHANNEL_NAME;
-});
+const { resolvedTitle: _resolvedTitle } = useTabTitle(
+	activeChannelId,
+	toRef(channelsStore, "channels"),
+);
+const activeTitle = computed(() => (activeChannelId.value === null ? "" : _resolvedTitle.value));
 
 /** Label of the host that owns the active tab's channel. */
 const activeHost = computed(() => {
