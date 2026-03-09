@@ -2,7 +2,15 @@
 
 ## In Progress
 
-### UI/UX Sprint — Phase B
+### UX-11 — Connection Experience
+- [ ] 🟡 [Web] Block 1: Port placeholder + auth method UX (A3, A2)
+- [ ] [Web] Block 2: Quick connect parser (A1)
+- [ ] [Web] Block 3: Modal tabs refactor (B3)
+- [ ] [Web] Block 4: Host preview in modal (A4)
+- [ ] [Web] Block 5: Connection string in rail (B2)
+- [ ] [Web] Block 6: Command palette v2 — fuzzy, prefix, recent, Cmd+K (B1')
+
+### UI/UX Sprint — Phase B (deferred)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
@@ -57,6 +65,11 @@
 - [ ] 🔧 [Web] SettingsPanel: toast notification on scope auto-fallback (SC-17) — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] settings store: dead else branch for top-level UI key → would 400 — Priority: L (from /review F-006)
 - [ ] 🔧 [Hub] PATCH /api/hosts/:id/profile + channels: add TERMINAL_PROFILE_KEYS validation — Priority: L (from /review F-007)
+
+### Deferred from UX-11 /llm
+- [ ] 💡 [Web] Command palette: visible UI trigger button for touch/mouse users — Priority: L (from /llm Gemini)
+- [ ] 💡 [Web] Command palette: prefix filter discoverability hint in input placeholder — Priority: L (from /llm Codex)
+- [ ] 💡 [Web] Rail subtitle: middle truncation for hostnames (keep unique part) — Priority: L (from /llm Copilot)
 
 ### Deferred from UX-09 /spec + /adversarial
 - [ ] 💡 [UI] Settings panel search/filter (VS Code style) — Priority: L (from UX-09 spec, P2)
