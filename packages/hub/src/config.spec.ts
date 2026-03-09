@@ -719,6 +719,21 @@ describe("extractUiConfig — channels section", () => {
 		const config = extractUiConfig({ channels: { default_shell: "/bin/zsh" } });
 		expect(config.channels.defaultShell).toBe("/bin/zsh");
 	});
+
+	it("parses auto_group = first", () => {
+		const config = extractUiConfig({ channels: { auto_group: "first" } });
+		expect(config.channels.autoGroup).toBe("first");
+	});
+
+	it("parses auto_group = none", () => {
+		const config = extractUiConfig({ channels: { auto_group: "none" } });
+		expect(config.channels.autoGroup).toBe("none");
+	});
+
+	it("ignores invalid auto_group value", () => {
+		const config = extractUiConfig({ channels: { auto_group: "always" } });
+		expect(config.channels.autoGroup).toBe("none");
+	});
 });
 
 describe("extractUiConfig — startup section", () => {

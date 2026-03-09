@@ -3,6 +3,7 @@ import { generateId } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref } from "vue";
 import { useAuthStore } from "./auth.js";
+import { useConfigStore } from "./config.js";
 import { useSessionStore } from "./session.js";
 
 const COLLAPSED_KEY = "nexterm:collapsed-groups";
@@ -436,6 +437,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		opts?: { cols?: number; rows?: number; select?: boolean },
 	): Promise<string> {
 		const sessionStore = useSessionStore();
+		const configStore = useConfigStore();
 		return new Promise<string>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				unsub();
@@ -454,9 +456,19 @@ export const useChannelsStore = defineStore("channels", () => {
 				}
 			});
 
+			// Auto-assign to first group when configured
+			let autoGroupId: string | undefined;
+			if (configStore.uiConfig.channels?.autoGroup === "first") {
+				const sorted = [...groups.value].sort((a, b) => a.sortOrder - b.sortOrder);
+				if (sorted.length > 0 && sorted[0] !== undefined) {
+					autoGroupId = sorted[0].id;
+				}
+			}
+
 			sessionStore.wsClient.send({
 				type: "SPAWN",
 				hostId,
+				...(autoGroupId !== undefined ? { groupId: autoGroupId } : {}),
 				...(opts?.cols !== undefined && opts?.rows !== undefined
 					? { cols: opts.cols, rows: opts.rows }
 					: {}),
@@ -533,6 +545,34 @@ export const useChannelsStore = defineStore("channels", () => {
 		} catch {
 			// Rollback
 			groups.value = oldGroups;
+		}
+	}
+
+	async function reorderGroups(hostId: string, groupIds: string[]): Promise<void> {
+		if (authStore.token === null) return;
+
+		// Optimistic update — reorder local groups array to match requested order
+		const prevGroups = groups.value;
+		const ordered = groupIds
+			.map((id) => groups.value.find((g) => g.id === id))
+			.filter((g): g is ChannelGroup => g !== undefined);
+		// Append any groups not in groupIds (guards against partial lists)
+		const reordered = [...ordered, ...groups.value.filter((g) => !groupIds.includes(g.id))];
+		groups.value = reordered;
+
+		try {
+			const res = await fetch("/api/groups/reorder", {
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${authStore.token}`,
+				},
+				body: JSON.stringify({ host_id: hostId, group_ids: groupIds }),
+			});
+			if (!res.ok) throw new Error(`PUT /api/groups/reorder failed: ${res.status}`);
+		} catch {
+			// Rollback on failure
+			groups.value = prevGroups;
 		}
 	}
 
@@ -769,6 +809,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		addGroup,
 		removeGroup,
 		renameGroup,
+		reorderGroups,
 		toggleGroupCollapsed,
 		generalCollapsed,
 		toggleGeneralCollapsed,

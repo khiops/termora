@@ -103,6 +103,8 @@ export interface ChannelsConfig {
 	defaultShell?: string;
 	/** Name for the ungrouped channels bucket. Default: "General" */
 	defaultGroupName?: string;
+	/** Auto-assign new channels to a group. Default: "none" */
+	autoGroup?: "none" | "first";
 }
 
 export interface StartupConfig {
@@ -343,7 +345,7 @@ export const TABS_CONFIG_KEYS = [
 
 export const PANES_CONFIG_KEYS = ["maxPanes", "defaultSplitDirection"] as const;
 
-export const CHANNELS_CONFIG_KEYS = ["defaultShell", "defaultGroupName"] as const;
+export const CHANNELS_CONFIG_KEYS = ["defaultShell", "defaultGroupName", "autoGroup"] as const;
 
 export const STARTUP_CONFIG_KEYS = ["autoOpenWelcome"] as const;
 

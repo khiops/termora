@@ -1058,6 +1058,126 @@ describe("DELETE /api/groups/:id", () => {
 	});
 });
 
+describe("PUT /api/groups/reorder", () => {
+	it("returns 400 with invalid host_id ULID", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: "not-a-ulid", group_ids: [] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when a group_id is not a valid ULID", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", group_ids: ["not-a-ulid"] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when a group does not belong to the given host", async () => {
+		// Create two hosts, create a group under host A, try to reorder it under host B
+		const hostARes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-host-a" },
+		});
+		const hostA = hostARes.json<{ id: string }>();
+
+		const hostBRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-host-b" },
+		});
+		const hostB = hostBRes.json<{ id: string }>();
+
+		const grpRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: hostA.id, name: "Group A" },
+		});
+		const grp = grpRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: hostB.id, group_ids: [grp.id] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 200 and persists new sort_order for reordered groups", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-sort-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const g1Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Alpha" },
+		});
+		const g2Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Beta" },
+		});
+		const g3Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Gamma" },
+		});
+		const g1 = g1Res.json<{ id: string }>();
+		const g2 = g2Res.json<{ id: string }>();
+		const g3 = g3Res.json<{ id: string }>();
+
+		// Reorder: Gamma, Alpha, Beta
+		const reorderRes = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: host.id, group_ids: [g3.id, g1.id, g2.id] },
+		});
+		expect(reorderRes.statusCode).toBe(200);
+		expect(reorderRes.json<{ ok: boolean }>().ok).toBe(true);
+
+		// Verify order via GET /api/groups
+		const listRes = await server.inject({
+			method: "GET",
+			url: `/api/groups?host_id=${host.id}`,
+		});
+		expect(listRes.statusCode).toBe(200);
+		const groups = listRes.json<Array<{ id: string; name: string }>>();
+		expect(groups.map((g) => g.name)).toEqual(["Gamma", "Alpha", "Beta"]);
+	});
+
+	it("returns 200 for empty group_ids array (no-op)", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-noop-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: host.id, group_ids: [] },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json<{ ok: boolean }>().ok).toBe(true);
+	});
+});
+
 describe("PATCH /api/channels/:id — group_id", () => {
 	let grpCounter = 0;
 

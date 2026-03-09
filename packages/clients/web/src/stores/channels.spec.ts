@@ -1,6 +1,8 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChannelsStore } from "./channels.js";
+import { useConfigStore } from "./config.js";
+import { useSessionStore } from "./session.js";
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -194,5 +196,131 @@ describe("useChannelsStore — toggleGeneralCollapsed", () => {
 		const store = useChannelsStore();
 		await store.fetchChannels("host-1");
 		expect(store.generalCollapsed).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// spawnChannel — autoGroup behaviour
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — spawnChannel autoGroup", () => {
+	function makeGroupRowWithOrder(
+		id: string,
+		name: string,
+		sortOrder: number,
+	): Record<string, unknown> {
+		return {
+			id,
+			host_id: "host-1",
+			name,
+			sort_order: sortOrder,
+			created_at: "2026-01-01T00:00:00Z",
+		};
+	}
+
+	function setupWsClient(sentMessages: unknown[]): {
+		on: ReturnType<typeof vi.fn>;
+		send: ReturnType<typeof vi.fn>;
+	} {
+		const listeners = new Map<string, ((msg: unknown) => void)[]>();
+		const on = vi.fn((type: string, cb: (msg: unknown) => void) => {
+			if (!listeners.has(type)) listeners.set(type, []);
+			listeners.get(type)?.push(cb);
+			return () => {
+				const arr = listeners.get(type) ?? [];
+				const idx = arr.indexOf(cb);
+				if (idx !== -1) arr.splice(idx, 1);
+			};
+		});
+		const send = vi.fn((msg: unknown) => {
+			sentMessages.push(msg);
+			// Immediately fire SPAWN_OK so the promise resolves
+			const cbs = listeners.get("SPAWN_OK") ?? [];
+			for (const cb of cbs) cb({ type: "SPAWN_OK", channelId: "ch-new" });
+		});
+		return { on, send };
+	}
+
+	beforeEach(() => {
+		localStorageMap.set("nexterm_token", "test-token");
+	});
+
+	it("sends SPAWN without groupId when autoGroup is none", async () => {
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups") ? [makeGroupRowWithOrder("g1", "Alpha", 0)] : [];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+
+		const sentMessages: unknown[] = [];
+		const store = useChannelsStore();
+		await store.fetchChannels("host-1");
+
+		const sessionStore = useSessionStore();
+		const { on, send } = setupWsClient(sentMessages);
+		// @ts-expect-error — overwrite reactive wsClient for test
+		sessionStore.wsClient = { on, send };
+
+		// configStore defaults autoGroup to undefined (falsy) — no assignment
+		await store.spawnChannel("host-1");
+
+		expect(send).toHaveBeenCalledOnce();
+		const msg = sentMessages[0] as Record<string, unknown>;
+		expect(msg.type).toBe("SPAWN");
+		expect(msg.groupId).toBeUndefined();
+	});
+
+	it("sends SPAWN with first group's id when autoGroup is first", async () => {
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups")
+				? [makeGroupRowWithOrder("g2", "Beta", 10), makeGroupRowWithOrder("g1", "Alpha", 0)]
+				: [];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+
+		const sentMessages: unknown[] = [];
+		const store = useChannelsStore();
+		await store.fetchChannels("host-1");
+
+		const sessionStore = useSessionStore();
+		const { on, send } = setupWsClient(sentMessages);
+		// @ts-expect-error — overwrite reactive wsClient for test
+		sessionStore.wsClient = { on, send };
+
+		const configStore = useConfigStore();
+		configStore.uiConfig = { ...configStore.uiConfig, channels: { autoGroup: "first" } };
+
+		await store.spawnChannel("host-1");
+
+		expect(send).toHaveBeenCalledOnce();
+		const msg = sentMessages[0] as Record<string, unknown>;
+		expect(msg.type).toBe("SPAWN");
+		// g1 has sortOrder 0 — it's first
+		expect(msg.groupId).toBe("g1");
+	});
+
+	it("sends SPAWN without groupId when autoGroup is first but no groups exist", async () => {
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups") ? [] : [];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+
+		const sentMessages: unknown[] = [];
+		const store = useChannelsStore();
+		await store.fetchChannels("host-1");
+
+		const sessionStore = useSessionStore();
+		const { on, send } = setupWsClient(sentMessages);
+		// @ts-expect-error — overwrite reactive wsClient for test
+		sessionStore.wsClient = { on, send };
+
+		const configStore = useConfigStore();
+		configStore.uiConfig = { ...configStore.uiConfig, channels: { autoGroup: "first" } };
+
+		await store.spawnChannel("host-1");
+
+		expect(send).toHaveBeenCalledOnce();
+		const msg = sentMessages[0] as Record<string, unknown>;
+		expect(msg.type).toBe("SPAWN");
+		expect(msg.groupId).toBeUndefined();
 	});
 });

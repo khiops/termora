@@ -260,6 +260,20 @@ export const settingsSchema: SettingDefinition[] = [
 		section: "channels",
 		scopes: ["global"],
 	},
+	{
+		key: "autoGroup",
+		label: "Auto-assign group",
+		description: "Automatically assign new channels to a group",
+		type: "select",
+		category: "channels",
+		section: "channels",
+		scopes: ["global"],
+		default: "none",
+		options: [
+			{ label: "No grouping", value: "none" },
+			{ label: "First group", value: "first" },
+		],
+	},
 
 	// ─── Startup category (global only, UI config) ─────────────────────
 	{
