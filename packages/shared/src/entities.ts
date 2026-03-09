@@ -24,12 +24,22 @@ export interface Host {
 	defaultShell?: string;
 	defaultCwd?: string;
 	hostGroup?: string | null;
+	hostGroupId?: string | null;
 	sortOrder: number;
 	sshConfigHost?: string | null;
 	sshUser?: string | null;
 	keepAliveSeconds: number;
 	historyRetentionDays: number;
 	createdAt: string; // ISO 8601
+	updatedAt: string;
+}
+
+export interface HostGroup {
+	id: string;
+	name: string;
+	sortOrder: number;
+	color?: string | null;
+	createdAt: string;
 	updatedAt: string;
 }
 

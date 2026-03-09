@@ -118,10 +118,10 @@
 								<option value="">Ungrouped</option>
 								<option
 									v-for="g in groups"
-									:key="g"
-									:value="g"
+									:key="g.id"
+									:value="g.id"
 								>
-									{{ g }}
+									{{ g.name }}
 								</option>
 							</select>
 							<button

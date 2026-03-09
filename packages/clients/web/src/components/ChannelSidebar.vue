@@ -15,7 +15,7 @@
 		</div>
 
 		<!-- Channel list, grouped -->
-		<div class="sidebar-list">
+		<div class="sidebar-list" @contextmenu.self.prevent="emit('sidebar-context-menu', $event)">
 			<!-- Loading state -->
 			<div v-if="channelsStore.loading" class="sidebar-state">Loading…</div>
 
@@ -57,6 +57,7 @@
 						@dragover.prevent="onGroupDragOver($event, group.id)"
 						@dragleave="onGroupDragLeave(group.id)"
 						@drop.prevent="onGroupDrop($event, group.id)"
+						@contextmenu.prevent="emit('channel-group-context-menu', { groupId: group.id, groupName: group.name, event: $event })"
 					>
 						<ChannelGroupHeader
 							:group="group"
@@ -149,6 +150,9 @@ const emit = defineEmits<{
 	"open-current-tab": [channelId: string];
 	"configure-command": [channelId: string];
 	"set-welcome": [channelId: string];
+	"channel-group-context-menu": [payload: { groupId: string; groupName: string; event: MouseEvent }];
+	"sidebar-context-menu": [event: MouseEvent];
+	"add-channel-group": [];
 }>();
 
 const channelsStore = useChannelsStore();
@@ -301,8 +305,7 @@ function onDestroyChannel(channelId: string): void {
 }
 
 function onAddGroup(): void {
-	const name = `Group ${channelsStore.groups.length + 1}`;
-	channelsStore.addGroup(name);
+	emit("add-channel-group");
 }
 </script>
 

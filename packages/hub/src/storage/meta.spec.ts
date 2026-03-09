@@ -1,4 +1,4 @@
-import type { Host } from "@nexterm/shared";
+import type { Host, HostGroup } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
@@ -1143,30 +1143,31 @@ describe("MetaDAL — Host Group Operations", () => {
 	});
 
 	it("reorderHosts updates sort_order for hosts in a group", () => {
+		const grp = dal.createHostGroup("prod");
 		const h1 = dal.createHost({
 			type: "ssh",
 			label: "reorder-a",
 			sshHost: "10.0.0.1",
-			hostGroup: "prod",
+			hostGroupId: grp.id,
 			sortOrder: 0,
 		});
 		const h2 = dal.createHost({
 			type: "ssh",
 			label: "reorder-b",
 			sshHost: "10.0.0.2",
-			hostGroup: "prod",
+			hostGroupId: grp.id,
 			sortOrder: 1,
 		});
 		const h3 = dal.createHost({
 			type: "ssh",
 			label: "reorder-c",
 			sshHost: "10.0.0.3",
-			hostGroup: "prod",
+			hostGroupId: grp.id,
 			sortOrder: 2,
 		});
 
 		// Reverse order
-		dal.reorderHosts("prod", [h3.id, h2.id, h1.id]);
+		dal.reorderHosts(grp.id, [h3.id, h2.id, h1.id]);
 
 		const updated1 = dal.getHost(h1.id);
 		const updated2 = dal.getHost(h2.id);
@@ -1177,12 +1178,14 @@ describe("MetaDAL — Host Group Operations", () => {
 		expect(updated1?.sortOrder).toBe(2);
 	});
 
-	it("reorderHosts also updates host_group", () => {
+	it("reorderHosts also updates host_group_id", () => {
+		const grpOld = dal.createHostGroup("old-group");
+		const grpNew = dal.createHostGroup("new-group");
 		const h1 = dal.createHost({
 			type: "ssh",
 			label: "move-group-a",
 			sshHost: "10.0.0.4",
-			hostGroup: "old-group",
+			hostGroupId: grpOld.id,
 		});
 		const h2 = dal.createHost({
 			type: "ssh",
@@ -1190,11 +1193,11 @@ describe("MetaDAL — Host Group Operations", () => {
 			sshHost: "10.0.0.5",
 		});
 
-		// Move both to "new-group"
-		dal.reorderHosts("new-group", [h1.id, h2.id]);
+		// Move both to new-group
+		dal.reorderHosts(grpNew.id, [h1.id, h2.id]);
 
-		expect(dal.getHost(h1.id)?.hostGroup).toBe("new-group");
-		expect(dal.getHost(h2.id)?.hostGroup).toBe("new-group");
+		expect(dal.getHost(h1.id)?.hostGroupId).toBe(grpNew.id);
+		expect(dal.getHost(h2.id)?.hostGroupId).toBe(grpNew.id);
 	});
 
 	it("duplicateHost creates copy with -copy suffix", () => {
@@ -1345,5 +1348,277 @@ describe("MetaDAL — Host Group Operations", () => {
 
 		const groups = dal.listHostGroups();
 		expect(groups).toEqual(["alpha", "bravo", "charlie"]);
+	});
+});
+
+// ─── Host Group First-Class Entities ─────────────────────────────────────────
+
+describe("MetaDAL — host groups (first-class)", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createHostGroup creates with ULID id and auto-increments sort_order", () => {
+		const g1 = dal.createHostGroup("Alpha");
+		const g2 = dal.createHostGroup("Beta");
+		const g3 = dal.createHostGroup("Gamma");
+
+		expect(g1.id).toHaveLength(26);
+		expect(g1.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+		expect(g2.id).not.toBe(g1.id);
+		expect(g1.sortOrder).toBe(0);
+		expect(g2.sortOrder).toBe(1);
+		expect(g3.sortOrder).toBe(2);
+	});
+
+	it("createHostGroup stores color when provided", () => {
+		const g = dal.createHostGroup("Colorful", "#ff6600");
+		expect(g.color).toBe("#ff6600");
+	});
+
+	it("createHostGroup stores null color by default", () => {
+		const g = dal.createHostGroup("NoColor");
+		expect(g.color).toBeNull();
+	});
+
+	it("listHostGroupEntities returns groups ordered by sort_order", () => {
+		dal.createHostGroup("Charlie");
+		dal.createHostGroup("Alpha");
+		dal.createHostGroup("Bravo");
+
+		const groups = dal.listHostGroupEntities();
+		expect(groups).toHaveLength(3);
+		// sorted by sort_order (insertion order: Charlie=0, Alpha=1, Bravo=2)
+		expect((groups[0] as HostGroup).name).toBe("Charlie");
+		expect((groups[1] as HostGroup).name).toBe("Alpha");
+		expect((groups[2] as HostGroup).name).toBe("Bravo");
+	});
+
+	it("getHostGroupEntity returns group by id", () => {
+		const created = dal.createHostGroup("FindMe", "#aabbcc");
+		const found = dal.getHostGroupEntity(created.id);
+
+		expect(found).not.toBeNull();
+		expect(found?.id).toBe(created.id);
+		expect(found?.name).toBe("FindMe");
+		expect(found?.color).toBe("#aabbcc");
+	});
+
+	it("getHostGroupEntity returns null for non-existent id", () => {
+		const result = dal.getHostGroupEntity("non-existent-id");
+		expect(result).toBeNull();
+	});
+
+	it("updateHostGroup updates name and bumps updated_at", async () => {
+		const g = dal.createHostGroup("OldName");
+		const originalUpdatedAt = g.updatedAt;
+
+		await new Promise((r) => setTimeout(r, 10));
+
+		const updated = dal.updateHostGroup(g.id, { name: "NewName" });
+		expect(updated).not.toBeNull();
+		expect(updated?.name).toBe("NewName");
+		expect(updated?.updatedAt).not.toBe(originalUpdatedAt);
+	});
+
+	it("updateHostGroup updates color", () => {
+		const g = dal.createHostGroup("WithColor", "#111111");
+		const updated = dal.updateHostGroup(g.id, { color: "#222222" });
+		expect(updated?.color).toBe("#222222");
+	});
+
+	it("updateHostGroup sets color to null", () => {
+		const g = dal.createHostGroup("ClearColor", "#ff0000");
+		const updated = dal.updateHostGroup(g.id, { color: null });
+		expect(updated?.color).toBeNull();
+	});
+
+	it("updateHostGroup returns null for non-existent id", () => {
+		const result = dal.updateHostGroup("no-such-id", { name: "Ghost" });
+		expect(result).toBeNull();
+	});
+
+	it("deleteHostGroupEntity removes group and returns true", () => {
+		const g = dal.createHostGroup("ToDelete");
+		const deleted = dal.deleteHostGroupEntity(g.id);
+		expect(deleted).toBe(true);
+		expect(dal.getHostGroupEntity(g.id)).toBeNull();
+	});
+
+	it("deleteHostGroupEntity returns false for non-existent id", () => {
+		const result = dal.deleteHostGroupEntity("no-such-id");
+		expect(result).toBe(false);
+	});
+
+	it("deleteHostGroupEntity cascade: hosts get host_group_id=null (ON DELETE SET NULL)", () => {
+		const g = dal.createHostGroup("Doomed");
+		const h1 = dal.createHost({
+			type: "ssh",
+			label: "cascade-host-a",
+			sshHost: "10.1.0.1",
+			hostGroupId: g.id,
+		});
+		const h2 = dal.createHost({
+			type: "ssh",
+			label: "cascade-host-b",
+			sshHost: "10.1.0.2",
+			hostGroupId: g.id,
+		});
+
+		dal.deleteHostGroupEntity(g.id);
+
+		expect(dal.getHost(h1.id)?.hostGroupId).toBeUndefined();
+		expect(dal.getHost(h2.id)?.hostGroupId).toBeUndefined();
+	});
+
+	it("reorderHostGroups reassigns sort_order by position", () => {
+		const g1 = dal.createHostGroup("First");
+		const g2 = dal.createHostGroup("Second");
+		const g3 = dal.createHostGroup("Third");
+
+		// Reverse order
+		dal.reorderHostGroups([g3.id, g2.id, g1.id]);
+
+		const groups = dal.listHostGroupEntities();
+		expect(groups[0]?.id).toBe(g3.id);
+		expect(groups[1]?.id).toBe(g2.id);
+		expect(groups[2]?.id).toBe(g1.id);
+	});
+
+	it("createHostGroup UNIQUE name constraint throws on duplicate", () => {
+		dal.createHostGroup("Unique");
+		expect(() => dal.createHostGroup("Unique")).toThrow();
+	});
+
+	it("migrateHostGroupData migrates legacy host_group strings to host_groups table", () => {
+		// Create hosts with legacy host_group string
+		const h1 = dal.createHost({
+			type: "ssh",
+			label: "migrate-a",
+			sshHost: "10.2.0.1",
+			hostGroup: "legacy-prod",
+		});
+		const h2 = dal.createHost({
+			type: "ssh",
+			label: "migrate-b",
+			sshHost: "10.2.0.2",
+			hostGroup: "legacy-prod",
+		});
+		const h3 = dal.createHost({
+			type: "ssh",
+			label: "migrate-c",
+			sshHost: "10.2.0.3",
+			hostGroup: "legacy-staging",
+		});
+		const h4 = dal.createHost({
+			type: "ssh",
+			label: "migrate-d",
+			sshHost: "10.2.0.4",
+			// no hostGroup
+		});
+
+		dal.migrateHostGroupData();
+
+		// host_groups table should have the two legacy names
+		const entities = dal.listHostGroupEntities();
+		const names = entities.map((g) => g.name).sort();
+		expect(names).toContain("legacy-prod");
+		expect(names).toContain("legacy-staging");
+
+		// hosts should have host_group_id set
+		const r1 = dal.getHost(h1.id);
+		const r2 = dal.getHost(h2.id);
+		const r3 = dal.getHost(h3.id);
+		const r4 = dal.getHost(h4.id);
+
+		const prodGroup = entities.find((g) => g.name === "legacy-prod");
+		const stagingGroup = entities.find((g) => g.name === "legacy-staging");
+
+		expect(r1?.hostGroupId).toBe(prodGroup?.id);
+		expect(r2?.hostGroupId).toBe(prodGroup?.id);
+		expect(r3?.hostGroupId).toBe(stagingGroup?.id);
+		expect(r4?.hostGroupId).toBeUndefined();
+	});
+
+	it("migrateHostGroupData is idempotent (safe to call twice)", () => {
+		dal.createHost({
+			type: "ssh",
+			label: "idem-host",
+			sshHost: "10.2.0.10",
+			hostGroup: "idem-group",
+		});
+
+		dal.migrateHostGroupData();
+		dal.migrateHostGroupData();
+
+		const entities = dal.listHostGroupEntities();
+		const idemGroups = entities.filter((g) => g.name === "idem-group");
+		expect(idemGroups).toHaveLength(1);
+	});
+
+	it("createHost with hostGroupId stores correctly", () => {
+		const g = dal.createHostGroup("MyGroup");
+		const h = dal.createHost({
+			type: "ssh",
+			label: "grouped-host",
+			sshHost: "10.3.0.1",
+			hostGroupId: g.id,
+		});
+
+		expect(h.hostGroupId).toBe(g.id);
+		const reloaded = dal.getHost(h.id);
+		expect(reloaded?.hostGroupId).toBe(g.id);
+	});
+
+	it("updateHost with hostGroupId updates correctly", () => {
+		const g1 = dal.createHostGroup("GroupOne");
+		const g2 = dal.createHostGroup("GroupTwo");
+		const h = dal.createHost({
+			type: "ssh",
+			label: "movable-host",
+			sshHost: "10.3.0.2",
+			hostGroupId: g1.id,
+		});
+
+		expect(h.hostGroupId).toBe(g1.id);
+
+		const updated = dal.updateHost(h.id, { hostGroupId: g2.id });
+		expect(updated.hostGroupId).toBe(g2.id);
+	});
+
+	it("reorderHosts with groupId moves hosts between groups", () => {
+		const g1 = dal.createHostGroup("Source");
+		const g2 = dal.createHostGroup("Destination");
+
+		const h1 = dal.createHost({
+			type: "ssh",
+			label: "rh-a",
+			sshHost: "10.4.0.1",
+			hostGroupId: g1.id,
+		});
+		const h2 = dal.createHost({
+			type: "ssh",
+			label: "rh-b",
+			sshHost: "10.4.0.2",
+		});
+
+		// Move both to g2, reverse order
+		dal.reorderHosts(g2.id, [h2.id, h1.id]);
+
+		const r1 = dal.getHost(h1.id);
+		const r2 = dal.getHost(h2.id);
+
+		expect(r1?.hostGroupId).toBe(g2.id);
+		expect(r2?.hostGroupId).toBe(g2.id);
+		expect(r2?.sortOrder).toBe(0);
+		expect(r1?.sortOrder).toBe(1);
 	});
 });

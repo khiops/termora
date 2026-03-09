@@ -7,12 +7,11 @@
 			:style="{ left: `${x}px`, top: `${y}px` }"
 			@click.stop
 		>
-			<button class="ctx-item" @click="onRename">
-				Rename Group
+			<button class="ctx-item" @click="onAddHost">
+				Add new host
 			</button>
-			<div class="ctx-sep" />
-			<button class="ctx-item ctx-item--danger" @click="onDelete">
-				Delete Group
+			<button class="ctx-item" @click="onAddGroup">
+				Add new group
 			</button>
 		</div>
 	</Teleport>
@@ -21,18 +20,16 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 
-const props = defineProps<{
+defineProps<{
 	visible: boolean;
-	groupId: string;
-	groupName: string;
 	x: number;
 	y: number;
 }>();
 
 const emit = defineEmits<{
 	(e: "close"): void;
-	(e: "rename", groupId: string): void;
-	(e: "delete-group", groupId: string): void;
+	(e: "add-host"): void;
+	(e: "add-group"): void;
 }>();
 
 const menuEl = ref<HTMLElement | null>(null);
@@ -55,13 +52,13 @@ onUnmounted(() => {
 
 // ── Action handlers ──────────────────────────────────────────────────────
 
-function onRename(): void {
-	emit("rename", props.groupId);
+function onAddHost(): void {
+	emit("add-host");
 	emit("close");
 }
 
-function onDelete(): void {
-	emit("delete-group", props.groupId);
+function onAddGroup(): void {
+	emit("add-group");
 	emit("close");
 }
 </script>
@@ -94,18 +91,5 @@ function onDelete(): void {
 
 .ctx-item:hover:not(:disabled) {
 	background: var(--nt-tab-hover);
-}
-
-.ctx-item--danger {
-	color: var(--nt-red, #e06c75);
-}
-
-.ctx-item--danger:hover {
-	background: rgba(224, 108, 117, 0.12);
-}
-
-.ctx-sep {
-	border-top: 1px solid var(--nt-border);
-	margin: 4px 0;
 }
 </style>

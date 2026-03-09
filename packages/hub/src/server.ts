@@ -7,6 +7,7 @@ import { registerChannelRoutes } from "./api/channels.js";
 import { registerConfigRoutes } from "./api/config.js";
 import { registerFontRoutes } from "./api/fonts.js";
 import { registerGroupRoutes } from "./api/groups.js";
+import { registerHostGroupRoutes } from "./api/host-groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
@@ -103,6 +104,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 		const sessionManager = new SessionManager(options.dbManager, gcConfig);
 		const metaDal = sessionManager.getMetaDal();
+		metaDal.migrateHostGroupData();
 
 		// First-run: ensure the built-in "local" host exists
 		const wasNew = !metaDal.getHostByLabel("local");
@@ -116,6 +118,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const configResolver = new ConfigResolver(metaDal);
 		configResolver.loadFromFile(configDir);
 		registerHostRoutes(server, metaDal);
+		registerHostGroupRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal, sessionManager);
 		registerGroupRoutes(server, metaDal);
