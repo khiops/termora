@@ -20,7 +20,7 @@ export interface SettingDefinition {
 }
 
 /** UI config sub-sections — these route through PUT /api/config/ui */
-const UI_SECTIONS = new Set(["tabs", "panes", "search", "startup", "title"]);
+const UI_SECTIONS = new Set(["tabs", "panes", "channels", "search", "startup", "title"]);
 
 /**
  * Map a schema definition to the store's (section, key) pair.
@@ -248,6 +248,17 @@ export const settingsSchema: SettingDefinition[] = [
 		scopes: ["global"],
 		min: 1,
 		max: 100,
+	},
+
+	// ─── Channels category (global only, UI config) ────────────────────
+	{
+		key: "defaultGroupName",
+		label: "Default group name",
+		description: "Name for the ungrouped channels bucket",
+		type: "text",
+		category: "channels",
+		section: "channels",
+		scopes: ["global"],
 	},
 
 	// ─── Startup category (global only, UI config) ─────────────────────

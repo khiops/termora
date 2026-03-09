@@ -104,6 +104,12 @@ export const useChannelsStore = defineStore("channels", () => {
 	/** Channels that belong to the currently loaded host. */
 	const activeHostId = ref<string | null>(null);
 
+	/**
+	 * Collapsed state for the synthetic "General" pseudo-group (ungrouped channels).
+	 * Persisted to localStorage under the "__general__" key in COLLAPSED_KEY.
+	 */
+	const generalCollapsed = ref<boolean>(false);
+
 	/** Channels grouped by groupId, with an implicit "General" bucket for ungrouped ones. */
 	const channelsByGroup = computed(() => {
 		const result = new Map<string | null, Channel[]>();
@@ -142,6 +148,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		const rows = (await res.json()) as Record<string, unknown>[];
 		const collapsedMap = loadCollapsedMap();
 		groups.value = rows.map((r) => apiGroupToChannelGroup(r, collapsedMap));
+		generalCollapsed.value = collapsedMap.__general__ ?? false;
 	}
 
 	// -------------------------------------------------------------------------
@@ -542,6 +549,14 @@ export const useChannelsStore = defineStore("channels", () => {
 		saveCollapsedMap(collapsedMap);
 	}
 
+	/** Toggle collapsed state of the "General" pseudo-group and persist to localStorage. */
+	function toggleGeneralCollapsed(): void {
+		generalCollapsed.value = !generalCollapsed.value;
+		const collapsedMap = loadCollapsedMap();
+		collapsedMap.__general__ = generalCollapsed.value;
+		saveCollapsedMap(collapsedMap);
+	}
+
 	/**
 	 * Rename a channel (optimistic update with rollback on failure).
 	 * Pass `null` to clear the custom title.
@@ -755,6 +770,8 @@ export const useChannelsStore = defineStore("channels", () => {
 		removeGroup,
 		renameGroup,
 		toggleGroupCollapsed,
+		generalCollapsed,
+		toggleGeneralCollapsed,
 		renameChannel,
 		clearTitle,
 		moveChannelToGroup,

@@ -108,7 +108,7 @@ export const DEFAULT_PANES_CONFIG: PanesConfig = {
 	defaultSplitDirection: "horizontal",
 };
 
-export const DEFAULT_CHANNELS_CONFIG: ChannelsConfig = {};
+export const DEFAULT_CHANNELS_CONFIG: ChannelsConfig = { defaultGroupName: "General" };
 
 export const DEFAULT_STARTUP_CONFIG: StartupConfig = {
 	autoOpenWelcome: true,
@@ -214,6 +214,9 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 		const raw = channelsSection as Record<string, unknown>;
 		if (typeof raw.default_shell === "string") {
 			config.channels.defaultShell = raw.default_shell;
+		}
+		if (typeof raw.default_group_name === "string" && raw.default_group_name.length > 0) {
+			config.channels.defaultGroupName = raw.default_group_name;
 		}
 	}
 

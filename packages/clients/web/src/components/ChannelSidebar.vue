@@ -124,6 +124,7 @@ import { computed, ref } from "vue";
 import type { ChannelGroup } from "@nexterm/shared";
 import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { useConfigStore } from "../stores/config.js";
 import ChannelGroupHeader from "./ChannelGroupHeader.vue";
 import ChannelItem from "./ChannelItem.vue";
 
@@ -137,6 +138,7 @@ const emit = defineEmits<{
 
 const channelsStore = useChannelsStore();
 const hostsStore = useHostsStore();
+const configStore = useConfigStore();
 
 const activeHostId = computed(() => channelsStore.activeHostId);
 
@@ -153,20 +155,20 @@ const hostLabel = computed(() => {
 // Synthetic "General" group for ungrouped channels
 // -------------------------------------------------------------------------
 
-const generalCollapsed = ref(false);
+const generalCollapsed = computed(() => channelsStore.generalCollapsed);
 
-/** Pseudo-group object for the ungrouped bucket. Not persisted. */
+/** Pseudo-group object for the ungrouped bucket. Not persisted to API. */
 const generalGroup = computed<ChannelGroup>(() => ({
 	id: "__general__",
 	hostId: activeHostId.value ?? "",
-	name: "General",
+	name: configStore.uiConfig?.channels?.defaultGroupName ?? "General",
 	sortOrder: -1,
 	collapsed: generalCollapsed.value,
 	createdAt: "",
 }));
 
 function toggleGeneral(): void {
-	generalCollapsed.value = !generalCollapsed.value;
+	channelsStore.toggleGeneralCollapsed();
 }
 
 // -------------------------------------------------------------------------

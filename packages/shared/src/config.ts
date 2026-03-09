@@ -101,6 +101,8 @@ export interface PanesConfig {
 export interface ChannelsConfig {
 	/** Default shell for new channels. Default: system shell */
 	defaultShell?: string;
+	/** Name for the ungrouped channels bucket. Default: "General" */
+	defaultGroupName?: string;
 }
 
 export interface StartupConfig {
@@ -341,7 +343,7 @@ export const TABS_CONFIG_KEYS = [
 
 export const PANES_CONFIG_KEYS = ["maxPanes", "defaultSplitDirection"] as const;
 
-export const CHANNELS_CONFIG_KEYS = ["defaultShell"] as const;
+export const CHANNELS_CONFIG_KEYS = ["defaultShell", "defaultGroupName"] as const;
 
 export const STARTUP_CONFIG_KEYS = ["autoOpenWelcome"] as const;
 
