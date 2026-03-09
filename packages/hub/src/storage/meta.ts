@@ -447,6 +447,27 @@ export class MetaDAL {
 		return rowToGroup(row);
 	}
 
+	reorderGroups(hostId: string, groupIds: string[]): void {
+		// Validate all groups belong to the given host before mutating
+		const existing = this.db
+			.prepare("SELECT id FROM channel_groups WHERE host_id = ?")
+			.all(hostId) as { id: string }[];
+		const ownedIds = new Set(existing.map((r) => r.id));
+		for (const id of groupIds) {
+			if (!ownedIds.has(id)) {
+				throw new Error(`Group ${id} does not belong to host ${hostId}`);
+			}
+		}
+		const txn = this.db.transaction(() => {
+			for (let i = 0; i < groupIds.length; i++) {
+				this.db
+					.prepare("UPDATE channel_groups SET sort_order = ? WHERE id = ?")
+					.run(i, groupIds[i]);
+			}
+		});
+		txn();
+	}
+
 	renameGroup(id: string, name: string): boolean {
 		const result = this.db.prepare("UPDATE channel_groups SET name = ? WHERE id = ?").run(name, id);
 		return result.changes > 0;

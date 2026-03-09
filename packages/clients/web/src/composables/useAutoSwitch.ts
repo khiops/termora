@@ -19,7 +19,10 @@ export function useAutoSwitch() {
 		if (!enabled.value || !mediaQuery) return;
 		const targetName = mediaQuery.matches ? darkThemeName.value : lightThemeName.value;
 		const theme = themeStore.availableThemes.find((t) => t.name === targetName);
-		if (theme) themeStore.setTheme(theme);
+		if (theme) {
+			themeStore.currentTheme = theme;
+			themeStore.applyTheme(theme);
+		}
 	}
 
 	function start(): void {
@@ -29,7 +32,10 @@ export function useAutoSwitch() {
 			if (!enabled.value) return;
 			const targetName = e.matches ? darkThemeName.value : lightThemeName.value;
 			const theme = themeStore.availableThemes.find((t) => t.name === targetName);
-			if (theme) themeStore.setTheme(theme);
+			if (theme) {
+				themeStore.currentTheme = theme;
+				themeStore.applyTheme(theme);
+			}
 		};
 		mediaQuery.addEventListener("change", handler);
 		applyCurrentPreference();

@@ -61,11 +61,11 @@
 							v-for="theme in section.themes"
 							:key="theme.name"
 							:theme="theme"
-							:is-active="themeStore.currentTheme?.name === theme.name"
+							:is-active="(props.activeThemeName ?? themeStore.currentTheme?.name) === theme.name"
 							:is-custom="!BUNDLED_THEME_NAMES.has(theme.name)"
 							@preview="themeStore.previewHover($event)"
 							@preview-clear="themeStore.clearPreview()"
-							@select="themeStore.setTheme($event)"
+							@select="$emit('select', $event)"
 							@edit="$emit('edit-theme', $event)"
 						/>
 					</div>
@@ -87,9 +87,14 @@ import { useThemeStore } from "../../stores/theme.js";
 import { useAuthStore } from "../../stores/auth.js";
 import ThemeCard from "./ThemeCard.vue";
 
+const props = defineProps<{
+	activeThemeName?: string;
+}>();
+
 defineEmits<{
 	"create-theme": [];
 	"edit-theme": [theme: NexTermTheme];
+	"select": [theme: NexTermTheme];
 }>();
 
 const themeStore = useThemeStore();

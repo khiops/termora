@@ -1,15 +1,10 @@
 import { THEME_NAME_REGEX } from "@nexterm/shared";
-import type { AppearanceConfig, NexTermTheme } from "@nexterm/shared";
+import type { NexTermTheme } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
-import type { AppearanceManager } from "../appearance-manager.js";
 import { ThemeError } from "../theme-manager.js";
 import type { ThemeManager } from "../theme-manager.js";
 
-export function registerThemeRoutes(
-	server: FastifyInstance,
-	themeManager: ThemeManager,
-	appearanceManager: AppearanceManager,
-): void {
+export function registerThemeRoutes(server: FastifyInstance, themeManager: ThemeManager): void {
 	// ─── Theme CRUD ──────────────────────────────────────────────────────────
 
 	server.get("/api/themes", async () => {
@@ -111,23 +106,5 @@ export function registerThemeRoutes(
 			}
 			throw err;
 		}
-	});
-
-	// ─── Appearance Config ───────────────────────────────────────────────────
-
-	server.get("/api/config/appearance", async () => {
-		return appearanceManager.get();
-	});
-
-	server.patch("/api/config/appearance", async (request, reply) => {
-		const body = request.body as Record<string, unknown> | null;
-		if (body == null || typeof body !== "object" || Array.isArray(body)) {
-			return reply.code(400).send({
-				error: { code: "VALIDATION_ERROR", message: "Request body must be an object" },
-			});
-		}
-
-		const updated = await appearanceManager.update(body as unknown as Partial<AppearanceConfig>);
-		return updated;
 	});
 }

@@ -1,7 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_APPEARANCE, generateId } from "@nexterm/shared";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
+import type { AppearanceConfig, CascadeResponse } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,6 +16,7 @@ import {
 	DEFAULT_TABS_CONFIG,
 	DEFAULT_TITLE_CONFIG,
 	DEFAULT_UI_CONFIG,
+	extractAppearanceConfig,
 	extractUiConfig,
 	loadGcConfig,
 	loadUiConfig,
@@ -240,6 +243,29 @@ describe("ConfigResolver.resolve", () => {
 		resolver.clearAgentHints("ses-x");
 		const result = resolver.resolve(undefined, undefined, "ses-x");
 		expect(result.fontSize).toBe(DEFAULT_PROFILE.fontSize);
+	});
+
+	it("wallpaper fields cascade through resolve()", () => {
+		// Layer 3: host sets wallpaper + blur
+		const host = metaDal.createHost({ type: "local", label: "cascade-wp-test" });
+		metaDal.updateHostProfile(host.id, JSON.stringify({ wallpaper: "host.jpg", wallpaperBlur: 5 }));
+
+		// Layer 4: channel adds dim
+		metaDal.createSession({ id: "ses-wp", hostId: host.id, status: "starting" });
+		metaDal.createChannel({ id: "ch-wp", sessionId: "ses-wp", status: "born" });
+		metaDal.updateChannelProfile("ch-wp", JSON.stringify({ wallpaperDim: 40 }));
+
+		const resolver = new ConfigResolver(metaDal);
+		const resolved = resolver.resolve(host.id, "ch-wp");
+
+		// Wallpaper fields merged across layers
+		expect(resolved.wallpaper).toBe("host.jpg");
+		expect(resolved.wallpaperBlur).toBe(5);
+		expect(resolved.wallpaperDim).toBe(40);
+
+		// Unrelated defaults still cascade correctly
+		expect(resolved.fontSize).toBe(DEFAULT_PROFILE.fontSize);
+		expect(resolved.cursorStyle).toBe(DEFAULT_PROFILE.cursorStyle);
 	});
 });
 
@@ -693,6 +719,21 @@ describe("extractUiConfig — channels section", () => {
 		const config = extractUiConfig({ channels: { default_shell: "/bin/zsh" } });
 		expect(config.channels.defaultShell).toBe("/bin/zsh");
 	});
+
+	it("parses auto_group = first", () => {
+		const config = extractUiConfig({ channels: { auto_group: "first" } });
+		expect(config.channels.autoGroup).toBe("first");
+	});
+
+	it("parses auto_group = none", () => {
+		const config = extractUiConfig({ channels: { auto_group: "none" } });
+		expect(config.channels.autoGroup).toBe("none");
+	});
+
+	it("ignores invalid auto_group value", () => {
+		const config = extractUiConfig({ channels: { auto_group: "always" } });
+		expect(config.channels.autoGroup).toBe("none");
+	});
 });
 
 describe("extractUiConfig — startup section", () => {
@@ -1002,5 +1043,748 @@ describe("ConfigResolver.uiConfig — search", () => {
 		expect(resolver.uiConfig.search.highlightOnClose).toBe("fade");
 		expect(resolver.uiConfig.search.scrollbarMarkers).toBe(false);
 		expect(resolver.uiConfig.search.historySize).toBe(30);
+	});
+});
+
+// ─── extractAppearanceConfig unit tests ──────────────────────────────────────
+
+describe("extractAppearanceConfig", () => {
+	it("returns defaults when no [appearance] section", () => {
+		const parsed = {} as import("@iarna/toml").JsonMap;
+		const config = extractAppearanceConfig(parsed);
+		expect(config).toEqual(DEFAULT_APPEARANCE);
+	});
+
+	it("parses theme from [appearance]", () => {
+		const parsed = { appearance: { theme: "dracula" } } as unknown as import("@iarna/toml").JsonMap;
+		const config = extractAppearanceConfig(parsed);
+		expect(config.theme).toBe("dracula");
+	});
+
+	it("parses auto_switch subsection", () => {
+		const parsed = {
+			appearance: {
+				auto_switch: { enabled: true, dark_theme: "dark-one", light_theme: "light-one" },
+			},
+		} as unknown as import("@iarna/toml").JsonMap;
+		const config = extractAppearanceConfig(parsed);
+		expect(config.autoSwitch.enabled).toBe(true);
+		expect(config.autoSwitch.darkTheme).toBe("dark-one");
+		expect(config.autoSwitch.lightTheme).toBe("light-one");
+	});
+
+	it("parses opacity subsection with snake_case keys", () => {
+		const parsed = {
+			appearance: {
+				opacity: { terminal: 80, sidebar: 90, host_rail: 70, tab_bar: 60 },
+			},
+		} as unknown as import("@iarna/toml").JsonMap;
+		const config = extractAppearanceConfig(parsed);
+		expect(config.opacity.terminal).toBe(80);
+		expect(config.opacity.sidebar).toBe(90);
+		expect(config.opacity.hostRail).toBe(70);
+		expect(config.opacity.tabBar).toBe(60);
+	});
+
+	it("parses scrollbar subsection with snake_case keys", () => {
+		const parsed = {
+			appearance: {
+				scrollbar: {
+					style: "wide",
+					thumb_color: "#ff0000",
+					track_color: "#00ff00",
+					width_thin: 4,
+					width_wide: 20,
+				},
+			},
+		} as unknown as import("@iarna/toml").JsonMap;
+		const config = extractAppearanceConfig(parsed);
+		expect(config.scrollbar.style).toBe("wide");
+		expect(config.scrollbar.thumbColor).toBe("#ff0000");
+		expect(config.scrollbar.trackColor).toBe("#00ff00");
+		expect(config.scrollbar.widthThin).toBe(4);
+		expect(config.scrollbar.widthWide).toBe(20);
+	});
+});
+
+// ─── ConfigResolver.appearance — loading from file ──────────────────────────
+
+describe("ConfigResolver.appearance", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns DEFAULT_APPEARANCE when no config.toml", () => {
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+		expect(resolver.appearance).toEqual(DEFAULT_APPEARANCE);
+	});
+
+	it("loads appearance from config.toml", () => {
+		const dir = join(tmpdir(), `nexterm-appear-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[appearance]\ntheme = "solarized"\n\n[appearance.opacity]\nterminal = 85\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.appearance.theme).toBe("solarized");
+		expect(resolver.appearance.opacity.terminal).toBe(85);
+		// Defaults preserved for non-overridden fields
+		expect(resolver.appearance.opacity.sidebar).toBe(100);
+	});
+});
+
+// ─── ConfigResolver.getCascade ──────────────────────────────────────────────
+
+describe("ConfigResolver.getCascade", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns all 4 layers with defaults when no overrides", () => {
+		const dir = join(tmpdir(), `nexterm-cascade-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		const cascade = resolver.getCascade();
+
+		expect(cascade.terminal.defaults).toEqual(DEFAULT_PROFILE);
+		expect(cascade.terminal.global).toEqual({});
+		expect(cascade.terminal.host).toBeUndefined();
+		expect(cascade.terminal.channel).toBeUndefined();
+		expect(cascade.terminal.resolved).toEqual(DEFAULT_PROFILE);
+		expect(cascade.ui.defaults).toEqual(DEFAULT_UI_CONFIG);
+		expect(cascade.ui.resolved).toEqual(DEFAULT_UI_CONFIG);
+		expect(cascade.appearance).toEqual(DEFAULT_APPEARANCE);
+	});
+
+	it("includes host layer when hostId provided", () => {
+		const dir = join(tmpdir(), `nexterm-cascade-host-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		// Create a host with a profile
+		const host = metaDal.createHost({ type: "local", label: "cascade-host" });
+		metaDal.updateHostProfile(host.id, JSON.stringify({ fontSize: 20 }));
+
+		const cascade = resolver.getCascade(host.id);
+		expect(cascade.terminal.host).toEqual({ fontSize: 20 });
+		expect(cascade.terminal.resolved.fontSize).toBe(20);
+	});
+
+	it("includes channel layer when channelId provided", () => {
+		const dir = join(tmpdir(), `nexterm-cascade-chan-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		const host = metaDal.createHost({ type: "local", label: "cascade-chan-host" });
+		const sessionId = generateId();
+		metaDal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		const channelId = generateId();
+		metaDal.createChannel({
+			id: channelId,
+			sessionId,
+			status: "live",
+		});
+		metaDal.updateChannelProfile(channelId, JSON.stringify({ scrollback: 9999 }));
+
+		const cascade = resolver.getCascade(host.id, channelId);
+		expect(cascade.terminal.channel).toEqual({ scrollback: 9999 });
+		expect(cascade.terminal.resolved.scrollback).toBe(9999);
+	});
+
+	it("includes global terminal overrides from config.toml", () => {
+		const dir = join(tmpdir(), `nexterm-cascade-global-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[terminal]\nfont_size = 18\n");
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		const cascade = resolver.getCascade();
+		expect(cascade.terminal.global).toEqual({ fontSize: 18 });
+		expect(cascade.terminal.resolved.fontSize).toBe(18);
+	});
+});
+
+// ─── ConfigResolver.getGlobalTerminalOverrides ──────────────────────────────
+
+describe("ConfigResolver.getGlobalTerminalOverrides", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns empty object when no config.toml loaded", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.getGlobalTerminalOverrides()).toEqual({});
+	});
+
+	it("returns fileConfig after loadFromFile", () => {
+		const dir = join(tmpdir(), `nexterm-overrides-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[terminal]\nfont_family = "Fira Code"\n');
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.getGlobalTerminalOverrides()).toEqual({ fontFamily: "Fira Code" });
+	});
+});
+
+// ─── ConfigResolver.getGlobalUiOverrides ────────────────────────────────────
+
+describe("ConfigResolver.getGlobalUiOverrides", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns empty object when no overrides", () => {
+		const resolver = new ConfigResolver(metaDal);
+		expect(resolver.getGlobalUiOverrides()).toEqual({});
+	});
+
+	it("returns only non-default values", () => {
+		const dir = join(tmpdir(), `nexterm-ui-overrides-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), "[tabs]\nclose_button = false\n");
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		const overrides = resolver.getGlobalUiOverrides();
+		expect(overrides.tabs).toEqual({ closeButton: false });
+		// Other sections should not appear
+		expect(overrides.panes).toBeUndefined();
+		expect(overrides.channels).toBeUndefined();
+	});
+});
+
+// ─── ConfigResolver.saveGlobalKey — config.toml write-back ──────────────────
+
+describe("ConfigResolver.saveGlobalKey", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("creates config.toml if missing", async () => {
+		const dir = join(tmpdir(), `nexterm-save-create-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await resolver.saveGlobalKey("terminal", "fontSize", 18);
+
+		const content = readFileSync(join(dir, "config.toml"), "utf8");
+		expect(content).toContain("font_size");
+		expect(content).toContain("18");
+		// Verify in-memory state reloaded
+		expect(resolver.getGlobalTerminalOverrides()).toEqual({ fontSize: 18 });
+	});
+
+	it("preserves comments when writing", async () => {
+		const dir = join(tmpdir(), `nexterm-save-comment-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const original = "# My config\n[terminal]\nfont_size = 14  # default size\n";
+		writeFileSync(join(dir, "config.toml"), original);
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await resolver.saveGlobalKey("terminal", "fontFamily", "Fira Code");
+
+		const content = readFileSync(join(dir, "config.toml"), "utf8");
+		expect(content).toContain("# My config");
+		expect(content).toContain("font_size = 14");
+		expect(content).toContain("Fira Code");
+	});
+
+	it("null value removes key", async () => {
+		const dir = join(tmpdir(), `nexterm-save-null-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[terminal]\nfont_size = 16\ntheme = "dracula"\n');
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await resolver.saveGlobalKey("terminal", "fontSize", null);
+
+		const content = readFileSync(join(dir, "config.toml"), "utf8");
+		expect(content).not.toContain("font_size");
+		expect(content).toContain("dracula");
+	});
+
+	it("saveGlobalTerminal rejects unknown keys", async () => {
+		const dir = join(tmpdir(), `nexterm-save-reject-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await expect(resolver.saveGlobalTerminal("badKey", 42)).rejects.toThrow("Unknown terminal key");
+	});
+
+	it("saveGlobalUi rejects unknown sections", async () => {
+		const dir = join(tmpdir(), `nexterm-save-ui-reject-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await expect(resolver.saveGlobalUi("badSection", "key", 42)).rejects.toThrow(
+			"Unknown UI section",
+		);
+	});
+
+	it("round-trips terminal values through write and read", async () => {
+		const dir = join(tmpdir(), `nexterm-save-roundtrip-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		await resolver.saveGlobalTerminal("fontSize", 22);
+		await resolver.saveGlobalTerminal("cursorStyle", "bar");
+
+		// Re-read with a fresh resolver
+		const resolver2 = new ConfigResolver(metaDal);
+		resolver2.loadFromFile(dir);
+		expect(resolver2.getGlobalTerminalOverrides()).toMatchObject({
+			fontSize: 22,
+			cursorStyle: "bar",
+		});
+	});
+});
+
+// ─── REST endpoint: GET /api/config/cascade ─────────────────────────────────
+
+describe("GET /api/config/cascade", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+
+	beforeEach(async () => {
+		dbs = openTestDatabases();
+		const dir = join(tmpdir(), `nexterm-cascade-api-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		server = await createServer({ logger: false, dbManager: dbs, configDir: dir });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("returns correct shape with all fields", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<CascadeResponse>();
+
+		expect(body.terminal).toBeDefined();
+		expect(body.terminal.defaults).toEqual(DEFAULT_PROFILE);
+		expect(body.terminal.global).toEqual({});
+		expect(body.terminal.resolved).toEqual(DEFAULT_PROFILE);
+		expect(body.ui).toBeDefined();
+		expect(body.ui.defaults).toBeDefined();
+		expect(body.ui.resolved).toBeDefined();
+		expect(body.appearance).toBeDefined();
+	});
+
+	it("includes host layer when host_id is provided", async () => {
+		// Create a host
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "cascade-host" },
+		});
+		const { id } = createRes.json<{ id: string }>();
+
+		// Set host profile
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${id}/profile`,
+			payload: { profile: { fontSize: 24 } },
+		});
+
+		const res = await server.inject({
+			method: "GET",
+			url: `/api/config/cascade?host_id=${id}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<CascadeResponse>();
+		expect(body.terminal.host).toEqual({ fontSize: 24 });
+		expect(body.terminal.resolved.fontSize).toBe(24);
+	});
+});
+
+// ─── REST endpoint: PUT /api/config/global ──────────────────────────────────
+
+describe("PUT /api/config/global", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = join(tmpdir(), `nexterm-global-api-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs, configDir: tempDir });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("writes terminal keys to config.toml", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/global",
+			payload: { terminal: { fontSize: 20 } },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+
+		// Verify via cascade
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.terminal.global).toMatchObject({ fontSize: 20 });
+	});
+
+	it("rejects unknown keys (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/global",
+			payload: { terminal: { unknownKey: "bad" } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("rejects missing terminal field (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/global",
+			payload: {},
+		});
+		expect(res.statusCode).toBe(400);
+	});
+});
+
+// ─── REST endpoint: PUT /api/config/ui ──────────────────────────────────────
+
+describe("PUT /api/config/ui", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = join(tmpdir(), `nexterm-ui-api-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs, configDir: tempDir });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("writes UI section keys to config.toml", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { closeButton: false } },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+
+		// Verify written
+		const content = readFileSync(join(tempDir, "config.toml"), "utf8");
+		expect(content).toContain("close_button");
+	});
+
+	it("rejects unknown UI section (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { badSection: { key: "val" } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("rejects unknown key within a valid UI section (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { unknownKey: true } },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string; message: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+		expect(body.error.message).toContain("unknownKey");
+		expect(body.error.message).toContain("tabs");
+	});
+
+	it("accepts valid keys within a valid UI section (200)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { closeButton: false, newTabPosition: "afterActive" } },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+	});
+});
+
+// ─── REST endpoint: PUT /api/config/appearance ──────────────────────────────
+
+describe("PUT /api/config/appearance", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = join(tmpdir(), `nexterm-appear-api-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs, configDir: tempDir });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("writes appearance keys to config.toml", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { theme: "dracula" },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+
+		// Verify via cascade
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.appearance.theme).toBe("dracula");
+	});
+
+	it("writes nested appearance keys (opacity)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { opacity: { terminal: 80 } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.appearance.opacity.terminal).toBe(80);
+	});
+
+	it("writes nested autoSwitch keys with correct snake_case section name", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { autoSwitch: { enabled: true, darkTheme: "dark-one", lightTheme: "light-one" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.appearance.autoSwitch.enabled).toBe(true);
+		expect(body.appearance.autoSwitch.darkTheme).toBe("dark-one");
+		expect(body.appearance.autoSwitch.lightTheme).toBe("light-one");
+	});
+
+	it("rejects unknown appearance keys (400)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { badKey: "val" },
+		});
+		expect(res.statusCode).toBe(400);
+	});
+});
+
+// ─── REST endpoint: GET /api/hosts/:id/profile ──────────────────────────────
+
+describe("GET /api/hosts/:id/profile", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+
+	beforeEach(async () => {
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("returns empty profile for host with no overrides", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "profile-get-host" },
+		});
+		const { id } = createRes.json<{ id: string }>();
+
+		const res = await server.inject({ method: "GET", url: `/api/hosts/${id}/profile` });
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ profile: {} });
+	});
+
+	it("returns profile after PATCH", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "profile-get-host-2" },
+		});
+		const { id } = createRes.json<{ id: string }>();
+
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${id}/profile`,
+			payload: { profile: { fontSize: 30 } },
+		});
+
+		const res = await server.inject({ method: "GET", url: `/api/hosts/${id}/profile` });
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ profile: { fontSize: 30 } });
+	});
+
+	it("returns 404 for unknown host", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/hosts/nonexistent/profile" });
+		expect(res.statusCode).toBe(404);
+	});
+});
+
+// ─── REST endpoint: GET /api/channels/:id/profile ───────────────────────────
+
+describe("GET /api/channels/:id/profile", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+
+	beforeEach(async () => {
+		dbs = openTestDatabases();
+		server = await createServer({ logger: false, dbManager: dbs });
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("returns 404 for unknown channel", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/channels/nonexistent/profile",
+		});
+		expect(res.statusCode).toBe(404);
+	});
+});
+
+// ─── Auth enforcement on new endpoints ──────────────────────────────────────
+
+describe("Auth enforcement on cascade/config endpoints", () => {
+	let server: FastifyInstance;
+	let dbs: DatabaseManager;
+
+	beforeEach(async () => {
+		dbs = openTestDatabases();
+		const dir = join(tmpdir(), `nexterm-auth-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			authToken: "abc123",
+			configDir: dir,
+		});
+	});
+
+	afterEach(async () => {
+		await server.close();
+		dbs.close();
+	});
+
+	it("GET /api/config/cascade requires auth", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		expect(res.statusCode).toBe(401);
+	});
+
+	it("PUT /api/config/global requires auth", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/global",
+			payload: { terminal: { fontSize: 20 } },
+		});
+		expect(res.statusCode).toBe(401);
+	});
+
+	it("PUT /api/config/ui requires auth", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { closeButton: false } },
+		});
+		expect(res.statusCode).toBe(401);
+	});
+
+	it("PUT /api/config/appearance requires auth", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/appearance",
+			payload: { theme: "dracula" },
+		});
+		expect(res.statusCode).toBe(401);
+	});
+
+	it("accepts request with valid Bearer token", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/config/cascade",
+			headers: { authorization: "Bearer abc123" },
+		});
+		expect(res.statusCode).toBe(200);
 	});
 });

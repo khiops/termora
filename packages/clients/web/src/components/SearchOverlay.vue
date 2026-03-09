@@ -348,7 +348,7 @@ function toggleOption(key: keyof SearchOptions): void {
 /* ------------------------------------------------------------------ */
 
 .search-overlay__match-count {
-	color: var(--nt-text-muted);
+	color: var(--nt-text-secondary);
 	font-size: 11px;
 	min-width: 36px;
 	text-align: center;
@@ -382,8 +382,8 @@ function toggleOption(key: keyof SearchOptions): void {
 	padding: 0;
 	background: none;
 	border: none;
-	border-radius: 3px;
-	color: var(--nt-text-muted);
+	border-radius: 4px;
+	color: var(--nt-text-secondary);
 	font-size: 10px;
 	cursor: pointer;
 	flex-shrink: 0;
@@ -391,8 +391,8 @@ function toggleOption(key: keyof SearchOptions): void {
 }
 
 .search-overlay__btn:hover:not(:disabled) {
-	color: var(--nt-fg);
-	background: var(--nt-tab-hover);
+	color: var(--nt-accent);
+	background: var(--nt-border);
 }
 
 .search-overlay__btn:disabled {
@@ -417,8 +417,8 @@ function toggleOption(key: keyof SearchOptions): void {
 	padding: 0 3px;
 	background: none;
 	border: 1px solid transparent;
-	border-radius: 3px;
-	color: var(--nt-text-muted);
+	border-radius: 4px;
+	color: var(--nt-text-secondary);
 	font-size: 11px;
 	font-weight: 600;
 	font-family: inherit;
@@ -428,8 +428,8 @@ function toggleOption(key: keyof SearchOptions): void {
 }
 
 .search-overlay__toggle:hover {
-	color: var(--nt-fg);
-	background: var(--nt-tab-hover);
+	color: var(--nt-accent);
+	background: var(--nt-border);
 }
 
 .search-overlay__toggle--active {

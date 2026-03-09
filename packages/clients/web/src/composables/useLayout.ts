@@ -1,6 +1,7 @@
 import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
 import { useChannelsStore } from "../stores/channels.js";
+import { useConfigStore } from "../stores/config.js";
 
 // ---------------------------------------------------------------------------
 // Pane tree types
@@ -368,8 +369,18 @@ export function useLayout() {
 			return;
 		}
 
-		tabs.value = [...tabs.value, { channelId, label }];
-		activeTabIndex.value = tabs.value.length - 1;
+		const configStore = useConfigStore();
+		const newTabPosition = configStore.uiConfig.tabs?.newTabPosition;
+		if (newTabPosition === "afterActive") {
+			const insertIdx = activeTabIndex.value + 1;
+			const newTabs = [...tabs.value];
+			newTabs.splice(insertIdx, 0, { channelId, label });
+			tabs.value = newTabs;
+			activeTabIndex.value = insertIdx;
+		} else {
+			tabs.value = [...tabs.value, { channelId, label }];
+			activeTabIndex.value = tabs.value.length - 1;
+		}
 
 		// Initialize layout for the new tab as a single terminal pane
 		if (!(channelId in layouts.value)) {

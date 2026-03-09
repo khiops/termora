@@ -200,7 +200,7 @@ onUnmounted(() => {
 	padding: 5px 10px 5px 20px;
 	cursor: pointer;
 	font-size: 13px;
-	color: var(--nt-text-muted);
+	color: var(--nt-sidebar-text);
 	border-radius: 4px;
 	margin: 0 4px;
 	transition: background 0.1s, color 0.1s;

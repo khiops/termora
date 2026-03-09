@@ -13,6 +13,12 @@ export const useThemeStore = defineStore("theme", () => {
 	const currentTheme = ref<NexTermTheme | null>(null);
 	const previewTheme = ref<NexTermTheme | null>(null);
 
+	/**
+	 * Scope-level theme override (host or channel).
+	 * When set, clearPreview reverts to this instead of the global currentTheme.
+	 */
+	const scopeOverride = ref<NexTermTheme | null>(null);
+
 	/** The active theme (preview if hovering, otherwise current). */
 	const activeTheme = computed(() => previewTheme.value ?? currentTheme.value);
 
@@ -40,6 +46,11 @@ export const useThemeStore = defineStore("theme", () => {
 			if (value !== undefined) {
 				result[key] = value;
 			}
+		}
+		// Apply terminal opacity to background so xterm.js renders with alpha
+		const alpha = appearance.value.opacity.terminal / 100;
+		if (alpha < 1 && result.background) {
+			result.background = hexToRgba(result.background, alpha);
 		}
 		return result;
 	}
@@ -167,7 +178,7 @@ export const useThemeStore = defineStore("theme", () => {
 		const authStore = useAuthStore();
 		try {
 			await fetch("/api/config/appearance", {
-				method: "PATCH",
+				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token ?? ""}`,
@@ -196,9 +207,14 @@ export const useThemeStore = defineStore("theme", () => {
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		rafId = requestAnimationFrame(() => {
 			previewTheme.value = null;
-			if (currentTheme.value !== null) applyTheme(currentTheme.value);
+			const revertTo = scopeOverride.value ?? currentTheme.value;
+			if (revertTo !== null) applyTheme(revertTo);
 			rafId = null;
 		});
+	}
+
+	function setScopeOverride(theme: NexTermTheme | null): void {
+		scopeOverride.value = theme;
 	}
 
 	// ── Appearance config (opacity, scrollbar, auto-switch) ─────────────
@@ -208,13 +224,14 @@ export const useThemeStore = defineStore("theme", () => {
 	async function loadAppearance(): Promise<void> {
 		const authStore = useAuthStore();
 		try {
-			const response = await fetch("/api/config/appearance", {
+			const response = await fetch("/api/config/cascade", {
 				headers: {
 					Authorization: `Bearer ${authStore.token ?? ""}`,
 				},
 			});
 			if (response.ok) {
-				appearance.value = (await response.json()) as AppearanceConfig;
+				const cascade = (await response.json()) as { appearance: AppearanceConfig };
+				appearance.value = cascade.appearance;
 			}
 		} catch {
 			// API may not exist yet — use defaults
@@ -222,12 +239,21 @@ export const useThemeStore = defineStore("theme", () => {
 	}
 
 	/** Apply opacity settings to CSS custom properties. */
+	/** Apply opacity settings to CSS custom properties. */
 	function applyOpacity(opacity: AppearanceConfig["opacity"]): void {
 		const root = document.documentElement.style;
 		root.setProperty("--nt-terminal-alpha", String(opacity.terminal / 100));
 		root.setProperty("--nt-sidebar-alpha", String(opacity.sidebar / 100));
 		root.setProperty("--nt-host-rail-alpha", String(opacity.hostRail / 100));
 		root.setProperty("--nt-tab-bar-alpha", String(opacity.tabBar / 100));
+
+		// Re-broadcast xterm theme so terminals pick up the new background alpha
+		if (currentTheme.value) {
+			const xtermTheme = toXtermTheme(currentTheme.value.colors);
+			for (const cb of terminalThemeCallbacks) {
+				cb(xtermTheme);
+			}
+		}
 	}
 
 	/** Apply scrollbar settings to CSS custom properties. */
@@ -246,23 +272,25 @@ export const useThemeStore = defineStore("theme", () => {
 		if (scrollbar.trackColor) {
 			root.setProperty("--nt-scrollbar-track", scrollbar.trackColor);
 		}
+		document.documentElement.classList.toggle("nt-scrollbar-hidden", scrollbar.style === "hidden");
+		window.dispatchEvent(new CustomEvent("nt:scrollbar-changed"));
 	}
 
 	/** Update appearance setting and persist via API. */
 	async function updateAppearance(partial: Partial<AppearanceConfig>): Promise<void> {
+		// Apply optimistic update locally
+		appearance.value = { ...appearance.value, ...partial };
+
 		const authStore = useAuthStore();
 		try {
-			const response = await fetch("/api/config/appearance", {
-				method: "PATCH",
+			await fetch("/api/config/appearance", {
+				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token ?? ""}`,
 				},
 				body: JSON.stringify(partial),
 			});
-			if (response.ok) {
-				appearance.value = (await response.json()) as AppearanceConfig;
-			}
 		} catch {
 			// API may not exist yet
 		}
@@ -297,6 +325,7 @@ export const useThemeStore = defineStore("theme", () => {
 		setTheme,
 		previewHover,
 		clearPreview,
+		setScopeOverride,
 		initialize,
 		onTerminalThemeChange,
 		toXtermTheme,
@@ -310,4 +339,12 @@ export function hexToRgb(hex: string): string {
 	const g = Number.parseInt(hex.slice(3, 5), 16);
 	const b = Number.parseInt(hex.slice(5, 7), 16);
 	return `${r}, ${g}, ${b}`;
+}
+
+// ── Helper: "#89b4fa" + alpha -> "rgba(137, 180, 250, 0.85)" ──────────────
+export function hexToRgba(hex: string, alpha: number): string {
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

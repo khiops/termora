@@ -6,8 +6,8 @@
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
-		<!-- Appearance panel — rendered globally, outside layout, via Teleport -->
-		<AppearancePanel :visible="showAppearance" @close="showAppearance = false" />
+		<!-- Settings panel — rendered globally, outside layout, via Teleport -->
+		<SettingsPanel :visible="showSettings" @close="showSettings = false" />
 
 		<!-- Configure Command dialog — opened from tab context menu or exit overlay -->
 		<ConfigureCommandDialog
@@ -109,15 +109,23 @@
 		/>
 
 		<!-- Main layout — only shown when authenticated and WS ready -->
-		<div v-else class="app-layout">
+		<div v-else class="app-layout" :style="layoutStyle">
 			<HostRail
 			class="host-rail"
-			@toggle-appearance="showAppearance = !showAppearance"
+			@toggle-settings="showSettings = !showSettings"
 			@add-host="showHostModal = true"
 			@host-context-menu="onHostContextMenu"
 			@group-context-menu="onGroupContextMenu"
 		/>
+			<!-- Resize handle after host rail -->
+			<div
+				class="resize-handle"
+				:style="{ left: railResize.width.value + 'px' }"
+				@mousedown="railResize.onMouseDown"
+				@dblclick="railResize.reset"
+			/>
 			<ChannelSidebar
+			v-show="!sidebarResize.collapsed.value"
 			class="channel-sidebar"
 			@select-channel="onSelectChannel"
 			@open-new-tab="onSidebarOpenNewTab"
@@ -125,6 +133,13 @@
 			@configure-command="onConfigureCommand"
 			@set-welcome="onSetWelcome"
 		/>
+			<!-- Resize handle after channel sidebar -->
+			<div
+				class="resize-handle"
+				:style="{ left: (railResize.width.value + (sidebarResize.collapsed.value ? 0 : sidebarResize.width.value)) + 'px' }"
+				@mousedown="sidebarResize.onMouseDown"
+				@dblclick="sidebarResize.reset"
+			/>
 
 			<!-- Terminal main: tab bar + recursive pane layout -->
 			<div class="terminal-main">
@@ -182,6 +197,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch } from "vue";
+import { useResizable } from "./composables/useResizable.js";
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
@@ -203,7 +219,7 @@ import PaneLayout from "./components/PaneLayout.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import CommandPalette from "./components/CommandPalette.vue";
-import AppearancePanel from "./components/settings/AppearancePanel.vue";
+import SettingsPanel from "./components/settings/SettingsPanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HostModal from "./components/HostModal.vue";
@@ -215,15 +231,69 @@ import GroupActionDialog from "./components/GroupActionDialog.vue";
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
+const configStore = useConfigStore();
+
+// ─── Resizable panels ────────────────────────────────────────────────────────
+
+function saveLayoutWidth(key: string, value: number): void {
+	if (authStore.token === null) return;
+	void fetch("/api/config/ui", {
+		method: "PUT",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${authStore.token}`,
+		},
+		body: JSON.stringify({ layout: { [key]: value } }),
+	}).then(() => configStore.loadUiConfig());
+}
+
+const railResize = useResizable({
+	initialWidth: 48,
+	minWidth: 48,
+	maxWidth: 120,
+	onResizeEnd: (width) => saveLayoutWidth("hostRailWidth", width),
+});
+
+const sidebarResize = useResizable({
+	initialWidth: 200,
+	minWidth: 140,
+	maxWidth: 400,
+	collapseThreshold: 80,
+	onResizeEnd: (width) => saveLayoutWidth("sidebarWidth", width),
+});
+
+// Apply persisted layout widths once the config loads (after auth).
+watch(
+	() => configStore.uiConfig.layout,
+	(layout) => {
+		if (!layout) return;
+		if (layout.hostRailWidth > 0) {
+			railResize.width.value = layout.hostRailWidth;
+		}
+		const sw = layout.sidebarWidth;
+		if (sw === 0) {
+			sidebarResize.collapsed.value = true;
+			sidebarResize.width.value = 0;
+		} else if (sw > 0) {
+			sidebarResize.collapsed.value = false;
+			sidebarResize.width.value = sw;
+		}
+	},
+	{ once: true },
+);
+
+const layoutStyle = computed(() => ({
+	"--rail-w": `${railResize.width.value}px`,
+	"--sidebar-w": `${sidebarResize.collapsed.value ? 0 : sidebarResize.width.value}px`,
+}));
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
-const configStore = useConfigStore();
 const themeStore = useThemeStore();
 const layout = useLayout();
 const multiPaneSearch = useMultiPaneSearch();
 provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
-const showAppearance = ref(false);
+const showSettings = ref(false);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
 const showHostModal = ref(false);
@@ -242,6 +312,74 @@ const groupContextMenu = ref<{
 } | null>(null);
 const renameGroupName = ref<string | null>(null);
 const deleteGroupName = ref<string | null>(null);
+
+// ─── Per-channel theme cascade ───────────────────────────────────────────────
+
+/**
+ * When the active channel changes, fetch the resolved cascade for that
+ * host+channel and apply the correct theme. Falls back to global theme
+ * when no channel is selected.
+ */
+/**
+ * Resolve and apply the cascade theme for a given channel.
+ * Extracted so it can be called from both the watcher and onMounted.
+ */
+async function applyCascadeTheme(channelId: string): Promise<void> {
+	if (themeStore.availableThemes.length === 0) return;
+	const hostId = channelsStore.channelHostMap.get(channelId) ?? null;
+	if (authStore.token === null) return;
+	try {
+		const params = new URLSearchParams();
+		if (hostId) params.set("host_id", hostId);
+		params.set("channel_id", channelId);
+		const res = await fetch(`/api/config/cascade?${params.toString()}`, {
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return;
+		const data = await res.json() as {
+			terminal: {
+				resolved: { theme?: string };
+				host?: { theme?: string } | null;
+				channel?: { theme?: string } | null;
+			};
+		};
+		// Only apply scope override if there's an explicit host or channel theme
+		const hasChannelOverride = data.terminal.channel?.theme != null;
+		const hasHostOverride = data.terminal.host?.theme != null;
+		if (!hasChannelOverride && !hasHostOverride) {
+			// No explicit scope override — use global appearance theme
+			themeStore.setScopeOverride(null);
+			if (themeStore.currentTheme !== null) {
+				themeStore.applyTheme(themeStore.currentTheme);
+			}
+			return;
+		}
+		const themeName = data.terminal.resolved.theme;
+		if (!themeName) return;
+		const theme = themeStore.availableThemes.find((t) => t.name === themeName);
+		if (theme) {
+			themeStore.setScopeOverride(theme);
+			themeStore.applyTheme(theme);
+		}
+	} catch {
+		// Non-critical — leave current theme applied
+	}
+}
+
+watch(
+	() => channelsStore.selectedChannelId,
+	async (channelId) => {
+		if (channelId === null) {
+			// No channel selected — reapply global theme
+			themeStore.setScopeOverride(null);
+			if (themeStore.currentTheme !== null) {
+				themeStore.applyTheme(themeStore.currentTheme);
+			}
+			return;
+		}
+		await applyCascadeTheme(channelId);
+	},
+);
 
 // ─── Window title ────────────────────────────────────────────────────────────
 
@@ -367,6 +505,10 @@ onMounted(async () => {
 			themeStore.applyOpacity(themeStore.appearance.opacity);
 			themeStore.applyScrollbar(themeStore.appearance.scrollbar);
 			await hostsStore.fetchHosts();
+			// Apply channel/host theme override if an active channel exists
+			if (channelsStore.selectedChannelId) {
+				await applyCascadeTheme(channelsStore.selectedChannelId);
+			}
 		} catch (err) {
 			console.error("[App] startup connect failed:", err);
 		}
@@ -437,6 +579,7 @@ watch(
 			channelsStore.selectChannel(tab.channelId);
 		}
 	},
+	{ immediate: true },
 );
 
 /**
@@ -486,8 +629,8 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 		commandPalette.toggle();
 		return;
 	}
-	if (event.key === "Escape" && showAppearance.value) {
-		showAppearance.value = false;
+	if (event.key === "Escape" && showSettings.value) {
+		showSettings.value = false;
 	}
 }
 
@@ -890,10 +1033,27 @@ body,
 
 .app-layout {
 	display: grid;
-	grid-template-columns: 48px 200px 1fr;
+	grid-template-columns: var(--rail-w, 48px) var(--sidebar-w, 200px) 1fr;
 	height: 100vh;
 	background: var(--nt-bg);
 	color: var(--nt-fg);
+	position: relative;
+}
+
+.resize-handle {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 6px;
+	margin-left: -3px;
+	cursor: col-resize;
+	z-index: 20;
+	transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+	background: rgba(var(--nt-accent-rgb), 0.3);
 }
 
 .host-rail {

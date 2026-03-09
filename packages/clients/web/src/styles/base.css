@@ -101,3 +101,45 @@ body {
 	margin: 0;
 	font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* ── Global scrollbar ──────────────────────────────────────────────── */
+
+* {
+	scrollbar-color: var(--nt-scrollbar-thumb) var(--nt-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+	width: var(--nt-scrollbar-width);
+}
+
+*::-webkit-scrollbar-track {
+	background: var(--nt-scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--nt-scrollbar-thumb);
+	border-radius: 3px;
+}
+
+/* xterm.js injects its own styles on .xterm-viewport — override with higher specificity */
+.xterm .xterm-viewport::-webkit-scrollbar {
+	width: var(--nt-scrollbar-width);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+	background: var(--nt-scrollbar-track);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+	background: var(--nt-scrollbar-thumb);
+	border-radius: 3px;
+}
+
+/* Hidden mode: fully remove scrollbar from layout (keeps overflow-y: scroll for scroll events) */
+.nt-scrollbar-hidden *::-webkit-scrollbar {
+	display: none;
+}
+
+.nt-scrollbar-hidden * {
+	scrollbar-width: none;
+}

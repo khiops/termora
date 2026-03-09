@@ -3,16 +3,10 @@
 ## In Progress
 
 ### UI/UX Sprint — Phase B
-- [ ] 💡 [UI] UX-09: Settings Panel — Config Cascade UI (Sprint 4)
 - [ ] ⏭️ [UI] UX-08: Multi-host Groups (deferred, partially covered by UX-03 host groups)
 - [ ] ⏭️ [UI] UX-10: Advanced Theming (absorbed into UX-06)
 
 ## Pending
-
-### E2E Bugs
-- [x] ✅ [Web] Edit Host modal creates duplicate — HostModal not remounting, v-if added (from E2E Sc.60) (2026-03-07)
-- [x] ✅ [Web] Edit Host self-name validation — same root cause as above (from E2E Sc.60) (2026-03-07)
-- [x] ✅ [Web] Visual profiles never render — added toCamelCase() to hosts store API responses (from E2E Sc.83) (2026-03-07)
 
 ### Review Findings
 - [ ] ⏭️ [UI] typecheck useCommandPalette.spec.ts — false positive, hostId not on Channel type
@@ -21,7 +15,6 @@
 - [ ] 🔧 [UI] useLayout localStorage load: validate max-pane-count (INV-10) — Priority: M (from /review F-011)
 - [ ] 🔧 [Hub] session-manager.spec.ts: crash-loop 60s window reset test skipped (timer cascade) — Priority: M (from /review F-003)
 - [ ] 🔧 [UI] Tab DnD reorder in tab bar (SC-21, priority:low) — Priority: L (from UX-01, missed in Block 4)
-- [x] ✅ [UI] E2E scenarios for all Sprint 1 stories — TESTING_E2E.md updated (scenarios 59-88) (2026-03-07)
 - [ ] 🔧 [Agent] EADDRINUSE randomized backoff on daemon spawn — Priority: L (from /review F-003, deprioritized)
 - [ ] 🔧 [UI] DRY: refactor TerminalPane.paneTitle + App.activeTitle to use useTabTitle composable — Priority: M (from UX-02 /review F-004)
 - [ ] 🔧 [UI] DRY: useMultiPaneSearch findNextAll/findPreviousAll near-symmetric (~50 lines each) — Priority: M (from UX-04 /review F-007)
@@ -33,15 +26,12 @@
 - [ ] 💡 [Agent] Unix socket path length validation (~100 char limit) — Priority: L (from /llm Copilot)
 
 ### Deferred from UX-03 /review
-- [x] ✅ [Web] DeleteHostModal: hasActiveSessions — uses channelHostMap + channel status (2026-03-08)
-- [x] ✅ [Hub] testSshConnectivity: auth failures now return ok:false (2026-03-08)
 - [ ] 🔧 [Web] HostRail tooltip missing channel count + connection duration (SC-17) — Priority: L (from /review F-007)
 - [ ] 🔧 [Hub] SQL comment for COALESCE(host_group, '~') tilde sorting trick — Priority: L (from /review F-008)
 - [ ] 🔧 [Hub] Batch import: set sshAuth based on IdentityFile presence — Priority: L (from /review F-009)
 - [ ] 🔧 [Hub] SSH config parser: add test for alias-only Host block (no HostName) — Priority: L (from /review F-010)
 
 ### Deferred from UX-05 /review
-- [x] ✅ [Web] Bell aggregation: channelHostMap enables cross-host bell counts (2026-03-08)
 - [ ] 🔧 [Web] SC-22 auto mode above threshold no brief badge — Priority: L (from /review F-005)
 - [ ] 🔧 [Web] Grouped notification body says 'terminal' instead of channel name — Priority: L (from /review F-006)
 - [ ] 🔧 [Web] No audio extension validation (.wav/.mp3/.ogg) in useBellSound — Priority: L (from /review F-008)
@@ -61,6 +51,26 @@
 - [ ] 💡 [UI] Banner position 'aboveTabs' option — Priority: L (from UX-07 /adversarial C-01)
 - [ ] 💡 [UI] Collapsible banner with shortText — Priority: L (from UX-07 /adversarial C-02)
 - [ ] 💡 [UI] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
+
+### Deferred from UX-09 /review
+- [ ] 🔧 [Hub] PUT /api/config/ui: add per-key validation for UI sections (C-08 completeness) — Priority: M (from /review F-002, partially fixed)
+- [ ] 🔧 [Web] SettingsPanel: toast notification on scope auto-fallback (SC-17) — Priority: L (from /review F-005)
+- [ ] 🔧 [Web] settings store: dead else branch for top-level UI key → would 400 — Priority: L (from /review F-006)
+- [ ] 🔧 [Hub] PATCH /api/hosts/:id/profile + channels: add TERMINAL_PROFILE_KEYS validation — Priority: L (from /review F-007)
+
+### Deferred from UX-09 /spec + /adversarial
+- [ ] 💡 [UI] Settings panel search/filter (VS Code style) — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Settings sync across devices — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Settings export/import as JSON — Priority: L (from UX-09 spec, P2)
+- [ ] 💡 [UI] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
+- [ ] 💡 [UI] Config.toml comment-preserving write (TOML AST editor) — Priority: L (from /adversarial C-01, deferred: full stringify approach simpler)
+- [ ] 💡 [Hub] WebSocket events for config changes (reactive settings across clients) — Priority: L (from /llm Copilot, deferred: single-user MVP)
+
+### Deferred from UX-10 /review
+- [ ] 🔧 [Web] vue-tsc pre-existing errors in SettingsPanel/AppearanceCategory/SchemaCategory (exactOptionalPropertyTypes) — Priority: L (from /review F-004)
+- [ ] 💡 [Hub] Magic-number MIME validation beyond extension check for wallpaper uploads — Priority: L (from /llm review)
+- [ ] 💡 [Hub] Disk quota enforcement for wallpapers directory — Priority: L (from /llm review)
+- [ ] 💡 [Hub] Image bomb detection (pixel dimension limits) for wallpaper uploads — Priority: L (from /llm review)
 
 ### Phase 2 (follows AGENT-DAEMON)
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1

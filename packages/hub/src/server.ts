@@ -1,5 +1,5 @@
 import websocket from "@fastify/websocket";
-import { DEFAULT_PORT } from "@nexterm/shared";
+import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
@@ -11,7 +11,7 @@ import { registerHostRoutes } from "./api/hosts.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
-import { AppearanceManager } from "./appearance-manager.js";
+import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { validateToken } from "./auth.js";
 import { getConfigDir } from "./cli.js";
 import { ConfigResolver, loadGcConfig } from "./config.js";
@@ -45,6 +45,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
 			if (pathname === "/api/fonts") return;
+			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -91,6 +92,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
+		const fastifyMultipart = (await import("@fastify/multipart")).default;
+		await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
+
 		await server.register(websocket);
 
 		// Load GC config from config.toml before creating SessionManager
@@ -117,16 +121,16 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerGroupRoutes(server, metaDal);
 		registerConfigRoutes(server, metaDal, configResolver);
 		registerFontRoutes(server, configDir);
+		registerWallpaperRoutes(server, configDir);
 		const themeManager = new ThemeManager(configDir);
 		await themeManager.init();
-		const appearanceManager = new AppearanceManager(configDir);
-		await appearanceManager.init();
-		registerThemeRoutes(server, themeManager, appearanceManager);
+		registerThemeRoutes(server, themeManager);
 		if (options.authToken) {
 			registerPairRoutes(server, { authToken: options.authToken, metaDal });
 		}
 		await registerUserFonts(server, configDir);
 		await registerUserSounds(server, configDir);
+		await registerUserWallpapers(server, configDir);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
@@ -205,6 +209,29 @@ async function registerUserSounds(server: FastifyInstance, configDir: string): P
 	});
 
 	server.log.info({ soundsDir }, "serving user sounds from config dir");
+}
+
+/**
+ * Register a @fastify/static instance to serve wallpaper images
+ * from the config directory's `wallpapers/` subdirectory.
+ */
+async function registerUserWallpapers(server: FastifyInstance, configDir: string): Promise<void> {
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const wallpapersDir = join(configDir, "wallpapers");
+	mkdirSync(wallpapersDir, { recursive: true });
+
+	const fastifyStatic = (await import("@fastify/static")).default;
+	await server.register(fastifyStatic, {
+		root: wallpapersDir,
+		prefix: "/public/wallpapers/",
+		decorateReply: false,
+		setHeaders: (res) => {
+			res.setHeader("X-Content-Type-Options", "nosniff");
+		},
+	});
+
+	server.log.info({ wallpapersDir }, "serving user wallpapers from config dir");
 }
 
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {

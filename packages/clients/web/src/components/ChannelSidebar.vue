@@ -39,18 +39,33 @@
 
 			<!-- Populated channel list -->
 			<template v-else>
-				<!-- Groups defined by user -->
+				<!-- Groups defined by user (draggable) -->
 				<template
 					v-for="group in channelsStore.groups.filter((g) => g.hostId === activeHostId || g.hostId === '')"
 					:key="group.id"
 				>
-					<ChannelGroupHeader
-						:group="group"
-						:count="(channelsStore.channelsByGroup.get(group.id) ?? []).length"
-						@toggle="channelsStore.toggleGroupCollapsed(group.id)"
-						@rename="channelsStore.renameGroup"
-						@delete="channelsStore.removeGroup"
-					/>
+					<div
+						class="group-drag-zone"
+						:class="{
+							'group-drag-zone--drag': dragGroupId === group.id,
+							'group-drag-zone--over-top': dragOverId === group.id && dragPosition === 'top',
+							'group-drag-zone--over-bottom': dragOverId === group.id && dragPosition === 'bottom',
+						}"
+						draggable="true"
+						@dragstart="onGroupDragStart($event, group.id)"
+						@dragend="onGroupDragEnd"
+						@dragover.prevent="onGroupDragOver($event, group.id)"
+						@dragleave="onGroupDragLeave(group.id)"
+						@drop.prevent="onGroupDrop($event, group.id)"
+					>
+						<ChannelGroupHeader
+							:group="group"
+							:count="(channelsStore.channelsByGroup.get(group.id) ?? []).length"
+							@toggle="channelsStore.toggleGroupCollapsed(group.id)"
+							@rename="channelsStore.renameGroup"
+							@delete="channelsStore.removeGroup"
+						/>
+					</div>
 					<template v-if="!group.collapsed">
 						<ChannelItem
 							v-for="(ch, idx) in channelsStore.channelsByGroup.get(group.id) ?? []"
@@ -74,7 +89,7 @@
 					</template>
 				</template>
 
-				<!-- "General" group — ungrouped channels (null bucket) -->
+				<!-- "General" group — ungrouped channels, NOT draggable / NOT a drop target -->
 				<ChannelGroupHeader
 					:group="generalGroup"
 					:count="(channelsStore.channelsByGroup.get(null) ?? []).length"
@@ -124,6 +139,7 @@ import { computed, ref } from "vue";
 import type { ChannelGroup } from "@nexterm/shared";
 import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { useConfigStore } from "../stores/config.js";
 import ChannelGroupHeader from "./ChannelGroupHeader.vue";
 import ChannelItem from "./ChannelItem.vue";
 
@@ -137,6 +153,7 @@ const emit = defineEmits<{
 
 const channelsStore = useChannelsStore();
 const hostsStore = useHostsStore();
+const configStore = useConfigStore();
 
 const activeHostId = computed(() => channelsStore.activeHostId);
 
@@ -153,20 +170,20 @@ const hostLabel = computed(() => {
 // Synthetic "General" group for ungrouped channels
 // -------------------------------------------------------------------------
 
-const generalCollapsed = ref(false);
+const generalCollapsed = computed(() => channelsStore.generalCollapsed);
 
-/** Pseudo-group object for the ungrouped bucket. Not persisted. */
+/** Pseudo-group object for the ungrouped bucket. Not persisted to API. */
 const generalGroup = computed<ChannelGroup>(() => ({
 	id: "__general__",
 	hostId: activeHostId.value ?? "",
-	name: "General",
+	name: configStore.uiConfig?.channels?.defaultGroupName ?? "General",
 	sortOrder: -1,
 	collapsed: generalCollapsed.value,
 	createdAt: "",
 }));
 
 function toggleGeneral(): void {
-	generalCollapsed.value = !generalCollapsed.value;
+	channelsStore.toggleGeneralCollapsed();
 }
 
 // -------------------------------------------------------------------------
@@ -180,6 +197,75 @@ function otherGroups(currentGroupId: string): ChannelGroup[] {
 			g.id !== currentGroupId &&
 			(g.hostId === activeHostId.value || g.hostId === ""),
 	);
+}
+
+// -------------------------------------------------------------------------
+// Drag-and-drop reorder for group headers
+// -------------------------------------------------------------------------
+
+/** ID of the group currently being dragged. */
+const dragGroupId = ref<string | null>(null);
+
+/** ID of the group the drag is hovering over (drop target). */
+const dragOverId = ref<string | null>(null);
+
+/** Whether the drop indicator is above ("top") or below ("bottom") the target. */
+const dragPosition = ref<"top" | "bottom">("top");
+
+function onGroupDragStart(event: DragEvent, groupId: string): void {
+	dragGroupId.value = groupId;
+	event.dataTransfer?.setData("text/plain", groupId);
+	// Slight delay so the ghost image captures un-faded state
+	if (event.dataTransfer) {
+		event.dataTransfer.effectAllowed = "move";
+	}
+}
+
+function onGroupDragEnd(): void {
+	dragGroupId.value = null;
+	dragOverId.value = null;
+}
+
+function onGroupDragOver(event: DragEvent, groupId: string): void {
+	if (dragGroupId.value === null || dragGroupId.value === groupId) return;
+	dragOverId.value = groupId;
+	// Determine whether to show the indicator above or below the midpoint
+	const el = (event.currentTarget as HTMLElement);
+	const rect = el.getBoundingClientRect();
+	dragPosition.value = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+}
+
+function onGroupDragLeave(groupId: string): void {
+	if (dragOverId.value === groupId) {
+		dragOverId.value = null;
+	}
+}
+
+function onGroupDrop(event: DragEvent, targetGroupId: string): void {
+	const sourceId = event.dataTransfer?.getData("text/plain") ?? dragGroupId.value;
+	dragGroupId.value = null;
+	dragOverId.value = null;
+
+	if (!sourceId || sourceId === targetGroupId || activeHostId.value === null) return;
+
+	const hostId = activeHostId.value;
+	const visibleGroups = channelsStore.groups.filter(
+		(g) => g.hostId === hostId || g.hostId === "",
+	);
+
+	// Build the new order by inserting source before or after target
+	const without = visibleGroups.filter((g) => g.id !== sourceId);
+	const targetIdx = without.findIndex((g) => g.id === targetGroupId);
+	if (targetIdx === -1) return;
+
+	const insertAt = dragPosition.value === "top" ? targetIdx : targetIdx + 1;
+	const source = visibleGroups.find((g) => g.id === sourceId);
+	if (!source) return;
+
+	without.splice(insertAt, 0, source);
+	const newOrder = without.map((g) => g.id);
+
+	void channelsStore.reorderGroups(hostId, newOrder);
 }
 
 // -------------------------------------------------------------------------
@@ -317,6 +403,42 @@ function onAddGroup(): void {
 .sidebar-state--error {
 	color: var(--nt-badge);
 	font-style: normal;
+}
+
+/* Drag-and-drop zones */
+.group-drag-zone {
+	position: relative;
+	transition: opacity 0.15s;
+}
+
+.group-drag-zone--drag {
+	opacity: 0.5;
+}
+
+.group-drag-zone--over-top::before,
+.group-drag-zone--over-bottom::after {
+	content: "";
+	display: block;
+	height: 2px;
+	background: var(--nt-accent);
+	border-radius: 1px;
+	margin: 0 8px;
+}
+
+.group-drag-zone--over-top::before {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	margin: 0 8px;
+}
+
+.group-drag-zone--over-bottom::after {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	margin: 0 8px;
 }
 
 /* Footer */

@@ -1058,6 +1058,126 @@ describe("DELETE /api/groups/:id", () => {
 	});
 });
 
+describe("PUT /api/groups/reorder", () => {
+	it("returns 400 with invalid host_id ULID", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: "not-a-ulid", group_ids: [] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when a group_id is not a valid ULID", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", group_ids: ["not-a-ulid"] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when a group does not belong to the given host", async () => {
+		// Create two hosts, create a group under host A, try to reorder it under host B
+		const hostARes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-host-a" },
+		});
+		const hostA = hostARes.json<{ id: string }>();
+
+		const hostBRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-host-b" },
+		});
+		const hostB = hostBRes.json<{ id: string }>();
+
+		const grpRes = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: hostA.id, name: "Group A" },
+		});
+		const grp = grpRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: hostB.id, group_ids: [grp.id] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 200 and persists new sort_order for reordered groups", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-sort-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const g1Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Alpha" },
+		});
+		const g2Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Beta" },
+		});
+		const g3Res = await server.inject({
+			method: "POST",
+			url: "/api/groups",
+			payload: { host_id: host.id, name: "Gamma" },
+		});
+		const g1 = g1Res.json<{ id: string }>();
+		const g2 = g2Res.json<{ id: string }>();
+		const g3 = g3Res.json<{ id: string }>();
+
+		// Reorder: Gamma, Alpha, Beta
+		const reorderRes = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: host.id, group_ids: [g3.id, g1.id, g2.id] },
+		});
+		expect(reorderRes.statusCode).toBe(200);
+		expect(reorderRes.json<{ ok: boolean }>().ok).toBe(true);
+
+		// Verify order via GET /api/groups
+		const listRes = await server.inject({
+			method: "GET",
+			url: `/api/groups?host_id=${host.id}`,
+		});
+		expect(listRes.statusCode).toBe(200);
+		const groups = listRes.json<Array<{ id: string; name: string }>>();
+		expect(groups.map((g) => g.name)).toEqual(["Gamma", "Alpha", "Beta"]);
+	});
+
+	it("returns 200 for empty group_ids array (no-op)", async () => {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "reorder-noop-host" },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/groups/reorder",
+			payload: { host_id: host.id, group_ids: [] },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json<{ ok: boolean }>().ok).toBe(true);
+	});
+});
+
 describe("PATCH /api/channels/:id — group_id", () => {
 	let grpCounter = 0;
 
@@ -1269,5 +1389,143 @@ describe("Auth enforcement", () => {
 		expect(res.statusCode).toBe(401);
 		const body = res.json<{ error: string }>();
 		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+});
+
+// ─── Profile PATCH — merge behaviour ─────────────────────────────────────────
+
+describe("PATCH /api/hosts/:id/profile — merge", () => {
+	async function createHost(label: string): Promise<string> {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		return res.json<{ id: string }>().id;
+	}
+
+	it("merges new keys with existing profile instead of replacing", async () => {
+		const hostId = await createHost("prof-host-merge");
+
+		// Set initial profile
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { fontSize: 20 } },
+		});
+
+		// Patch a different key
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: "solarized" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({ method: "GET", url: `/api/hosts/${hostId}/profile` });
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(20);
+		expect(profile.theme).toBe("solarized");
+	});
+
+	it("removes a key when its value is null (reset to inherited)", async () => {
+		const hostId = await createHost("prof-host-null");
+
+		// Set both keys
+		await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: "solarized", fontSize: 20 } },
+		});
+
+		// Reset theme to null
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { theme: null } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({ method: "GET", url: `/api/hosts/${hostId}/profile` });
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(20);
+		expect("theme" in profile).toBe(false);
+	});
+});
+
+describe("PATCH /api/channels/:id/profile — merge", () => {
+	let profChanCounter = 0;
+
+	async function createTestChannel(label: string): Promise<string> {
+		const hostRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label },
+		});
+		const host = hostRes.json<{ id: string }>();
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbs.meta);
+		profChanCounter++;
+		const n = String(profChanCounter).padStart(3, "0");
+		const sessionId = `01TSTPROFSES0000000000${n}`;
+		const channelId = `01TSTPROFCHN0000000000${n}`;
+		dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		dal.createChannel({ id: channelId, sessionId, status: "live", cols: 80, rows: 24 });
+		return channelId;
+	}
+
+	it("merges new keys with existing profile instead of replacing", async () => {
+		const channelId = await createTestChannel("prof-chan-merge");
+
+		// Set initial profile
+		await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { fontSize: 16 } },
+		});
+
+		// Patch a different key
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: "bar" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({
+			method: "GET",
+			url: `/api/channels/${channelId}/profile`,
+		});
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(16);
+		expect(profile.cursorStyle).toBe("bar");
+	});
+
+	it("removes a key when its value is null (reset to inherited)", async () => {
+		const channelId = await createTestChannel("prof-chan-null");
+
+		// Set both keys
+		await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: "bar", fontSize: 16 } },
+		});
+
+		// Reset cursorStyle to null
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/channels/${channelId}/profile`,
+			payload: { profile: { cursorStyle: null } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({
+			method: "GET",
+			url: `/api/channels/${channelId}/profile`,
+		});
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.fontSize).toBe(16);
+		expect("cursorStyle" in profile).toBe(false);
 	});
 });

@@ -1,4 +1,5 @@
 // Config types and deep merge utility for nexterm config cascade
+import type { AppearanceConfig } from "./appearance.js";
 import { isPlainObject } from "./utils.js";
 
 export interface TerminalProfile {
@@ -11,6 +12,9 @@ export interface TerminalProfile {
 	bellSound?: boolean;
 	/** Show search match markers in the scrollbar overview ruler (default: true). */
 	scrollbarMarkers?: boolean;
+	wallpaper?: string;
+	wallpaperBlur?: number;
+	wallpaperDim?: number;
 	[key: string]: unknown;
 }
 
@@ -97,6 +101,10 @@ export interface PanesConfig {
 export interface ChannelsConfig {
 	/** Default shell for new channels. Default: system shell */
 	defaultShell?: string;
+	/** Name for the ungrouped channels bucket. Default: "General" */
+	defaultGroupName?: string;
+	/** Auto-assign new channels to a group. Default: "none" */
+	autoGroup?: "none" | "first";
 }
 
 export interface StartupConfig {
@@ -239,4 +247,135 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	scrollback: 5000,
 	bellSound: false,
 	scrollbarMarkers: true,
+	wallpaper: "",
+	wallpaperBlur: 0,
+	wallpaperDim: 0,
+};
+
+// ─── UI behavioral config (combined) ─────────────────────────────────────────
+
+/** Persisted layout dimensions for resizable panels. */
+export interface LayoutConfig {
+	/** Host rail width in pixels. Default: 48. */
+	hostRailWidth: number;
+	/** Channel sidebar width in pixels. 0 means collapsed. Default: 200. */
+	sidebarWidth: number;
+}
+
+export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
+	hostRailWidth: 48,
+	sidebarWidth: 200,
+};
+
+/** UI behavioral configuration (from [ui], [tabs], [panes], [channels], [startup], [title], [search], [layout] in config.toml). */
+export interface UiConfig {
+	/** What to do when a channel dies: "close" the tab or keep it "readonly". Default: "readonly". */
+	onChannelDead: "close" | "readonly";
+	/** Tab behavior configuration. */
+	tabs: TabsConfig;
+	/** Pane behavior configuration. */
+	panes: PanesConfig;
+	/** Channel defaults configuration. */
+	channels: ChannelsConfig;
+	/** Startup behavior configuration. */
+	startup: StartupConfig;
+	/** Terminal title configuration. */
+	title: TitleConfig;
+	/** Search behavior configuration. */
+	search: SearchConfig;
+	/** Persisted panel layout dimensions. */
+	layout: LayoutConfig;
+}
+
+// ─── Cascade endpoint response ────────────────────────────────────────────────
+
+export interface CascadeResponse {
+	terminal: {
+		defaults: TerminalProfile;
+		global: Partial<TerminalProfile>;
+		host?: Partial<TerminalProfile>;
+		channel?: Partial<TerminalProfile>;
+		resolved: TerminalProfile;
+	};
+	ui: {
+		defaults: UiConfig;
+		global: Partial<UiConfig>;
+		resolved: UiConfig;
+	};
+	appearance: AppearanceConfig;
+}
+
+// ─── Key whitelists for config write-back validation ──────────────────────────
+
+export const TERMINAL_PROFILE_KEYS = [
+	"fontFamily",
+	"fontSize",
+	"theme",
+	"themeOverrides",
+	"cursorStyle",
+	"scrollback",
+	"bellSound",
+	"scrollbarMarkers",
+	"wallpaper",
+	"wallpaperBlur",
+	"wallpaperDim",
+] as const;
+
+export const MAX_WALLPAPER_BLUR = 20;
+export const MAX_WALLPAPER_SIZE = 10 * 1024 * 1024; // 10 MB
+export const WALLPAPER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "avif"];
+
+export const UI_CONFIG_SECTIONS = [
+	"tabs",
+	"panes",
+	"channels",
+	"startup",
+	"title",
+	"search",
+	"layout",
+] as const;
+
+/** Per-section key whitelists — derived from the TypeScript interfaces above. */
+export const TABS_CONFIG_KEYS = [
+	"closeButton",
+	"newTabPosition",
+	"confirmCloseAll",
+	"confirmCloseOthers",
+] as const;
+
+export const PANES_CONFIG_KEYS = ["maxPanes", "defaultSplitDirection"] as const;
+
+export const CHANNELS_CONFIG_KEYS = ["defaultShell", "defaultGroupName", "autoGroup"] as const;
+
+export const STARTUP_CONFIG_KEYS = ["autoOpenWelcome"] as const;
+
+export const TITLE_CONFIG_KEYS = [
+	"source",
+	"fallback",
+	"fallbackCustom",
+	"maxLength",
+	"truncation",
+	"prefix",
+	"windowTitle",
+	"windowFormat",
+] as const;
+
+export const SEARCH_CONFIG_KEYS = [
+	"position",
+	"highlightOnClose",
+	"scrollbarMarkers",
+	"historySize",
+] as const;
+
+export const LAYOUT_CONFIG_KEYS = ["hostRailWidth", "sidebarWidth"] as const;
+
+/** Map from UI section name to its allowed keys. */
+export const UI_SECTION_KEYS: Record<string, readonly string[]> = {
+	tabs: TABS_CONFIG_KEYS,
+	panes: PANES_CONFIG_KEYS,
+	channels: CHANNELS_CONFIG_KEYS,
+	startup: STARTUP_CONFIG_KEYS,
+	title: TITLE_CONFIG_KEYS,
+	search: SEARCH_CONFIG_KEYS,
+	layout: LAYOUT_CONFIG_KEYS,
 };

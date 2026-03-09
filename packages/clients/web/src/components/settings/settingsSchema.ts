@@ -1,0 +1,295 @@
+export interface SettingDefinition {
+	/** Property key within the section (e.g. "fontSize", "closeButton") */
+	key: string;
+	label: string;
+	description?: string;
+	type: "text" | "number" | "select" | "toggle" | "range" | "color";
+	/** UI category for navigation (e.g. "terminal", "tabs") */
+	category: string;
+	/**
+	 * Config section name.
+	 * - "terminal" → terminal profile (cascaded, all scopes)
+	 * - "tabs" | "panes" | "search" | "startup" | "title" → UI config sub-section (global only)
+	 */
+	section: string;
+	scopes: ("global" | "host" | "channel")[];
+	options?: { label: string; value: string | number | boolean }[];
+	min?: number;
+	max?: number;
+	step?: number;
+}
+
+/** UI config sub-sections — these route through PUT /api/config/ui */
+const UI_SECTIONS = new Set(["tabs", "panes", "channels", "search", "startup", "title"]);
+
+/**
+ * Map a schema definition to the store's (section, key) pair.
+ * - terminal → ("terminal", key)
+ * - tabs/panes/search/startup/title → ("ui", "tabs.key")
+ */
+export function toStoreParams(def: SettingDefinition): {
+	storeSection: string;
+	storeKey: string;
+} {
+	if (UI_SECTIONS.has(def.section)) {
+		return { storeSection: "ui", storeKey: `${def.section}.${def.key}` };
+	}
+	return { storeSection: def.section, storeKey: def.key };
+}
+
+export const settingsSchema: SettingDefinition[] = [
+	// ─── Terminal category (cascaded — all scopes) ─────────────────────
+	{
+		key: "fontFamily",
+		label: "Font Family",
+		type: "text",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "CSS font stack for the terminal",
+	},
+	{
+		key: "fontSize",
+		label: "Font Size",
+		type: "number",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		min: 8,
+		max: 32,
+		step: 1,
+	},
+	{
+		key: "cursorStyle",
+		label: "Cursor Style",
+		type: "select",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		options: [
+			{ label: "Block", value: "block" },
+			{ label: "Underline", value: "underline" },
+			{ label: "Bar", value: "bar" },
+		],
+	},
+	{
+		key: "scrollback",
+		label: "Scrollback Lines",
+		type: "number",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		min: 100,
+		max: 100000,
+		step: 100,
+	},
+	{
+		key: "bellSound",
+		label: "Bell Sound",
+		type: "toggle",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "Play sound on terminal bell",
+	},
+
+	// ─── Terminal category — title settings (global only) ──────────────
+	{
+		key: "source",
+		label: "Title Source",
+		type: "select",
+		category: "terminal",
+		section: "title",
+		scopes: ["global"],
+		options: [
+			{ label: "Dynamic (OSC 0/2)", value: "dynamic" },
+			{ label: "Static (fallback only)", value: "static" },
+		],
+		description: "Whether to use dynamic terminal title from the shell",
+	},
+	{
+		key: "fallback",
+		label: "Title Fallback",
+		type: "select",
+		category: "terminal",
+		section: "title",
+		scopes: ["global"],
+		options: [
+			{ label: "Channel name", value: "channel" },
+			{ label: "Shell name", value: "shell" },
+			{ label: "Custom", value: "custom" },
+		],
+	},
+	{
+		key: "maxLength",
+		label: "Max Title Length",
+		type: "number",
+		category: "terminal",
+		section: "title",
+		scopes: ["global"],
+		min: 10,
+		max: 200,
+	},
+	{
+		key: "windowTitle",
+		label: "Update Window Title",
+		type: "toggle",
+		category: "terminal",
+		section: "title",
+		scopes: ["global"],
+		description: "Update browser tab title with terminal title",
+	},
+
+	// ─── Tabs category (global only, UI config) ────────────────────────
+	{
+		key: "closeButton",
+		label: "Close Button",
+		type: "toggle",
+		category: "tabs",
+		section: "tabs",
+		scopes: ["global"],
+		description: "Show close button on tabs",
+	},
+	{
+		key: "newTabPosition",
+		label: "New Tab Position",
+		type: "select",
+		category: "tabs",
+		section: "tabs",
+		scopes: ["global"],
+		options: [
+			{ label: "End", value: "end" },
+			{ label: "After Active", value: "afterActive" },
+		],
+	},
+	{
+		key: "confirmCloseAll",
+		label: "Confirm Close All",
+		type: "toggle",
+		category: "tabs",
+		section: "tabs",
+		scopes: ["global"],
+	},
+	{
+		key: "confirmCloseOthers",
+		label: "Confirm Close Others",
+		type: "toggle",
+		category: "tabs",
+		section: "tabs",
+		scopes: ["global"],
+	},
+
+	// ─── Panes category (global only, UI config) ───────────────────────
+	{
+		key: "maxPanes",
+		label: "Max Panes",
+		type: "number",
+		category: "panes",
+		section: "panes",
+		scopes: ["global"],
+		min: 1,
+		max: 8,
+	},
+	{
+		key: "defaultSplitDirection",
+		label: "Default Split Direction",
+		type: "select",
+		category: "panes",
+		section: "panes",
+		scopes: ["global"],
+		options: [
+			{ label: "Horizontal", value: "horizontal" },
+			{ label: "Vertical", value: "vertical" },
+		],
+	},
+
+	// ─── Search category (global only, UI config) ──────────────────────
+	{
+		key: "position",
+		label: "Search Position",
+		type: "select",
+		category: "search",
+		section: "search",
+		scopes: ["global"],
+		options: [
+			{ label: "Top Right", value: "top-right" },
+			{ label: "Bottom Right", value: "bottom-right" },
+			{ label: "Bottom Bar", value: "bottom-bar" },
+		],
+	},
+	{
+		key: "highlightOnClose",
+		label: "Highlight on Close",
+		type: "select",
+		category: "search",
+		section: "search",
+		scopes: ["global"],
+		options: [
+			{ label: "Clear", value: "clear" },
+			{ label: "Fade", value: "fade" },
+			{ label: "Persist", value: "persist" },
+		],
+	},
+	{
+		key: "scrollbarMarkers",
+		label: "Scrollbar Markers",
+		type: "toggle",
+		category: "search",
+		section: "search",
+		scopes: ["global"],
+		description: "Show search results in scrollbar",
+	},
+	{
+		key: "historySize",
+		label: "Search History Size",
+		type: "number",
+		category: "search",
+		section: "search",
+		scopes: ["global"],
+		min: 1,
+		max: 100,
+	},
+
+	// ─── Channels category (global only, UI config) ────────────────────
+	{
+		key: "defaultGroupName",
+		label: "Default group name",
+		description: "Name for the ungrouped channels bucket",
+		type: "text",
+		category: "channels",
+		section: "channels",
+		scopes: ["global"],
+	},
+	{
+		key: "autoGroup",
+		label: "Auto-assign group",
+		description: "Automatically assign new channels to a group",
+		type: "select",
+		category: "channels",
+		section: "channels",
+		scopes: ["global"],
+		default: "none",
+		options: [
+			{ label: "No grouping", value: "none" },
+			{ label: "First group", value: "first" },
+		],
+	},
+
+	// ─── Startup category (global only, UI config) ─────────────────────
+	{
+		key: "autoOpenWelcome",
+		label: "Auto-open Welcome Tab",
+		type: "toggle",
+		category: "startup",
+		section: "startup",
+		scopes: ["global"],
+		description: "Show welcome tab when connecting to a host",
+	},
+];
+
+/** Get schema entries for a specific category and scope */
+export function getSchemaForCategoryScope(category: string, scope: string): SettingDefinition[] {
+	return settingsSchema.filter(
+		(d) => d.category === category && d.scopes.includes(scope as "global" | "host" | "channel"),
+	);
+}
