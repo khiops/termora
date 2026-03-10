@@ -120,7 +120,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
-		registerChannelRoutes(server, metaDal, sessionManager);
+		registerChannelRoutes(server, metaDal, sessionManager, sessionManager.getSpoolDal());
 		registerGroupRoutes(server, metaDal);
 		registerConfigRoutes(server, metaDal, configResolver);
 		registerFontRoutes(server, configDir);

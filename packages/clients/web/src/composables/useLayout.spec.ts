@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, nextTick } from "vue";
-import { countPanes, useLayout } from "./useLayout.js";
+import { countPanes, purgeOrphanedTabs, useLayout } from "./useLayout.js";
 import type { PaneNode } from "./useLayout.js";
 
 let layout: ReturnType<typeof useLayout>;
@@ -39,20 +39,21 @@ function isAllVacant(node: PaneNode | null | undefined): boolean {
 // ── closeOthers ──────────────────────────────────────────────────────────
 
 describe("closeOthers", () => {
-	it("vacates all tabs except the specified index", () => {
+	it("removes all tabs except the specified index", () => {
 		openTabs("A", "B", "C", "D");
 		expect(layout.tabs.value).toHaveLength(4);
 
 		layout.closeOthers(1); // keep B
 
-		// All tabs remain
-		expect(layout.tabs.value).toHaveLength(4);
+		// Only B remains
+		expect(layout.tabs.value).toHaveLength(1);
+		expect(layout.tabs.value[0]?.channelId).toBe("ch-B");
 		// B's layout should still be a terminal
 		expect(layout.layouts.value["ch-B"]?.type).toBe("terminal");
-		// Others should be all-vacant
-		expect(isAllVacant(layout.layouts.value["ch-A"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-C"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-D"])).toBe(true);
+		// Others should be gone
+		expect(layout.layouts.value["ch-A"]).toBeUndefined();
+		expect(layout.layouts.value["ch-C"]).toBeUndefined();
+		expect(layout.layouts.value["ch-D"]).toBeUndefined();
 	});
 
 	it("handles single tab (no-op)", () => {
@@ -64,38 +65,41 @@ describe("closeOthers", () => {
 		expect(layout.layouts.value["ch-A"]?.type).toBe("terminal");
 	});
 
-	it("keeps activeTabIndex unchanged", () => {
+	it("resets activeTabIndex to 0", () => {
 		openTabs("A", "B", "C");
 		layout.setActiveTab(2); // C is active
 		expect(layout.activeTabIndex.value).toBe(2);
 
 		layout.closeOthers(2); // keep C
 
-		// All tabs remain, index stays
-		expect(layout.tabs.value).toHaveLength(3);
-		expect(layout.activeTabIndex.value).toBe(2);
+		// Only C remains, index resets to 0
+		expect(layout.tabs.value).toHaveLength(1);
+		expect(layout.tabs.value[0]?.channelId).toBe("ch-C");
+		expect(layout.activeTabIndex.value).toBe(0);
 		expect(layout.layouts.value["ch-C"]?.type).toBe("terminal");
-		expect(isAllVacant(layout.layouts.value["ch-A"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-B"])).toBe(true);
+		expect(layout.layouts.value["ch-A"]).toBeUndefined();
+		expect(layout.layouts.value["ch-B"]).toBeUndefined();
 	});
 });
 
 // ── closeToRight ─────────────────────────────────────────────────────────
 
 describe("closeToRight", () => {
-	it("vacates all tabs to the right of specified index", () => {
+	it("removes all tabs to the right of specified index", () => {
 		openTabs("A", "B", "C", "D");
 
-		layout.closeToRight(1); // vacate C, D
+		layout.closeToRight(1); // remove C, D
 
-		// All tabs remain
-		expect(layout.tabs.value).toHaveLength(4);
-		// A and B untouched
+		// Only A and B remain
+		expect(layout.tabs.value).toHaveLength(2);
+		expect(layout.tabs.value[0]?.channelId).toBe("ch-A");
+		expect(layout.tabs.value[1]?.channelId).toBe("ch-B");
+		// A and B layouts untouched
 		expect(layout.layouts.value["ch-A"]?.type).toBe("terminal");
 		expect(layout.layouts.value["ch-B"]?.type).toBe("terminal");
-		// C and D are all-vacant
-		expect(isAllVacant(layout.layouts.value["ch-C"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-D"])).toBe(true);
+		// C and D layouts are gone
+		expect(layout.layouts.value["ch-C"]).toBeUndefined();
+		expect(layout.layouts.value["ch-D"]).toBeUndefined();
 	});
 
 	it("is no-op when index is last tab", () => {
@@ -110,43 +114,53 @@ describe("closeToRight", () => {
 	it("does not affect tabs to the left", () => {
 		openTabs("A", "B", "C", "D");
 
-		layout.closeToRight(2); // vacate D only
+		layout.closeToRight(2); // remove D only
 
-		expect(layout.tabs.value).toHaveLength(4);
+		expect(layout.tabs.value).toHaveLength(3);
+		expect(layout.tabs.value[2]?.channelId).toBe("ch-C");
 		expect(layout.layouts.value["ch-A"]?.type).toBe("terminal");
 		expect(layout.layouts.value["ch-B"]?.type).toBe("terminal");
 		expect(layout.layouts.value["ch-C"]?.type).toBe("terminal");
-		expect(isAllVacant(layout.layouts.value["ch-D"])).toBe(true);
+		expect(layout.layouts.value["ch-D"]).toBeUndefined();
+	});
+
+	it("clamps activeTabIndex when active tab is removed", () => {
+		openTabs("A", "B", "C", "D");
+		layout.setActiveTab(3); // D is active
+		expect(layout.activeTabIndex.value).toBe(3);
+
+		layout.closeToRight(1); // remove C, D
+
+		expect(layout.tabs.value).toHaveLength(2);
+		expect(layout.activeTabIndex.value).toBe(1); // clamped to last remaining
 	});
 });
 
 // ── closeAll ─────────────────────────────────────────────────────────────
 
 describe("closeAll", () => {
-	it("vacates all tabs when no welcome tab", () => {
+	it("removes all tabs when no welcome tab", () => {
 		openTabs("A", "B", "C");
 
 		layout.closeAll();
 
-		// All tabs remain but layouts are all-vacant
-		expect(layout.tabs.value).toHaveLength(3);
-		expect(isAllVacant(layout.layouts.value["ch-A"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-B"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-C"])).toBe(true);
+		expect(layout.tabs.value).toHaveLength(0);
+		expect(layout.layouts.value).toEqual({});
 	});
 
-	it("keeps welcome tab layout when exceptWelcomeId is provided", () => {
+	it("keeps only welcome tab when exceptWelcomeId is provided", () => {
 		openTabs("A", "B", "C");
 
 		layout.closeAll("ch-B");
 
-		// All tabs remain
-		expect(layout.tabs.value).toHaveLength(3);
+		// Only B remains
+		expect(layout.tabs.value).toHaveLength(1);
+		expect(layout.tabs.value[0]?.channelId).toBe("ch-B");
 		// B's layout untouched
 		expect(layout.layouts.value["ch-B"]?.type).toBe("terminal");
-		// Others are all-vacant
-		expect(isAllVacant(layout.layouts.value["ch-A"])).toBe(true);
-		expect(isAllVacant(layout.layouts.value["ch-C"])).toBe(true);
+		// Others are gone
+		expect(layout.layouts.value["ch-A"]).toBeUndefined();
+		expect(layout.layouts.value["ch-C"]).toBeUndefined();
 	});
 
 	it("is no-op when only welcome tab exists", () => {
@@ -594,5 +608,79 @@ describe("reorderTab", () => {
 		const parsed = JSON.parse(stored) as { tabs: { channelId: string }[] };
 		expect(parsed.tabs[0]?.channelId).toBe("ch-B");
 		expect(parsed.tabs[1]?.channelId).toBe("ch-A");
+	});
+});
+
+// -- purgeOrphanedTabs ---------------------------------------------------------
+
+describe("purgeOrphanedTabs", () => {
+	it("closes tabs for orphaned channels on the current host", () => {
+		const closeTab = vi.fn();
+		const tabs = [{ channelId: "ch-1" }, { channelId: "ch-2" }];
+		const channels: { id: string }[] = [];
+		const hostId = "host-A";
+		const channelHostMap = new Map([
+			["ch-1", "host-A"],
+			["ch-2", "host-A"],
+		]);
+		purgeOrphanedTabs(channels, tabs, closeTab, hostId, channelHostMap);
+		// Both tabs are orphaned on host-A — closed in reverse order
+		expect(closeTab).toHaveBeenCalledTimes(2);
+		expect(closeTab).toHaveBeenNthCalledWith(1, 1);
+		expect(closeTab).toHaveBeenNthCalledWith(2, 0);
+	});
+
+	it("preserves tabs for channels on other hosts", () => {
+		const closeTab = vi.fn();
+		const tabs = [{ channelId: "ch-1" }, { channelId: "ch-2" }];
+		const channels: { id: string }[] = [];
+		const hostId = "host-A";
+		const channelHostMap = new Map([
+			["ch-1", "host-B"],
+			["ch-2", "host-B"],
+		]);
+		purgeOrphanedTabs(channels, tabs, closeTab, hostId, channelHostMap);
+		expect(closeTab).not.toHaveBeenCalled();
+	});
+
+	it("preserves tabs for channels not in channelHostMap", () => {
+		const closeTab = vi.fn();
+		const tabs = [{ channelId: "ch-unknown" }];
+		const channels: { id: string }[] = [];
+		const hostId = "host-A";
+		const channelHostMap = new Map<string, string>();
+		purgeOrphanedTabs(channels, tabs, closeTab, hostId, channelHostMap);
+		expect(closeTab).not.toHaveBeenCalled();
+	});
+
+	it("preserves tabs for alive channels on the current host", () => {
+		const closeTab = vi.fn();
+		const tabs = [{ channelId: "ch-1" }];
+		const channels = [{ id: "ch-1" }];
+		const hostId = "host-A";
+		const channelHostMap = new Map([["ch-1", "host-A"]]);
+		purgeOrphanedTabs(channels, tabs, closeTab, hostId, channelHostMap);
+		expect(closeTab).not.toHaveBeenCalled();
+	});
+
+	it("mixed: closes only orphaned tabs on current host, preserves others", () => {
+		const closeTab = vi.fn();
+		const tabs = [
+			{ channelId: "ch-alive" }, // alive on host-A — keep
+			{ channelId: "ch-dead" }, // orphaned on host-A — close
+			{ channelId: "ch-other" }, // on host-B — keep
+			{ channelId: "ch-unknown" }, // not in map — keep
+		];
+		const channels = [{ id: "ch-alive" }];
+		const hostId = "host-A";
+		const channelHostMap = new Map([
+			["ch-alive", "host-A"],
+			["ch-dead", "host-A"],
+			["ch-other", "host-B"],
+		]);
+		purgeOrphanedTabs(channels, tabs, closeTab, hostId, channelHostMap);
+		// Only ch-dead at index 1 should be closed
+		expect(closeTab).toHaveBeenCalledTimes(1);
+		expect(closeTab).toHaveBeenCalledWith(1);
 	});
 });

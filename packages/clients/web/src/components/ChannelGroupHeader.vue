@@ -39,6 +39,9 @@
 			@click.stop
 		>
 			<button class="group-context-menu__item" @click="onRename">Rename</button>
+			<button v-if="hasDeadChannels" class="group-context-menu__item" @click="onPurgeDead">
+				Clean Up Dead Terminals
+			</button>
 			<div class="group-context-menu__sep"></div>
 			<button class="group-context-menu__item group-context-menu__item--danger" @click="onDelete">
 				Delete group
@@ -60,12 +63,14 @@ import type { ChannelGroup } from "@nexterm/shared";
 const props = defineProps<{
 	group: ChannelGroup;
 	count: number;
+	hasDeadChannels?: boolean;
 }>();
 
 const emit = defineEmits<{
 	toggle: [];
 	rename: [groupId: string, name: string];
 	delete: [groupId: string];
+	purgeDead: [groupId: string];
 }>();
 
 // -------------------------------------------------------------------------
@@ -116,6 +121,11 @@ function onRename(): void {
 function onDelete(): void {
 	contextMenuVisible.value = false;
 	emit("delete", props.group.id);
+}
+
+function onPurgeDead(): void {
+	contextMenuVisible.value = false;
+	emit("purgeDead", props.group.id);
 }
 
 function onKeydown(e: KeyboardEvent): void {

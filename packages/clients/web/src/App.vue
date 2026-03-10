@@ -111,18 +111,6 @@
 			@confirm="onCreateGroupConfirmed"
 		/>
 
-		<!-- Channel-group context menu -->
-		<GroupContextMenu
-			:visible="channelGroupContextMenu !== null"
-			:group-id="channelGroupContextMenu?.groupId ?? ''"
-			:group-name="channelGroupContextMenu?.groupName ?? ''"
-			:x="channelGroupContextMenu?.x ?? 0"
-			:y="channelGroupContextMenu?.y ?? 0"
-			@close="channelGroupContextMenu = null"
-			@rename="onRenameChannelGroup"
-			@delete-group="onDeleteChannelGroup"
-		/>
-
 		<!-- Sidebar background context menu -->
 		<SidebarContextMenu
 			:visible="sidebarContextMenu !== null"
@@ -130,32 +118,6 @@
 			:y="sidebarContextMenu?.y ?? 0"
 			@close="sidebarContextMenu = null"
 			@add-group="onAddChannelGroupFromSidebar"
-		/>
-
-		<!-- Rename channel-group dialog -->
-		<GroupActionDialog
-			v-if="renameChannelGroupId !== null"
-			:visible="true"
-			title="Rename Group"
-			:message="`Rename group '${renameChannelGroupCurrentName}'.`"
-			confirm-label="Rename"
-			input-label="NEW NAME"
-			:input-value="renameChannelGroupCurrentName"
-			input-placeholder="Group name"
-			@close="renameChannelGroupId = null"
-			@confirm="onRenameChannelGroupConfirmed"
-		/>
-
-		<!-- Delete channel-group confirmation -->
-		<GroupActionDialog
-			v-if="deleteChannelGroupId !== null"
-			:visible="true"
-			title="Delete Group"
-			:message="`Delete group '${deleteChannelGroupCurrentName}'? Channels will move to General.`"
-			confirm-label="Delete"
-			:confirm-danger="true"
-			@close="deleteChannelGroupId = null"
-			@confirm="onDeleteChannelGroupConfirmed"
 		/>
 
 		<!-- Create channel-group dialog -->
@@ -184,11 +146,33 @@
 			@imported="void hostsStore.fetchHosts()"
 		/>
 
+		<!-- Pairing code generator dialog -->
+		<Teleport to="body">
+			<div v-if="showPairingGenerator" class="pairing-gen-overlay" @click.self="showPairingGenerator = false">
+				<div class="pairing-gen-card">
+					<div class="pairing-gen-header">
+						<h3 class="pairing-gen-title">Pair Another Device</h3>
+						<button class="pairing-gen-close" @click="showPairingGenerator = false" aria-label="Close">&times;</button>
+					</div>
+					<p class="pairing-gen-desc">
+						Generate a one-time code to authenticate another browser or device.
+						Your current session will not be affected.
+					</p>
+					<PairingCodeGenerator />
+				</div>
+			</div>
+		</Teleport>
+
 		<!-- Pairing overlay — shown when no token yet, or AUTH_FAIL -->
 		<PairingScreen
 			v-if="needsPairing"
 			@authenticated="onAuthenticated"
 		/>
+
+		<!-- Loading screen — shown while config/theme loads after auth -->
+		<div v-else-if="!appReady" class="app-loading">
+			<div class="app-loading-spinner" />
+		</div>
 
 		<!-- Main layout — only shown when authenticated and WS ready -->
 		<div v-else class="app-layout" :style="layoutStyle">
@@ -216,9 +200,10 @@
 				@open-current-tab="onSidebarOpenCurrentTab"
 				@configure-command="onConfigureCommand"
 				@set-welcome="onSetWelcome"
-				@channel-group-context-menu="onChannelGroupContextMenu"
 				@sidebar-context-menu="onSidebarContextMenu"
 				@add-channel-group="onAddChannelGroupFromSidebar"
+				@purge-dead="onPurgeDead"
+				@delete-channel="onDeleteChannel"
 			/>
 			<!-- Resize handle after channel sidebar -->
 			<div
@@ -294,16 +279,19 @@ import { useHostsStore } from "./stores/hosts.js";
 import { useChannelsStore } from "./stores/channels.js";
 import { useConfigStore } from "./stores/config.js";
 import { useThemeStore } from "./stores/theme.js";
-import { countPanes, purgeDeadTabs, useLayout } from "./composables/useLayout.js";
+import { useWriteLockStore } from "./stores/writelock.js";
+import { countPanes, purgeDeadTabs, purgeOrphanedTabs, useLayout } from "./composables/useLayout.js";
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { useWindowTitle } from "./composables/useWindowTitle.js";
 import { useTabTitle } from "./composables/useTabTitle.js";
 import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
+import { useAutoSwitch } from "./composables/useAutoSwitch.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
 import TabBar from "./components/TabBar.vue";
 import PaneLayout from "./components/PaneLayout.vue";
+import PairingCodeGenerator from "./components/PairingCodeGenerator.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import CommandPalette from "./components/CommandPalette.vue";
@@ -379,6 +367,8 @@ const layoutStyle = computed(() => ({
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
 const themeStore = useThemeStore();
+const writeLockStore = useWriteLockStore();
+const autoSwitch = useAutoSwitch();
 const layout = useLayout();
 const multiPaneSearch = useMultiPaneSearch();
 provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
@@ -391,7 +381,23 @@ const editingHost = ref<Host | null>(null);
 const deleteHostId = ref<string | null>(null);
 const showBatchImport = ref(false);
 
-// Wire up palette external actions (add-host, settings, ssh-import, toggle-sidebar)
+const showPairingGenerator = ref(false);
+
+// Sync auto-switch composable with server appearance config (SC-14)
+// This ensures OS dark/light preference is respected at boot, not just when Settings is open.
+// IMPORTANT: Set theme names BEFORE enabled — the enabled watcher is flush:sync
+// and calls start() immediately, which reads darkThemeName/lightThemeName.
+watch(
+	() => themeStore.appearance,
+	(cfg) => {
+		autoSwitch.darkThemeName.value = cfg.autoSwitch.darkTheme;
+		autoSwitch.lightThemeName.value = cfg.autoSwitch.lightTheme;
+		autoSwitch.enabled.value = cfg.autoSwitch.enabled;
+	},
+	{ immediate: true },
+);
+
+// Wire up palette external actions (add-host, settings, ssh-import, toggle-sidebar, pairing-code)
 commandPalette.onExternalAction.value = (actionId: string) => {
 	switch (actionId) {
 		case "action:add-host":
@@ -406,6 +412,9 @@ commandPalette.onExternalAction.value = (actionId: string) => {
 			break;
 		case "action:toggle-sidebar":
 			sidebarResize.collapsed.value = !sidebarResize.collapsed.value;
+			break;
+		case "action:pairing-code":
+			showPairingGenerator.value = true;
 			break;
 		default:
 			console.warn("[CommandPalette] unhandled external action:", actionId);
@@ -430,19 +439,9 @@ const renameGroupId = ref<string | null>(null);
 const renameGroupCurrentName = ref<string>("");
 const deleteGroupId = ref<string | null>(null);
 const deleteGroupCurrentName = ref<string>("");
-// Channel-group context menu + create/rename/delete dialogs
-const channelGroupContextMenu = ref<{
-	groupId: string;
-	groupName: string;
-	x: number;
-	y: number;
-} | null>(null);
+// Channel-group create dialog + sidebar context menu
 const sidebarContextMenu = ref<{ x: number; y: number } | null>(null);
 const createChannelGroupDialogVisible = ref(false);
-const renameChannelGroupId = ref<string | null>(null);
-const renameChannelGroupCurrentName = ref<string>("");
-const deleteChannelGroupId = ref<string | null>(null);
-const deleteChannelGroupCurrentName = ref<string>("");
 
 // ─── Per-channel theme cascade ───────────────────────────────────────────────
 
@@ -595,9 +594,12 @@ function onConfirmAction(remember: { host: boolean; global: boolean }): void {
  * Show pairing screen when:
  * - No token stored in localStorage, OR
  * - The hub responded AUTH_FAIL (token revoked / rotated on server)
+ * - Post-auth config is still loading (prevents flash of default theme)
  */
+const appReady = ref(false);
+const postAuthLoading = ref(false);
 const needsPairing = computed(
-	() => authStore.token === null || sessionStore.authFailed,
+	() => authStore.token === null || sessionStore.authFailed || postAuthLoading.value,
 );
 
 /** Helper: open a tab backed by a pending spawn (TerminalPane handles the actual SPAWN). */
@@ -625,14 +627,17 @@ onMounted(async () => {
 			await configStore.loadUiConfig();
 			await themeStore.loadThemes();
 			await themeStore.loadAppearance();
-			// Apply the persisted theme if it exists in available themes
-			const savedThemeName = themeStore.appearance.theme;
-			const savedTheme = themeStore.availableThemes.find(
-				(t) => t.name === savedThemeName,
-			);
-			if (savedTheme) {
-				themeStore.currentTheme = savedTheme;
-				themeStore.applyTheme(savedTheme);
+			// Auto-switch watcher fires here (immediate: true) — if enabled,
+			// it applies the OS-preferred theme. Otherwise fall back to saved theme.
+			if (!themeStore.appearance.autoSwitch.enabled) {
+				const savedThemeName = themeStore.appearance.theme;
+				const savedTheme = themeStore.availableThemes.find(
+					(t) => t.name === savedThemeName,
+				);
+				if (savedTheme) {
+					themeStore.currentTheme = savedTheme;
+					themeStore.applyTheme(savedTheme);
+				}
 			}
 			themeStore.applyOpacity(themeStore.appearance.opacity);
 			themeStore.applyScrollbar(themeStore.appearance.scrollbar);
@@ -645,6 +650,7 @@ onMounted(async () => {
 			console.error("[App] startup connect failed:", err);
 		}
 	}
+	appReady.value = true;
 });
 
 onUnmounted(() => {
@@ -661,6 +667,19 @@ watch(
 	async (hostId) => {
 		if (hostId === null) return;
 		await channelsStore.fetchChannels(hostId);
+		// Clear stale write-lock entries for dead channels
+		const deadIds = new Set(
+			channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
+		);
+		writeLockStore.pruneDeadLocks(deadIds);
+		// Always purge tabs for channels that no longer exist on this host
+		purgeOrphanedTabs(
+			channelsStore.channels,
+			layout.tabs.value,
+			layout.closeTab,
+			hostId,
+			channelsStore.channelHostMap,
+		);
 		if (configStore.uiConfig.onChannelDead === "close") {
 			purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab);
 		}
@@ -879,54 +898,37 @@ function onDeleteGroupConfirmed(): void {
 	void hostsStore.deleteHostGroup(id).then(() => hostsStore.fetchHosts());
 }
 
-// ─── Channel-group context menu handlers ─────────────────────────────────────
-
-function onChannelGroupContextMenu(payload: { groupId: string; groupName: string; event: MouseEvent }): void {
-	channelGroupContextMenu.value = {
-		groupId: payload.groupId,
-		groupName: payload.groupName,
-		x: payload.event.clientX,
-		y: payload.event.clientY,
-	};
-}
+// ─── Channel-group handlers ─────────────────────────────────────
 
 function onSidebarContextMenu(event: MouseEvent): void {
 	sidebarContextMenu.value = { x: event.clientX, y: event.clientY };
 }
 
-function onRenameChannelGroup(groupId: string): void {
-	channelGroupContextMenu.value = null;
-	const group = channelsStore.groups.find((g) => g.id === groupId) ?? null;
-	if (!group) return;
-	renameChannelGroupId.value = groupId;
-	renameChannelGroupCurrentName.value = group.name;
-}
-
-function onRenameChannelGroupConfirmed(newName?: string): void {
-	const id = renameChannelGroupId.value;
-	renameChannelGroupId.value = null;
-	if (!id || !newName?.trim()) return;
-	void channelsStore.renameGroup(id, newName.trim());
-}
-
-function onDeleteChannelGroup(groupId: string): void {
-	channelGroupContextMenu.value = null;
-	const group = channelsStore.groups.find((g) => g.id === groupId) ?? null;
-	if (!group) return;
-	deleteChannelGroupId.value = groupId;
-	deleteChannelGroupCurrentName.value = group.name;
-}
-
-function onDeleteChannelGroupConfirmed(): void {
-	const id = deleteChannelGroupId.value;
-	deleteChannelGroupId.value = null;
-	if (!id) return;
-	void channelsStore.removeGroup(id);
-}
-
 function onAddChannelGroupFromSidebar(): void {
 	sidebarContextMenu.value = null;
 	createChannelGroupDialogVisible.value = true;
+}
+
+async function onPurgeDead(): Promise<void> {
+	// Close tabs for dead channels before purging
+	const deadIds = new Set(
+		channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
+	);
+	// Iterate tabs in reverse so indices stay stable as we close
+	for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
+		const tab = layout.tabs.value[i];
+		if (tab && deadIds.has(tab.channelId)) {
+			layout.closeTab(i);
+		}
+	}
+	await channelsStore.purgeDeadChannels();
+}
+
+async function onDeleteChannel(channelId: string): Promise<void> {
+	// Close the tab for this channel if open
+	const idx = layout.tabs.value.findIndex((t) => t.channelId === channelId);
+	if (idx !== -1) layout.closeTab(idx);
+	await channelsStore.deleteChannel(channelId);
 }
 
 async function onCreateChannelGroupConfirmed(name?: string): Promise<void> {
@@ -940,11 +942,33 @@ async function onCreateChannelGroupConfirmed(name?: string): Promise<void> {
  * successfully completed WS AUTH. We just clear authFailed —
  * the session store will already be authenticated.
  */
-function onAuthenticated(): void {
-	// sessionStore.authFailed is reset inside connect() on AUTH_OK,
-	// so no explicit action needed here — the computed will flip.
-	// Force a reactive refresh by reading sessionStore.authenticated.
-	void sessionStore.authenticated;
+async function onAuthenticated(): Promise<void> {
+	postAuthLoading.value = true;
+	try {
+		await configStore.loadProfile();
+		await configStore.loadUiConfig();
+		await themeStore.loadThemes();
+		await themeStore.loadAppearance();
+		// Auto-switch watcher fires here — if enabled, OS preference wins.
+		if (!themeStore.appearance.autoSwitch.enabled) {
+			const savedThemeName = themeStore.appearance.theme;
+			const savedTheme = themeStore.availableThemes.find(
+				(t) => t.name === savedThemeName,
+			);
+			if (savedTheme) {
+				themeStore.currentTheme = savedTheme;
+				themeStore.applyTheme(savedTheme);
+			}
+		}
+		themeStore.applyOpacity(themeStore.appearance.opacity);
+		themeStore.applyScrollbar(themeStore.appearance.scrollbar);
+		await hostsStore.fetchHosts();
+	} catch (err) {
+		console.error("[App] post-pairing init failed:", err);
+	} finally {
+		postAuthLoading.value = false;
+		appReady.value = true;
+	}
 }
 
 /**
@@ -1297,5 +1321,87 @@ body,
 
 body.nexterm-dragging * {
 	cursor: grabbing !important;
+}
+
+/* Pairing code generator dialog */
+.pairing-gen-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.5);
+	backdrop-filter: blur(4px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 2000;
+}
+
+.pairing-gen-card {
+	background: var(--nt-bg);
+	border: 1px solid var(--nt-border);
+	border-radius: 12px;
+	padding: 24px 28px;
+	width: 360px;
+	max-width: calc(100vw - 32px);
+	box-shadow: var(--nt-shadow);
+}
+
+.pairing-gen-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 8px;
+}
+
+.pairing-gen-title {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--nt-fg);
+}
+
+.pairing-gen-close {
+	background: none;
+	border: none;
+	color: var(--nt-text-secondary);
+	font-size: 20px;
+	cursor: pointer;
+	padding: 0 4px;
+	line-height: 1;
+}
+
+.pairing-gen-close:hover {
+	color: var(--nt-fg);
+}
+
+.pairing-gen-desc {
+	margin: 0 0 4px;
+	font-size: 12px;
+	color: var(--nt-text-secondary);
+	line-height: 1.5;
+}
+
+.app-loading {
+	position: fixed;
+	inset: 0;
+	background: var(--nt-bg);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 999;
+}
+
+.app-loading-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid var(--nt-border);
+	border-top-color: var(--nt-accent);
+	border-radius: 50%;
+	animation: app-spin 0.7s linear infinite;
+}
+
+@keyframes app-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 </style>

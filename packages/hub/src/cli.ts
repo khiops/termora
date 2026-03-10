@@ -87,7 +87,8 @@ async function apiRequest(method: string, path: string, body?: unknown): Promise
 	}
 
 	const token = loadAuthToken();
-	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	const headers: Record<string, string> = {};
+	if (body !== undefined) headers["Content-Type"] = "application/json";
 	if (token) headers.Authorization = `Bearer ${token}`;
 
 	const url = `http://127.0.0.1:${runtime.port}${path}`;

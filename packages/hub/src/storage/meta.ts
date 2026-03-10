@@ -740,13 +740,9 @@ export class MetaDAL {
 		const rows = (
 			sessionId
 				? this.db
-						.prepare(
-							"SELECT * FROM channels WHERE session_id = ? AND status != 'dead' ORDER BY created_at ASC",
-						)
+						.prepare("SELECT * FROM channels WHERE session_id = ? ORDER BY created_at ASC")
 						.all(sessionId)
-				: this.db
-						.prepare("SELECT * FROM channels WHERE status != 'dead' ORDER BY created_at ASC")
-						.all()
+				: this.db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all()
 		) as ChannelRow[];
 		return rows.map(rowToChannel);
 	}
@@ -834,6 +830,7 @@ export class MetaDAL {
 	}
 
 	deleteChannel(id: string): void {
+		this.db.prepare("DELETE FROM cache_index WHERE channel_id = ?").run(id);
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
 

@@ -7,19 +7,24 @@
 			:style="{ left: `${x}px`, top: `${y}px` }"
 			@click.stop
 		>
-			<button class="ctx-item" @click="onRename">
+			<button v-if="!isGeneral" class="ctx-item" @click="onRename">
 				Rename Group
 			</button>
-			<div class="ctx-sep" />
-			<button class="ctx-item ctx-item--danger" @click="onDelete">
-				Delete Group
+			<button v-if="hasDeadChannels" class="ctx-item" @click="onPurgeDead">
+				Clean Up Dead Terminals
 			</button>
+			<template v-if="!isGeneral">
+				<div class="ctx-sep" />
+				<button class="ctx-item ctx-item--danger" @click="onDelete">
+					Delete Group
+				</button>
+			</template>
 		</div>
 	</Teleport>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 const props = defineProps<{
 	visible: boolean;
@@ -27,13 +32,17 @@ const props = defineProps<{
 	groupName: string;
 	x: number;
 	y: number;
+	hasDeadChannels?: boolean;
 }>();
 
 const emit = defineEmits<{
 	(e: "close"): void;
 	(e: "rename", groupId: string): void;
 	(e: "delete-group", groupId: string): void;
+	(e: "purge-dead", groupId: string): void;
 }>();
+
+const isGeneral = computed(() => props.groupId === "__general__");
 
 const menuEl = ref<HTMLElement | null>(null);
 
@@ -62,6 +71,11 @@ function onRename(): void {
 
 function onDelete(): void {
 	emit("delete-group", props.groupId);
+	emit("close");
+}
+
+function onPurgeDead(): void {
+	emit("purge-dead", props.groupId);
 	emit("close");
 }
 </script>

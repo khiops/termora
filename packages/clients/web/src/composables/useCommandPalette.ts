@@ -392,12 +392,6 @@ export function useCommandPalette() {
 				break;
 			}
 
-			case "action:pairing-code": {
-				// Re-open pairing dialog by clearing the token.
-				authStore.clearToken();
-				break;
-			}
-
 			case "action:toggle-writelock": {
 				if (activeChannelId === null) break;
 				const holdsLock = writeLockStore.isWriter(activeChannelId);

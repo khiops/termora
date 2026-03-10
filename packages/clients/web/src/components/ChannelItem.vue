@@ -74,7 +74,16 @@
 			</button>
 
 			<div class="channel-context-menu__sep"></div>
-			<button class="channel-context-menu__item channel-context-menu__item--danger" @click="onAction('destroy')">Destroy</button>
+			<button
+				v-if="channel.status !== 'dead'"
+				class="channel-context-menu__item channel-context-menu__item--danger"
+				@click="onAction('destroy')"
+			>Kill Terminal</button>
+			<button
+				v-if="channel.status === 'dead'"
+				class="channel-context-menu__item channel-context-menu__item--danger"
+				@click="onAction('delete')"
+			>Delete</button>
 		</div>
 	</Teleport>
 </template>
@@ -107,6 +116,7 @@ const emit = defineEmits<{
 	setWelcome: [channelId: string];
 	restart: [channelId: string];
 	destroy: [channelId: string];
+	delete: [channelId: string];
 }>();
 
 const notificationStore = useNotificationStore();
@@ -152,7 +162,8 @@ type ContextAction =
 	| "configureCommand"
 	| "setWelcome"
 	| "restart"
-	| "destroy";
+	| "destroy"
+	| "delete";
 
 function onAction(action: ContextAction): void {
 	contextMenuVisible.value = false;

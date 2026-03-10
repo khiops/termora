@@ -2,11 +2,13 @@ import { isValidUlid, toSnakeCase } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../session/session-manager.js";
 import type { MetaDAL } from "../storage/meta.js";
+import type { SpoolDAL } from "../storage/spool.js";
 
 export function registerChannelRoutes(
 	server: FastifyInstance,
 	metaDal: MetaDAL,
 	sessionManager: SessionManager,
+	spoolDal: SpoolDAL,
 ): void {
 	// GET /api/channels?host_id=X
 	// host_id filtering: look up sessions for that host, then get channels for those sessions
@@ -28,6 +30,32 @@ export function registerChannelRoutes(
 
 			const channels = metaDal.listChannels();
 			return toSnakeCase(channels);
+		},
+	);
+
+	// POST /api/channels/purge-dead — bulk delete all dead channels (optionally scoped to a host)
+	// MUST be registered before /:id routes to avoid "purge-dead" matching as a channel ID param.
+	server.post<{ Body: { host_id?: string } }>(
+		"/api/channels/purge-dead",
+		async (request, reply) => {
+			const { host_id } = request.body ?? {};
+
+			let deadChannelIds: string[];
+			if (host_id) {
+				const sessions = metaDal.listSessions(host_id);
+				const allChannels = sessions.flatMap((s) => metaDal.listChannels(s.id));
+				deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
+			} else {
+				const allChannels = metaDal.listChannels();
+				deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
+			}
+
+			for (const id of deadChannelIds) {
+				spoolDal.deleteChunksForChannel(id);
+				metaDal.deleteChannel(id);
+			}
+
+			return reply.code(200).send({ ok: true, purged: deadChannelIds.length });
 		},
 	);
 
@@ -201,9 +229,11 @@ export function registerChannelRoutes(
 			});
 		}
 
-		// Already dead — idempotent success
+		// Already dead — purge: delete chunks from spool + record from meta
 		if (channel.status === "dead") {
-			return reply.code(200).send({ ok: true });
+			spoolDal.deleteChunksForChannel(id);
+			metaDal.deleteChannel(id);
+			return reply.code(200).send({ ok: true, purged: true });
 		}
 
 		if (!sessionManager.destroyChannel(id)) {

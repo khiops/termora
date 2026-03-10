@@ -2,6 +2,11 @@
 
 ## Tier 1 — Next Sprint (UX + DX)
 
+- [x] ✅ [Hub+Web] Dead channel purge — DELETE /api/channels/:id purges dead channels, POST /api/channels/purge-dead bulk purge, ChannelItem "Delete" context menu, ChannelSidebar "Clear" header btn (2026-03-09)
+- [x] ✅ [Web] Fix: stale tabs persist after hub/agent restart — purgeOrphanedTabs in useLayout (2026-03-09)
+- [x] ✅ [Hub+Web] Fix: dead channels hidden from sidebar + stale write-lock label after restart (2026-03-09)
+- [x] ✅ [Web] Fix: closeAll/closeOthers/closeToRight remove tabs instead of vacating panes (2026-03-09)
+
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — same pattern as wallpapers — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
@@ -11,6 +16,7 @@
 
 ## Tier 2 — Quick Wins (batchable)
 
+- [ ] 💡 [Web+Hub] Dead channel display policy as setting (show/hide/auto-purge) with per-host override — Priority: L
 - [ ] 💡 [Web] Rail subtitle: middle truncation for hostnames (keep unique part) — Priority: L
 - [ ] 💡 [Web+Hub] ProxyJump auto-check in batch SSH import — Priority: L (from UX-03 /adversarial C-22)
 - [ ] 💡 [Web] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)

@@ -4,6 +4,15 @@
 		<div class="sidebar-header">
 			<span class="sidebar-header__label" :title="hostLabel">{{ hostLabel }}</span>
 			<button
+				v-if="hasDeadChannels"
+				class="sidebar-header__clear-btn"
+				title="Delete all dead channels"
+				aria-label="Delete all dead channels"
+				@click="emit('purge-dead')"
+			>
+				<span aria-hidden="true">&#x1F5D1;</span>
+			</button>
+			<button
 				class="sidebar-header__new-btn"
 				:disabled="activeHostId === null || spawning"
 				:title="activeHostId === null ? 'Select a host first' : 'New channel'"
@@ -57,14 +66,15 @@
 						@dragover.prevent="onGroupDragOver($event, group.id)"
 						@dragleave="onGroupDragLeave(group.id)"
 						@drop.prevent="onGroupDrop($event, group.id)"
-						@contextmenu.prevent="emit('channel-group-context-menu', { groupId: group.id, groupName: group.name, event: $event })"
 					>
 						<ChannelGroupHeader
 							:group="group"
 							:count="(channelsStore.channelsByGroup.get(group.id) ?? []).length"
+							:has-dead-channels="groupHasDeadChannels(group.id)"
 							@toggle="channelsStore.toggleGroupCollapsed(group.id)"
 							@rename="channelsStore.renameGroup"
 							@delete="channelsStore.removeGroup"
+							@purge-dead="onPurgeDeadInGroup"
 						/>
 					</div>
 					<template v-if="!group.collapsed">
@@ -86,6 +96,7 @@
 							@set-welcome="emit('set-welcome', $event)"
 							@restart="onRestartChannel"
 							@destroy="onDestroyChannel"
+							@delete="(id) => emit('delete-channel', id)"
 						/>
 					</template>
 				</template>
@@ -94,9 +105,11 @@
 				<ChannelGroupHeader
 					:group="generalGroup"
 					:count="(channelsStore.channelsByGroup.get(null) ?? []).length"
+					:has-dead-channels="groupHasDeadChannels(null)"
 					@toggle="toggleGeneral"
 					@rename="() => {}"
 					@delete="() => {}"
+					@purge-dead="onPurgeDeadInGroup"
 				/>
 				<template v-if="!generalCollapsed">
 					<ChannelItem
@@ -117,6 +130,7 @@
 						@set-welcome="emit('set-welcome', $event)"
 						@restart="onRestartChannel"
 						@destroy="onDestroyChannel"
+						@delete="(id) => emit('delete-channel', id)"
 					/>
 				</template>
 			</template>
@@ -150,9 +164,10 @@ const emit = defineEmits<{
 	"open-current-tab": [channelId: string];
 	"configure-command": [channelId: string];
 	"set-welcome": [channelId: string];
-	"channel-group-context-menu": [payload: { groupId: string; groupName: string; event: MouseEvent }];
 	"sidebar-context-menu": [event: MouseEvent];
 	"add-channel-group": [];
+	"purge-dead": [];
+	"delete-channel": [channelId: string];
 }>();
 
 const channelsStore = useChannelsStore();
@@ -176,6 +191,10 @@ const hostLabel = computed(() => {
 
 const generalCollapsed = computed(() => channelsStore.generalCollapsed);
 
+const hasDeadChannels = computed(() =>
+	channelsStore.channels.some((c) => c.status === "dead"),
+);
+
 /** Pseudo-group object for the ungrouped bucket. Not persisted to API. */
 const generalGroup = computed<ChannelGroup>(() => ({
 	id: "__general__",
@@ -193,6 +212,12 @@ function toggleGeneral(): void {
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
+
+/** Whether a group contains at least one dead channel. */
+function groupHasDeadChannels(groupId: string | null): boolean {
+	const channels = channelsStore.channelsByGroup.get(groupId) ?? [];
+	return channels.some((c) => c.status === "dead");
+}
 
 /** Groups available for "Move to" context-menu, excluding the one the channel is already in. */
 function otherGroups(currentGroupId: string): ChannelGroup[] {
@@ -304,6 +329,15 @@ function onDestroyChannel(channelId: string): void {
 	channelsStore.removeChannel(channelId);
 }
 
+function onPurgeDeadInGroup(groupId: string): void {
+	const lookupKey = groupId === "__general__" ? null : groupId;
+	const dead = (channelsStore.channelsByGroup.get(lookupKey) ?? [])
+		.filter((c) => c.status === "dead");
+	for (const ch of dead) {
+		void channelsStore.deleteChannel(ch.id);
+	}
+}
+
 function onAddGroup(): void {
 	emit("add-channel-group");
 }
@@ -370,6 +404,29 @@ function onAddGroup(): void {
 	display: block;
 	line-height: 1;
 	margin-top: -1px;
+}
+
+.sidebar-header__clear-btn {
+	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
+	border-radius: 4px;
+	border: none;
+	background: transparent;
+	color: var(--nt-text-secondary);
+	font-size: 14px;
+	line-height: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	transition: background 0.1s, color 0.1s;
+	padding: 0;
+}
+
+.sidebar-header__clear-btn:hover {
+	background: var(--nt-border);
+	color: var(--nt-badge);
 }
 
 /* Scrollable list */

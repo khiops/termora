@@ -225,6 +225,11 @@ export class SessionManager {
 		return this.metaDal;
 	}
 
+	/** Expose SpoolDAL for REST API route handlers that need to purge chunks. */
+	getSpoolDal(): SpoolDAL {
+		return this.spoolDal;
+	}
+
 	/**
 	 * Returns all WsClient instances currently attached to a channel.
 	 * Used by WriteLockManager's broadcastToChannel callback.

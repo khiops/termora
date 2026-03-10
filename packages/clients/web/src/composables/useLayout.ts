@@ -324,6 +324,32 @@ export function purgeDeadTabs(
 	}
 }
 
+/**
+ * Close tabs whose channels no longer exist on the given host.
+ * After a hub/agent restart, channels may be gone from the API but tabs
+ * persist in localStorage. This purges those orphaned references.
+ *
+ * Only purges tabs known to belong to `hostId` (via channelHostMap) to
+ * avoid closing tabs for channels on other hosts that haven't been fetched.
+ */
+export function purgeOrphanedTabs(
+	channels: ReadonlyArray<{ id: string }>,
+	tabs: ReadonlyArray<{ channelId: string }>,
+	closeTab: (index: number) => void,
+	hostId: string,
+	channelHostMap: ReadonlyMap<string, string>,
+): void {
+	const aliveIds = new Set(channels.map((c) => c.id));
+	for (let i = tabs.length - 1; i >= 0; i--) {
+		const tab = tabs[i];
+		if (tab === undefined) continue;
+		const tabHost = channelHostMap.get(tab.channelId);
+		if (tabHost === hostId && !aliveIds.has(tab.channelId)) {
+			closeTab(i);
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Composable
 // ---------------------------------------------------------------------------
@@ -497,28 +523,53 @@ export function useLayout() {
 		layouts.value = { ...layouts.value, [tabChannelId]: vacateNode(root) };
 	}
 
-	/** Vacate all panes in tabs except the one at `keepIndex`. */
+	/** Close all tabs except the one at `keepIndex`. */
 	function closeOthers(keepIndex: number): void {
-		for (let i = 0; i < tabs.value.length; i++) {
-			if (i === keepIndex) continue;
-			const tab = tabs.value[i];
-			if (tab !== undefined) vacateAllPanesInTab(tab.channelId);
-		}
+		const kept = tabs.value[keepIndex];
+		if (!kept) return;
+		// Clean up layouts for removed tabs
+		const keptLayout = layouts.value[kept.channelId];
+		layouts.value = keptLayout != null ? { [kept.channelId]: keptLayout } : {};
+		tabs.value = [kept];
+		activeTabIndex.value = 0;
 	}
 
-	/** Vacate all panes in tabs to the right of `fromIndex`. */
+	/** Close all tabs to the right of `fromIndex`. */
 	function closeToRight(fromIndex: number): void {
-		for (let i = fromIndex + 1; i < tabs.value.length; i++) {
-			const tab = tabs.value[i];
-			if (tab !== undefined) vacateAllPanesInTab(tab.channelId);
+		const removed = tabs.value.slice(fromIndex + 1);
+		const nextLayouts = { ...layouts.value };
+		for (const tab of removed) {
+			delete nextLayouts[tab.channelId];
+		}
+		tabs.value = tabs.value.slice(0, fromIndex + 1);
+		layouts.value = nextLayouts;
+		// Clamp active index if needed
+		if (activeTabIndex.value >= tabs.value.length) {
+			activeTabIndex.value = Math.max(0, tabs.value.length - 1);
 		}
 	}
 
-	/** Vacate all panes in all tabs. If `exceptWelcomeId` is provided, skip that tab. */
+	/** Close all tabs. If `exceptWelcomeId` is provided, keep that tab. */
 	function closeAll(exceptWelcomeId?: string): void {
-		for (const tab of tabs.value) {
-			if (tab.channelId === exceptWelcomeId) continue;
-			vacateAllPanesInTab(tab.channelId);
+		if (exceptWelcomeId) {
+			const keepIdx = tabs.value.findIndex((t) => t.channelId === exceptWelcomeId);
+			// Remove all tabs except the welcome one
+			const keepTab = keepIdx >= 0 ? tabs.value[keepIdx] : undefined;
+			const kept = keepTab !== undefined ? [keepTab] : [];
+			// Clean up layouts for removed tabs
+			const removedLayouts = { ...layouts.value };
+			for (const tab of tabs.value) {
+				if (tab.channelId !== exceptWelcomeId) {
+					delete removedLayouts[tab.channelId];
+				}
+			}
+			tabs.value = kept;
+			layouts.value = removedLayouts;
+			activeTabIndex.value = 0;
+		} else {
+			tabs.value = [];
+			layouts.value = {};
+			activeTabIndex.value = 0;
 		}
 	}
 
