@@ -113,12 +113,10 @@ export interface StartupConfig {
 }
 
 export interface TitleConfig {
-	/** Title source: 'dynamic' uses OSC 0/2, 'static' uses only fallback. Default: 'dynamic'. */
-	source?: "dynamic" | "static";
-	/** What to show when no dynamic or custom title is set. Default: 'channel'. */
-	fallback?: "channel" | "shell" | "custom";
-	/** Custom fallback string (used when fallback = 'custom'). */
-	fallbackCustom?: string;
+	/** Title source: 'dynamic' uses OSC 0/2, 'static' uses a fixed user-configured title, 'process' polls the foreground process name. Default: 'dynamic'. */
+	source?: "dynamic" | "static" | "process";
+	/** Fixed title shown when source = "static". */
+	staticTitle?: string;
 	/** Maximum display length for tab titles. Default: 50. */
 	maxLength?: number;
 	/** Where to place the ellipsis when truncating. Default: 'end'. */
@@ -351,8 +349,7 @@ export const STARTUP_CONFIG_KEYS = ["autoOpenWelcome"] as const;
 
 export const TITLE_CONFIG_KEYS = [
 	"source",
-	"fallback",
-	"fallbackCustom",
+	"staticTitle",
 	"maxLength",
 	"truncation",
 	"prefix",

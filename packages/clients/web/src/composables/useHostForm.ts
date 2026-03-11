@@ -1,4 +1,5 @@
 import type { Host, SshConfigEntry } from "@nexterm/shared";
+import { generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
 import { useAuthStore } from "../stores/auth.js";
 import { useHostsStore } from "../stores/hosts.js";
@@ -140,30 +141,53 @@ export function useHostForm(editHost?: Host) {
 		testing.value = true;
 		testResult.value = null;
 		try {
-			if (isEdit && editHost) {
-				testResult.value = await hostsStore.testConnection(editHost.id);
-			} else {
-				// Test unsaved host
-				const res = await fetch("/api/hosts/test", {
-					method: "POST",
-					headers: {
-						Authorization: `Bearer ${authStore.token}`,
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						hostname: form.value.sshHost,
-						...(form.value.sshPort !== undefined &&
-							form.value.sshPort > 0 && { port: form.value.sshPort }),
-						ssh_auth: form.value.sshAuth,
-						ssh_key_path: form.value.sshKeyPath || undefined,
-						ssh_user: form.value.sshUser || undefined,
-					}),
-				});
-				testResult.value = (await res.json()) as {
-					ok: boolean;
-					message?: string;
+			const { useSessionStore } = await import("../stores/session.js");
+			const sessionStore = useSessionStore();
+			const wsClient = sessionStore.wsClient;
+
+			// Use real hostId for saved hosts, temp ID for unsaved
+			const testHostId = isEdit && editHost ? editHost.id : generateId();
+
+			// Always read from form — it's initialized with editHost values,
+		// so form.value already reflects DB state + user edits
+		const host = form.value.sshHost;
+		const port = form.value.sshPort ?? 22;
+		const sshAuth = form.value.sshAuth;
+		const sshKeyPath = form.value.sshKeyPath;
+		const sshUser = form.value.sshUser;
+
+			const result = await new Promise<{ ok: boolean; message?: string }>((resolve) => {
+				const cleanup = (): void => {
+					unsubOk();
+					unsubFail();
 				};
-			}
+
+				const unsubOk = wsClient.on("TEST_CONNECT_OK", (msg) => {
+					if (msg.type === "TEST_CONNECT_OK" && msg.hostId === testHostId) {
+						cleanup();
+						resolve({ ok: true });
+					}
+				});
+
+				const unsubFail = wsClient.on("TEST_CONNECT_FAIL", (msg) => {
+					if (msg.type === "TEST_CONNECT_FAIL" && msg.hostId === testHostId) {
+						cleanup();
+						resolve({ ok: false, message: msg.message });
+					}
+				});
+
+				wsClient.send({
+					type: "TEST_CONNECT",
+					hostId: testHostId,
+					hostname: host,
+					port: port,
+					sshAuth: sshAuth,
+					...(sshKeyPath && { sshKeyPath }),
+					...(sshUser && { sshUser }),
+				});
+			});
+
+			testResult.value = result;
 		} catch {
 			testResult.value = { ok: false, message: "Connection test failed" };
 		} finally {

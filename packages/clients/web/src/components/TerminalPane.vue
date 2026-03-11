@@ -179,10 +179,24 @@ const error = ref<string | null>(null);
 
 const hostsStore = useHostsStore();
 
+// Resolve per-host theme override (SC-03) from host.profileJson
+const hostThemeName = (() => {
+	if (!props.hostId) return undefined;
+	const host = hostsStore.hosts.find((h) => h.id === props.hostId);
+	if (!host?.profileJson) return undefined;
+	try {
+		const parsed = JSON.parse(host.profileJson) as { theme?: string };
+		return parsed.theme;
+	} catch {
+		return undefined;
+	}
+})();
+
 const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
 	configStore.profile,
+	hostThemeName,
 );
 
 // ---------------------------------------------------------------------------
@@ -469,9 +483,8 @@ const matchPaneName = computed<string | null>(() => {
 	if (searchScope.value !== "all") return null;
 	const matchChId = multiPaneSearch.matchPaneChannelId.value;
 	if (matchChId === null || matchChId === effectiveChannelId.value) return null;
-	// Resolve the name from channels store
 	const ch = channelsStore.channels.find((c) => c.id === matchChId);
-	return ch?.title ?? ch?.dynamicTitle ?? DEFAULT_CHANNEL_NAME;
+	return ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 });
 
 /** Effective match count: aggregated when scope=all, local when scope=pane. */

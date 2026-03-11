@@ -4,6 +4,50 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## TITLE-HUB-RESOLVE — Move title resolution from client to hub (2026-03-11)
+
+- Hub resolves displayTitle using resolveChannelDisplayName (shared) — single source of truth
+- displayTitle is computed (not stored in DB) — derived from title + dynamicTitle + processTitle + config
+- Hub broadcasts displayTitle in TITLE_CHANGE/PROCESS_TITLE/ATTACH_OK messages
+- Client uses channel.displayTitle everywhere — removes mode logic from 6 locations
+- liveDynamicTitle (xterm.js local) stays as optimistic override in useTabTitle for active terminal only
+- Config change (title section) triggers re-resolution of all active channels' displayTitles via broadcastDisplayTitles()
+- ConfigResolver injected as optional 4th param to SessionManager constructor (null-safe)
+- ChannelState tracks dynamicTitle/processTitle/displayTitle in memory (not stored in DB)
+- handleAttach backfills ChannelState from DB on first attach (hub-restart scenario)
+- notifyChannelRenamed() on SessionManager for F2 rename → displayTitle recompute + broadcast
+- PUT /api/config/ui checks for 'title' key → calls sessionManager.broadcastDisplayTitles()
+- F-002 fix: pendingAuthPrompts tracks clientId, cleaned on removeClient + shutdown
+- F-003 fix: buildSshConnectConfig extracted in ssh-agent.ts (DRY for SshAgent.start + _testSshConnectivity)
+
+---
+
+## TEST-CONNECT-WS — Refactor test connectivity REST→WS via TEST_CONNECT message (2026-03-10)
+
+- WS-only TEST_CONNECT replaces REST /api/hosts/:id/test and /api/hosts/test — single auth path
+- TEST_CONNECT reuses AUTH_PROMPT mechanism from SPAWN for interactive password/passphrase prompting
+- Lightweight SSH test (ssh2.Client ready event) — no agent spawn, no HELLO handshake
+- REST routes and testSshConnectivity fully removed (no fallback)
+- Unsaved hosts use generateId() as temporary hostId for WS correlation
+- CLI cmdHostTest removed (can't do interactive auth via CLI)
+- _buildPromptAuth extracted as DRY helper in SessionManager
+
+---
+
+## SSH-AUTH-PROMPT — SSH key passphrase + password prompting via AUTH_PROMPT/AUTH_PROMPT_RESPONSE (2026-03-10)
+
+- AUTH_PROMPT/AUTH_PROMPT_RESPONSE protocol messages (same pattern as HOST_VERIFY)
+- SshAgent takes AuthPromptFn callback (DI) — hub provides WS-based impl
+- Detect encrypted key via PEM header before connect (proactive prompt)
+- Secret never stored — used once for ssh2 connect, then GC'd
+- Keytar/OS keychain deferred to P1 (Tauri desktop only)
+- pendingAuthPrompts keyed by hostId (one prompt per host at a time), 60s timeout
+- AuthPromptDialog centered modal (not bottom-right like WriteRequest), 60s countdown, Enter/Escape keys
+- F-001 fix: validate apr.secret type+length in ws-handler (OWASP input validation)
+- F-004/F-005 deferred to TODO (L priority, single-user mitigates risk)
+
+---
+
 ## SC-23 — Host Groups as First-Class Entities (2026-03-09)
 
 - host_groups table is global (not per-workspace) — same as current behavior

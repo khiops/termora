@@ -14,7 +14,7 @@
 			</button>
 			<button
 				class="sidebar-header__new-btn"
-				:disabled="activeHostId === null || spawning"
+				:disabled="activeHostId === null"
 				:title="activeHostId === null ? 'Select a host first' : 'New channel'"
 				aria-label="New channel"
 				@click="onNewChannel"
@@ -168,6 +168,7 @@ const emit = defineEmits<{
 	"add-channel-group": [];
 	"purge-dead": [];
 	"delete-channel": [channelId: string];
+	"new-channel": [];
 }>();
 
 const channelsStore = useChannelsStore();
@@ -175,8 +176,6 @@ const hostsStore = useHostsStore();
 const configStore = useConfigStore();
 
 const activeHostId = computed(() => channelsStore.activeHostId);
-
-const spawning = ref(false);
 
 const hostLabel = computed(() => {
 	const id = activeHostId.value;
@@ -301,16 +300,9 @@ function onGroupDrop(event: DragEvent, targetGroupId: string): void {
 // Actions
 // -------------------------------------------------------------------------
 
-async function onNewChannel(): Promise<void> {
-	if (activeHostId.value === null || spawning.value) return;
-	spawning.value = true;
-	try {
-		await channelsStore.spawnChannel(activeHostId.value);
-	} catch (err) {
-		console.error("[ChannelSidebar] spawn failed:", err);
-	} finally {
-		spawning.value = false;
-	}
+function onNewChannel(): void {
+	if (activeHostId.value === null) return;
+	emit("new-channel");
 }
 
 function onCloseChannel(channelId: string): void {

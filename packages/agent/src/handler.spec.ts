@@ -22,6 +22,7 @@ interface MockPtyManager {
 	onOsc9: ReturnType<typeof vi.fn>;
 	destroy: ReturnType<typeof vi.fn>;
 	has: ReturnType<typeof vi.fn>;
+	getPid: ReturnType<typeof vi.fn>;
 	destroyAll: ReturnType<typeof vi.fn>;
 	// Helpers for triggering registered callbacks in tests
 	_triggerData: (channelId: string, raw: string) => void;
@@ -72,6 +73,7 @@ function makeMockPtyManager(): MockPtyManager {
 		}),
 		destroy: vi.fn(),
 		has: vi.fn().mockReturnValue(true),
+		getPid: vi.fn().mockReturnValue(null), // null = skip polling (no real process in tests)
 		destroyAll: vi.fn(),
 		_triggerData: (channelId: string, raw: string) => {
 			dataCallbacks.get(channelId)?.(raw);

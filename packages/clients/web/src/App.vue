@@ -3,6 +3,9 @@
 		<!-- Write-request dialog — rendered globally, outside layout, via Teleport -->
 		<WriteRequestDialog />
 
+		<!-- Auth-prompt dialog — SSH password / passphrase, rendered via Teleport -->
+		<AuthPromptDialog />
+
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
@@ -204,6 +207,7 @@
 				@add-channel-group="onAddChannelGroupFromSidebar"
 				@purge-dead="onPurgeDead"
 				@delete-channel="onDeleteChannel"
+				@new-channel="onAddTab"
 			/>
 			<!-- Resize handle after channel sidebar -->
 			<div
@@ -294,6 +298,7 @@ import PaneLayout from "./components/PaneLayout.vue";
 import PairingCodeGenerator from "./components/PairingCodeGenerator.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
+import AuthPromptDialog from "./components/AuthPromptDialog.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import SettingsPanel from "./components/settings/SettingsPanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";

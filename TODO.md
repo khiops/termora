@@ -1,11 +1,10 @@
 # nexterm — Backlog
 
-## Tier 1 — Next Sprint (UX + DX)
+## Recently Completed
 
-- [x] ✅ [Hub+Web] Dead channel purge — DELETE /api/channels/:id purges dead channels, POST /api/channels/purge-dead bulk purge, ChannelItem "Delete" context menu, ChannelSidebar "Clear" header btn (2026-03-09)
-- [x] ✅ [Web] Fix: stale tabs persist after hub/agent restart — purgeOrphanedTabs in useLayout (2026-03-09)
-- [x] ✅ [Hub+Web] Fix: dead channels hidden from sidebar + stale write-lock label after restart (2026-03-09)
-- [x] ✅ [Web] Fix: closeAll/closeOthers/closeToRight remove tabs instead of vacating panes (2026-03-09)
+(Archived → docs/historic/done-2026-03.md)
+
+## Tier 1 — Next Sprint (UX + DX)
 
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — same pattern as wallpapers — Priority: M
@@ -13,6 +12,9 @@
 - [ ] 💡 [Web] Settings panel search/filter (VS Code style) — Priority: M (from UX-09 spec, P2)
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
+
+- [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
+- [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
 
 ## Tier 2 — Quick Wins (batchable)
 
@@ -25,7 +27,6 @@
 - [ ] 💡 [Hub] Upload security: apply MIME/quota/image-bomb to wallpapers too (currently extension-only) — Priority: L
 - [ ] 💡 [Hub] Color field validation on host-groups API (hex regex or allowlist) — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] Remove dead DAL methods renameHostGroup/deleteHostGroup/listHostGroups (legacy string-based) — Priority: L (from /review F-005)
-- [x] ✅ [Web] Replace window.prompt for group creation with GroupActionDialog + add channel group context menu (2026-03-09)
 
 ## Tier 3 — Strategic (milestones)
 

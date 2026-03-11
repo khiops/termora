@@ -78,6 +78,8 @@ export interface Channel {
 	icon?: string;
 	directProcess?: boolean;
 	dynamicTitle?: string;
+	processTitle?: string;
+	displayTitle?: string;
 	createdAt: string;
 	updatedAt: string;
 }

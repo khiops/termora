@@ -5,6 +5,7 @@ import SettingControl from "../SettingControl.vue";
 import { useSettingsStore, type Scope } from "../../../stores/settings.js";
 import {
 	getSchemaForCategoryScope,
+	settingsSchema,
 	toStoreParams,
 	type SettingDefinition,
 } from "../settingsSchema.js";
@@ -18,7 +19,17 @@ const props = defineProps<{
 const settingsStore = useSettingsStore();
 
 const filteredSchema = computed(() =>
-	getSchemaForCategoryScope(props.category, props.scope),
+	getSchemaForCategoryScope(props.category, props.scope).filter((def) => {
+		if (!def.showWhen) return true;
+		// Find the sibling setting that controls visibility
+		const sibling = settingsSchema.find(
+			(s) => s.key === def.showWhen!.key && s.section === def.showWhen!.section,
+		);
+		if (!sibling) return false;
+		const { storeSection, storeKey } = storeFor(sibling);
+		const current = settingsStore.getValue(props.scope, storeSection, storeKey);
+		return current === def.showWhen.value;
+	}),
 );
 
 function storeFor(def: SettingDefinition) {

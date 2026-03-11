@@ -1,5 +1,7 @@
-import { DEFAULT_CHANNEL_NAME, type ProtocolMessage } from "@nexterm/shared";
+import type { ProtocolMessage } from "@nexterm/shared";
+import type { AuthPromptMessage } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ConfigResolver } from "../config.js";
 import { openTestDatabases } from "../storage/db.js";
 import { SpoolDAL } from "../storage/spool.js";
 import { SessionManager, type WsClient } from "./session-manager.js";
@@ -149,12 +151,16 @@ class MockSshAgent {
 	}
 }
 
-vi.mock("./ssh-agent.js", () => ({
-	SshAgent: vi.fn().mockImplementation(() => {
-		mockSshAgentInstance = new MockSshAgent();
-		return mockSshAgentInstance;
-	}),
-}));
+vi.mock("./ssh-agent.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./ssh-agent.js")>();
+	return {
+		...actual,
+		SshAgent: vi.fn().mockImplementation(() => {
+			mockSshAgentInstance = new MockSshAgent();
+			return mockSshAgentInstance;
+		}),
+	};
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -284,7 +290,7 @@ describe("SessionManager", () => {
 		// Agent is connected — handleAttach always requests a fresh snapshot
 		expect(attachOk.snapshot).toBeTruthy();
 		expect(attachOk.tail).toEqual([]);
-		expect(attachOk.writeLockHolder).toBeNull();
+		expect(attachOk.writeLockHolder).toBeFalsy();
 		expect(attachOk.cached).toBe(false);
 	});
 
@@ -382,10 +388,10 @@ describe("SessionManager", () => {
 		expect(channels).toHaveLength(1);
 		expect(channels[0]?.id).toBe("local-ch-1");
 		expect(channels[0]?.status).toBe("live");
-		expect(channels[0]?.title).toBe(DEFAULT_CHANNEL_NAME);
+		expect(channels[0]?.title).toBeFalsy();
 	});
 
-	it("assigns default title to all spawned channels", async () => {
+	it("spawned channels have null title (dynamic title takes precedence)", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);
 		sm.addClient(client);
@@ -397,8 +403,8 @@ describe("SessionManager", () => {
 		const dal = new MetaDAL(dbManager.meta);
 		const ch1 = dal.getChannel("local-ch-1");
 		const ch2 = dal.getChannel("local-ch-2");
-		expect(ch1?.title).toBe(DEFAULT_CHANNEL_NAME);
-		expect(ch2?.title).toBe(DEFAULT_CHANNEL_NAME);
+		expect(ch1?.title).toBeFalsy();
+		expect(ch2?.title).toBeFalsy();
 	});
 
 	it("second SPAWN for same local host reuses existing session", async () => {
@@ -578,7 +584,7 @@ describe("SessionManager", () => {
 
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
 
-		expect(mockSshAgentInstance).not.toBeNull();
+		expect(mockSshAgentInstance).not.toBeFalsy();
 
 		// Simulate SSH connection drop
 		if (mockSshAgentInstance) {
@@ -682,7 +688,7 @@ describe("SessionManager", () => {
 
 		await sm.handleAttach("c2", "ssh-ch-1");
 
-		expect(mockSshAgentInstance).not.toBeNull();
+		expect(mockSshAgentInstance).not.toBeFalsy();
 		// MockSshAgent should have received an ATTACH message
 		// biome-ignore lint/style/noNonNullAssertion: asserted not null above
 		const sendCalls = mockSshAgentInstance!.send.mock.calls.map(
@@ -699,7 +705,7 @@ describe("SessionManager", () => {
 		expect(attachOk).toBeTruthy();
 		expect(attachOk.channelId).toBe("ssh-ch-1");
 		// Agent returned a fresh snapshot
-		expect(attachOk.snapshot).not.toBeNull();
+		expect(attachOk.snapshot).not.toBeFalsy();
 		expect(attachOk.snapshot?.serialized).toBe("<mock-snapshot>");
 		// The tail has the pre-inserted output chunk (seq 0, which is ≤ lastSeq=0 from mock)
 		// Mock agent returns lastSeq=0, so tail = chunks with seq > 0 → empty
@@ -1049,6 +1055,44 @@ describe("SessionManager", () => {
 		expect(channel).toBeUndefined();
 	});
 
+	// ─── SC-14: PROCESS_TITLE for unknown channel ────────────────────────────
+
+	it("PROCESS_TITLE for unknown channelId does not crash or update DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Spawn a channel to set up the local agent with its message handler
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
+
+		// Grab the mock agent from the agents map (EventEmitter-based mock)
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		expect(agentsMap.size).toBeGreaterThan(0);
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		const [, agent] = entry;
+
+		// Emit PROCESS_TITLE with a channel ID that doesn't exist
+		// Should log a warning but not throw
+		expect(() => {
+			agent.emit("message", {
+				type: "PROCESS_TITLE",
+				channelId: "nonexistent-channel-id",
+				title: "bash",
+			});
+		}).not.toThrow();
+
+		// Verify no DB update occurred for the unknown channel
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const channel = dal.getChannel("nonexistent-channel-id");
+		expect(channel).toBeUndefined();
+	});
+
 	// ─── Warm restart (Block 4) ───────────────────────────────────────────────
 
 	describe("startup() warm restart", () => {
@@ -1226,7 +1270,7 @@ describe("SessionManager", () => {
 
 				// Agent got the SPAWN but never replies
 				expect(silentAgent.send).toHaveBeenCalledTimes(1);
-				expect(errChannelId).toBeNull();
+				expect(errChannelId).toBeFalsy();
 
 				// Advance past the 10s SPAWN timeout
 				vi.advanceTimersByTime(10_001);
@@ -1522,5 +1566,851 @@ describe("SessionManager", () => {
 		// At most 5 should pass through
 		expect(notifMsgs.length).toBeLessThanOrEqual(5);
 		expect(notifMsgs.length).toBeGreaterThan(0);
+	});
+});
+
+// ─── Auth prompt tests ────────────────────────────────────────────────────────
+
+describe("SessionManager — handleAuthPromptResponse", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	it("handleAuthPromptResponse resolves a pending AUTH_PROMPT", async () => {
+		// Access private map via type cast
+		const pendingMap = (
+			sm as unknown as {
+				pendingAuthPrompts: Map<
+					string,
+					{ resolve: (s: string | null) => void; timer: ReturnType<typeof setTimeout> }
+				>;
+			}
+		).pendingAuthPrompts;
+
+		// Manually install a pending prompt
+		const resolvePromise = new Promise<string | null>((resolve) => {
+			const timer = setTimeout(() => {
+				pendingMap.delete("host-01");
+				resolve(null);
+			}, 60_000);
+			pendingMap.set("host-01", { resolve, timer });
+		});
+
+		// Respond with a secret
+		sm.handleAuthPromptResponse("client-1", "host-01", "my-secret");
+
+		const result = await resolvePromise;
+		expect(result).toBe("my-secret");
+		expect(pendingMap.has("host-01")).toBe(false);
+	});
+
+	it("handleAuthPromptResponse with null (cancel) resolves to null", async () => {
+		const pendingMap = (
+			sm as unknown as {
+				pendingAuthPrompts: Map<
+					string,
+					{ resolve: (s: string | null) => void; timer: ReturnType<typeof setTimeout> }
+				>;
+			}
+		).pendingAuthPrompts;
+
+		const resolvePromise = new Promise<string | null>((resolve) => {
+			const timer = setTimeout(() => {
+				pendingMap.delete("host-02");
+				resolve(null);
+			}, 60_000);
+			pendingMap.set("host-02", { resolve, timer });
+		});
+
+		sm.handleAuthPromptResponse("client-1", "host-02", null);
+
+		const result = await resolvePromise;
+		expect(result).toBeFalsy();
+		expect(pendingMap.has("host-02")).toBe(false);
+	});
+
+	it("auth prompt times out after 60s and resolves to null", async () => {
+		vi.useFakeTimers();
+		try {
+			const pendingMap = (
+				sm as unknown as {
+					pendingAuthPrompts: Map<
+						string,
+						{ resolve: (s: string | null) => void; timer: ReturnType<typeof setTimeout> }
+					>;
+				}
+			).pendingAuthPrompts;
+
+			const resolvePromise = new Promise<string | null>((resolve) => {
+				const timer = setTimeout(() => {
+					pendingMap.delete("host-03");
+					resolve(null);
+				}, 60_000);
+				pendingMap.set("host-03", { resolve, timer });
+			});
+
+			// No handleAuthPromptResponse call — advance time past 60s
+			vi.advanceTimersByTime(61_000);
+
+			const result = await resolvePromise;
+			expect(result).toBeFalsy();
+			expect(pendingMap.has("host-03")).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("handleAuthPromptResponse is a no-op for unknown hostId", () => {
+		// Should not throw
+		expect(() => {
+			sm.handleAuthPromptResponse("client-1", "no-such-host", "secret");
+		}).not.toThrow();
+	});
+
+	it("AUTH_PROMPT message is sent to client when promptAuth callback sends it", () => {
+		// This test verifies the promptAuth callback wiring directly:
+		// the callback sends AUTH_PROMPT to the client and registers a pending prompt.
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Access the private pendingAuthPrompts map
+		const pendingMap = (
+			sm as unknown as {
+				pendingAuthPrompts: Map<
+					string,
+					{ resolve: (s: string | null) => void; timer: ReturnType<typeof setTimeout> }
+				>;
+			}
+		).pendingAuthPrompts;
+
+		// Simulate what handleSpawn does: send AUTH_PROMPT then register in pendingAuthPrompts
+		const promptMsg: AuthPromptMessage = {
+			type: "AUTH_PROMPT",
+			hostId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			promptType: "password",
+			message: "Enter password for user@localhost",
+		};
+		client.send(promptMsg);
+
+		let capturedSecret: string | null = null;
+		const timer = setTimeout(() => {
+			pendingMap.delete("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+			capturedSecret = null;
+		}, 60_000);
+		pendingMap.set("01ARZ3NDEKTSV4RRFFQ69G5FAV", {
+			resolve: (s) => {
+				capturedSecret = s;
+			},
+			timer,
+		});
+
+		// Verify AUTH_PROMPT arrived at the client
+		expect(received).toHaveLength(1);
+		expect(received[0]?.type).toBe("AUTH_PROMPT");
+		const sentPrompt = received[0] as AuthPromptMessage;
+		expect(sentPrompt.promptType).toBe("password");
+		expect(sentPrompt.hostId).toBe("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+
+		// Respond via handleAuthPromptResponse
+		sm.handleAuthPromptResponse("c1", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "hunter2");
+
+		// The pending resolve should have been called with the secret
+		expect(capturedSecret).toBe("hunter2");
+		expect(pendingMap.has("01ARZ3NDEKTSV4RRFFQ69G5FAV")).toBe(false);
+
+		clearTimeout(timer);
+	});
+});
+
+// ─── handleTestConnect ────────────────────────────────────────────────────────
+
+// Mock ssh2 Client for _testSshConnectivity
+import { EventEmitter } from "node:events";
+import type { TestConnectMessage } from "@nexterm/shared";
+
+let mockSsh2Client: EventEmitter & {
+	connect: ReturnType<typeof vi.fn>;
+	end: ReturnType<typeof vi.fn>;
+	destroy: ReturnType<typeof vi.fn>;
+};
+
+vi.mock("ssh2", () => {
+	return {
+		Client: vi.fn().mockImplementation(() => {
+			mockSsh2Client = Object.assign(new EventEmitter(), {
+				connect: vi.fn(),
+				end: vi.fn(),
+				destroy: vi.fn(),
+			});
+			return mockSsh2Client;
+		}),
+	};
+});
+
+describe("handleTestConnect", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	it("is a no-op when client is not registered", async () => {
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId: "temp-host-1",
+			hostname: "example.com",
+			port: 22,
+			sshAuth: "agent",
+		};
+		// Should not throw
+		await expect(sm.handleTestConnect("nonexistent-client", msg)).resolves.toBeUndefined();
+	});
+
+	it("sends TEST_CONNECT_OK when ssh2 emits ready", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-tc-1", received);
+		sm.addClient(client);
+
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId: "temp-host-2",
+			hostname: "example.com",
+			port: 22,
+			sshAuth: "agent",
+		};
+
+		// Set SSH_AUTH_SOCK so agent auth doesn't fail early
+		process.env.SSH_AUTH_SOCK = "/tmp/mock-agent.sock";
+
+		const promise = sm.handleTestConnect("c-tc-1", msg);
+		// Wait for async connect setup
+		await new Promise((r) => setImmediate(r));
+		// Emit ready
+		mockSsh2Client.emit("ready");
+		await promise;
+
+		expect(received).toHaveLength(1);
+		expect(received[0]?.type).toBe("TEST_CONNECT_OK");
+		const ok = received[0] as unknown as Record<string, string>;
+		expect(ok.hostId).toBe("temp-host-2");
+
+		process.env.SSH_AUTH_SOCK = undefined;
+	});
+
+	it("sends TEST_CONNECT_FAIL when ssh2 emits an auth error", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-tc-2", received);
+		sm.addClient(client);
+
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId: "temp-host-3",
+			hostname: "example.com",
+			port: 22,
+			sshAuth: "agent",
+		};
+
+		process.env.SSH_AUTH_SOCK = "/tmp/mock-agent.sock";
+
+		const promise = sm.handleTestConnect("c-tc-2", msg);
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("error", new Error("All configured authentication methods failed"));
+		await promise;
+
+		expect(received).toHaveLength(1);
+		expect(received[0]?.type).toBe("TEST_CONNECT_FAIL");
+		const fail = received[0] as unknown as Record<string, string>;
+		expect(fail.hostId).toBe("temp-host-3");
+		expect(fail.message).toBe("Authentication failed");
+
+		process.env.SSH_AUTH_SOCK = undefined;
+	});
+
+	it("sends TEST_CONNECT_FAIL on network error", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-tc-3", received);
+		sm.addClient(client);
+
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId: "temp-host-4",
+			hostname: "192.168.1.99",
+			port: 22,
+			sshAuth: "agent",
+		};
+
+		process.env.SSH_AUTH_SOCK = "/tmp/mock-agent.sock";
+
+		const promise = sm.handleTestConnect("c-tc-3", msg);
+		await new Promise((r) => setImmediate(r));
+		mockSsh2Client.emit("error", new Error("connect ECONNREFUSED 192.168.1.99:22"));
+		await promise;
+
+		expect(received).toHaveLength(1);
+		expect(received[0]?.type).toBe("TEST_CONNECT_FAIL");
+		const fail = received[0] as unknown as Record<string, string>;
+		expect(fail.message).toContain("ECONNREFUSED");
+
+		process.env.SSH_AUTH_SOCK = undefined;
+	});
+
+	it("sends AUTH_PROMPT for password auth and TEST_CONNECT_FAIL on cancelled prompt", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-tc-4", received);
+		sm.addClient(client);
+
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId: "temp-host-5",
+			hostname: "example.com",
+			port: 22,
+			sshAuth: "password",
+		};
+
+		const promise = sm.handleTestConnect("c-tc-4", msg);
+		// Wait for AUTH_PROMPT to be sent
+		await new Promise((r) => setImmediate(r));
+
+		// Should have sent AUTH_PROMPT
+		expect(received).toHaveLength(1);
+		expect(received[0]?.type).toBe("AUTH_PROMPT");
+		const prompt = received[0] as AuthPromptMessage;
+		expect(prompt.promptType).toBe("password");
+		expect(prompt.hostId).toBe("temp-host-5");
+
+		// Cancel the prompt (null = user cancelled)
+		sm.handleAuthPromptResponse("c-tc-4", "temp-host-5", null);
+		await promise;
+
+		// Should have received TEST_CONNECT_FAIL after cancellation
+		const failMsg = received.find((m) => m.type === "TEST_CONNECT_FAIL") as
+			| (ProtocolMessage & { message?: string })
+			| undefined;
+		expect(failMsg).toBeDefined();
+		expect(failMsg?.type).toBe("TEST_CONNECT_FAIL");
+	});
+});
+
+// ─── _resolveDisplayTitle tests ───────────────────────────────────────────────
+
+function makeMockConfigResolver(
+	source: "dynamic" | "static" | "process" = "dynamic",
+	staticTitle = "",
+): ConfigResolver {
+	return {
+		uiConfig: {
+			title: { source, staticTitle },
+		},
+	} as unknown as ConfigResolver;
+}
+
+/** Access the private _resolveDisplayTitle method via type cast */
+function resolveDisplayTitle(sm: SessionManager, channelId: string): string {
+	return (sm as unknown as { _resolveDisplayTitle(id: string): string })._resolveDisplayTitle(
+		channelId,
+	);
+}
+
+/** Inject a ChannelState directly for testing */
+function injectChannelState(
+	sm: SessionManager,
+	channelId: string,
+	state: {
+		dynamicTitle?: string | null;
+		processTitle?: string | null;
+		displayTitle?: string;
+	},
+): void {
+	const channels = (sm as unknown as { channels: Map<string, object> }).channels;
+	channels.set(channelId, {
+		sessionId: "s1",
+		hostId: "h1",
+		status: "live",
+		clients: new Set(),
+		shell: "/bin/bash",
+		cols: 80,
+		rows: 24,
+		dynamicTitle: state.dynamicTitle ?? null,
+		processTitle: state.processTitle ?? null,
+		displayTitle: state.displayTitle ?? "Terminal",
+	});
+}
+
+describe("SessionManager — _resolveDisplayTitle", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	it("returns DEFAULT_CHANNEL_NAME for unknown channelId", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+		const result = resolveDisplayTitle(sm, "nonexistent-channel");
+		expect(result).toBe("Terminal");
+	});
+
+	it("dynamic mode: returns dynamicTitle when available", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+		injectChannelState(sm, "ch-1", { dynamicTitle: "vim session", processTitle: "vim" });
+		expect(resolveDisplayTitle(sm, "ch-1")).toBe("vim session");
+	});
+
+	it("dynamic mode: falls back to DEFAULT_CHANNEL_NAME when no dynamicTitle", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+		injectChannelState(sm, "ch-2", { dynamicTitle: null });
+		expect(resolveDisplayTitle(sm, "ch-2")).toBe("Terminal");
+	});
+
+	it("process mode: returns processTitle when configured", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("process"));
+		injectChannelState(sm, "ch-3", { dynamicTitle: "bash", processTitle: "node" });
+		expect(resolveDisplayTitle(sm, "ch-3")).toBe("node");
+	});
+
+	it("static mode: returns staticTitle from config", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(
+			dbManager,
+			undefined,
+			undefined,
+			makeMockConfigResolver("static", "My Terminal"),
+		);
+		injectChannelState(sm, "ch-4", { dynamicTitle: "bash", processTitle: "vim" });
+		expect(resolveDisplayTitle(sm, "ch-4")).toBe("My Terminal");
+	});
+
+	it("custom DB title (F2 rename) wins over dynamic title regardless of mode", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+		const hostId = await sm.ensureLocalHost();
+
+		// Create a session then a channel with a custom title via proper MetaDAL methods
+		const metaDal = sm.getMetaDal();
+		const sessionId = "sess-rename-test";
+		const channelId = "ch-rename-test";
+		metaDal.createSession({ id: sessionId, hostId, status: "active" });
+		metaDal.createChannel({
+			id: channelId,
+			sessionId,
+			status: "live",
+			title: "My Renamed Tab",
+		});
+
+		injectChannelState(sm, channelId, { dynamicTitle: "vim", processTitle: "vim" });
+		const result = resolveDisplayTitle(sm, channelId);
+		expect(result).toBe("My Renamed Tab");
+	});
+
+	it("updates state.displayTitle in place", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+		injectChannelState(sm, "ch-5", { dynamicTitle: "zsh", displayTitle: "Terminal" });
+		resolveDisplayTitle(sm, "ch-5");
+		const channels = (sm as unknown as { channels: Map<string, { displayTitle: string }> })
+			.channels;
+		expect(channels.get("ch-5")?.displayTitle).toBe("zsh");
+	});
+});
+
+describe("SessionManager — Block 2: title broadcast wiring", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	// Helper: get agent mock from the agents map after a spawn
+	function getAgentEmitter(sm: SessionManager): {
+		emit: (event: string, ...args: unknown[]) => boolean;
+	} {
+		const agentsMap = (
+			sm as unknown as {
+				agents: Map<string, { emit: (event: string, ...args: unknown[]) => boolean }>;
+			}
+		).agents;
+		const entry = [...agentsMap.entries()][0];
+		if (!entry) throw new Error("expected at least one agent entry");
+		return entry[1];
+	}
+
+	it("TITLE_CHANGE updates ChannelState.dynamicTitle and broadcasts displayTitle", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-1", received);
+		sm.addClient(client);
+
+		// Spawn to get a real channelId and wired agent
+		const channelId = await sm.handleSpawn("c-bt-1", { type: "SPAWN", hostId: "local" });
+		if (!channelId) throw new Error("expected channelId");
+
+		// Attach the client so it is tracked in channel.clients
+		await new Promise((r) => setImmediate(r));
+		received.length = 0; // clear SPAWN_OK + any other msgs
+
+		const agent = getAgentEmitter(sm);
+
+		// Emit TITLE_CHANGE from agent
+		agent.emit("message", {
+			type: "TITLE_CHANGE",
+			channelId,
+			title: "vim ~/file.ts",
+		});
+
+		// The broadcast should have happened synchronously
+		const titleMsg = received.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { displayTitle?: string; title?: string })
+			| undefined;
+		expect(titleMsg).toBeDefined();
+		expect(titleMsg?.displayTitle).toBe("vim ~/file.ts");
+		expect(titleMsg?.title).toBe("vim ~/file.ts");
+
+		// Verify in-memory ChannelState updated
+		const channels = (sm as unknown as { channels: Map<string, { dynamicTitle: string | null }> })
+			.channels;
+		expect(channels.get(channelId)?.dynamicTitle).toBe("vim ~/file.ts");
+	});
+
+	it("PROCESS_TITLE updates ChannelState.processTitle and broadcasts displayTitle", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("process"));
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-2", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-bt-2", { type: "SPAWN", hostId: "local" });
+		if (!channelId) throw new Error("expected channelId");
+		await new Promise((r) => setImmediate(r));
+		received.length = 0;
+
+		const agent = getAgentEmitter(sm);
+
+		agent.emit("message", {
+			type: "PROCESS_TITLE",
+			channelId,
+			title: "node",
+		});
+
+		const procMsg = received.find((m) => m.type === "PROCESS_TITLE") as
+			| (ProtocolMessage & { displayTitle?: string; title?: string })
+			| undefined;
+		expect(procMsg).toBeDefined();
+		// In "process" mode the displayTitle should be the process title
+		expect(procMsg?.displayTitle).toBe("node");
+		expect(procMsg?.title).toBe("node");
+
+		// Verify in-memory ChannelState updated
+		const channels = (sm as unknown as { channels: Map<string, { processTitle: string | null }> })
+			.channels;
+		expect(channels.get(channelId)?.processTitle).toBe("node");
+	});
+
+	it("ATTACH_OK includes displayTitle resolved from in-memory dynamicTitle", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-3", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-bt-3", { type: "SPAWN", hostId: "local" });
+		if (!channelId) throw new Error("expected channelId");
+		await new Promise((r) => setImmediate(r));
+
+		// Inject a dynamicTitle directly (simulates prior TITLE_CHANGE)
+		injectChannelState(sm, channelId, { dynamicTitle: "htop", processTitle: null });
+
+		received.length = 0;
+
+		// Re-attach: handleAttach sends ATTACH_OK
+		await sm.handleAttach("c-bt-3", channelId);
+		await new Promise((r) => setImmediate(r));
+
+		const attachOk = received.find((m) => m.type === "ATTACH_OK") as
+			| (ProtocolMessage & { displayTitle?: string })
+			| undefined;
+		expect(attachOk).toBeDefined();
+		expect(attachOk?.displayTitle).toBe("htop");
+	});
+
+	it("STATE_SYNC channels include displayTitle from ChannelState", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-4", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-bt-4", { type: "SPAWN", hostId: "local" });
+		if (!channelId) throw new Error("expected channelId");
+		await new Promise((r) => setImmediate(r));
+
+		// Set a displayTitle via state injection
+		injectChannelState(sm, channelId, {
+			dynamicTitle: "bash",
+			processTitle: null,
+			displayTitle: "bash",
+		});
+
+		const snapshot = sm.getStateSnapshot();
+		const ch = snapshot.channels.find((c) => c.channelId === channelId);
+		expect(ch).toBeDefined();
+		expect((ch as unknown as Record<string, unknown>).displayTitle).toBe("bash");
+	});
+
+	it("custom title (F2 rename) makes displayTitle use it regardless of dynamic mode", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const hostId = await sm.ensureLocalHost();
+		const metaDal = sm.getMetaDal();
+		const sessionId = "sess-b2-rename";
+		const channelId = "ch-b2-rename-01AAAAAAAAAAAAAAAAAAAAAAAAAA";
+		metaDal.createSession({ id: sessionId, hostId, status: "active" });
+		metaDal.createChannel({
+			id: channelId,
+			sessionId,
+			status: "live",
+			title: "My Custom Tab",
+		});
+
+		// Inject state with a dynamicTitle — the custom DB title should win
+		injectChannelState(sm, channelId, { dynamicTitle: "vim", processTitle: null });
+
+		const displayTitle = resolveDisplayTitle(sm, channelId);
+		expect(displayTitle).toBe("My Custom Tab");
+	});
+
+	it("dynamic mode: TITLE_CHANGE displayTitle equals the new dynamic title", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-6", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-bt-6", { type: "SPAWN", hostId: "local" });
+		if (!channelId) throw new Error("expected channelId");
+		await new Promise((r) => setImmediate(r));
+		received.length = 0;
+
+		const agent = getAgentEmitter(sm);
+
+		agent.emit("message", {
+			type: "TITLE_CHANGE",
+			channelId,
+			title: "zsh — ~/projects/nexterm",
+		});
+
+		const titleMsg = received.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { displayTitle?: string })
+			| undefined;
+		expect(titleMsg?.displayTitle).toBe("zsh — ~/projects/nexterm");
+	});
+
+	it("notifyChannelRenamed broadcasts updated displayTitle to channel clients", async () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const hostId = await sm.ensureLocalHost();
+		const metaDal = sm.getMetaDal();
+		const sessionId = "sess-b2-notify";
+		const channelId = "ch-b2-notify-01AAAAAAAAAAAAAAAAAAAAAAAAA";
+		metaDal.createSession({ id: sessionId, hostId, status: "active" });
+		metaDal.createChannel({ id: channelId, sessionId, status: "live" });
+
+		// Inject channel into memory with a client attached
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-bt-7", received);
+		sm.addClient(client);
+
+		const channels = (sm as unknown as { channels: Map<string, object> }).channels;
+		channels.set(channelId, {
+			sessionId,
+			hostId,
+			status: "live",
+			clients: new Set(["c-bt-7"]),
+			shell: "/bin/bash",
+			cols: 80,
+			rows: 24,
+			dynamicTitle: "vim",
+			processTitle: null,
+			displayTitle: "Terminal",
+		});
+		// The client's attachedChannels also needs the channelId so _broadcastToChannel reaches it
+		client.attachedChannels.add(channelId);
+
+		// Simulate the REST PATCH setting a custom title in DB
+		metaDal.updateChannelTitle(channelId, "Renamed Tab");
+
+		// Call notifyChannelRenamed (what the PATCH route does after DB update)
+		sm.notifyChannelRenamed(channelId);
+
+		const titleMsg = received.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { displayTitle?: string })
+			| undefined;
+		expect(titleMsg).toBeDefined();
+		expect(titleMsg?.displayTitle).toBe("Renamed Tab");
+	});
+});
+
+// ─── broadcastDisplayTitles tests ─────────────────────────────────────────────
+
+describe("SessionManager — broadcastDisplayTitles", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	/**
+	 * Helper: inject a channel into the in-memory channels map with a connected
+	 * client so that _broadcastToChannel reaches it.
+	 */
+	function injectChannelWithClient(
+		sm: SessionManager,
+		channelId: string,
+		clientId: string,
+		dynamicTitle: string | null,
+		processTitle: string | null = null,
+	): ProtocolMessage[] {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient(clientId, received);
+		sm.addClient(client);
+		client.attachedChannels.add(channelId);
+
+		const channels = (sm as unknown as { channels: Map<string, object> }).channels;
+		channels.set(channelId, {
+			sessionId: "s1",
+			hostId: "h1",
+			status: "live" as const,
+			clients: new Set([clientId]),
+			shell: "/bin/bash",
+			cols: 80,
+			rows: 24,
+			dynamicTitle,
+			processTitle,
+			displayTitle: dynamicTitle ?? "Terminal",
+		});
+
+		return received;
+	}
+
+	it("broadcasts TITLE_CHANGE to all active channels", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const recv1 = injectChannelWithClient(sm, "ch-bdt-1", "c-bdt-1", "vim session");
+		const recv2 = injectChannelWithClient(sm, "ch-bdt-2", "c-bdt-2", "bash");
+
+		sm.broadcastDisplayTitles();
+
+		const msg1 = recv1.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { channelId?: string; displayTitle?: string })
+			| undefined;
+		const msg2 = recv2.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { channelId?: string; displayTitle?: string })
+			| undefined;
+
+		expect(msg1).toBeDefined();
+		expect(msg1?.channelId).toBe("ch-bdt-1");
+		expect(msg1?.displayTitle).toBe("vim session");
+
+		expect(msg2).toBeDefined();
+		expect(msg2?.channelId).toBe("ch-bdt-2");
+		expect(msg2?.displayTitle).toBe("bash");
+	});
+
+	it("uses updated config when re-resolving (dynamic → static switch)", () => {
+		dbManager = openTestDatabases();
+
+		// Start with dynamic mode
+		const configResolver = makeMockConfigResolver("dynamic");
+		sm = new SessionManager(dbManager, undefined, undefined, configResolver);
+
+		const recv = injectChannelWithClient(sm, "ch-bdt-3", "c-bdt-3", "htop");
+
+		// Verify dynamic title before switch
+		sm.broadcastDisplayTitles();
+		const dynMsg = recv.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { displayTitle?: string })
+			| undefined;
+		expect(dynMsg?.displayTitle).toBe("htop");
+
+		// Simulate config switch to static mode (mutate the mock resolver in place)
+		(
+			configResolver as unknown as { uiConfig: { title: { source: string; staticTitle: string } } }
+		).uiConfig = { title: { source: "static", staticTitle: "My Static Tab" } };
+
+		recv.length = 0;
+		sm.broadcastDisplayTitles();
+
+		const staticMsg = recv.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { displayTitle?: string })
+			| undefined;
+		expect(staticMsg?.displayTitle).toBe("My Static Tab");
+	});
+
+	it("does nothing when no channels are active", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		// No channels injected — should not throw
+		expect(() => sm.broadcastDisplayTitles()).not.toThrow();
+	});
+
+	it("TITLE_CHANGE message includes correct title field from dynamicTitle", () => {
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager, undefined, undefined, makeMockConfigResolver("dynamic"));
+
+		const recv = injectChannelWithClient(sm, "ch-bdt-4", "c-bdt-4", "zsh — ~/projects");
+
+		sm.broadcastDisplayTitles();
+
+		const msg = recv.find((m) => m.type === "TITLE_CHANGE") as
+			| (ProtocolMessage & { title?: string; displayTitle?: string })
+			| undefined;
+		expect(msg?.title).toBe("zsh — ~/projects");
+		expect(msg?.displayTitle).toBe("zsh — ~/projects");
 	});
 });

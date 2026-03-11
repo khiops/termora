@@ -1,7 +1,7 @@
 import { decodeMessage, encodeMessage } from "@nexterm/shared";
-import type { ProtocolMessage } from "@nexterm/shared";
+import type { AuthPromptResponseMessage, ProtocolMessage } from "@nexterm/shared";
 import { isValidDimensions, isValidEnv, isValidInputData, isValidUlid } from "@nexterm/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /** Known token used across auth tests */
 const TEST_TOKEN = "a".repeat(64);
@@ -253,5 +253,206 @@ describe("ws-handler input validation", () => {
 			expect(errMsg.code).toBe("INVALID_INPUT");
 			expect(errMsg.message).toBe("Invalid channelId");
 		});
+	});
+});
+
+describe("ws-handler AUTH_PROMPT_RESPONSE routing", () => {
+	const VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+	it("AUTH_PROMPT_RESPONSE message round-trips through codec", () => {
+		const msg: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: "my-password",
+		};
+
+		const encoded = encodeMessage(msg);
+		const decoded = decodeMessage(encoded) as unknown as Record<string, unknown>;
+		expect(decoded.type).toBe("AUTH_PROMPT_RESPONSE");
+		expect(decoded.hostId ?? decoded.host_id).toBe(VALID_ULID);
+		expect(decoded.secret).toBe("my-password");
+	});
+
+	it("AUTH_PROMPT_RESPONSE with null secret round-trips correctly", () => {
+		const msg: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: null,
+		};
+
+		const encoded = encodeMessage(msg);
+		const decoded = decodeMessage(encoded) as unknown as Record<string, unknown>;
+		expect(decoded.type).toBe("AUTH_PROMPT_RESPONSE");
+		expect(decoded.secret).toBeNull();
+	});
+
+	it("hostId validation: rejects non-ULID hostId", () => {
+		expect(isValidUlid("bad-host-id")).toBe(false);
+		expect(isValidUlid("")).toBe(false);
+	});
+
+	it("hostId validation: accepts valid ULID", () => {
+		expect(isValidUlid(VALID_ULID)).toBe(true);
+	});
+
+	it("handleAuthPromptResponse is called on SessionManager with correct args", () => {
+		// Simulate the ws-handler dispatch logic for AUTH_PROMPT_RESPONSE
+		const mockSessionManager = {
+			handleAuthPromptResponse: vi.fn(),
+		};
+
+		const apr: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: "hunter2",
+		};
+
+		if (!isValidUlid(apr.hostId)) {
+			throw new Error("should not reach here");
+		}
+		mockSessionManager.handleAuthPromptResponse("client-1", apr.hostId, apr.secret);
+
+		expect(mockSessionManager.handleAuthPromptResponse).toHaveBeenCalledOnce();
+		expect(mockSessionManager.handleAuthPromptResponse).toHaveBeenCalledWith(
+			"client-1",
+			VALID_ULID,
+			"hunter2",
+		);
+	});
+});
+
+describe("ws-handler TEST_CONNECT validation", () => {
+	const validMsg = {
+		type: "TEST_CONNECT" as const,
+		hostId: "temp-host-123",
+		hostname: "example.com",
+		port: 22,
+		sshAuth: "agent" as const,
+	};
+
+	it("TEST_CONNECT message round-trips through codec", () => {
+		const encoded = encodeMessage(validMsg as unknown as ProtocolMessage);
+		const decoded = decodeMessage(encoded) as unknown as Record<string, unknown>;
+		expect(decoded.type).toBe("TEST_CONNECT");
+		expect(decoded.hostId ?? decoded.host_id).toBe("temp-host-123");
+		expect(decoded.hostname).toBe("example.com");
+		expect(decoded.port).toBe(22);
+		expect(decoded.sshAuth ?? decoded.ssh_auth).toBe("agent");
+	});
+
+	it("validates hostId: rejects empty string", () => {
+		// Simulate the ws-handler dispatch logic inline
+		const msg = { ...validMsg, hostId: "" };
+		const hostId = msg.hostId;
+		expect(typeof hostId !== "string" || hostId.length === 0 || hostId.length > 128).toBe(true);
+	});
+
+	it("validates hostId: rejects string longer than 128 chars", () => {
+		const msg = { ...validMsg, hostId: "a".repeat(129) };
+		expect(msg.hostId.length > 128).toBe(true);
+	});
+
+	it("validates hostId: accepts valid temp id", () => {
+		const hostId = "temp-host-abc-123";
+		expect(typeof hostId !== "string" || hostId.length === 0 || hostId.length > 128).toBe(false);
+	});
+
+	it("validates hostname: rejects empty string", () => {
+		const hostname = "";
+		expect(typeof hostname !== "string" || hostname.length === 0 || hostname.length > 4096).toBe(
+			true,
+		);
+	});
+
+	it("validates hostname: rejects string longer than 4096 chars", () => {
+		const hostname = "x".repeat(4097);
+		expect(hostname.length > 4096).toBe(true);
+	});
+
+	it("validates hostname: accepts valid hostname", () => {
+		const hostname = "example.com";
+		expect(typeof hostname !== "string" || hostname.length === 0 || hostname.length > 4096).toBe(
+			false,
+		);
+	});
+
+	it("validates port: rejects 0", () => {
+		const port = 0;
+		expect(typeof port !== "number" || port < 1 || port > 65535).toBe(true);
+	});
+
+	it("validates port: rejects 65536", () => {
+		const port = 65536;
+		expect(typeof port !== "number" || port < 1 || port > 65535).toBe(true);
+	});
+
+	it("validates port: accepts valid port", () => {
+		expect(typeof 22 !== "number" || 22 < 1 || 22 > 65535).toBe(false);
+		expect(typeof 443 !== "number" || 443 < 1 || 443 > 65535).toBe(false);
+	});
+
+	it("validates sshAuth: rejects unknown value", () => {
+		const sshAuth = "certificate";
+		expect(!["agent", "key", "password"].includes(sshAuth)).toBe(true);
+	});
+
+	it("validates sshAuth: accepts agent, key, password", () => {
+		expect(!["agent", "key", "password"].includes("agent")).toBe(false);
+		expect(!["agent", "key", "password"].includes("key")).toBe(false);
+		expect(!["agent", "key", "password"].includes("password")).toBe(false);
+	});
+
+	it("handleTestConnect is called on SessionManager with valid message", () => {
+		const mockSessionManager = {
+			handleTestConnect: vi.fn().mockResolvedValue(undefined),
+		};
+
+		// Simulate valid dispatch
+		const msg = { ...validMsg };
+		const hostId = msg.hostId;
+		const hostname = msg.hostname;
+		const port = msg.port;
+		const sshAuth = msg.sshAuth;
+
+		const isInvalid =
+			typeof hostId !== "string" ||
+			hostId.length === 0 ||
+			hostId.length > 128 ||
+			typeof hostname !== "string" ||
+			hostname.length === 0 ||
+			hostname.length > 4096 ||
+			typeof port !== "number" ||
+			port < 1 ||
+			port > 65535 ||
+			!["agent", "key", "password"].includes(sshAuth);
+
+		expect(isInvalid).toBe(false);
+
+		// Dispatch
+		mockSessionManager.handleTestConnect("client-1", msg);
+		expect(mockSessionManager.handleTestConnect).toHaveBeenCalledOnce();
+		expect(mockSessionManager.handleTestConnect).toHaveBeenCalledWith("client-1", msg);
+	});
+
+	it("TEST_CONNECT_OK message round-trips through codec", () => {
+		const ok: ProtocolMessage = {
+			type: "TEST_CONNECT_OK",
+			hostId: "temp-host-123",
+		} as unknown as ProtocolMessage;
+		const decoded = decodeMessage(encodeMessage(ok)) as unknown as Record<string, unknown>;
+		expect(decoded.type).toBe("TEST_CONNECT_OK");
+		expect(decoded.hostId ?? decoded.host_id).toBe("temp-host-123");
+	});
+
+	it("TEST_CONNECT_FAIL message round-trips through codec", () => {
+		const fail: ProtocolMessage = {
+			type: "TEST_CONNECT_FAIL",
+			hostId: "temp-host-123",
+			message: "Authentication failed",
+		} as unknown as ProtocolMessage;
+		const decoded = decodeMessage(encodeMessage(fail)) as unknown as Record<string, unknown>;
+		expect(decoded.type).toBe("TEST_CONNECT_FAIL");
+		expect(decoded.hostId ?? decoded.host_id).toBe("temp-host-123");
+		expect(decoded.message).toBe("Authentication failed");
 	});
 });

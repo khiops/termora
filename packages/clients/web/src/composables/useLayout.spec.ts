@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, nextTick } from "vue";
-import { countPanes, purgeOrphanedTabs, useLayout } from "./useLayout.js";
+import { countPanes, purgeOrphanedTabs, resolveTabLabel, useLayout } from "./useLayout.js";
 import type { PaneNode } from "./useLayout.js";
 
 let layout: ReturnType<typeof useLayout>;
@@ -682,5 +682,33 @@ describe("purgeOrphanedTabs", () => {
 		// Only ch-dead at index 1 should be closed
 		expect(closeTab).toHaveBeenCalledTimes(1);
 		expect(closeTab).toHaveBeenCalledWith(1);
+	});
+});
+
+describe("resolveTabLabel", () => {
+	const tabs = [{ channelId: "ch-1", label: "Tab Label" }];
+
+	it("returns displayTitle when set", () => {
+		const channels = [{ id: "ch-1", displayTitle: "vim ~/project" }];
+		expect(resolveTabLabel("ch-1", channels, tabs)).toBe("vim ~/project");
+	});
+
+	it("returns DEFAULT_CHANNEL_NAME when displayTitle is not set", () => {
+		const channels = [{ id: "ch-1" }];
+		expect(resolveTabLabel("ch-1", channels, tabs)).toBe("Terminal");
+	});
+
+	it("returns DEFAULT_CHANNEL_NAME when channel not found", () => {
+		expect(resolveTabLabel("missing", [], [])).toBe("Terminal");
+	});
+
+	it("returns DEFAULT_CHANNEL_NAME when channel list is empty", () => {
+		expect(resolveTabLabel("ch-1", [], tabs)).toBe("Terminal");
+	});
+
+	it("ignores other channel fields, only uses displayTitle", () => {
+		// Hub pre-computes displayTitle — client should not re-derive from raw fields
+		const channels = [{ id: "ch-1", displayTitle: "hub-computed" }];
+		expect(resolveTabLabel("ch-1", channels, tabs)).toBe("hub-computed");
 	});
 });

@@ -21,9 +21,10 @@ Results are recorded ONLY in the Run Log section. Scenarios below are pure accep
 | 59-70 | Host Management (UX-03) | 11/12 | Run #2 |
 | 71-80 | Notifications (UX-05) | 8/10 | Run #4 |
 | 81-88 | Host Customization (UX-07) | 6/8 | Run #3 |
-| 89-93 | Regressions | 4/5 | Run #3 |
+| 89-93 | Regressions (batch 1) | 4/5 | Run #3 |
+| 94-100 | Regressions (batch 2) | 7/7 | Run #5 |
 
-**Total: 46/93 scenarios covered**
+**Total: 53/100 scenarios covered**
 
 ---
 
@@ -764,6 +765,52 @@ Precondition: 1 host "local", 2 channels (A, B), both alive.
 - Switch to B → unread bar appears with correct line count
 - "Jump ↓" clears bar and scrolls to bottom
 
+### 94. Duplicate context menus on channel groups (regression: b037c40)
+
+- Right-click channel group header → ONE context menu appears (not two overlapping)
+- Rename via menu → single modal, no stale menu behind
+- "Clean Up Dead Terminals" visible only when group has dead channels
+
+### 95. Dead channel purge FK constraint (regression: b037c40)
+
+- Dead channel → right-click → "Delete" → channel removed (no HTTP 500)
+- "Clean Up Dead Terminals" in group menu → all dead channels in group purged
+- Sidebar "Clear" button → bulk purge dead channels
+- Remaining live channels unaffected
+
+### 96. Dead channel restart visual state (regression: b037c40)
+
+- Dead channel (black/grey) → right-click → "Restart" → channel turns alive (green dot)
+- Terminal becomes usable immediately (no page refresh needed)
+- Tab title updates from "Closed" to active state
+
+### 97. Pairing code preserves current session (regression: b037c40)
+
+- Command palette → "Generate Pairing Code" → modal appears with 6-digit code
+- Current session NOT interrupted (auth token preserved)
+- Code expires after 60s (countdown bar visible)
+- Copy button works, code can be used on another browser
+
+### 98. Post-pairing config initialization (regression: b037c40)
+
+- Pair new browser with 6-digit code → theme, fonts, hosts loaded before layout shows
+- PairingScreen stays visible during config loading (no flash of default theme)
+- After init complete → layout appears with correct theme
+
+### 99. Auto-switch theme at boot (regression: b037c40)
+
+- Auto-switch enabled with dark=one-half-dark, light=one-half-light
+- Browser B (OS dark mode) → page load → dark theme applied immediately
+- Browser A (OS light mode) → page load → light theme applied
+- Does NOT fall back to hardcoded "catppuccin-mocha" default
+- Settings panel shows correct dark/light theme selections
+
+### 100. App refresh theme flash (regression: b037c40)
+
+- Ctrl+R refresh → spinner shown while config loads (no theme flash)
+- Spinner uses `--nt-bg` background (matches theme once loaded)
+- Layout appears only after theme + fonts are ready
+
 ---
 
 ## Run Log
@@ -853,6 +900,33 @@ Focused run: Sc.75-76 (desktop notifications), Sc.79 (scroll modes).
 
 **Summary: 3/3 tested, 3 pass**
 
+### Run #5 — 2026-03-10 — `fix/ux-bugfixes-batch-2` (b037c40)
+
+Focused run: channel lifecycle, pairing, theming regressions.
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 94 | Duplicate context menus | ✅ | Removed GroupContextMenu for channel groups, consolidated into ChannelGroupHeader |
+| 95 | Dead channel purge FK | ✅ | Fixed: delete cache_index before channels row |
+| 96 | Dead channel restart visual | ✅ | Optimistic `status = "born"` after successful restart API call |
+| 97 | Pairing code preserves session | ✅ | Modal with PairingCodeGenerator replaces token-clearing behavior |
+| 98 | Post-pairing config init | ✅ | postAuthLoading flag keeps PairingScreen visible during config load |
+| 99 | Auto-switch theme at boot | ✅ | useAutoSwitch in App.vue + fix assignment order (names before enabled) |
+| 100 | App refresh theme flash | ✅ | appReady gate with spinner prevents layout render before theme loaded |
+
+**Summary: 7/7 tested, 7 pass**
+
+### Run #6 — 2026-03-10 — `fix/ux-bugfixes-batch-2` (uncommitted)
+
+Manual verification of SSH auth + sidebar UX fixes.
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 1 | Channel creation (sidebar +) | ✅ | Sidebar "+" now uses openPendingTab (same as tab bar "+"), auto-focuses new tab |
+| 69 | Test connection | ✅ | Form values read correctly in edit mode, tilde expansion, encrypted ed25519 key detected via ssh2.utils.parseKey, passphrase dialog appears (z-index 10100 > modal 10000), no client/server timeouts during passphrase entry |
+
+**Summary: 2/2 tested, 2 pass (manual verification)**
+
 ---
 
 ## Regression Markers
@@ -868,3 +942,16 @@ When a test fails, note the commit hash and which test. Fix before merging.
 | 2026-03-07 | 92 | 73336ae | Group rename/delete used system prompt()/confirm() |
 | 2026-03-07 | 74, 93 | 3a95d32 | Unread bar: countNewlines returned 0 for Uint8Array + hidden pane scroll cleared unreadLines |
 | 2026-03-07 | 68 | 3a95d32 | Host DnD: missing .prevent on @drop + race condition in reorder/fetchHosts |
+| 2026-03-10 | 94 | 47b03c9 | Duplicate context menus: GroupContextMenu + ChannelGroupHeader inline menu both fired |
+| 2026-03-10 | 95 | 47b03c9 | Dead channel DELETE failed: FK constraint on cache_index.channel_id without CASCADE |
+| 2026-03-10 | 96 | 47b03c9 | Dead channel restart: local status not updated (stayed black) |
+| 2026-03-10 | 97 | 47b03c9 | Pairing code action cleared auth token instead of generating code |
+| 2026-03-10 | 98 | 47b03c9 | Post-pairing: theme/fonts/config not loaded (flash of defaults) |
+| 2026-03-10 | 99 | 47b03c9 | Auto-switch: flush:sync watcher applied catppuccin-mocha default before server config loaded |
+| 2026-03-10 | 100 | 47b03c9 | Ctrl+R refresh: layout rendered before theme loaded (theme flash) |
+| 2026-03-10 | 1 | b037c40 | Sidebar "+" spawned directly (no tab), unlike tab bar "+" which uses openPendingTab |
+| 2026-03-10 | 69 | b037c40 | Test connection read editHost values instead of form.value (ignored user input in edit mode) |
+| 2026-03-10 | 69 | b037c40 | Tilde not expanded in SSH key paths (readFileSync("~/.ssh/...") fails) |
+| 2026-03-10 | 69 | b037c40 | Encrypted OpenSSH ed25519 keys not detected (PEM header check missed modern format) |
+| 2026-03-10 | 69 | b037c40 | AuthPromptDialog z-index 9500 hidden behind HostModal 10000 |
+| 2026-03-10 | 69 | b037c40 | Client 15s timeout + server 60s timeout fired before user could enter passphrase |

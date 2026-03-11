@@ -4,11 +4,13 @@ import type {
 	AgentBellMessage,
 	AgentChannelStateMessage,
 	AgentNotificationMessage,
+	AgentProcessTitleMessage,
 	AgentSnapshotResMessage,
 	AgentSpawnErrMessage,
 	AgentSpawnMessage,
 	AgentSpawnOkMessage,
 	AgentTitleChangeMessage,
+	AuthPromptMessage,
 	ChannelExitMessage,
 	ChannelStateMessage,
 	DestroyMessage,
@@ -19,6 +21,7 @@ import type {
 	ResizeMessage,
 	SessionStateMessage,
 	StateSyncMessage,
+	TestConnectMessage,
 	UiAttachOkMessage,
 	UiSpawnMessage,
 	UiSpawnOkMessage,
@@ -29,8 +32,10 @@ import {
 	DEFAULT_CHANNEL_NAME,
 	generateId,
 	getSocketPath,
+	resolveChannelDisplayName,
 } from "@nexterm/shared";
-import type { GcConfig } from "../config.js";
+import { Client as SshClient } from "ssh2";
+import type { ConfigResolver, GcConfig } from "../config.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
@@ -41,7 +46,7 @@ import { NextermAgent } from "./nexterm-agent.js";
 import { OutputChunker } from "./output-chunker.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
-import { SshAgent } from "./ssh-agent.js";
+import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
 const ATTACH_TIMEOUT_MS = 5_000;
@@ -69,6 +74,9 @@ interface ChannelState {
 	cols: number;
 	rows: number;
 	directProcess?: boolean;
+	dynamicTitle: string | null;
+	processTitle: string | null;
+	displayTitle: string;
 }
 
 interface SessionState {
@@ -94,9 +102,20 @@ export class SessionManager {
 	private restartTracking = new Map<string, { count: number; windowStart: number }>();
 	/** requestId (or keyed token like "attach:<channelId>") → callback for pending agent responses */
 	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
+	/** hostId → pending auth prompt resolve + timeout */
+	private pendingAuthPrompts = new Map<
+		string,
+		{
+			resolve: (secret: string | null) => void;
+			timer: ReturnType<typeof setTimeout> | null;
+			clientId: string;
+		}
+	>();
 	private metaDal: MetaDAL;
 	/** Agent daemon configuration (socket path, buffer caps) */
 	private agentConfig: AgentConfig;
+	/** Config resolver — used for title resolution */
+	private _configResolver: ConfigResolver | null = null;
 
 	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
 	private scheduler: SnapshotScheduler;
@@ -106,6 +125,8 @@ export class SessionManager {
 	private gc: SpoolGarbageCollector;
 	/** channelId → pending title debounce timer for DB writes */
 	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** channelId → pending process title debounce timer for DB writes */
+	private processTitleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	private bellTimestamps = new Map<string, number[]>();
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
@@ -125,10 +146,12 @@ export class SessionManager {
 		private dbManager: DatabaseManager,
 		gcConfig?: GcConfig,
 		agentConfig?: AgentConfig,
+		configResolver?: ConfigResolver,
 	) {
 		this.metaDal = new MetaDAL(dbManager.meta);
 		this.spoolDal = new SpoolDAL(dbManager.spool);
 		this.agentConfig = agentConfig ?? { ...DEFAULT_AGENT_CONFIG };
+		this._configResolver = configResolver ?? null;
 		this.scheduler = new SnapshotScheduler((channelId) => {
 			// Find the agent for this channel via the channel's hostId
 			const ch = this.channels.get(channelId);
@@ -205,6 +228,9 @@ export class SessionManager {
 					rows: ch.rows,
 					...(ch.cwd !== null && { cwd: ch.cwd }),
 					...(ch.directProcess && { directProcess: true }),
+					dynamicTitle: null,
+					processTitle: null,
+					displayTitle: DEFAULT_CHANNEL_NAME,
 				});
 			}
 
@@ -264,10 +290,51 @@ export class SessionManager {
 					channelId,
 					sessionId: ch.sessionId,
 					status: ch.status,
+					displayTitle: ch.displayTitle,
 				});
 			}
 		}
 		return { type: "STATE_SYNC", sessions, channels };
+	}
+
+	/**
+	 * Called by the REST PATCH /api/channels/:id route when a channel is renamed
+	 * (custom title set via F2). Recomputes displayTitle and broadcasts a
+	 * TITLE_CHANGE-like update to all connected UI clients.
+	 */
+	notifyChannelRenamed(channelId: string): void {
+		const channel = this.channels.get(channelId);
+		if (!channel) return; // Channel not active in memory — nothing to broadcast
+
+		const displayTitle = this._resolveDisplayTitle(channelId);
+		const msg = {
+			type: "TITLE_CHANGE" as const,
+			channelId,
+			title: channel.dynamicTitle ?? "",
+			displayTitle,
+		};
+		this._broadcastToChannel(channelId, msg);
+	}
+
+	/**
+	 * Re-resolves displayTitle for every active channel and broadcasts a
+	 * TITLE_CHANGE message to each channel's UI clients.
+	 *
+	 * Called when the global title config (source, staticTitle, etc.) changes
+	 * via PUT /api/config/ui so that all open tabs immediately reflect the
+	 * new title format without requiring a reconnect.
+	 */
+	broadcastDisplayTitles(): void {
+		for (const [channelId, channel] of this.channels) {
+			const displayTitle = this._resolveDisplayTitle(channelId);
+			const msg = {
+				type: "TITLE_CHANGE" as const,
+				channelId,
+				title: channel.dynamicTitle ?? "",
+				displayTitle,
+			};
+			this._broadcastToChannel(channelId, msg);
+		}
 	}
 
 	removeClient(clientId: string): void {
@@ -276,6 +343,14 @@ export class SessionManager {
 		// Copy set to avoid mutating while iterating
 		for (const channelId of [...client.attachedChannels]) {
 			this._detachClient(clientId, channelId);
+		}
+		// Cancel any pending auth prompts initiated by this client
+		for (const [hostId, pending] of this.pendingAuthPrompts) {
+			if (pending.clientId === clientId) {
+				if (pending.timer !== null) clearTimeout(pending.timer);
+				this.pendingAuthPrompts.delete(hostId);
+				pending.resolve(null);
+			}
 		}
 		this.clients.delete(clientId);
 	}
@@ -309,7 +384,8 @@ export class SessionManager {
 		let agent = this.agents.get(hostId);
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
-				const sshAgent = new SshAgent(host);
+				const promptAuth = this._buildPromptAuth(client);
+				const sshAgent = new SshAgent(host, promptAuth);
 				// Connect and wait for HELLO — session transitions to 'active' on success
 				try {
 					await sshAgent.start();
@@ -377,8 +453,10 @@ export class SessionManager {
 
 					const { channelId } = spawnOk;
 
-					// Persist channel as 'born' then immediately 'live' (first client attaches)
-					const title = DEFAULT_CHANNEL_NAME;
+					// Persist channel as 'born' then immediately 'live' (first client attaches).
+					// title is null (no custom title) — the UI falls back to dynamicTitle
+					// then DEFAULT_CHANNEL_NAME. Setting title = "Terminal" here would
+					// prevent dynamic titles (OSC 0/2) from ever showing.
 					this.metaDal.createChannel({
 						id: channelId,
 						sessionId: session.id,
@@ -386,7 +464,6 @@ export class SessionManager {
 						shell,
 						...(args.length > 0 && { args }),
 						cwd,
-						title,
 						cols,
 						rows,
 						...(directProcess && { directProcess }),
@@ -403,6 +480,9 @@ export class SessionManager {
 						cols,
 						rows,
 						...(directProcess && { directProcess }),
+						dynamicTitle: null,
+						processTitle: null,
+						displayTitle: DEFAULT_CHANNEL_NAME,
 					});
 					this.metaDal.updateChannelStatus(channelId, "live");
 					this.scheduler.trackChannel(channelId);
@@ -485,9 +565,21 @@ export class SessionManager {
 		// Case 1: agent connected — request fresh snapshot via ATTACH
 		// Case 2: agent disconnected — serve cached snapshot from spool.db
 
-		// Look up dynamic_title from DB once — used in all ATTACH_OK responses
+		// Look up dynamic_title and process_title from DB once — used in all ATTACH_OK responses
 		const dbChannelForTitle = this.metaDal.getChannel(channelId);
 		const dynamicTitle = dbChannelForTitle?.dynamicTitle;
+		const processTitle = dbChannelForTitle?.processTitle;
+
+		// Backfill in-memory state from DB if not yet populated (e.g. on first attach after hub restart)
+		if (dynamicTitle !== undefined && channel.dynamicTitle === null) {
+			channel.dynamicTitle = dynamicTitle;
+		}
+		if (processTitle !== undefined && channel.processTitle === null) {
+			channel.processTitle = processTitle;
+		}
+
+		// Resolve displayTitle using current in-memory state (now backfilled from DB)
+		const displayTitle = this._resolveDisplayTitle(channelId);
 
 		if (!agent?.connected) {
 			// Agent disconnected — serve cached snapshot from spool.db
@@ -500,6 +592,8 @@ export class SessionManager {
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
+				...(processTitle !== undefined && { processTitle }),
+				displayTitle,
 			};
 			client.send(attachOk);
 			return true;
@@ -549,6 +643,8 @@ export class SessionManager {
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: false,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
+				...(processTitle !== undefined && { processTitle }),
+				displayTitle,
 			};
 			client.send(attachOk);
 		} catch {
@@ -562,6 +658,8 @@ export class SessionManager {
 				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
+				...(processTitle !== undefined && { processTitle }),
+				displayTitle,
 			};
 			client.send(attachOk);
 		}
@@ -592,6 +690,18 @@ export class SessionManager {
 		channel.cols = cols;
 		channel.rows = rows;
 		this.metaDal.updateChannelDimensions(channelId, cols, rows);
+	}
+
+	/**
+	 * Resolve a pending auth prompt for a host.
+	 * Called by WsHandler when AUTH_PROMPT_RESPONSE arrives from the client.
+	 */
+	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
+		const pending = this.pendingAuthPrompts.get(hostId);
+		if (!pending) return;
+		if (pending.timer !== null) clearTimeout(pending.timer);
+		this.pendingAuthPrompts.delete(hostId);
+		pending.resolve(secret);
 	}
 
 	/**
@@ -723,6 +833,9 @@ export class SessionManager {
 			cols,
 			rows,
 			...(channel.directProcess && { directProcess: true }),
+			dynamicTitle: null,
+			processTitle: null,
+			displayTitle: DEFAULT_CHANNEL_NAME,
 		});
 		this.scheduler.trackChannel(channelId);
 		this.chunker.trackChannel(channelId);
@@ -748,6 +861,17 @@ export class SessionManager {
 			clearTimeout(timer);
 		}
 		this.titleDebounceTimers.clear();
+		for (const timer of this.processTitleDebounceTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.processTitleDebounceTimers.clear();
+		// Cancel all pending auth prompts on shutdown
+		for (const [hostId, pending] of this.pendingAuthPrompts) {
+			if (pending.timer !== null) clearTimeout(pending.timer);
+			this.pendingAuthPrompts.delete(hostId);
+			pending.resolve(null);
+		}
+		this.pendingAuthPrompts.clear();
 		this.scheduler.shutdown();
 		this.chunker.shutdown();
 		this.gc.stop();
@@ -901,9 +1025,13 @@ export class SessionManager {
 				this.scheduler.untrackChannel(exitMsg.channelId);
 				this.chunker.untrackChannel(exitMsg.channelId);
 				this._clearTitleDebounce(exitMsg.channelId);
+				this._clearProcessTitleDebounce(exitMsg.channelId);
 			} else if (msg.type === "TITLE_CHANGE") {
 				const titleMsg = msg as AgentTitleChangeMessage;
 				this._handleTitleChange(titleMsg);
+			} else if (msg.type === "PROCESS_TITLE") {
+				const processTitleMsg = msg as AgentProcessTitleMessage;
+				this._handleProcessTitle(processTitleMsg);
 			} else if (msg.type === "BELL") {
 				const bellMsg = msg as AgentBellMessage;
 				if (this._rateLimitCheck(this.bellTimestamps, bellMsg.channelId, 10)) {
@@ -1262,6 +1390,9 @@ export class SessionManager {
 			cols,
 			rows,
 			...(deadChannel.directProcess && { directProcess: true }),
+			dynamicTitle: null,
+			processTitle: null,
+			displayTitle: DEFAULT_CHANNEL_NAME,
 		});
 
 		this.scheduler.trackChannel(deadChannelId);
@@ -1317,6 +1448,33 @@ export class SessionManager {
 	 * Handle TITLE_CHANGE from agent: debounce DB writes (100ms, last-write-wins)
 	 * and forward to connected UI clients immediately.
 	 */
+
+	/**
+	 * Resolve the display title for a channel using the configured title source.
+	 * Updates state.displayTitle in place and returns the resolved string.
+	 * Returns DEFAULT_CHANNEL_NAME if the channel is not tracked.
+	 */
+	private _resolveDisplayTitle(channelId: string): string {
+		const state = this.channels.get(channelId);
+		if (!state) return DEFAULT_CHANNEL_NAME;
+
+		const titleConfig = this._configResolver?.uiConfig.title ?? {};
+		const source = titleConfig.source ?? "dynamic";
+		const staticTitle = titleConfig.staticTitle ?? "";
+
+		// Custom title (F2 rename) from DB — always wins
+		const dbChannel = this.metaDal.getChannel(channelId);
+		const customTitle = dbChannel?.title ?? null;
+
+		const resolved = resolveChannelDisplayName(
+			{ title: customTitle, dynamicTitle: state.dynamicTitle, processTitle: state.processTitle },
+			source,
+			staticTitle,
+		);
+		state.displayTitle = resolved;
+		return resolved;
+	}
+
 	private _handleTitleChange(msg: AgentTitleChangeMessage): void {
 		const channel = this.channels.get(msg.channelId);
 		if (!channel) {
@@ -1324,8 +1482,12 @@ export class SessionManager {
 			return;
 		}
 
-		// Forward to UI clients immediately (real-time)
-		this._broadcastToChannel(msg.channelId, msg);
+		// Update in-memory state before resolving displayTitle
+		channel.dynamicTitle = msg.title;
+
+		// Resolve displayTitle and broadcast enriched message to UI clients
+		const displayTitle = this._resolveDisplayTitle(msg.channelId);
+		this._broadcastToChannel(msg.channelId, { ...msg, displayTitle });
 
 		// Debounce DB writes
 		this._clearTitleDebounce(msg.channelId);
@@ -1344,6 +1506,45 @@ export class SessionManager {
 			clearTimeout(timer);
 			this.titleDebounceTimers.delete(channelId);
 		}
+	}
+
+	private _clearProcessTitleDebounce(channelId: string): void {
+		const timer = this.processTitleDebounceTimers.get(channelId);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			this.processTitleDebounceTimers.delete(channelId);
+		}
+	}
+
+	/**
+	 * Handle PROCESS_TITLE from agent: debounce DB writes (100ms, last-write-wins)
+	 * and forward to connected UI clients immediately.
+	 */
+	private _handleProcessTitle(msg: AgentProcessTitleMessage): void {
+		const channel = this.channels.get(msg.channelId);
+		if (!channel) {
+			console.warn(
+				`[session-manager] PROCESS_TITLE for unknown channel ${msg.channelId} — ignored`,
+			);
+			return;
+		}
+
+		// Update in-memory state before resolving displayTitle
+		channel.processTitle = msg.title;
+
+		// Resolve displayTitle and broadcast enriched message to UI clients
+		const displayTitle = this._resolveDisplayTitle(msg.channelId);
+		this._broadcastToChannel(msg.channelId, { ...msg, displayTitle });
+
+		// Debounce DB writes
+		this._clearProcessTitleDebounce(msg.channelId);
+		this.processTitleDebounceTimers.set(
+			msg.channelId,
+			setTimeout(() => {
+				this.processTitleDebounceTimers.delete(msg.channelId);
+				this.metaDal.updateProcessTitle(msg.channelId, msg.title);
+			}, TITLE_DEBOUNCE_MS),
+		);
 	}
 
 	private _broadcastToChannel(channelId: string, msg: ProtocolMessage): void {
@@ -1439,5 +1640,131 @@ export class SessionManager {
 		this.chunker.bumpSeq(channelId, snapshotSeq + 1);
 		this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
 		return chunkId;
+	}
+
+	/**
+	 * Build an AuthPromptFn that sends AUTH_PROMPT to the given client and
+	 * registers the response in pendingAuthPrompts.
+	 * No server-side timeout — the client dismisses the dialog when ready.
+	 * Extracted to avoid duplicating this pattern in handleSpawn and handleTestConnect.
+	 */
+	private _buildPromptAuth(client: WsClient): AuthPromptFn {
+		return async (hostId, promptType, message) => {
+			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
+			client.send(promptMsg);
+			// No server-side timeout — the user dismisses the dialog when ready
+			return new Promise<string | null>((resolve) => {
+				this.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
+			});
+		};
+	}
+
+	/**
+	 * Handle a TEST_CONNECT message: lightweight SSH test with AUTH_PROMPT support.
+	 * Does NOT spawn an agent — just tests ssh2 connectivity (reach "ready" event).
+	 */
+	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
+		const client = this.clients.get(clientId);
+		if (!client) return;
+
+		const promptAuth = this._buildPromptAuth(client);
+
+		try {
+			const result = await this._testSshConnectivity(msg, promptAuth);
+			if (result.ok) {
+				client.send({ type: "TEST_CONNECT_OK", hostId: msg.hostId });
+			} else {
+				client.send({
+					type: "TEST_CONNECT_FAIL",
+					hostId: msg.hostId,
+					message: result.message ?? "Connection failed",
+				});
+			}
+		} catch (err) {
+			client.send({
+				type: "TEST_CONNECT_FAIL",
+				hostId: msg.hostId,
+				message: err instanceof Error ? err.message : "Connection test failed",
+			});
+		}
+	}
+
+	private async _testSshConnectivity(
+		msg: TestConnectMessage,
+		promptAuth: AuthPromptFn,
+	): Promise<{ ok: boolean; message?: string }> {
+		const sshClient = new SshClient();
+		const SSH_TEST_TIMEOUT_MS = 10_000;
+
+		const username = msg.sshUser ?? process.env.USER ?? "root";
+
+		// Build connect config using shared utility (throws on config errors or cancellation)
+		let connectConfig: Parameters<InstanceType<typeof SshClient>["connect"]>[0];
+		try {
+			connectConfig = await buildSshConnectConfig(
+				{ method: msg.sshAuth ?? "key", keyPath: msg.sshKeyPath },
+				msg.hostname,
+				msg.port,
+				username,
+				promptAuth,
+				msg.hostId,
+			);
+		} catch (err) {
+			return {
+				ok: false,
+				message: err instanceof Error ? err.message : "Authentication error",
+			};
+		}
+		connectConfig.readyTimeout = SSH_TEST_TIMEOUT_MS;
+
+		// Connect and wait for ready/error
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				sshClient.destroy();
+				resolve({ ok: false, message: "Connection timed out" });
+			}, SSH_TEST_TIMEOUT_MS);
+
+			sshClient.on("ready", () => {
+				clearTimeout(timer);
+				sshClient.end();
+				resolve({ ok: true });
+			});
+
+			sshClient.on("error", (err: Error) => {
+				clearTimeout(timer);
+				const errMsg = err.message ?? "Unknown error";
+				const lower = errMsg.toLowerCase();
+				if (
+					errMsg.includes("ECONNREFUSED") ||
+					errMsg.includes("ETIMEDOUT") ||
+					errMsg.includes("EHOSTUNREACH") ||
+					errMsg.includes("ENOTFOUND")
+				) {
+					resolve({ ok: false, message: errMsg });
+				} else if (
+					lower.includes("authentication") ||
+					lower.includes("permission denied") ||
+					lower.includes("publickey") ||
+					lower.includes("keyboard-interactive") ||
+					lower.includes("all configured authentication methods failed")
+				) {
+					sshClient.end();
+					resolve({ ok: false, message: "Authentication failed" });
+				} else {
+					sshClient.end();
+					resolve({ ok: false, message: errMsg });
+				}
+			});
+
+			try {
+				sshClient.connect(connectConfig);
+			} catch (err) {
+				clearTimeout(timer);
+				resolve({
+					ok: false,
+					message: err instanceof Error ? err.message : "Connection failed",
+				});
+			}
+		});
 	}
 }

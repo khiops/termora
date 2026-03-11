@@ -25,6 +25,39 @@ export const PAIRING_CODE_EXPIRY_MS = 60_000;
 export const MAX_ENV_ENTRIES = 100;
 export const DEFAULT_CHANNEL_NAME = "Terminal";
 
+/**
+ * Resolve the display name for a channel using strict title source mode.
+ *
+ * Priority:
+ *   1. Custom title (F2 rename) — always honored
+ *   2. Source-specific title (dynamic/process/static) — only the configured source
+ *   3. DEFAULT_CHANNEL_NAME
+ *
+ * Pure function — no Vue/Pinia deps. Usable in stores, composables, and components.
+ */
+export function resolveChannelDisplayName(
+	channel:
+		| { title?: string | null; dynamicTitle?: string | null; processTitle?: string | null }
+		| null
+		| undefined,
+	titleSource: "dynamic" | "static" | "process" = "dynamic",
+	staticTitle = "",
+): string {
+	if (channel?.title) return channel.title;
+	switch (titleSource) {
+		case "dynamic":
+			if (channel?.dynamicTitle) return channel.dynamicTitle;
+			break;
+		case "process":
+			if (channel?.processTitle) return channel.processTitle;
+			break;
+		case "static":
+			if (staticTitle) return staticTitle;
+			break;
+	}
+	return DEFAULT_CHANNEL_NAME;
+}
+
 export const ErrorCode = {
 	AUTH_REQUIRED: "AUTH_REQUIRED",
 	AUTH_INVALID: "AUTH_INVALID",

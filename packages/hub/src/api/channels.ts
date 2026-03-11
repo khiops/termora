@@ -150,6 +150,8 @@ export function registerChannelRoutes(
 
 			if (title !== undefined) {
 				metaDal.updateChannelTitle(id, title?.trim() ?? null);
+				// Recompute displayTitle and broadcast to active UI clients
+				sessionManager.notifyChannelRenamed(id);
 			}
 			if (group_id !== undefined) {
 				metaDal.updateChannelGroupId(id, group_id);

@@ -47,6 +47,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 		ch.args = row.args as string[];
 	}
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title as string;
+	if (row.process_title != null) ch.processTitle = row.process_title as string;
 	return ch;
 }
 
@@ -280,6 +281,38 @@ export const useChannelsStore = defineStore("channels", () => {
 		if (existing.dynamicTitle === title) return;
 		const next = [...channels.value];
 		next[idx] = { ...existing, dynamicTitle: title };
+		channels.value = next;
+	}
+
+	/**
+	 * Update the hub-resolved display title for a channel.
+	 * Called on TITLE_CHANGE, PROCESS_TITLE, ATTACH_OK, and STATE_SYNC.
+	 * Silently ignored if the channel is not loaded yet.
+	 */
+	function setDisplayTitle(channelId: string, displayTitle: string): void {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		if (existing.displayTitle === displayTitle) return;
+		const next = [...channels.value];
+		next[idx] = { ...existing, displayTitle };
+		channels.value = next;
+	}
+
+	/**
+	 * Update the process title for a channel (from PROCESS_TITLE WS message or ATTACH_OK).
+	 * Silently ignored if the channel is not loaded yet.
+	 */
+	function updateProcessTitle(channelId: string, title: string): void {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		// Avoid unnecessary reactivity triggers if title hasn't changed
+		if (existing.processTitle === title) return;
+		const next = [...channels.value];
+		next[idx] = { ...existing, processTitle: title };
 		channels.value = next;
 	}
 
@@ -849,6 +882,8 @@ export const useChannelsStore = defineStore("channels", () => {
 		markUnread,
 		updateChannelStatus,
 		setDynamicTitle,
+		setDisplayTitle,
+		updateProcessTitle,
 		applyStateSync,
 		removeChannel,
 		addChannel,

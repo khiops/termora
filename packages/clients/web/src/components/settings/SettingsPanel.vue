@@ -81,6 +81,7 @@ import AppearanceCategory from "./categories/AppearanceCategory.vue";
 import WallpaperCategory from "./categories/WallpaperCategory.vue";
 import SchemaCategory from "./categories/SchemaCategory.vue";
 import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
+import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { useSettingsStore, type Scope } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";
@@ -113,7 +114,7 @@ const hostName = computed(() => {
 const channelName = computed(() => {
 	if (!channelsStore.selectedChannelId) return undefined;
 	const ch = channelsStore.channels.find((c) => c.id === channelsStore.selectedChannelId);
-	return ch?.title ?? ch?.dynamicTitle ?? "Terminal";
+	return ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 });
 
 // ─── Load cascade when panel opens ────────────────────────────────────

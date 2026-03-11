@@ -1,5 +1,5 @@
 import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
-import { computed, ref, watch } from "vue";
+import { computed, ref, triggerRef, watch } from "vue";
 import { useChannelsStore } from "../stores/channels.js";
 import { useConfigStore } from "../stores/config.js";
 
@@ -280,23 +280,19 @@ export function collectTerminalChannelIds(node: PaneNode): string[] {
 /**
  * Resolve the display label for a channel in a tab or pane.
  *
- * Title priority (INV-01):
- *   1. Custom title (from F2 rename) — channel.title
- *   2. Dynamic title (from OSC 0/2) — channel.dynamicTitle
- *   3. Tab label or DEFAULT_CHANNEL_NAME fallback
+ * The hub pre-computes `displayTitle` from the configured title source and
+ * broadcasts it in TITLE_CHANGE, PROCESS_TITLE, ATTACH_OK, and STATE_SYNC.
+ * The client simply reads it — no client-side mode resolution needed.
  *
  * Extracted as a standalone function for testability — no Vue/Pinia deps.
  */
 export function resolveTabLabel(
 	channelId: string,
-	channels: ReadonlyArray<{ id: string; title?: string; dynamicTitle?: string }>,
-	tabs: ReadonlyArray<{ channelId: string; label: string }>,
+	channels: ReadonlyArray<{ id: string; displayTitle?: string }>,
+	_tabs: ReadonlyArray<{ channelId: string; label: string }>,
 ): string {
 	const channel = channels.find((c) => c.id === channelId);
-	if (channel?.title) return channel.title;
-	if (channel?.dynamicTitle) return channel.dynamicTitle;
-	const tab = tabs.find((t) => t.channelId === channelId);
-	return tab?.label ?? DEFAULT_CHANNEL_NAME;
+	return channel?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +430,12 @@ export function useLayout() {
 				[channelId]: { type: "terminal", channelId, paneId: generateId() },
 			};
 		}
+
+		// Force Vue to re-evaluate v-show on the newly created v-for element.
+		// When adding the first tab, activeTabIndex is already 0 so the 0→0
+		// assignment is a reactive no-op — triggerRef ensures the pane container
+		// gets the correct display state.
+		triggerRef(activeTabIndex);
 	}
 
 	/**
@@ -730,6 +732,11 @@ export function useLayout() {
 	/**
 	 * Resolve the display label for a tab/pane. Delegates to the pure
 	 * `resolveTabLabel` helper, passing in the channels store data.
+	 */
+	/**
+	 * Resolve the display label for a tab/pane. Delegates to the pure
+	 * `resolveTabLabel` helper, passing in the channels store data.
+	 * Title resolution is done hub-side; the client reads `channel.displayTitle`.
 	 */
 	function getTabLabel(channelId: string): string {
 		const channelsStore = useChannelsStore();
