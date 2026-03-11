@@ -2,6 +2,9 @@
 
 ## Recently Completed
 
+- [x] ✅ [Web] Fix splitPane no limit — enforce MAX_PANE_COUNT=4 in useLayout.ts (2026-03-11)
+- [x] ✅ [Web] Fix split direction inversion — command palette action:split-right/split-down had swapped directions (2026-03-11)
+
 (Archived → docs/historic/done-2026-03.md)
 
 ## Tier 1 — Next Sprint (UX + DX)

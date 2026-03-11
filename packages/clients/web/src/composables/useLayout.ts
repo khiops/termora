@@ -590,22 +590,22 @@ export function useLayout() {
 
 	/**
 	 * Split the pane that currently contains `channelId` into two panes.
-	 * The original pane keeps `channelId`; the second pane is a new empty
-	 * terminal pane identified by `newChannelId`.
+	 * The original pane keeps `channelId`; the second pane is a vacant slot
+	 * so the user can pick or spawn a channel via VacantPane.
 	 *
 	 * If the layout is null (no tabs), this is a no-op.
 	 */
 	function splitPane(
 		channelId: string,
 		direction: "horizontal" | "vertical",
-		newChannelId: string,
-		newLabel: string,
 	): void {
 		const tab = activeTab.value;
 		if (tab === null) return;
 
 		const root = layouts.value[tab.channelId];
 		if (root === null || root === undefined) return;
+
+		if (countLeaves(root) >= MAX_PANE_COUNT) return;
 
 		const path = findChannelPath(root, channelId);
 		if (path === null) return;
@@ -618,15 +618,11 @@ export function useLayout() {
 			direction,
 			ratio: 0.5,
 			first: existingNode,
-			second: { type: "terminal", channelId: newChannelId, paneId: generateId() },
+			second: { type: "vacant", id: generateId() },
 		};
 
 		const newRoot = setNodeAtPath(root, path, splitNode);
 		layouts.value = { ...layouts.value, [tab.channelId]: newRoot };
-
-		// Register new channel label in our internal label map but do NOT
-		// create a top-level tab for it — it lives inside the split.
-		_paneLabels.value = { ..._paneLabels.value, [newChannelId]: newLabel };
 	}
 
 	/**

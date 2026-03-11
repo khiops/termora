@@ -1061,20 +1061,14 @@ async function onSetWelcome(channelId: string): Promise<void> {
 }
 
 /**
- * Split a pane. Creates a pending-spawn pane in the split — TerminalPane
- * will handle the actual SPAWN with correct terminal dimensions.
- * onChannelSpawned then patches the layout with the real channelId.
+ * Split a pane. The second pane opens as a vacant slot — the user picks
+ * or spawns a channel via the VacantPane picker.
  */
 function onSplit(
 	existingChannelId: string,
 	direction: "horizontal" | "vertical",
 ): void {
-	const hostId = channelsStore.activeHostId;
-	if (hostId === null) return;
-
-	const tempId = generateId();
-	channelsStore.registerPendingSpawn(tempId, hostId);
-	layout.splitPane(existingChannelId, direction, tempId, "Starting\u2026");
+	layout.splitPane(existingChannelId, direction);
 }
 
 /**

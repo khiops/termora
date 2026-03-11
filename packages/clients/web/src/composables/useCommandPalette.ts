@@ -374,14 +374,14 @@ export function useCommandPalette() {
 			}
 
 			case "action:split-right": {
-				if (activeChannelId === null || hostId === null) break;
-				_spawnAndSplit(hostId, activeChannelId, "horizontal");
+				if (activeChannelId === null) break;
+				_spawnAndSplit(activeChannelId, "vertical");
 				break;
 			}
 
 			case "action:split-down": {
-				if (activeChannelId === null || hostId === null) break;
-				_spawnAndSplit(hostId, activeChannelId, "vertical");
+				if (activeChannelId === null) break;
+				_spawnAndSplit(activeChannelId, "horizontal");
 				break;
 			}
 
@@ -414,23 +414,10 @@ export function useCommandPalette() {
 	}
 
 	function _spawnAndSplit(
-		hostId: string,
 		existingChannelId: string,
 		direction: "horizontal" | "vertical",
 	): void {
-		void channelsStore
-			.spawnChannel(hostId)
-			.then((newChannelId) => {
-				layout.splitPane(
-					existingChannelId,
-					direction,
-					newChannelId,
-					`Terminal ${newChannelId.slice(-8)}`,
-				);
-			})
-			.catch((err: unknown) => {
-				console.error("[CommandPalette] split spawn failed:", err);
-			});
+		layout.splitPane(existingChannelId, direction);
 	}
 
 	return {

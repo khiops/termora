@@ -174,18 +174,102 @@ describe("closeAll", () => {
 	});
 });
 
+// ── splitPane ────────────────────────────────────────────────────────────
+
+describe("splitPane", () => {
+	it("creates a split with the original terminal as first and a vacant node as second", () => {
+		openTabs("A");
+		layout.splitPane("ch-A", "vertical");
+
+		const root = layout.layouts.value["ch-A"];
+		expect(root?.type).toBe("split");
+		if (root?.type !== "split") return;
+
+		expect(root.direction).toBe("vertical");
+		expect(root.ratio).toBe(0.5);
+		expect(root.first.type).toBe("terminal");
+		if (root.first.type === "terminal") {
+			expect(root.first.channelId).toBe("ch-A");
+		}
+		expect(root.second.type).toBe("vacant");
+		if (root.second.type === "vacant") {
+			expect(root.second.id).toBeTruthy();
+		}
+	});
+
+	it("creates a horizontal split", () => {
+		openTabs("A");
+		layout.splitPane("ch-A", "horizontal");
+
+		const root = layout.layouts.value["ch-A"];
+		expect(root?.type).toBe("split");
+		if (root?.type === "split") {
+			expect(root.direction).toBe("horizontal");
+			expect(root.second.type).toBe("vacant");
+		}
+	});
+
+	it("is a no-op when channelId does not exist in the active tab", () => {
+		openTabs("A");
+		const before = layout.layouts.value["ch-A"];
+
+		layout.splitPane("ch-nonexistent", "vertical");
+
+		expect(layout.layouts.value["ch-A"]).toEqual(before);
+	});
+
+	it("does nothing when MAX_PANE_COUNT (4) is already reached", () => {
+		openTabs("A");
+
+		// Build a 4-pane layout by splitting 3 times and filling vacants
+		function fillFirstVacant(root: PaneNode | null | undefined): string {
+			if (!root) return "";
+			if (root.type === "vacant") return root.id;
+			if (root.type === "split") {
+				return fillFirstVacant(root.first) || fillFirstVacant(root.second);
+			}
+			return "";
+		}
+
+		layout.splitPane("ch-A", "vertical");
+		layout.fillVacant(fillFirstVacant(layout.layouts.value["ch-A"]), "ch-B");
+
+		layout.splitPane("ch-A", "horizontal");
+		layout.fillVacant(fillFirstVacant(layout.layouts.value["ch-A"]), "ch-C");
+
+		layout.splitPane("ch-B", "vertical");
+		layout.fillVacant(fillFirstVacant(layout.layouts.value["ch-A"]), "ch-D");
+
+		// Snapshot state at 4 panes
+		const before = layout.layouts.value["ch-A"];
+
+		// Attempt a 5th split — should be a no-op
+		layout.splitPane("ch-A", "vertical");
+
+		expect(layout.layouts.value["ch-A"]).toEqual(before);
+	});
+});
+
 // ── vacatePane ────────────────────────────────────────────────────────────
 
 describe("vacatePane", () => {
 	it("replaces terminal node with vacant in split layout", () => {
 		openTabs("A");
-		// Split the pane to create a split layout
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
+		// Split creates: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
 		const root = layout.layouts.value["ch-A"];
 		expect(root).not.toBeNull();
 		expect(root?.type).toBe("split");
 
-		// Vacate the second pane (ch-B)
+		// Fill the vacant second slot with ch-B so we have a terminal to vacate
+		let vacantId = "";
+		if (root?.type === "split" && root.second.type === "vacant") {
+			vacantId = root.second.id;
+		}
+		expect(vacantId).toBeTruthy();
+		layout.fillVacant(vacantId, "ch-B");
+
+		// Now vacate ch-B — it should become a vacant node again
 		layout.vacatePane("ch-B");
 
 		const updated = layout.layouts.value["ch-A"];
@@ -202,7 +286,7 @@ describe("vacatePane", () => {
 
 	it("does nothing for non-existent channelId", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
+		layout.splitPane("ch-A", "vertical");
 		const before = layout.layouts.value["ch-A"];
 
 		layout.vacatePane("ch-nonexistent");
@@ -217,17 +301,15 @@ describe("vacatePane", () => {
 describe("rearrangeVacant", () => {
 	it("removes vacant node and collapses parent split", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
+		// Split creates a vacant second slot directly
+		layout.splitPane("ch-A", "vertical");
+		const afterSplit = layout.layouts.value["ch-A"];
+		expect(afterSplit?.type).toBe("split");
 
-		// Vacate ch-B to create a vacant node
-		layout.vacatePane("ch-B");
-		const afterVacate = layout.layouts.value["ch-A"];
-		expect(afterVacate?.type).toBe("split");
-
-		// Get the vacant ID
+		// Get the vacant ID from the split result
 		let vacantId = "";
-		if (afterVacate?.type === "split" && afterVacate.second.type === "vacant") {
-			vacantId = afterVacate.second.id;
+		if (afterSplit?.type === "split" && afterSplit.second.type === "vacant") {
+			vacantId = afterSplit.second.id;
 		}
 		expect(vacantId).toBeTruthy();
 
@@ -266,14 +348,12 @@ describe("rearrangeVacant", () => {
 describe("fillVacant", () => {
 	it("replaces vacant node with terminal node", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
-
-		// Vacate ch-B
-		layout.vacatePane("ch-B");
-		const afterVacate = layout.layouts.value["ch-A"];
+		// Split creates: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
+		const afterSplit = layout.layouts.value["ch-A"];
 		let vacantId = "";
-		if (afterVacate?.type === "split" && afterVacate.second.type === "vacant") {
-			vacantId = afterVacate.second.id;
+		if (afterSplit?.type === "split" && afterSplit.second.type === "vacant") {
+			vacantId = afterSplit.second.id;
 		}
 		expect(vacantId).toBeTruthy();
 
@@ -292,8 +372,8 @@ describe("fillVacant", () => {
 
 	it("does nothing for non-existent vacantId", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
-		layout.vacatePane("ch-B");
+		// Split creates a vacant second slot
+		layout.splitPane("ch-A", "vertical");
 		const before = layout.layouts.value["ch-A"];
 
 		layout.fillVacant("nonexistent-id", "ch-C");
@@ -434,8 +514,17 @@ describe("movePaneTo", () => {
 	it("vacates source pane after move", () => {
 		openTabs("A", "B");
 		layout.setActiveTab(0); // switch to tab A before splitting
-		// Split tab A to have two panes
-		layout.splitPane("ch-A", "vertical", "ch-C", "C");
+		// Split tab A: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
+
+		// Fill the vacant slot with ch-C so we have a terminal pane to move
+		const splitRoot = layout.layouts.value["ch-A"];
+		let vacantId = "";
+		if (splitRoot?.type === "split" && splitRoot.second.type === "vacant") {
+			vacantId = splitRoot.second.id;
+		}
+		expect(vacantId).toBeTruthy();
+		layout.fillVacant(vacantId, "ch-C");
 
 		const tabBRoot = layout.layouts.value["ch-B"];
 		const targetPaneId = tabBRoot?.type === "terminal" ? tabBRoot.paneId : "";
@@ -461,7 +550,17 @@ describe("movePaneTo", () => {
 
 	it("handles same-tab move (rearrange panes within tab)", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
+		// Split: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
+
+		// Fill the vacant slot with ch-B so we have a terminal to move
+		const splitRoot = layout.layouts.value["ch-A"];
+		let vacantId = "";
+		if (splitRoot?.type === "split" && splitRoot.second.type === "vacant") {
+			vacantId = splitRoot.second.id;
+		}
+		expect(vacantId).toBeTruthy();
+		layout.fillVacant(vacantId, "ch-B");
 
 		const root = layout.layouts.value["ch-A"];
 		expect(root?.type).toBe("split");
@@ -491,7 +590,17 @@ describe("movePaneTo", () => {
 describe("moveToNewTab", () => {
 	it("moves pane from split into a new tab", () => {
 		openTabs("A");
-		layout.splitPane("ch-A", "vertical", "ch-B", "B");
+		// Split: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
+
+		// Fill the vacant slot with ch-B so we have a terminal pane to move
+		const splitRoot = layout.layouts.value["ch-A"];
+		let vacantId = "";
+		if (splitRoot?.type === "split" && splitRoot.second.type === "vacant") {
+			vacantId = splitRoot.second.id;
+		}
+		expect(vacantId).toBeTruthy();
+		layout.fillVacant(vacantId, "ch-B");
 		expect(layout.tabs.value).toHaveLength(1);
 
 		// Move ch-B to a new tab at index 1
@@ -526,7 +635,17 @@ describe("findTabForChannel", () => {
 	it("finds the tab containing a channel", () => {
 		openTabs("A", "B");
 		layout.setActiveTab(0); // switch to tab A before splitting
-		layout.splitPane("ch-A", "vertical", "ch-C", "C");
+		// Split: first=terminal(ch-A), second=vacant
+		layout.splitPane("ch-A", "vertical");
+
+		// Fill the vacant slot with ch-C so we can look it up by channelId
+		const splitRoot = layout.layouts.value["ch-A"];
+		let vacantId = "";
+		if (splitRoot?.type === "split" && splitRoot.second.type === "vacant") {
+			vacantId = splitRoot.second.id;
+		}
+		expect(vacantId).toBeTruthy();
+		layout.fillVacant(vacantId, "ch-C");
 
 		expect(layout.findTabForChannel("ch-A")).toBe("ch-A");
 		expect(layout.findTabForChannel("ch-C")).toBe("ch-A");
