@@ -223,6 +223,7 @@
 					:tabs="layout.tabs.value"
 					:active-tab-index="layout.activeTabIndex.value"
 					:get-tab-label="layout.getTabLabel"
+					:get-active-channel-id="layout.getActiveChannelId"
 					@select-tab="layout.setActiveTab"
 					@close-tab="layout.closeTab"
 					@close-others="onCloseOthers"
@@ -239,24 +240,26 @@
 				<div class="pane-area">
 					<div
 						v-for="(tab, idx) in layout.tabs.value"
-						:key="tab.channelId"
+						:key="tab.id"
 						v-show="idx === layout.activeTabIndex.value"
 						class="pane-tab-container"
 					>
 						<PaneLayout
-							v-if="layout.layouts.value[tab.channelId]"
-							:node="layout.layouts.value[tab.channelId]!"
+							v-if="layout.layouts.value[tab.id]"
+							:node="layout.layouts.value[tab.id]!"
 							:host-id="channelsStore.activeHostId"
-							:tab-channel-id="tab.channelId"
-							:has-multiple-panes="tabHasMultiplePanes(tab.channelId)"
+							:tab-id="tab.id"
+							:has-multiple-panes="tabHasMultiplePanes(tab.id)"
 							@split="onSplit"
 							@close-pane="onClosePane"
+							@detach-pane="onDetachPane"
 							@update-ratio="layout.updateRatio"
 							@channel-spawned="onChannelSpawned"
 							@fill-vacant="onFillVacant"
 							@new-terminal-vacant="onNewTerminalVacant"
 							@rearrange-vacant="onRearrangeVacant"
 							@drop-pane="onDropPane"
+							@focus-pane="onFocusPane"
 							@configure-command="onConfigureCommand"
 							@search-all-panes="onSearchAllPanes"
 							@find-next-all="onFindNextAll"
@@ -284,7 +287,7 @@ import { useChannelsStore } from "./stores/channels.js";
 import { useConfigStore } from "./stores/config.js";
 import { useThemeStore } from "./stores/theme.js";
 import { useWriteLockStore } from "./stores/writelock.js";
-import { countPanes, purgeDeadTabs, purgeOrphanedTabs, useLayout } from "./composables/useLayout.js";
+import { countPanes, purgeDeadTabs, purgeOrphanedTabs, collectTerminalChannelIds, useLayout } from "./composables/useLayout.js";
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
 import { useWindowTitle } from "./composables/useWindowTitle.js";
@@ -526,7 +529,11 @@ const windowTitleFormat = computed(
 	() => configStore.uiConfig.title?.windowFormat ?? "nexterm - {prefix}{host} - {title}",
 );
 
-const activeChannelId = computed(() => layout.activeTab.value?.channelId ?? null);
+const activeChannelId = computed(() => {
+	const tab = layout.activeTab.value;
+	if (tab === null) return null;
+	return layout.getActiveChannelId(tab.id);
+});
 /** Resolved title of the active tab's channel (no prefix, no truncation). */
 const { resolvedTitle: _resolvedTitle } = useTabTitle(
 	activeChannelId,
@@ -611,7 +618,7 @@ const needsPairing = computed(
 function openPendingTab(hostId: string): void {
 	const tempId = generateId();
 	channelsStore.registerPendingSpawn(tempId, hostId);
-	layout.openTab(tempId, "Starting\u2026");
+	layout.openTab(tempId);
 }
 
 /**
@@ -684,16 +691,17 @@ watch(
 			layout.closeTab,
 			hostId,
 			channelsStore.channelHostMap,
+			layout.layouts.value,
 		);
 		if (configStore.uiConfig.onChannelDead === "close") {
-			purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab);
+			purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab, layout.layouts.value);
 		}
 		// Auto-open welcome tab if one exists and is alive
 		const welcomeCh = channelsStore.channels.find(
 			(c) => c.isWelcome && c.status !== "dead",
 		);
 		if (welcomeCh) {
-			layout.openTab(welcomeCh.id, layout.getTabLabel(welcomeCh.id));
+			layout.openTab(welcomeCh.id);
 		}
 
 		// Auto-spawn only for local hosts with no live channels and no tabs open.
@@ -715,7 +723,7 @@ watch(
 	() => channelsStore.selectedChannelId,
 	(channelId) => {
 		if (channelId === null) return;
-		layout.openTab(channelId, layout.getTabLabel(channelId));
+		layout.openTab(channelId);
 	},
 );
 
@@ -725,7 +733,7 @@ watch(
  */
 function onSelectChannel(channelId: string): void {
 	channelsStore.selectChannel(channelId);
-	layout.openTab(channelId, layout.getTabLabel(channelId));
+	layout.openTab(channelId);
 }
 
 /**
@@ -735,8 +743,11 @@ function onSelectChannel(channelId: string): void {
 watch(
 	() => layout.activeTab.value,
 	(tab) => {
-		if (tab !== null && tab.channelId !== channelsStore.selectedChannelId) {
-			channelsStore.selectChannel(tab.channelId);
+		if (tab !== null) {
+			const activeChId = layout.getActiveChannelId(tab.id);
+			if (activeChId !== null && activeChId !== channelsStore.selectedChannelId) {
+				channelsStore.selectChannel(activeChId);
+			}
 		}
 	},
 	{ immediate: true },
@@ -753,24 +764,46 @@ watch(
 	(current, previous) => {
 		if (!previous) return;
 
-		// Close tabs for channels that died (only in "close" mode)
+		// Close tabs for channels that died (only in "close" mode).
+		// In the new model, only close a tab if ALL its terminal panes are dead.
 		if (configStore.uiConfig.onChannelDead === "close") {
 			for (const ch of current) {
 				if (ch.status !== "dead") continue;
 				const prev = previous.find((p) => p.id === ch.id);
 				if (prev && prev.status !== "dead") {
-					const idx = layout.tabs.value.findIndex((t) => t.channelId === ch.id);
-					if (idx !== -1) layout.closeTab(idx);
+					// Find which tab contains this channel
+					const tabId = layout.findTabForChannel(ch.id);
+					if (tabId === null) continue;
+					// Only close if ALL terminal panes in the tab are dead
+					const root = layout.layouts.value[tabId];
+					if (root !== null && root !== undefined) {
+						const deadIds = new Set(current.filter((c) => c.status === "dead").map((c) => c.id));
+						const termIds = collectTerminalChannelIds(root);
+						if (termIds.length > 0 && termIds.every((id) => deadIds.has(id))) {
+							const idx = layout.tabs.value.findIndex((t) => t.id === tabId);
+							if (idx !== -1) layout.closeTab(idx);
+						}
+					}
 				}
 			}
 		}
 
-		// Always close tabs for channels removed from the list (explicit DELETE)
+		// Always close tabs for channels removed from the list (explicit DELETE).
+		// Only close a tab if the deleted channel was the ONLY terminal in the tab.
 		const currentIds = new Set(current.map((c) => c.id));
 		for (const prev of previous) {
 			if (!currentIds.has(prev.id)) {
-				const idx = layout.tabs.value.findIndex((t) => t.channelId === prev.id);
-				if (idx !== -1) layout.closeTab(idx);
+				const tabId = layout.findTabForChannel(prev.id);
+				if (tabId === null) continue;
+				const root = layout.layouts.value[tabId];
+				if (root !== null && root !== undefined) {
+					const termIds = collectTerminalChannelIds(root);
+					// Only auto-close tab if this was the only channel in it
+					if (termIds.length === 1 && termIds[0] === prev.id) {
+						const idx = layout.tabs.value.findIndex((t) => t.id === tabId);
+						if (idx !== -1) layout.closeTab(idx);
+					}
+				}
 			}
 		}
 	},
@@ -915,24 +948,38 @@ function onAddChannelGroupFromSidebar(): void {
 }
 
 async function onPurgeDead(): Promise<void> {
-	// Close tabs for dead channels before purging
+	// Close tabs whose ALL terminal panes are dead before purging
 	const deadIds = new Set(
 		channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
 	);
 	// Iterate tabs in reverse so indices stay stable as we close
 	for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
 		const tab = layout.tabs.value[i];
-		if (tab && deadIds.has(tab.channelId)) {
-			layout.closeTab(i);
+		if (!tab) continue;
+		const root = layout.layouts.value[tab.id];
+		if (root !== null && root !== undefined) {
+			const termIds = collectTerminalChannelIds(root);
+			if (termIds.length > 0 && termIds.every((id) => deadIds.has(id))) {
+				layout.closeTab(i);
+			}
 		}
 	}
 	await channelsStore.purgeDeadChannels();
 }
 
 async function onDeleteChannel(channelId: string): Promise<void> {
-	// Close the tab for this channel if open
-	const idx = layout.tabs.value.findIndex((t) => t.channelId === channelId);
-	if (idx !== -1) layout.closeTab(idx);
+	// Close the tab if this channel is its only terminal pane
+	const tabId = layout.findTabForChannel(channelId);
+	if (tabId !== null) {
+		const root = layout.layouts.value[tabId];
+		if (root !== null && root !== undefined) {
+			const termIds = collectTerminalChannelIds(root);
+			if (termIds.length === 1 && termIds[0] === channelId) {
+				const idx = layout.tabs.value.findIndex((t) => t.id === tabId);
+				if (idx !== -1) layout.closeTab(idx);
+			}
+		}
+	}
 	await channelsStore.deleteChannel(channelId);
 }
 
@@ -999,8 +1046,9 @@ function onRenameTab(channelId: string, title: string): void {
  */
 function onCloseAll(): void {
 	const welcomeId = channelsStore.welcomeChannel?.id;
-	const closingCount = welcomeId
-		? layout.tabs.value.filter((t) => t.channelId !== welcomeId).length
+	const welcomeTabId = welcomeId ? layout.findTabForChannel(welcomeId) : null;
+	const closingCount = welcomeTabId
+		? layout.tabs.value.filter((t) => t.id !== welcomeTabId).length
 		: layout.tabs.value.length;
 
 	if (
@@ -1086,24 +1134,20 @@ function onChannelSpawned(tempId: string, realId: string): void {
 }
 
 /**
- * Close a single pane (not the whole tab). If the pane is the last one in
- * the tab, close the tab entirely. INV-03: closing a pane detaches the
- * terminal — it keeps running in the background.
+ * Close a single pane: collapse the split and give space to the sibling.
+ * If the pane is the root (no split parent), it becomes a vacant slot (INV-04).
+ * INV-03: closing never kills the terminal — channel keeps running.
  */
 function onClosePane(channelId: string): void {
-	const activeTab = layout.activeTab.value;
-	if (activeTab === null) return;
+	layout.closePane(channelId);
+}
 
-	if (activeTab.channelId === channelId) {
-		// Closing the root pane of the tab → close the whole tab
-		// Terminal detaches and stays alive
-		const idx = layout.tabs.value.findIndex((t) => t.channelId === channelId);
-		if (idx !== -1) layout.closeTab(idx);
-	} else {
-		// Closing a split pane → leave vacant slot
-		layout.vacatePane(channelId);
-	}
-	// INV-03: closing a pane detaches, never kills the terminal
+/**
+ * Detach a pane: replace it with a vacant slot without collapsing the split.
+ * The channel/PTY keeps running. INV-03: detach never kills the terminal.
+ */
+function onDetachPane(channelId: string): void {
+	layout.detachPane(channelId);
 }
 
 /**
@@ -1139,15 +1183,15 @@ function onRearrangeVacant(vacantId: string): void {
 function onDropPane(
 	sourceChannelId: string,
 	targetPaneId: string,
-	targetTabChannelId: string,
+	targetTabId: string,
 	zone: DropZone,
 ): void {
 	// For non-center zone, check max panes in target tab
 	if (zone !== "center") {
-		const targetRoot = layout.layouts.value[targetTabChannelId];
+		const targetRoot = layout.layouts.value[targetTabId];
 		if (targetRoot && countPanes(targetRoot) >= 4) return;
 	}
-	layout.movePaneTo(sourceChannelId, targetPaneId, targetTabChannelId, zone);
+	layout.movePaneTo(sourceChannelId, targetPaneId, targetTabId, zone);
 }
 
 /**
@@ -1169,7 +1213,7 @@ function onMoveToNewTab(sourceChannelId: string, insertAtIndex: number): void {
  * Sidebar context menu: open a channel in a new tab.
  */
 function onSidebarOpenNewTab(channelId: string): void {
-	layout.openTab(channelId, layout.getTabLabel(channelId));
+	layout.openTab(channelId);
 }
 
 /**
@@ -1180,11 +1224,16 @@ function onSidebarOpenCurrentTab(channelId: string): void {
 	const activeTab = layout.activeTab.value;
 	if (activeTab === null) {
 		// No active tab — just open a new one
-		layout.openTab(channelId, layout.getTabLabel(channelId));
+		layout.openTab(channelId);
 		return;
 	}
-	// Replace the active tab's root pane with this channel
-	layout.replaceChannelId(activeTab.channelId, channelId);
+	// Replace the active pane's channel in the active tab
+	const activeChId = layout.getActiveChannelId(activeTab.id);
+	if (activeChId !== null) {
+		layout.replaceChannelId(activeChId, channelId);
+	} else {
+		layout.openTab(channelId);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,8 +1243,8 @@ function onSidebarOpenCurrentTab(channelId: string): void {
 /**
  * Check if a tab has multiple panes (SC-12: scope toggle visibility).
  */
-function tabHasMultiplePanes(tabChannelId: string): boolean {
-	const root = layout.layouts.value[tabChannelId];
+function tabHasMultiplePanes(tabId: string): boolean {
+	const root = layout.layouts.value[tabId];
 	if (root === null || root === undefined) return false;
 	return countPanes(root) > 1;
 }
@@ -1219,6 +1268,14 @@ function onFindNextAll(currentChannelId: string): void {
  */
 function onFindPreviousAll(currentChannelId: string): void {
 	multiPaneSearch.findPreviousAll(currentChannelId, layout.layout.value);
+}
+
+/**
+ * Handle focus-pane events from PaneLayout (bubbled up from TerminalPane).
+ * Updates the activePaneId for the tab so getActiveChannelId() works correctly.
+ */
+function onFocusPane(tabId: string, paneId: string): void {
+	layout.setActivePaneId(tabId, paneId);
 }
 
 // Set up the focus-pane callback for cross-pane search navigation (SC-11).

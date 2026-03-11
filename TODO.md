@@ -2,6 +2,7 @@
 
 ## Recently Completed
 
+- [x] ✅ [Web] Refactor tab identity — decouple from channelId: Tab.id ULID, activePaneIds tracking, localStorage migration, PaneLayout focus-pane events (2026-03-11)
 - [x] ✅ [Web] Fix splitPane no limit — enforce MAX_PANE_COUNT=4 in useLayout.ts (2026-03-11)
 - [x] ✅ [Web] Fix split direction inversion — command palette action:split-right/split-down had swapped directions (2026-03-11)
 

@@ -4,6 +4,7 @@
 		<template v-if="node.type === 'terminal'">
 			<div
 				class="pane-drop-wrapper"
+				@mousedown="onPaneFocus(node.paneId)"
 				@dragover.prevent="onDragOver"
 				@dragleave="onDragLeave"
 				@drop="onDrop"
@@ -17,6 +18,7 @@
 					@split-right="(chId: string) => emit('split', chId, 'vertical')"
 					@split-down="(chId: string) => emit('split', chId, 'horizontal')"
 					@close-pane="(chId: string) => emit('close-pane', chId)"
+					@detach-pane="(chId: string) => emit('detach-pane', chId)"
 					@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
 					@configure-command="(chId: string) => emit('configure-command', chId)"
 					@search-all-panes="(q: string) => emit('search-all-panes', q)"
@@ -80,17 +82,19 @@
 				:node="node.first"
 				:node-path="firstChildPath"
 				:host-id="hostId"
-				:tab-channel-id="tabChannelId"
+				:tab-id="tabId"
 				:has-multiple-panes="props.hasMultiplePanes"
 				:style="firstStyle"
 				@split="(chId: string, dir: 'horizontal' | 'vertical') => emit('split', chId, dir)"
 				@close-pane="(chId: string) => emit('close-pane', chId)"
+				@detach-pane="(chId: string) => emit('detach-pane', chId)"
 				@update-ratio="(path: NodePath, ratio: number) => emit('update-ratio', path, ratio)"
 				@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
 				@fill-vacant="(vId: string, chId: string) => emit('fill-vacant', vId, chId)"
 				@new-terminal-vacant="(vId: string) => emit('new-terminal-vacant', vId)"
 				@rearrange-vacant="(vId: string) => emit('rearrange-vacant', vId)"
 				@drop-pane="(sourceChId: string, targetPId: string, tTabId: string, zone: DropZone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
+				@focus-pane="(tId: string, pId: string) => emit('focus-pane', tId, pId)"
 				@configure-command="(chId: string) => emit('configure-command', chId)"
 				@search-all-panes="(q: string) => emit('search-all-panes', q)"
 				@find-next-all="(chId: string) => emit('find-next-all', chId)"
@@ -110,17 +114,19 @@
 				:node="node.second"
 				:node-path="secondChildPath"
 				:host-id="hostId"
-				:tab-channel-id="tabChannelId"
+				:tab-id="tabId"
 				:has-multiple-panes="props.hasMultiplePanes"
 				:style="secondStyle"
 				@split="(chId: string, dir: 'horizontal' | 'vertical') => emit('split', chId, dir)"
 				@close-pane="(chId: string) => emit('close-pane', chId)"
+				@detach-pane="(chId: string) => emit('detach-pane', chId)"
 				@update-ratio="(path: NodePath, ratio: number) => emit('update-ratio', path, ratio)"
 				@channel-spawned="(tempId: string, realId: string) => emit('channel-spawned', tempId, realId)"
 				@fill-vacant="(vId: string, chId: string) => emit('fill-vacant', vId, chId)"
 				@new-terminal-vacant="(vId: string) => emit('new-terminal-vacant', vId)"
 				@rearrange-vacant="(vId: string) => emit('rearrange-vacant', vId)"
 				@drop-pane="(sourceChId: string, targetPId: string, tTabId: string, zone: DropZone) => emit('drop-pane', sourceChId, targetPId, tTabId, zone)"
+				@focus-pane="(tId: string, pId: string) => emit('focus-pane', tId, pId)"
 				@configure-command="(chId: string) => emit('configure-command', chId)"
 				@search-all-panes="(q: string) => emit('search-all-panes', q)"
 				@find-next-all="(chId: string) => emit('find-next-all', chId)"
@@ -151,8 +157,8 @@ const props = defineProps<{
 	nodePath?: NodePath;
 	/** Current host ID — passed to VacantPane for channel filtering. */
 	hostId?: string | null;
-	/** The tab's root channel ID — needed for cross-tab DnD. */
-	tabChannelId?: string | null;
+	/** The tab's ULID — needed for cross-tab DnD and focus-pane events. */
+	tabId?: string | null;
 	/** Whether the current tab has multiple panes (SC-12, for search scope toggle). */
 	hasMultiplePanes?: boolean;
 }>();
@@ -160,12 +166,14 @@ const props = defineProps<{
 const emit = defineEmits<{
 	(e: "split", channelId: string, direction: "horizontal" | "vertical"): void;
 	(e: "close-pane", channelId: string): void;
+	(e: "detach-pane", channelId: string): void;
 	(e: "update-ratio", nodePath: NodePath, ratio: number): void;
 	(e: "channel-spawned", tempId: string, realId: string): void;
 	(e: "fill-vacant", vacantId: string, channelId: string): void;
 	(e: "new-terminal-vacant", vacantId: string): void;
 	(e: "rearrange-vacant", vacantId: string): void;
-	(e: "drop-pane", sourceChannelId: string, targetPaneId: string, targetTabChannelId: string, zone: DropZone): void;
+	(e: "drop-pane", sourceChannelId: string, targetPaneId: string, targetTabId: string, zone: DropZone): void;
+	(e: "focus-pane", tabId: string, paneId: string): void;
 	(e: "configure-command", channelId: string): void;
 	(e: "search-all-panes", query: string): void;
 	(e: "find-next-all", currentChannelId: string): void;
@@ -180,7 +188,7 @@ const firstChildPath = computed<NodePath>(() => [...effectivePath.value, "first"
 const secondChildPath = computed<NodePath>(() => [...effectivePath.value, "second"]);
 
 const hostId = computed<string | null>(() => props.hostId ?? null);
-const tabChannelId = computed<string | null>(() => props.tabChannelId ?? null);
+const tabId = computed<string | null>(() => props.tabId ?? null);
 
 const containerClass = computed(() => {
 	if (props.node.type === "terminal" || props.node.type === "vacant")
@@ -223,6 +231,14 @@ function getLeafPaneId(): string | null {
 	if (props.node.type === "terminal") return props.node.paneId;
 	if (props.node.type === "vacant") return props.node.id;
 	return null;
+}
+
+/** Emit focus-pane when a terminal pane receives a mousedown event. */
+function onPaneFocus(paneId: string): void {
+	const tId = tabId.value;
+	if (tId !== null) {
+		emit("focus-pane", tId, paneId);
+	}
 }
 
 function getDropZone(event: DragEvent, element: HTMLElement): DropZone {
@@ -289,7 +305,7 @@ function onDrop(event: DragEvent): void {
 	// Same host validation
 	if (data.hostId !== null && hostId.value !== null && data.hostId !== hostId.value) return;
 
-	const targetTab = tabChannelId.value;
+	const targetTab = tabId.value;
 	if (targetTab === null) return;
 
 	// Determine the zone

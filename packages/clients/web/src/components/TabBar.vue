@@ -11,19 +11,19 @@
 	>
 		<button
 			v-for="(tab, idx) in tabs"
-			:key="tab.channelId"
+			:key="tab.id"
 			role="tab"
 			:aria-selected="idx === activeTabIndex"
 			:draggable="editingTabIndex !== idx"
 			:class="['tab', { 'tab--active': idx === activeTabIndex, 'tab--drop-before': dropInsertIndex === idx, 'tab--drop-after': dropInsertIndex === idx + 1 && idx === tabs.length - 1, 'tab--dragging': dragTabIndex === idx }]"
-			:title="getTabLabel(tab.channelId)"
+			:title="getTabLabel(tab.id)"
 			@click="emit('select-tab', idx)"
 			@mousedown.middle.prevent="emit('close-tab', idx)"
 			@contextmenu.prevent="onTabContextMenu(idx, $event)"
 			@dragstart="onTabDragStart(idx, $event)"
 			@dragend="onTabDragEnd"
 		>
-			<span v-if="isWelcomeTab(tab.channelId)" class="tab__welcome-star" title="Welcome Tab">&#x2605;</span>
+			<span v-if="isWelcomeTab(tab.id)" class="tab__welcome-star" title="Welcome Tab">&#x2605;</span>
 			<input
 				v-if="editingTabIndex === idx"
 				ref="editInput"
@@ -34,21 +34,21 @@
 				@blur="commitRename"
 				@click.stop
 			/>
-			<span v-else class="tab__label" @dblclick="startRename(idx)">{{ getTabLabel(tab.channelId) }}</span>
+			<span v-else class="tab__label" @dblclick="startRename(idx)">{{ getTabLabel(tab.id) }}</span>
 			<span
-				v-if="notificationStore.activityDots.get(tab.channelId) && idx !== activeTabIndex"
+				v-if="notificationStore.activityDots.get(getActiveChannelId(tab.id) ?? '') && idx !== activeTabIndex"
 				class="tab__activity-dot"
 				aria-label="New activity"
 			></span>
 			<span
-				v-if="(notificationStore.bellCounts.get(tab.channelId) ?? 0) > 0"
+				v-if="(notificationStore.bellCounts.get(getActiveChannelId(tab.id) ?? '') ?? 0) > 0"
 				class="tab__bell-badge"
-			>{{ notificationStore.bellCounts.get(tab.channelId) }}</span>
+			>{{ notificationStore.bellCounts.get(getActiveChannelId(tab.id) ?? '') }}</span>
 			<span
 				v-show="showCloseButton"
 				class="tab__close"
 				role="button"
-				:aria-label="`Close ${getTabLabel(tab.channelId)}`"
+				:aria-label="`Close ${getTabLabel(tab.id)}`"
 				title="Close tab"
 				@click.stop="emit('close-tab', idx)"
 			>×</span>
@@ -66,9 +66,10 @@
 			:x="ctxMenu.x"
 			:y="ctxMenu.y"
 			:tab="ctxMenu.tabIndex >= 0 ? tabs[ctxMenu.tabIndex] ?? null : null"
+			:active-channel-id="ctxMenu.tabIndex >= 0 && tabs[ctxMenu.tabIndex] ? getActiveChannelId(tabs[ctxMenu.tabIndex]!.id) : null"
 			:tab-index="ctxMenu.tabIndex"
 			:tab-count="tabs.length"
-			:is-welcome="ctxMenu.tabIndex >= 0 && tabs[ctxMenu.tabIndex] ? isWelcomeTab(tabs[ctxMenu.tabIndex]!.channelId) : false"
+			:is-welcome="ctxMenu.tabIndex >= 0 && tabs[ctxMenu.tabIndex] ? isWelcomeTab(tabs[ctxMenu.tabIndex]!.id) : false"
 			:is-custom-title="isCtxTabCustomTitle"
 			@close="ctxMenu.visible = false"
 			@rename="onCtxRename"
@@ -77,8 +78,8 @@
 			@close-others="(idx) => emit('close-others', idx)"
 			@close-to-right="(idx) => emit('close-to-right', idx)"
 			@close-all="emit('close-all')"
-			@split-right="(id) => emit('split', id, 'horizontal')"
-			@split-down="(id) => emit('split', id, 'vertical')"
+			@split-right="(id) => emit('split', id, 'vertical')"
+			@split-down="(id) => emit('split', id, 'horizontal')"
 			@set-welcome="(id) => emit('set-welcome', id)"
 			@configure-command="(id) => emit('configure-command', id)"
 		/>
@@ -103,7 +104,10 @@ const showCloseButton = computed(() => configStore.uiConfig.tabs?.closeButton !=
 const props = defineProps<{
 	tabs: Tab[];
 	activeTabIndex: number;
-	getTabLabel: (channelId: string) => string;
+	/** Resolve the display label for a tab by its tab.id. */
+	getTabLabel: (tabId: string) => string;
+	/** Get the channelId of the active pane for a tab by its tab.id. */
+	getActiveChannelId: (tabId: string) => string | null;
 }>();
 
 const emit = defineEmits<{
@@ -156,7 +160,11 @@ const { editValue, editInput, isEditing, startRename: startRenameRaw, commitRena
 		if (editingTabIndex.value === null) return;
 		const tab = props.tabs[editingTabIndex.value];
 		if (tab !== undefined) {
-			emit("rename-tab", tab.channelId, newValue);
+			// Rename operates on the active pane's channel
+			const channelId = props.getActiveChannelId(tab.id);
+			if (channelId !== null) {
+				emit("rename-tab", channelId, newValue);
+			}
 		}
 	},
 });
@@ -169,15 +177,16 @@ function startRename(idx: number): void {
 	const tab = props.tabs[idx];
 	if (tab === undefined) return;
 	editingTabIndex.value = idx;
-	startRenameRaw(props.getTabLabel(tab.channelId));
+	startRenameRaw(props.getTabLabel(tab.id));
 }
 
 // -------------------------------------------------------------------------
-// Welcome tab check
+// Welcome tab check (checks active pane's channel)
 // -------------------------------------------------------------------------
 
-function isWelcomeTab(channelId: string): boolean {
-	return channelsStore.welcomeChannel?.id === channelId;
+function isWelcomeTab(tabId: string): boolean {
+	const channelId = props.getActiveChannelId(tabId);
+	return channelId !== null && channelsStore.welcomeChannel?.id === channelId;
 }
 
 // -------------------------------------------------------------------------
@@ -194,7 +203,8 @@ function onTabContextMenu(idx: number, event: MouseEvent): void {
 }
 
 function onCtxRename(channelId: string): void {
-	const idx = props.tabs.findIndex((t) => t.channelId === channelId);
+	// Find the tab whose active channel matches
+	const idx = props.tabs.findIndex((t) => props.getActiveChannelId(t.id) === channelId);
 	if (idx !== -1) startRename(idx);
 }
 
@@ -202,7 +212,9 @@ function onCtxRename(channelId: string): void {
 const isCtxTabCustomTitle = computed(() => {
 	const tab = ctxMenu.tabIndex >= 0 ? props.tabs[ctxMenu.tabIndex] : undefined;
 	if (!tab) return false;
-	const ch = channelsStore.channels.find((c) => c.id === tab.channelId);
+	const channelId = props.getActiveChannelId(tab.id);
+	if (channelId === null) return false;
+	const ch = channelsStore.channels.find((c) => c.id === channelId);
 	return ch?.title != null && ch.title !== "";
 });
 

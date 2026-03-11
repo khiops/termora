@@ -100,6 +100,7 @@
 			<button class="context-menu__item" @click="onSplitRight">Split Right</button>
 			<button class="context-menu__item" @click="onSplitDown">Split Down</button>
 			<hr class="context-menu__divider" />
+			<button class="context-menu__item" @click="onDetachPane">Detach</button>
 			<button class="context-menu__item context-menu__item--danger" @click="onClosePane">
 				Close Pane
 			</button>
@@ -157,6 +158,7 @@ const props = withDefaults(
 const emit = defineEmits<{
 	(e: "split-right", channelId: string): void;
 	(e: "split-down", channelId: string): void;
+	(e: "detach-pane", channelId: string): void;
 	(e: "close-pane", channelId: string): void;
 	(e: "channel-spawned", tempId: string, realId: string): void;
 	(e: "configure-command", channelId: string): void;
@@ -454,6 +456,12 @@ function onSplitDown(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
 	if (chId !== null) emit("split-down", chId);
+}
+
+function onDetachPane(): void {
+	contextMenuVisible.value = false;
+	const chId = effectiveChannelId.value;
+	if (chId !== null) emit("detach-pane", chId);
 }
 
 function onClosePane(): void {
