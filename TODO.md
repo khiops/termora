@@ -20,7 +20,7 @@
 - [x] ✅ Block 5: Migration Logic (hub) (2026-03-12)
 - [x] ✅ Block 6: UI — "+" Dropdown (web) (2026-03-12)
 - [x] ✅ Block 7: UI — Settings > Profiles Tab (web) (2026-03-12)
-- [ ] Block 8: Command Palette + Keyboard Shortcuts (web)
+- [x] ✅ Block 8: Command Palette + Keyboard Shortcuts (web) (2026-03-12)
 
 ## Tier 1 — Next Sprint (UX + DX)
 

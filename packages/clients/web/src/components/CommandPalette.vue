@@ -19,7 +19,7 @@
 						v-model="localQuery"
 						class="palette-input"
 						type="text"
-						placeholder="Search... (> actions, @ hosts, # channels)"
+						placeholder="Search... (> actions, @ hosts, # channels, ~ profiles)"
 						autocomplete="off"
 						spellcheck="false"
 						@input="palette.search(localQuery)"
@@ -145,6 +145,8 @@ function groupLabel(type: GroupKey): string {
 			return "Channels";
 		case "action":
 			return "Actions";
+		case "profile":
+			return "Profiles";
 	}
 }
 
@@ -156,6 +158,8 @@ function typeBadge(type: PaletteItemType): string {
 			return "Channel";
 		case "action":
 			return "Action";
+		case "profile":
+			return "Profile";
 	}
 }
 </script>
@@ -336,6 +340,12 @@ function typeBadge(type: PaletteItemType): string {
 	background: rgba(var(--nt-accent-rgb), 0.12);
 	color: var(--nt-magenta);
 	border: 1px solid rgba(var(--nt-accent-rgb), 0.25);
+}
+
+.palette-item-badge[data-type="profile"] {
+	background: rgba(var(--nt-yellow-rgb, 200, 150, 0), 0.12);
+	color: var(--nt-yellow, #c89600);
+	border: 1px solid rgba(var(--nt-yellow-rgb, 200, 150, 0), 0.25);
 }
 
 /* ── Shortcut hint ────────────────────────────────────────────────────────── */

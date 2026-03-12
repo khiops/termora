@@ -1,8 +1,9 @@
-import type { Host } from "@nexterm/shared";
+import type { Host, LaunchProfile } from "@nexterm/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { useProfilesStore } from "../stores/profiles.js";
 import { fuzzyMatch, useCommandPalette } from "./useCommandPalette.js";
 
 vi.hoisted(() => {
@@ -39,6 +40,15 @@ vi.mock("./useLayout.js", () => ({
 }));
 
 /**
+ * Mock useSessionStore to avoid WS dependency in unit tests.
+ */
+vi.mock("../stores/session.js", () => ({
+	useSessionStore: () => ({
+		wsClient: { send: vi.fn() },
+	}),
+}));
+
+/**
  * Mock useRecentPaletteItems — avoids localStorage side-effects in tests.
  * Shared spies so the test file and the composable see the same functions.
  */
@@ -56,6 +66,21 @@ vi.mock("./useRecentPaletteItems.js", () => {
 		}),
 	};
 });
+
+function makeProfile(id: string, name: string, shell = "/bin/bash"): LaunchProfile {
+	return {
+		id,
+		name,
+		shell,
+		mode: "shell",
+		elevated: false,
+		supportedOs: "any",
+		iconType: "auto",
+		sortOrder: 0,
+		createdAt: "2025-01-01T00:00:00Z",
+		updatedAt: "2025-01-01T00:00:00Z",
+	};
+}
 
 function makeHost(id: string, label: string): Host {
 	return {
@@ -499,6 +524,126 @@ describe("useCommandPalette", () => {
 				payload: "h1",
 			});
 			expect(mockPushRecent).toHaveBeenCalledWith("host:h1");
+		});
+	});
+
+	describe("profile items (SC-28)", () => {
+		it("profile items appear in general search results", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [makeProfile("p1", "Python REPL")];
+
+			const palette = useCommandPalette();
+			palette.search("python");
+
+			const profileResults = palette.results.value.filter((r) => r.type === "profile");
+			expect(profileResults).toHaveLength(1);
+			expect(profileResults[0]?.label).toBe("Python REPL");
+		});
+
+		it("profile item has shell as description", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [makeProfile("p1", "Fish Shell", "/usr/bin/fish")];
+
+			const palette = useCommandPalette();
+			palette.search("~");
+
+			const item = palette.results.value.find((r) => r.type === "profile");
+			expect(item?.description).toBe("/usr/bin/fish");
+		});
+
+		it("~ prefix filters to profiles only", () => {
+			const hostsStore = useHostsStore();
+			hostsStore.hosts = [makeHost("h1", "Production")];
+
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [makeProfile("p1", "Python REPL")];
+
+			const palette = useCommandPalette();
+			palette.search("~");
+
+			const types = new Set(palette.results.value.map((r) => r.type));
+			expect(types.has("profile")).toBe(true);
+			expect(types.has("host")).toBe(false);
+			expect(types.has("action")).toBe(false);
+			expect(types.has("channel")).toBe(false);
+		});
+
+		it("~ prefix with search query fuzzy-matches profile names", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [
+				makeProfile("p1", "Python REPL"),
+				makeProfile("p2", "Node REPL"),
+				makeProfile("p3", "PyPy"),
+			];
+
+			const palette = useCommandPalette();
+			palette.search("~py");
+
+			const profileResults = palette.results.value.filter((r) => r.type === "profile");
+			// Should match "Python REPL" and "PyPy", not "Node REPL"
+			expect(profileResults.some((r) => r.label === "Python REPL")).toBe(true);
+			expect(profileResults.some((r) => r.label === "PyPy")).toBe(true);
+			expect(profileResults.some((r) => r.label === "Node REPL")).toBe(false);
+		});
+
+		it("~ prefix with empty query shows all profiles", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [makeProfile("p1", "Bash"), makeProfile("p2", "Zsh")];
+
+			const palette = useCommandPalette();
+			palette.search("~");
+
+			expect(palette.results.value).toHaveLength(2);
+			expect(palette.results.value.every((r) => r.type === "profile")).toBe(true);
+		});
+
+		it("execute() on profile item calls spawnFromProfile", () => {
+			const profilesStore = useProfilesStore();
+			const spawnSpy = vi.spyOn(profilesStore, "spawnFromProfile");
+			// Also set up active host so spawnFromProfile doesn't bail early
+			const channelsStore = useChannelsStore();
+			channelsStore.activeHostId = "h1";
+
+			profilesStore.profiles = [makeProfile("p1", "Python REPL")];
+
+			const palette = useCommandPalette();
+			palette.execute({
+				id: "profile:p1",
+				label: "Python REPL",
+				type: "profile",
+				icon: "▶",
+				payload: "p1",
+			});
+
+			expect(spawnSpy).toHaveBeenCalledWith("p1");
+		});
+
+		it("profile item uses emoji icon when iconType is emoji", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [
+				{
+					...makeProfile("p1", "Python REPL"),
+					iconType: "emoji",
+					iconValue: "🐍",
+				},
+			];
+
+			const palette = useCommandPalette();
+			palette.search("~");
+
+			const item = palette.results.value.find((r) => r.type === "profile");
+			expect(item?.icon).toBe("🐍");
+		});
+
+		it("profile item uses default icon when iconType is not emoji", () => {
+			const profilesStore = useProfilesStore();
+			profilesStore.profiles = [makeProfile("p1", "Bash")];
+
+			const palette = useCommandPalette();
+			palette.search("~");
+
+			const item = palette.results.value.find((r) => r.type === "profile");
+			expect(item?.icon).toBe("▶");
 		});
 	});
 });
