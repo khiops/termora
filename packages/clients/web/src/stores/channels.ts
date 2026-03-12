@@ -828,8 +828,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		if (!res.ok) return false;
 
 		// Optimistically update local status so UI reflects the restart
-		const ch = channels.value.find((c) => c.id === channelId);
-		if (ch) ch.status = "born";
+		updateChannelStatus(channelId, "born");
 
 		return true;
 	}
