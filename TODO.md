@@ -13,9 +13,9 @@
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
 
-- [ ] 🐛 [Hub] restartChannel rejects local hosts: session status "detached" fails `!== "active"` check (line 882) — Priority: M (from E2E Sc.103)
-- [ ] 🐛 [Web] ConfigureCommandDialog: silent failure on restart 503 — no error toast, dialog closes — Priority: M (from E2E Sc.103)
-- [ ] 💡 [Web+Hub] Unified exit overlay for all channel types: Closed shell → Restart/Close, directProcess exit → Restart/Configure/Close (harmonize "Closed" badge + "process exited" overlay) — Priority: M
+- [x] ✅ [Hub] restartChannel: accept session status "detached" + re-activate on success (2026-03-12)
+- [x] ✅ [Web] ConfigureCommandDialog: error feedback on restart failure (2026-03-12)
+- [x] ✅ [Web+Hub] Unified exit overlay for all channel types: contextual message + exit code + Configure only for directProcess (2026-03-12)
 
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)

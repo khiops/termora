@@ -50,6 +50,8 @@
 					</label>
 				</div>
 
+				<div v-if="restartError" class="field-error">{{ restartError }}</div>
+
 				<div class="dialog-actions">
 					<button class="btn btn-secondary" @click="$emit('close')">
 						Cancel
@@ -82,6 +84,8 @@ const emit = defineEmits<{
 
 const channelsStore = useChannelsStore();
 
+const restartError = ref<string | null>(null);
+
 const form = ref({
 	shell: "",
 	args: [] as string[],
@@ -102,6 +106,7 @@ watch(
 	() => props.visible,
 	(visible) => {
 		if (visible && props.channelId) {
+			restartError.value = null;
 			const ch = channelsStore.channels.find((c) => c.id === props.channelId);
 			if (ch) {
 				form.value = {
@@ -131,14 +136,22 @@ async function onApply(): Promise<void> {
 
 async function onApplyRestart(): Promise<void> {
 	if (!props.channelId) return;
-	await channelsStore.updateChannelConfig(props.channelId, {
+	const configOk = await channelsStore.updateChannelConfig(props.channelId, {
 		icon: form.value.icon || null,
 		shell: form.value.shell || null,
 		args: form.value.args,
 		cwd: form.value.cwd || null,
 		direct_process: form.value.directProcess,
 	});
-	await channelsStore.restartChannel(props.channelId);
+	if (!configOk) {
+		restartError.value = "Failed to save configuration";
+		return;
+	}
+	const restartOk = await channelsStore.restartChannel(props.channelId);
+	if (!restartOk) {
+		restartError.value = "Failed to restart channel";
+		return;
+	}
 	emit("applied");
 	emit("close");
 }
@@ -218,6 +231,15 @@ async function onApplyRestart(): Promise<void> {
 .field-input:focus,
 .field-select:focus {
 	border-color: var(--nt-accent);
+}
+
+.field-error {
+	font-size: 12px;
+	color: var(--nt-badge);
+	margin-top: 8px;
+	padding: 6px 8px;
+	background: rgba(255, 80, 80, 0.1);
+	border-radius: 4px;
 }
 
 .dialog-actions {

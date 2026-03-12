@@ -877,9 +877,10 @@ export class SessionManager {
 			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
 		}
 
-		// Find active session
+		// Find active or detached session
 		const sessionEntry = this.sessions.get(hostId);
-		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		if (!sessionEntry || (sessionEntry.status !== "active" && sessionEntry.status !== "detached"))
+			return false;
 		if (!agent?.connected) return false;
 
 		// Build SPAWN from DB config
@@ -945,6 +946,11 @@ export class SessionManager {
 			status: "live",
 		};
 		this._broadcastToAllClients(channelStateMsg);
+
+		// If session was detached, re-activate it now that a channel is live
+		if (sessionEntry.status === "detached") {
+			this._updateSessionStatus(hostId, sessionEntry.id, "active");
+		}
 
 		return true;
 	}
