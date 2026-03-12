@@ -23,6 +23,7 @@
 - [x] ✅ Block 8: Command Palette + Keyboard Shortcuts (web) (2026-03-12)
 - [x] ✅ [Web] Fix TypeScript build errors (vue-tsc --noEmit) — promptType elevation, exactOptionalPropertyTypes, Tab.channelId, useLayout cast (2026-03-12)
 - [x] ✅ [All] Fix 4 blocking review findings: F-001 ASKPASS injection, F-002 SC-17 profile override priority, F-003 HTTP method mismatch, F-004 host OS auto-resolve; + F-005/F-006/F-009 non-blocking (2026-03-12)
+- [x] ✅ [Web] F-008: isDefault() now uses overrideType from host-profiles API (2026-03-12)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
@@ -33,6 +34,7 @@
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
 
+- [ ] 🔧 [Hub] Crash-loop protection test flaky: timeout with fake timers + async mocks — Priority: M (from /review F-007)
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
 
