@@ -494,7 +494,7 @@ const matchPaneName = computed<string | null>(() => {
 	const matchChId = multiPaneSearch.matchPaneChannelId.value;
 	if (matchChId === null || matchChId === effectiveChannelId.value) return null;
 	const ch = channelsStore.channels.find((c) => c.id === matchChId);
-	return ch?.displayTitle ?? ch?.dynamicTitle ?? ch?.processTitle ?? DEFAULT_CHANNEL_NAME;
+	return ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 });
 
 /** Effective match count: aggregated when scope=all, local when scope=pane. */

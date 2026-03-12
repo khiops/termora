@@ -1575,6 +1575,11 @@ export class SessionManager {
 	 * Updates state.displayTitle in place and returns the resolved string.
 	 * Returns DEFAULT_CHANNEL_NAME if the channel is not tracked.
 	 */
+	/** Public accessor for REST API — resolves displayTitle for a channel. */
+	resolveDisplayTitle(channelId: string): string {
+		return this._resolveDisplayTitle(channelId);
+	}
+
 	private _resolveDisplayTitle(channelId: string): string {
 		const state = this.channels.get(channelId);
 		if (!state) return DEFAULT_CHANNEL_NAME;

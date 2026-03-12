@@ -350,18 +350,11 @@ export function collectTerminalChannelIds(node: PaneNode): string[] {
  */
 export function resolveTabLabel(
 	channelId: string,
-	channels: ReadonlyArray<{
-		id: string;
-		displayTitle?: string;
-		dynamicTitle?: string;
-		processTitle?: string;
-	}>,
+	channels: ReadonlyArray<{ id: string; displayTitle?: string }>,
 	_tabs?: ReadonlyArray<unknown>,
 ): string {
 	const channel = channels.find((c) => c.id === channelId);
-	return (
-		channel?.displayTitle ?? channel?.dynamicTitle ?? channel?.processTitle ?? DEFAULT_CHANNEL_NAME
-	);
+	return channel?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 }
 
 // ---------------------------------------------------------------------------

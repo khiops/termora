@@ -17,19 +17,21 @@ export function registerChannelRoutes(
 		async (request) => {
 			const { host_id, session_id } = request.query;
 
+			let channels;
 			if (session_id) {
-				const channels = metaDal.listChannels(session_id);
-				return toSnakeCase(channels);
-			}
-
-			if (host_id) {
+				channels = metaDal.listChannels(session_id);
+			} else if (host_id) {
 				const sessions = metaDal.listSessions(host_id);
-				const channels = sessions.flatMap((s) => metaDal.listChannels(s.id));
-				return toSnakeCase(channels);
+				channels = sessions.flatMap((s) => metaDal.listChannels(s.id));
+			} else {
+				channels = metaDal.listChannels();
 			}
 
-			const channels = metaDal.listChannels();
-			return toSnakeCase(channels);
+			return channels.map((ch) => {
+				const row = toSnakeCase(ch) as Record<string, unknown>;
+				row.display_title = sessionManager.resolveDisplayTitle(ch.id);
+				return row;
+			});
 		},
 	);
 
@@ -65,7 +67,9 @@ export function registerChannelRoutes(
 		if (!channel) {
 			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Channel not found" } });
 		}
-		return toSnakeCase(channel);
+		const row = toSnakeCase(channel) as Record<string, unknown>;
+		row.display_title = sessionManager.resolveDisplayTitle(channel.id);
+		return row;
 	});
 
 	// PATCH /api/channels/:id

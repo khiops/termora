@@ -125,11 +125,7 @@ const bellCount = computed(() => notificationStore.bellCounts.get(props.channel.
 const hasActivity = computed(() => notificationStore.activityDots.get(props.channel.id) ?? false);
 
 const displayLabel = computed(
-	() =>
-		props.channel.displayTitle
-		?? props.channel.dynamicTitle
-		?? props.channel.processTitle
-		?? DEFAULT_CHANNEL_NAME,
+	() => props.channel.displayTitle ?? DEFAULT_CHANNEL_NAME,
 );
 
 // -------------------------------------------------------------------------

@@ -48,6 +48,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 	}
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title as string;
 	if (row.process_title != null) ch.processTitle = row.process_title as string;
+	if (row.display_title != null) ch.displayTitle = row.display_title as string;
 	return ch;
 }
 

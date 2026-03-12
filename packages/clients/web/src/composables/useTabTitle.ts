@@ -104,8 +104,8 @@ export function useTabTitle(
 			if (live != null && live !== "") return live;
 		}
 
-		// Hub-computed display title is authoritative; fall back to store fields.
-		return ch.displayTitle ?? ch.dynamicTitle ?? ch.processTitle ?? DEFAULT_CHANNEL_NAME;
+		// Hub-computed display title is authoritative.
+		return ch.displayTitle ?? DEFAULT_CHANNEL_NAME;
 	});
 
 	const tabTitle = computed(() => {
