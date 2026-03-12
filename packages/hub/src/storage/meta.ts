@@ -56,6 +56,7 @@ export interface CreateChannelInput {
 	rows?: number;
 	icon?: string;
 	directProcess?: boolean;
+	launchProfileId?: string;
 }
 
 interface HostRow {
@@ -778,8 +779,8 @@ export class MetaDAL {
 			.prepare(
 				`INSERT INTO channels (
 					id, session_id, shell, args, cwd, title, status, cols, rows,
-					icon, direct_process, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					icon, direct_process, launch_profile_id, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				input.id,
@@ -793,6 +794,7 @@ export class MetaDAL {
 				input.rows ?? 24,
 				input.icon ?? null,
 				input.directProcess ? 1 : 0,
+				input.launchProfileId ?? null,
 				now,
 				now,
 			);

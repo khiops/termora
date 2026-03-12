@@ -391,6 +391,122 @@ describe("SessionManager", () => {
 		expect(channels[0]?.title).toBeFalsy();
 	});
 
+	// ─── Launch profile resolution ─────────────────────────────────────────
+
+	it("handleSpawn with launchProfileId stores resolved shell and args in channel DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Create a launch profile in meta.db
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Test Profile",
+			shell: "/usr/bin/zsh",
+			args: ["-l", "-i"],
+			cwd: "/tmp",
+			env: { MY_VAR: "hello" },
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		// Verify SPAWN_OK was sent (spawn succeeded)
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		// Verify the channel DB record has the resolved shell and args
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.shell).toBe("/usr/bin/zsh");
+		expect(channel?.args).toEqual(["-l", "-i"]);
+		expect(channel?.cwd).toBe("/tmp");
+	});
+
+	it("handleSpawn with launchProfileId mode=process stores directProcess in channel DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Process Profile",
+			shell: "/usr/bin/htop",
+			args: [],
+			mode: "process",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.shell).toBe("/usr/bin/htop");
+		expect(channel?.directProcess).toBe(true);
+	});
+
+	it("handleSpawn with unknown launchProfileId falls back to default spawn", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Use a non-existent profile ID — should not error, just use defaults
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: "nonexistent-profile-id",
+		});
+
+		const spawnOk = received.find((m) => m.type === "SPAWN_OK");
+		expect(spawnOk).toBeTruthy(); // Should still spawn successfully
+	});
+
+	it("handleSpawn with launchProfileId stores launchProfileId in channel DB record", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Seed Profile",
+			shell: "/bin/bash",
+			args: [],
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.launchProfileId).toBe(profile.id);
+	});
+
+	// ── End launch profile resolution ─────────────────────────────────────────
+
 	it("spawned channels have null title (dynamic title takes precedence)", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);

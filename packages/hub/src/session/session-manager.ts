@@ -420,22 +420,47 @@ export class SessionManager {
 		}
 
 		const requestId = generateId();
-		const shell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
-		const args = msg.args ?? [];
-		const cwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
 		const cols = msg.cols ?? 80;
 		const rows = msg.rows ?? 24;
-		const directProcess = msg.directProcess ?? false;
+
+		// ── Launch profile resolution (seed pattern) ─────────────────────────
+		// If launchProfileId is provided, look up the profile and use its fields
+		// as spawn parameters. Profile data is seeded at spawn time — updating
+		// the profile later does NOT affect already-running channels.
+		let resolvedShell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
+		let resolvedArgs = msg.args ?? [];
+		let resolvedCwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
+		let resolvedEnv: Record<string, string> = msg.env ?? {};
+		let resolvedDirectProcess = msg.directProcess ?? false;
+		let resolvedElevated = msg.elevated ?? false;
+		let resolvedLaunchProfileId: string | undefined;
+
+		if (msg.launchProfileId) {
+			const profile = this.metaDal.getLaunchProfile(msg.launchProfileId);
+			if (profile) {
+				resolvedShell = profile.shell;
+				resolvedArgs = profile.args ?? [];
+				resolvedCwd = profile.cwd ?? resolvedCwd;
+				// Profile env overrides/supplements the UI-provided env
+				resolvedEnv = { ...resolvedEnv, ...(profile.env ?? {}) };
+				resolvedDirectProcess = profile.mode === "process";
+				// UI-level elevated flag can override the profile's setting
+				resolvedElevated = msg.elevated ?? profile.elevated;
+				resolvedLaunchProfileId = profile.id;
+			}
+		}
 
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
-			shell,
-			...(args.length > 0 && { args }),
-			cwd,
-			env: msg.env ?? {},
+			shell: resolvedShell,
+			...(resolvedArgs.length > 0 && { args: resolvedArgs }),
+			cwd: resolvedCwd,
+			env: resolvedEnv,
 			cols,
 			rows,
+			...(resolvedDirectProcess && { directProcess: true }),
+			...(resolvedElevated && { elevated: true }),
 		};
 		agent.send(agentSpawn);
 
@@ -461,12 +486,15 @@ export class SessionManager {
 						id: channelId,
 						sessionId: session.id,
 						status: "born",
-						shell,
-						...(args.length > 0 && { args }),
-						cwd,
+						shell: resolvedShell,
+						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
+						cwd: resolvedCwd,
 						cols,
 						rows,
-						...(directProcess && { directProcess }),
+						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
+						...(resolvedLaunchProfileId !== undefined && {
+							launchProfileId: resolvedLaunchProfileId,
+						}),
 					});
 
 					this.channels.set(channelId, {
@@ -474,12 +502,12 @@ export class SessionManager {
 						hostId,
 						status: "live",
 						clients: new Set([clientId]),
-						shell,
-						...(args.length > 0 && { args }),
-						cwd,
+						shell: resolvedShell,
+						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
+						cwd: resolvedCwd,
 						cols,
 						rows,
-						...(directProcess && { directProcess }),
+						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
 						dynamicTitle: null,
 						processTitle: null,
 						displayTitle: DEFAULT_CHANNEL_NAME,

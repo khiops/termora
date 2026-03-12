@@ -15,7 +15,7 @@
 
 - [x] ✅ Block 1: Data Model + DAL + REST API (shared, hub) (2026-03-12)
 - [x] ✅ Block 2: Agent Shell Discovery (agent, hub) (2026-03-12)
-- [ ] Block 3: Spawn Resolution + Variable Expansion (hub, agent)
+- [x] ✅ Block 3: Spawn Resolution + Variable Expansion (shared, hub, agent) (2026-03-12)
 - [ ] Block 4: Elevation Support (agent, hub)
 - [ ] Block 5: Migration Logic (hub)
 - [ ] Block 6: UI — "+" Dropdown (web)

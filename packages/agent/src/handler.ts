@@ -3,6 +3,7 @@ import {
 	OUTPUT_BATCH_BYTES,
 	OUTPUT_BATCH_MS,
 	PROTOCOL_VERSION,
+	expandVars,
 	sanitizeTitle,
 } from "@nexterm/shared";
 import type {
@@ -140,12 +141,31 @@ export class AgentHandler {
 
 	private handleSpawn(msg: AgentSpawnMessage): void {
 		try {
+			// ── Variable expansion (agent-side, one-pass) ─────────────────────
+			// shell is NOT expanded (must be an exact path).
+			// args, cwd, and env values are expanded with process.env merged
+			// with the spawn-message env as the lookup table.
+			const isWindows = process.platform === "win32";
+			// spawnEnv: process.env is the base, profile env overrides on top.
+			// Filter out undefined values (NodeJS.ProcessEnv allows string | undefined).
+			const processEnvStrings: Record<string, string> = {};
+			for (const [k, v] of Object.entries(process.env)) {
+				if (v !== undefined) processEnvStrings[k] = v;
+			}
+			const spawnEnv: Record<string, string> = { ...processEnvStrings, ...msg.env };
+			const expandedArgs = msg.args?.map((arg) => expandVars(arg, spawnEnv, isWindows));
+			const expandedCwd = expandVars(msg.cwd, spawnEnv, isWindows);
+			const expandedEnv: Record<string, string> = {};
+			for (const [k, v] of Object.entries(msg.env)) {
+				expandedEnv[k] = expandVars(v, spawnEnv, isWindows);
+			}
+
 			const channelId = this.ptyManager.spawn({
 				...(msg.channelId !== undefined && { id: msg.channelId }),
 				shell: msg.shell,
-				...(msg.args !== undefined && msg.args.length > 0 && { args: msg.args }),
-				cwd: msg.cwd,
-				env: msg.env,
+				...(expandedArgs !== undefined && expandedArgs.length > 0 && { args: expandedArgs }),
+				cwd: expandedCwd,
+				env: expandedEnv,
 				cols: msg.cols,
 				rows: msg.rows,
 			});
