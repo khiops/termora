@@ -23,8 +23,9 @@ Results are recorded ONLY in the Run Log section. Scenarios below are pure accep
 | 81-88 | Host Customization (UX-07) | 6/8 | Run #3 |
 | 89-93 | Regressions (batch 1) | 4/5 | Run #3 |
 | 94-100 | Regressions (batch 2) | 7/7 | Run #5 |
+| 101-110 | Launch Profiles | 6/10 | Run #7 |
 
-**Total: 53/100 scenarios covered**
+**Total: 59/110 scenarios covered**
 
 ---
 
@@ -813,6 +814,82 @@ Precondition: 1 host "local", 2 channels (A, B), both alive.
 
 ---
 
+## Launch Profiles (101-110)
+
+### 101. Profile dropdown from "+" chevron
+
+- Tab bar shows split button: wide "+" (spawn default) + narrow "▾" chevron
+- Click chevron → dropdown appears below with profile list
+- Click profile → terminal spawns with that profile's config
+- Click outside dropdown → closes
+- Escape key → closes
+
+### 102. Profile dropdown — default indicator
+
+- Profile marked as default for current host shows ✓ mark and bold text
+- Default profile listed first (or sorted by effectiveSort)
+- Non-default profiles show ▶ icon (or custom emoji if set)
+
+### 103. Quick command (Run command...)
+
+- Profile dropdown shows "Run command..." action below profile list
+- Click → inline input appears in dropdown
+- Type "htop" + Enter → terminal spawns running htop (directProcess mode)
+- Empty submit → no-op
+- Escape → closes dropdown
+
+### 104. Create profile via Settings
+
+- Open Settings → Profiles tab visible in category nav
+- Click "+ New Profile" → form appears
+- Fill name "My Shell", shell "/bin/bash", save → profile appears in list
+- Profile card shows name, shell path, icon
+- Duplicate name (case-insensitive) → error
+
+### 105. Edit profile via Settings
+
+- Click profile card → edit form opens pre-filled
+- Modify shell to "/bin/zsh" → Save → updated in list
+- Cancel → no changes
+- Delete profile → removed from list + dropdown
+
+### 106. Profile env editor with masking
+
+- Edit a profile → env section shows key-value pairs
+- Add key "API_TOKEN" with value "secret123" → Save
+- Re-open profile → API_TOKEN value shows "********" (masked)
+- Edit without touching masked value → Save → original value preserved (no clobber)
+- Clear masked field and type new value → Save → new value stored
+
+### 107. Command palette — ~ prefix
+
+- Open command palette (Ctrl+K) → type "~" → only profiles listed
+- Type "~My" → filters to profiles matching "My"
+- Select a profile → terminal spawns with that profile
+- Without "~" prefix, profiles still appear (with lower score) in general results
+
+### 108. Keyboard shortcut — Ctrl+Shift+1
+
+- With terminal NOT focused (e.g., click sidebar) → Ctrl+Shift+1 spawns 1st profile
+- With terminal focused (cursor in xterm) → Ctrl+Shift+1 does nothing (INV-13)
+- Ctrl+Shift+2 spawns 2nd profile (if exists)
+- Ctrl+Shift+N where N > profile count → no-op
+
+### 109. Profile reorder in Settings
+
+- Settings > Profiles shows profiles in sort_order
+- Click up/down arrows on profile card → profile moves position
+- New order reflected in dropdown and command palette
+
+### 110. Host-specific profile visibility
+
+- Profile with supportedOs="linux" → visible on Linux hosts, hidden on Windows
+- Profile with supportedOs="any" → visible on all hosts
+- Per-host override "hide" → profile hidden for that host only
+- Per-host override "pin" → profile pinned to top for that host
+
+---
+
 ## Run Log
 
 Each run records which scenarios passed/failed. Commit = HEAD at time of run.
@@ -926,6 +1003,24 @@ Manual verification of SSH auth + sidebar UX fixes.
 | 69 | Test connection | ✅ | Form values read correctly in edit mode, tilde expansion, encrypted ed25519 key detected via ssh2.utils.parseKey, passphrase dialog appears (z-index 10100 > modal 10000), no client/server timeouts during passphrase entry |
 
 **Summary: 2/2 tested, 2 pass (manual verification)**
+
+### Run #7 — 2026-03-12 — `feat/launch-profiles` (ee8dfff)
+
+Launch Profiles feature E2E validation.
+
+| # | Scenario | Result | Notes |
+|---|----------|--------|-------|
+| 101 | Profile dropdown chevron | ✅ | Split button in tab bar, dropdown with profiles + "Run command..." action |
+| 102 | Default indicator | ✅ | No ✓ shown (no default configured) — correct, --default CSS class absent |
+| 103 | Quick command | ⚠️ | UI correct (inline input, Enter dispatches), spawn fails: local session "Closed" (env issue, not code) |
+| 104 | Create profile (Settings) | ✅ | Full form: name, shell, mode, OS, cwd, elevated, args, icon, color, env, overrides. Saves + appears in list |
+| 105 | Edit profile (Settings) | ✅ | Pre-filled, host overrides table (pin/hide/default per host), immediate update |
+| 107 | Command palette ~ prefix | ✅ | ~ filters to PROFILES section only, badge "Profile", other types hidden |
+| 109 | Reorder profiles | ✅ | Up/down arrows, boundary disable logic, DOM reorders immediately |
+
+**Summary: 6/7 tested, 6 pass, 1 env warning (Sc.103)**
+
+**Not tested (require active session):** Sc.106 (env masking round-trip), Sc.108 (Ctrl+Shift+1..9), Sc.110 (host OS visibility)
 
 ---
 

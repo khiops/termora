@@ -213,7 +213,7 @@ defineExpose({ defaultProfileId });
 .profile-dropdown {
 	min-width: 220px;
 	max-width: 320px;
-	background: var(--nt-context-menu-bg, var(--nt-panel));
+	background: var(--nt-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 6px;
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
@@ -245,7 +245,7 @@ defineExpose({ defaultProfileId });
 }
 
 .profile-dropdown__item:hover {
-	background: var(--nt-context-menu-hover, var(--nt-bg));
+	background: var(--nt-tab-hover);
 }
 
 .profile-dropdown__item--default {

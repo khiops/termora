@@ -13,6 +13,10 @@
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
 
+- [ ] 🐛 [Hub] restartChannel rejects local hosts: session status "detached" fails `!== "active"` check (line 882) — Priority: M (from E2E Sc.103)
+- [ ] 🐛 [Web] ConfigureCommandDialog: silent failure on restart 503 — no error toast, dialog closes — Priority: M (from E2E Sc.103)
+- [ ] 💡 [Web+Hub] Unified exit overlay for all channel types: Closed shell → Restart/Close, directProcess exit → Restart/Configure/Close (harmonize "Closed" badge + "process exited" overlay) — Priority: M
+
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
 
@@ -26,6 +30,7 @@
 - [ ] 💡 [Web] Collapsible banner with shortText — Priority: L (from UX-07 /adversarial C-02)
 - [ ] 💡 [Hub] Upload security: apply MIME/quota/image-bomb to wallpapers too (currently extension-only) — Priority: L
 - [ ] 💡 [Hub] Color field validation on host-groups API (hex regex or allowlist) — Priority: L (from /review F-004)
+- [ ] 🔧 [Web] Design system: define missing --nt-* vars (bg-raised, input-bg, hover, danger, fg-muted, bg-surface) in base.css, migrate phantom refs — Priority: L (from E2E audit)
 - [ ] 🔧 [Hub] Remove dead DAL methods renameHostGroup/deleteHostGroup/listHostGroups (legacy string-based) — Priority: L (from /review F-005)
 - [ ] 💡 [Web] Env key warning for dangerous keys (PATH, LD_PRELOAD, LD_LIBRARY_PATH) in profile editor — Priority: L (from /adversarial C-08)
 - [ ] 🔧 [Shared] Rename `directProcess` → `mode` in AgentSpawnMessage (breaking change, next protocol version) — Priority: L (from /adversarial C-20)
