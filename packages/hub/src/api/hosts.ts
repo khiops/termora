@@ -25,6 +25,8 @@ interface CreateHostBody {
 	keep_alive_seconds?: number;
 	history_retention_days?: number;
 	profile_json?: string;
+	elevation_method?: "sudo" | "doas" | "pkexec" | "gsudo" | "custom" | null;
+	custom_command?: string | null;
 }
 
 interface UpdateHostBody {
@@ -47,6 +49,8 @@ interface UpdateHostBody {
 	keep_alive_seconds?: number;
 	history_retention_days?: number;
 	profile_json?: string;
+	elevation_method?: "sudo" | "doas" | "pkexec" | "gsudo" | "custom" | null;
+	custom_command?: string | null;
 }
 
 function validateCreateHost(body: CreateHostBody): string | null {
@@ -88,6 +92,14 @@ function validateCreateHost(body: CreateHostBody): string | null {
 	}
 	if (body.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
 		return "color must be in hex format #rrggbb";
+	}
+	const validElevationMethods = ["sudo", "doas", "pkexec", "gsudo", "custom"];
+	if (
+		body.elevation_method !== undefined &&
+		body.elevation_method !== null &&
+		!validElevationMethods.includes(body.elevation_method)
+	) {
+		return "elevation_method must be one of: sudo, doas, pkexec, gsudo, custom";
 	}
 	return null;
 }
@@ -212,6 +224,8 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				historyRetentionDays: body.history_retention_days,
 			}),
 			...(body.profile_json !== undefined && { profileJson: body.profile_json }),
+			...(body.elevation_method !== undefined && { elevationMethod: body.elevation_method }),
+			...(body.custom_command !== undefined && { customCommand: body.custom_command }),
 		});
 
 		return reply.code(201).send(toSnakeCase(host));
@@ -347,6 +361,22 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			if (body.history_retention_days !== undefined)
 				updateInput.historyRetentionDays = body.history_retention_days;
 			if (body.profile_json !== undefined) updateInput.profileJson = body.profile_json;
+			if (body.elevation_method !== undefined) {
+				const validElevationMethods = ["sudo", "doas", "pkexec", "gsudo", "custom"];
+				if (
+					body.elevation_method !== null &&
+					!validElevationMethods.includes(body.elevation_method)
+				) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "elevation_method must be one of: sudo, doas, pkexec, gsudo, custom",
+						},
+					});
+				}
+				updateInput.elevationMethod = body.elevation_method;
+			}
+			if (body.custom_command !== undefined) updateInput.customCommand = body.custom_command;
 
 			const updated = metaDal.updateHost(request.params.id, updateInput);
 

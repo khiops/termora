@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_APPEARANCE, generateId } from "@nexterm/shared";
+import type { JsonMap } from "@iarna/toml";
+import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG, generateId } from "@nexterm/shared";
 import { DEFAULT_PROFILE, deepMerge } from "@nexterm/shared";
-import type { AppearanceConfig, CascadeResponse } from "@nexterm/shared";
+import type { AppearanceConfig, CascadeResponse, ElevationMethod } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +18,7 @@ import {
 	DEFAULT_TITLE_CONFIG,
 	DEFAULT_UI_CONFIG,
 	extractAppearanceConfig,
+	extractElevationConfig,
 	extractUiConfig,
 	loadGcConfig,
 	loadUiConfig,
@@ -1767,5 +1769,220 @@ describe("Auth enforcement on cascade/config endpoints", () => {
 			headers: { authorization: "Bearer abc123" },
 		});
 		expect(res.statusCode).toBe(200);
+	});
+});
+
+// ─── extractElevationConfig unit tests ───────────────────────────────────────
+
+describe("extractElevationConfig", () => {
+	it("returns empty object when no [elevation] section", () => {
+		const parsed = {} as import("@iarna/toml").JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result).toEqual({});
+	});
+
+	it("returns empty object when [elevation] is not an object", () => {
+		const parsed = { elevation: "invalid" } as unknown as import("@iarna/toml").JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result).toEqual({});
+	});
+
+	it("parses method_linux with valid value", () => {
+		const parsed = { elevation: { method_linux: "doas" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodLinux).toBe("doas");
+	});
+
+	it("rejects method_linux with invalid value", () => {
+		const parsed = { elevation: { method_linux: "badvalue" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodLinux).toBeUndefined();
+	});
+
+	it("parses method_darwin with valid value", () => {
+		const parsed = { elevation: { method_darwin: "pkexec" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodDarwin).toBe("pkexec");
+	});
+
+	it("parses method_windows with valid value", () => {
+		const parsed = { elevation: { method_windows: "gsudo" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodWindows).toBe("gsudo");
+	});
+
+	it("rejects method_windows with linux-only value", () => {
+		const parsed = { elevation: { method_windows: "sudo" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodWindows).toBeUndefined();
+	});
+
+	it("parses custom_command", () => {
+		const parsed = {
+			elevation: { custom_command: "/usr/local/bin/myelevate" },
+		} as unknown as import("@iarna/toml").JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.customCommand).toBe("/usr/local/bin/myelevate");
+	});
+
+	it("rejects empty custom_command", () => {
+		const parsed = { elevation: { custom_command: "" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.customCommand).toBeUndefined();
+	});
+
+	it("parses all fields together", () => {
+		const parsed = {
+			elevation: {
+				method_linux: "doas",
+				method_darwin: "sudo",
+				method_windows: "custom",
+				custom_command: "my-elev",
+			},
+		} as unknown as import("@iarna/toml").JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodLinux).toBe("doas");
+		expect(result.methodDarwin).toBe("sudo");
+		expect(result.methodWindows).toBe("custom");
+		expect(result.customCommand).toBe("my-elev");
+	});
+});
+
+// ─── ConfigResolver.elevationConfig + resolve methods ────────────────────────
+
+describe("ConfigResolver.elevationConfig", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns DEFAULT_ELEVATION_CONFIG when no config.toml", () => {
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+		expect(resolver.elevationConfig).toEqual(DEFAULT_ELEVATION_CONFIG);
+	});
+
+	it("loads elevation config from config.toml", () => {
+		const dir = join(tmpdir(), `nexterm-elev-test-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[elevation]\nmethod_linux = "doas"\n');
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.elevationConfig.methodLinux).toBe("doas");
+		// Defaults preserved for non-overridden fields
+		expect(resolver.elevationConfig.methodDarwin).toBe("sudo");
+		expect(resolver.elevationConfig.methodWindows).toBe("gsudo");
+	});
+
+	it("loads custom_command from config.toml", () => {
+		const dir = join(tmpdir(), `nexterm-elev-custom-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[elevation]\nmethod_linux = "custom"\ncustom_command = "/usr/local/bin/myelevate"\n',
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		expect(resolver.elevationConfig.methodLinux).toBe("custom");
+		expect(resolver.elevationConfig.customCommand).toBe("/usr/local/bin/myelevate");
+	});
+});
+
+// ─── ConfigResolver.resolveElevationMethod ───────────────────────────────────
+
+describe("ConfigResolver.resolveElevationMethod", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+	let resolver: ConfigResolver;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+		resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns host-level method when explicitly set", () => {
+		const method = resolver.resolveElevationMethod("doas" as ElevationMethod);
+		expect(method).toBe("doas");
+	});
+
+	it("returns null-bypassed host value (null → falls back to global)", () => {
+		// null means "not set at host level" → use global default
+		const method = resolver.resolveElevationMethod(null);
+		// On Linux (CI), default is "sudo"
+		expect(method).toBeDefined();
+	});
+
+	it("returns undefined-bypassed (undefined → falls back to global)", () => {
+		const method = resolver.resolveElevationMethod(undefined);
+		expect(method).toBeDefined();
+	});
+
+	it("global default is platform-dependent — falls through to non-null result", () => {
+		const method = resolver.resolveElevationMethod();
+		expect(["sudo", "doas", "pkexec", "gsudo", "custom"]).toContain(method);
+	});
+});
+
+// ─── ConfigResolver.resolveCustomCommand ─────────────────────────────────────
+
+describe("ConfigResolver.resolveCustomCommand", () => {
+	let dbs: DatabaseManager;
+	let metaDal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		metaDal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("returns host-level custom command when set", () => {
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+		const cmd = resolver.resolveCustomCommand("/host/custom/cmd");
+		expect(cmd).toBe("/host/custom/cmd");
+	});
+
+	it("falls back to global custom_command when host not set", () => {
+		const dir = join(tmpdir(), `nexterm-custom-cmd-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "config.toml"), '[elevation]\ncustom_command = "/global/cmd"\n');
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		const cmd = resolver.resolveCustomCommand(null);
+		expect(cmd).toBe("/global/cmd");
+	});
+
+	it("returns undefined when neither host nor global custom command set", () => {
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+		const cmd = resolver.resolveCustomCommand(undefined);
+		expect(cmd).toBeUndefined();
+	});
+
+	it("returns undefined when host custom_command is empty string", () => {
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(join(tmpdir(), "nonexistent-dir"));
+		const cmd = resolver.resolveCustomCommand("");
+		// empty string → falls back to global (which is also undefined by default)
+		expect(cmd).toBeUndefined();
 	});
 });

@@ -19,10 +19,12 @@ import {
 	UI_CONFIG_SECTIONS,
 	deepMerge,
 } from "@nexterm/shared";
-import { DEFAULT_APPEARANCE } from "@nexterm/shared";
+import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@nexterm/shared";
 import { DEFAULT_LAYOUT_CONFIG } from "@nexterm/shared";
 import type {
 	AppearanceConfig,
+	ElevationConfig,
+	ElevationMethod,
 	CascadeResponse,
 	ChannelsConfig,
 	LayoutConfig,
@@ -416,6 +418,33 @@ export function extractAppearanceConfig(parsed: TOML.JsonMap): AppearanceConfig 
 	return config;
 }
 
+/** Extract ElevationConfig from a parsed TOML map's [elevation] section. */
+export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationConfig> {
+	const result: Partial<ElevationConfig> = {};
+
+	const section = parsed.elevation;
+	if (section == null || typeof section !== "object") return result;
+	const raw = section as Record<string, unknown>;
+
+	const linuxMethods = ["sudo", "doas", "pkexec", "custom"] as const;
+	const windowsMethods = ["gsudo", "custom"] as const;
+
+	if (typeof raw.method_linux === "string" && (linuxMethods as readonly string[]).includes(raw.method_linux)) {
+		result.methodLinux = raw.method_linux as ElevationMethod;
+	}
+	if (typeof raw.method_darwin === "string" && (linuxMethods as readonly string[]).includes(raw.method_darwin)) {
+		result.methodDarwin = raw.method_darwin as ElevationMethod;
+	}
+	if (typeof raw.method_windows === "string" && (windowsMethods as readonly string[]).includes(raw.method_windows)) {
+		result.methodWindows = raw.method_windows as ElevationMethod;
+	}
+	if (typeof raw.custom_command === "string" && raw.custom_command.length > 0) {
+		result.customCommand = raw.custom_command;
+	}
+
+	return result;
+}
+
 // ─── ConfigResolver ──────────────────────────────────────────────────────────
 
 export class ConfigResolver {
@@ -424,6 +453,7 @@ export class ConfigResolver {
 	private _gcConfig: GcConfig = { ...DEFAULT_GC_CONFIG };
 	private _uiConfig: UiConfig = { ...DEFAULT_UI_CONFIG };
 	private _appearance: AppearanceConfig = { ...DEFAULT_APPEARANCE };
+	private _elevation: ElevationConfig = { ...DEFAULT_ELEVATION_CONFIG };
 	private _configDir: string | null = null;
 
 	constructor(private metaDal: MetaDAL) {}
@@ -441,6 +471,11 @@ export class ConfigResolver {
 	/** Returns the resolved appearance configuration (defaults merged with [appearance] from config.toml). */
 	get appearance(): AppearanceConfig {
 		return this._appearance;
+	}
+
+	/** Returns the resolved elevation configuration (defaults merged with [elevation] from config.toml). */
+	get elevationConfig(): ElevationConfig {
+		return this._elevation;
 	}
 
 	/**
@@ -486,6 +521,10 @@ export class ConfigResolver {
 
 		// ── [appearance] section ────────────────────────────────────────────
 		this._appearance = extractAppearanceConfig(parsed);
+
+		// ── [elevation] section ────────────────────────────────────────────
+		const elevationOverrides = extractElevationConfig(parsed);
+		this._elevation = { ...DEFAULT_ELEVATION_CONFIG, ...elevationOverrides };
 	}
 
 	/** Returns the Layer 2 terminal overrides from config.toml. */
@@ -621,6 +660,26 @@ export class ConfigResolver {
 			throw new Error(`Unknown UI section: ${section}`);
 		}
 		await this.saveGlobalKey(section, key, value);
+	}
+
+	/**
+	 * Resolve the elevation method to use for a spawn.
+	 * Host-level setting wins; falls back to platform-appropriate global default.
+	 */
+	resolveElevationMethod(hostElevationMethod?: ElevationMethod | null): ElevationMethod {
+		if (hostElevationMethod != null) return hostElevationMethod;
+		if (process.platform === "win32") return this._elevation.methodWindows;
+		if (process.platform === "darwin") return this._elevation.methodDarwin;
+		return this._elevation.methodLinux;
+	}
+
+	/**
+	 * Resolve the custom elevation command to use.
+	 * Host-level command wins; falls back to global config.
+	 */
+	resolveCustomCommand(hostCustomCommand?: string | null): string | undefined {
+		if (hostCustomCommand != null && hostCustomCommand.length > 0) return hostCustomCommand;
+		return this._elevation.customCommand;
 	}
 
 	/**

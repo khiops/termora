@@ -251,6 +251,13 @@ export const useSettingsStore = defineStore("settings", () => {
 								headers,
 								body: JSON.stringify(payload),
 							});
+						} else if (section === "elevation") {
+							// Elevation settings route to their own endpoint (flat key/value)
+							await fetch("/api/config/elevation", {
+								method: "PUT",
+								headers,
+								body: JSON.stringify({ [key]: value }),
+							});
 						} else {
 							// UI sections (tabs, panes, search, startup, title)
 							// key may be "tabs.closeButton" → section "tabs", sub-key "closeButton"
@@ -302,7 +309,7 @@ export const useSettingsStore = defineStore("settings", () => {
 					const configStore = useConfigStore();
 					if (scope === "global" && section === "terminal") {
 						await configStore.loadProfile();
-					} else if (scope === "global" && section !== "appearance") {
+					} else if (scope === "global" && section !== "appearance" && section !== "elevation") {
 						await configStore.loadUiConfig();
 					}
 				} catch (err) {

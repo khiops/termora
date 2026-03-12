@@ -2,6 +2,7 @@ import type {
 	Channel,
 	ChannelGroup,
 	ChannelStatus,
+	ElevationMethod,
 	Host,
 	HostGroup,
 	HostLaunchProfileOverride,
@@ -36,6 +37,8 @@ export interface CreateHostInput {
 	sshUser?: string | null;
 	keepAliveSeconds?: number;
 	historyRetentionDays?: number;
+	elevationMethod?: ElevationMethod | null;
+	customCommand?: string | null;
 }
 
 export interface CreateSessionInput {
@@ -83,6 +86,8 @@ interface HostRow {
 	history_retention_days: number;
 	discovered_shells: string | null;
 	discovered_shells_at: string | null;
+	elevation_method: string | null;
+	custom_command: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -172,6 +177,8 @@ function rowToHost(row: HostRow): Host {
 		}
 	}
 	if (row.discovered_shells_at != null) host.discoveredShellsAt = row.discovered_shells_at;
+	if (row.elevation_method != null) host.elevationMethod = row.elevation_method as ElevationMethod;
+	if (row.custom_command != null) host.customCommand = row.custom_command;
 	return host;
 }
 
@@ -339,12 +346,14 @@ export class MetaDAL {
 					default_shell, default_cwd,
 					host_group, host_group_id, sort_order, ssh_config_host, ssh_user,
 					keep_alive_seconds, history_retention_days,
+					elevation_method, custom_command,
 					created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?,
 					?, ?,
 					?, ?, ?, ?, ?,
+					?, ?,
 					?, ?,
 					?, ?
 				)`,
@@ -371,6 +380,8 @@ export class MetaDAL {
 				input.sshUser ?? null,
 				input.keepAliveSeconds ?? 60,
 				input.historyRetentionDays ?? 30,
+				input.elevationMethod ?? null,
+				input.customCommand ?? null,
 				now,
 				now,
 			);
@@ -426,6 +437,8 @@ export class MetaDAL {
 			sshUser: "ssh_user",
 			keepAliveSeconds: "keep_alive_seconds",
 			historyRetentionDays: "history_retention_days",
+			elevationMethod: "elevation_method",
+			customCommand: "custom_command",
 		};
 
 		const setClauses: string[] = ["updated_at = ?"];

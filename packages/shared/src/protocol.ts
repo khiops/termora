@@ -53,6 +53,8 @@ export interface AgentSpawnMessage {
 	directProcess?: boolean;
 	elevated?: boolean;
 	elevationSecret?: string;
+	elevationMethod?: string;
+	customCommand?: string;
 }
 
 /** Agent → Hub: PTY spawned successfully */

@@ -11,6 +11,7 @@ export type IconType = "auto" | "emoji" | "image";
 export type TrustPolicy = "apply" | "ask" | "ignore";
 export type LaunchProfileMode = "shell" | "process";
 export type SupportedOs = "linux" | "darwin" | "windows" | "any";
+export type ElevationMethod = "sudo" | "doas" | "pkexec" | "gsudo" | "custom";
 
 export interface Host {
 	id: string; // ULID
@@ -27,6 +28,8 @@ export interface Host {
 	trustRemoteHints: TrustPolicy;
 	defaultShell?: string;
 	defaultCwd?: string;
+	elevationMethod?: ElevationMethod | null;
+	customCommand?: string | null;
 	hostGroup?: string | null;
 	hostGroupId?: string | null;
 	sortOrder: number;

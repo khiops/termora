@@ -29,8 +29,20 @@ vi.mock("./local-agent.js", () => {
 		start = vi.fn().mockResolvedValue(undefined);
 		send = vi.fn((msg: ProtocolMessage) => {
 			if (msg.type === "SPAWN") {
-				const spawnMsg = msg as unknown as Record<string, string>;
-				const channelId = spawnMsg.channelId ?? nextLocalChannelId();
+				const spawnMsg = msg as unknown as Record<string, unknown>;
+				const channelId = (spawnMsg.channelId as string | undefined) ?? nextLocalChannelId();
+				// Two-step elevation: if elevated=true but no elevationSecret, return SPAWN_ERR
+				if (spawnMsg.elevated === true && !spawnMsg.elevationSecret) {
+					setImmediate(() => {
+						this.emit("message", {
+							type: "SPAWN_ERR",
+							requestId: spawnMsg.requestId,
+							code: "ELEVATION_PASSWORD_REQUIRED",
+							message: "Elevation password required",
+						});
+					});
+					return;
+				}
 				setImmediate(() => {
 					this.emit("message", {
 						type: "SPAWN_OK",

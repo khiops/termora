@@ -289,6 +289,59 @@ export const settingsSchema: SettingDefinition[] = [
 		scopes: ["global"],
 		description: "Show welcome tab when connecting to a host",
 	},
+
+	// ─── Elevation ────────────────────────────────────────
+	{
+		key: "methodLinux",
+		label: "Linux Method",
+		type: "select",
+		category: "elevation",
+		section: "elevation",
+		scopes: ["global"],
+		options: [
+			{ label: "sudo", value: "sudo" },
+			{ label: "doas", value: "doas" },
+			{ label: "pkexec", value: "pkexec" },
+			{ label: "Custom", value: "custom" },
+		],
+		description: "Elevation method for Linux hosts",
+	},
+	{
+		key: "methodDarwin",
+		label: "macOS Method",
+		type: "select",
+		category: "elevation",
+		section: "elevation",
+		scopes: ["global"],
+		options: [
+			{ label: "sudo", value: "sudo" },
+			{ label: "doas", value: "doas" },
+			{ label: "Custom", value: "custom" },
+		],
+		description: "Elevation method for macOS hosts",
+	},
+	{
+		key: "methodWindows",
+		label: "Windows Method",
+		type: "select",
+		category: "elevation",
+		section: "elevation",
+		scopes: ["global"],
+		options: [
+			{ label: "gsudo", value: "gsudo" },
+			{ label: "Custom", value: "custom" },
+		],
+		description: "Elevation method for Windows hosts",
+	},
+	{
+		key: "customCommand",
+		label: "Custom Command",
+		type: "text",
+		category: "elevation",
+		section: "elevation",
+		scopes: ["global"],
+		description: "Custom elevation command (used when method is 'Custom')",
+	},
 ];
 
 /** Get schema entries for a specific category and scope */

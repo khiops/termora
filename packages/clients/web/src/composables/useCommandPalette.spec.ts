@@ -44,7 +44,7 @@ vi.mock("./useLayout.js", () => ({
  */
 vi.mock("../stores/session.js", () => ({
 	useSessionStore: () => ({
-		wsClient: { send: vi.fn() },
+		wsClient: { send: vi.fn(), on: vi.fn().mockReturnValue(vi.fn()) },
 	}),
 }));
 

@@ -16,7 +16,7 @@ import type {
 	ResizeMessage,
 	SnapshotReqMessage,
 } from "@nexterm/shared";
-import { buildAskpassEnv, wrapWithElevation } from "./elevation.js";
+import { buildAskpassEnv, checkPasswordless, wrapWithElevation } from "./elevation.js";
 import { startProcessTitlePolling } from "./process-title.js";
 import { PtyManager } from "./pty.js";
 import { detectAvailableShells, getDefaultShell } from "./shell-detection.js";
@@ -171,17 +171,50 @@ export class AgentHandler {
 			let askpassCleanup: (() => void) | null = null;
 
 			if (msg.elevated) {
-				const askpass = buildAskpassEnv(msg.elevationSecret ?? "", process.platform);
-				ptyEnv = { ...ptyEnv, ...askpass.env };
-				askpassCleanup = askpass.cleanup;
+				const method = msg.elevationMethod ?? (process.platform === "win32" ? "gsudo" : "sudo");
 
-				const wrapped = wrapWithElevation(msg.shell, expandedArgs ?? [], process.platform);
-				ptyShell = wrapped.shell;
-				ptyArgs = wrapped.args;
-
-				// Zero the secret from memory immediately after it has been consumed.
 				if (msg.elevationSecret) {
+					// Secret provided → askpass mode
+					const askpass = buildAskpassEnv(msg.elevationSecret, method, process.platform);
+					ptyEnv = { ...ptyEnv, ...askpass.env };
+					askpassCleanup = askpass.cleanup;
+
+					const wrapped = wrapWithElevation(
+						msg.shell,
+						expandedArgs ?? [],
+						method,
+						"askpass",
+						process.platform,
+						msg.customCommand,
+					);
+					ptyShell = wrapped.shell;
+					ptyArgs = wrapped.args;
+
+					// Zero the secret from memory immediately after it has been consumed.
 					msg.elevationSecret = "";
+				} else {
+					// No secret → try passwordless
+					if (checkPasswordless(method, process.platform)) {
+						const wrapped = wrapWithElevation(
+							msg.shell,
+							expandedArgs ?? [],
+							method,
+							"passwordless",
+							process.platform,
+							msg.customCommand,
+						);
+						ptyShell = wrapped.shell;
+						ptyArgs = wrapped.args;
+					} else {
+						// Cannot proceed without a password — tell hub to prompt.
+						this.sendMessage({
+							type: "SPAWN_ERR",
+							requestId: msg.requestId,
+							code: "ELEVATION_PASSWORD_REQUIRED",
+							message: `${method} requires a password`,
+						});
+						return;
+					}
 				}
 			}
 

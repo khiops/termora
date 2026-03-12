@@ -31,6 +31,7 @@ const ALL_CATEGORIES: CategoryDef[] = [
 	{ id: "panes", label: "Panes", scopes: ["global"] },
 	{ id: "search", label: "Search", scopes: ["global"] },
 	{ id: "startup", label: "Startup", scopes: ["global"] },
+	{ id: "elevation", label: "Elevation", scopes: ["global"] },
 	{ id: "profiles", label: "Profiles", scopes: ["global"] },
 	{ id: "keybindings", label: "Keybindings", scopes: ["global"] },
 ];

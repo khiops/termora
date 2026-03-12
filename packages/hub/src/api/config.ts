@@ -1,5 +1,6 @@
 import {
 	DEFAULT_PROFILE,
+	ELEVATION_CONFIG_KEYS,
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	UI_SECTION_KEYS,
@@ -278,6 +279,69 @@ export function registerConfigRoutes(
 		}
 		const profileRaw = metaDal.getChannelProfile(id);
 		return { profile: profileRaw ? JSON.parse(profileRaw) : {} };
+	});
+
+	// GET /api/config/elevation — read current elevation config
+	server.get("/api/config/elevation", async () => {
+		return configResolver.elevationConfig;
+	});
+
+	// PUT /api/config/elevation — write elevation keys to config.toml
+	server.put("/api/config/elevation", async (request, reply) => {
+		const body = request.body as Record<string, unknown> | null;
+		if (!body || typeof body !== "object") {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: "body must be an object" },
+			});
+		}
+
+		for (const key of Object.keys(body)) {
+			if (!(ELEVATION_CONFIG_KEYS as readonly string[]).includes(key)) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: `Unknown elevation key: ${key}`,
+					},
+				});
+			}
+		}
+
+		const linuxDarwinMethods = ["sudo", "doas", "pkexec", "custom"];
+		const windowsMethods = ["gsudo", "custom"];
+
+		for (const [key, value] of Object.entries(body)) {
+			if (key === "methodLinux" || key === "methodDarwin") {
+				if (typeof value !== "string" || !linuxDarwinMethods.includes(value)) {
+					return reply.code(400).send({
+						error: {
+							code: "INVALID_VALUE",
+							message: `Invalid value for "${key}": must be one of ${linuxDarwinMethods.join(", ")}`,
+						},
+					});
+				}
+			} else if (key === "methodWindows") {
+				if (typeof value !== "string" || !windowsMethods.includes(value)) {
+					return reply.code(400).send({
+						error: {
+							code: "INVALID_VALUE",
+							message: `Invalid value for "methodWindows": must be one of ${windowsMethods.join(", ")}`,
+						},
+					});
+				}
+			} else if (key === "customCommand") {
+				if (typeof value !== "string" || value.length === 0) {
+					return reply.code(400).send({
+						error: {
+							code: "INVALID_VALUE",
+							message: `Invalid value for "customCommand": must be a non-empty string`,
+						},
+					});
+				}
+			}
+			await configResolver.saveGlobalKey("elevation", key, value);
+		}
+
+		return { ok: true };
 	});
 
 	// PATCH /api/channels/:id/profile — update channel Layer 4 profile

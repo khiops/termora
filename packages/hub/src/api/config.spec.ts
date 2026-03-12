@@ -339,3 +339,109 @@ describe("PUT /api/config/ui — broadcastDisplayTitles integration", () => {
 		expect(res.statusCode).toBe(200);
 	});
 });
+
+// ─── GET /api/config/elevation ────────────────────────────────────────────────
+
+describe("GET /api/config/elevation", () => {
+	it("returns elevation config with expected shape", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/config/elevation",
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ methodLinux: string; methodDarwin: string; methodWindows: string }>();
+		// Verify shape — specific values depend on the real config.toml on disk
+		const linuxDarwinValid = ["sudo", "doas", "pkexec", "custom"];
+		const windowsValid = ["gsudo", "custom"];
+		expect(linuxDarwinValid).toContain(body.methodLinux);
+		expect(linuxDarwinValid).toContain(body.methodDarwin);
+		expect(windowsValid).toContain(body.methodWindows);
+	});
+});
+
+// ─── PUT /api/config/elevation ────────────────────────────────────────────────
+
+describe("PUT /api/config/elevation", () => {
+	it("accepts valid methodLinux value", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { methodLinux: "doas" },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ ok: boolean }>();
+		expect(body.ok).toBe(true);
+	});
+
+	it("rejects unknown elevation key", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { unknownKey: "value" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("rejects invalid methodLinux value", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { methodLinux: "runas" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_VALUE");
+	});
+
+	it("rejects invalid methodWindows value (sudo is linux-only)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { methodWindows: "sudo" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_VALUE");
+	});
+
+	it("accepts valid methodWindows value", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { methodWindows: "custom" },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("accepts non-empty customCommand", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { customCommand: "/usr/local/bin/myelev" },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("rejects empty customCommand", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { customCommand: "" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_VALUE");
+	});
+
+	it("rejects non-object body", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: "not-an-object",
+			headers: { "content-type": "text/plain" },
+		});
+		expect(res.statusCode).toBe(400);
+	});
+});

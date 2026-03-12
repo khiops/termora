@@ -306,6 +306,26 @@
 									placeholder="/bin/bash"
 								/>
 							</div>
+							<div class="field">
+								<label class="field-label">Elevation Method</label>
+								<select v-model="form.elevationMethod" class="field-select">
+									<option value="">Default (global setting)</option>
+									<option value="sudo">sudo</option>
+									<option value="doas">doas</option>
+									<option value="pkexec">pkexec</option>
+									<option value="gsudo">gsudo</option>
+									<option value="custom">Custom</option>
+								</select>
+							</div>
+							<div v-if="form.elevationMethod === 'custom'" class="field">
+								<label class="field-label">Custom Elevation Command</label>
+								<input
+									v-model="form.customCommand"
+									type="text"
+									class="field-input"
+									placeholder="e.g., /usr/local/bin/my-elevate"
+								/>
+							</div>
 							<div class="form-row">
 								<div class="field flex-1">
 									<label class="field-label">
