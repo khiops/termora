@@ -16,6 +16,7 @@ import type {
 	ResizeMessage,
 	SnapshotReqMessage,
 } from "@nexterm/shared";
+import { buildAskpassEnv, wrapWithElevation } from "./elevation.js";
 import { startProcessTitlePolling } from "./process-title.js";
 import { PtyManager } from "./pty.js";
 import { detectAvailableShells, getDefaultShell } from "./shell-detection.js";
@@ -160,15 +161,47 @@ export class AgentHandler {
 				expandedEnv[k] = expandVars(v, spawnEnv, isWindows);
 			}
 
+			// ── Elevation ─────────────────────────────────────────────────
+			// If elevated=true, wrap the shell/args with sudo (Linux/macOS) or
+			// gsudo (Windows) and inject the SUDO_ASKPASS env variable.
+			// elevationSecret is zeroed immediately after use — never log it.
+			let ptyShell = msg.shell;
+			let ptyArgs = expandedArgs;
+			let ptyEnv = expandedEnv;
+			let askpassCleanup: (() => void) | null = null;
+
+			if (msg.elevated) {
+				const askpass = buildAskpassEnv(msg.elevationSecret ?? "", process.platform);
+				ptyEnv = { ...ptyEnv, ...askpass.env };
+				askpassCleanup = askpass.cleanup;
+
+				const wrapped = wrapWithElevation(msg.shell, expandedArgs ?? [], process.platform);
+				ptyShell = wrapped.shell;
+				ptyArgs = wrapped.args;
+
+				// Zero the secret from memory immediately after it has been consumed.
+				if (msg.elevationSecret) {
+					msg.elevationSecret = "";
+				}
+			}
+
 			const channelId = this.ptyManager.spawn({
 				...(msg.channelId !== undefined && { id: msg.channelId }),
-				shell: msg.shell,
-				...(expandedArgs !== undefined && expandedArgs.length > 0 && { args: expandedArgs }),
+				shell: ptyShell,
+				...(ptyArgs !== undefined && ptyArgs.length > 0 && { args: ptyArgs }),
 				cwd: expandedCwd,
-				env: expandedEnv,
+				env: ptyEnv,
 				cols: msg.cols,
 				rows: msg.rows,
 			});
+
+			// Remove the ASKPASS temp script ~1 s after spawn so sudo has time to read it.
+			if (askpassCleanup !== null) {
+				const cleanup = askpassCleanup;
+				setTimeout(() => {
+					cleanup();
+				}, 1000);
+			}
 
 			this.setupOutputBatching(channelId);
 			this.setupTitleChangeHandler(channelId);

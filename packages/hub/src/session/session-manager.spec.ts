@@ -2598,3 +2598,215 @@ describe("SessionManager — broadcastDisplayTitles", () => {
 		expect(msg?.displayTitle).toBe("zsh — ~/projects");
 	});
 });
+
+// ─── Elevation support ────────────────────────────────────────────────────────
+
+describe("SessionManager — elevation support", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	/** Access private agentCapabilities map for test setup. */
+	function setAgentCapabilities(hostId: string, caps: string[]): void {
+		(
+			sm as unknown as {
+				agentCapabilities: Map<string, string[]>;
+			}
+		).agentCapabilities.set(hostId, caps);
+	}
+
+	/** Access private elevationCache map for test inspection/setup. */
+	function getElevationCache(): Map<string, { secret: string; expiresAt: number }> {
+		return (
+			sm as unknown as {
+				elevationCache: Map<string, { secret: string; expiresAt: number }>;
+			}
+		).elevationCache;
+	}
+
+	/**
+	 * Build a WsClient that automatically responds to AUTH_PROMPT messages.
+	 * When the client receives an AUTH_PROMPT, it calls handleAuthPromptResponse
+	 * with `responseSecret` on the next microtask.
+	 */
+	function makeAutoRespondClient(
+		id: string,
+		received: ProtocolMessage[],
+		responseSecret: string | null,
+	): WsClient {
+		return {
+			id,
+			send: (msg: ProtocolMessage) => {
+				received.push(msg);
+				if (msg.type === "AUTH_PROMPT") {
+					const promptMsg = msg as AuthPromptMessage;
+					// Respond on next microtask so the pending entry is registered first
+					Promise.resolve().then(() => {
+						sm.handleAuthPromptResponse(id, promptMsg.hostId, responseSecret);
+					});
+				}
+			},
+			attachedChannels: new Set(),
+		};
+	}
+
+	it("SC-19: SSH host with elevated=true: stripped — spawn proceeds without elevation", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "windows-ssh",
+			sshHost: "user@192.168.1.1",
+			sshAuth: "password",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-sc19", received);
+		sm.addClient(client);
+
+		// Perform the spawn — SSH agent mock auto-resolves SPAWN_OK.
+		// Since elevation is stripped (SSH host), no AUTH_PROMPT is sent.
+		await sm.handleSpawn("c-sc19", { type: "SPAWN", hostId: host.id, elevated: true });
+
+		// No AUTH_PROMPT should have been sent (elevation was stripped for SSH hosts)
+		const authPrompts = received.filter((m) => m.type === "AUTH_PROMPT");
+		expect(authPrompts).toHaveLength(0);
+
+		// A channel should have been created (spawn succeeded without elevation)
+		const sessions = dal.listSessions(host.id);
+		expect(sessions.length).toBeGreaterThan(0);
+		const channels = dal.listChannels(sessions[0]?.id);
+		expect(channels.length).toBeGreaterThan(0);
+
+		// The agent should have received a SPAWN without elevated flag
+		const spawnMsg = mockSshAgentInstance?.send.mock.calls.find(
+			(c) => (c[0] as ProtocolMessage).type === "SPAWN",
+		)?.[0] as import("@nexterm/shared").AgentSpawnMessage | undefined;
+		expect(spawnMsg?.elevated).toBeFalsy();
+		expect(spawnMsg?.elevationSecret).toBeUndefined();
+	});
+
+	it("SC-19: local host with elevated=true but agent lacks launch-profiles: stripped", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-sc19b", received);
+		sm.addClient(client);
+
+		// Agent does NOT have launch-profiles capability (pre-set, HELLO not emitted by mock)
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot"]);
+
+		await sm.handleSpawn("c-sc19b", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// No AUTH_PROMPT sent (elevation stripped due to missing capability)
+		const authPrompts = received.filter((m) => m.type === "AUTH_PROMPT");
+		expect(authPrompts).toHaveLength(0);
+	});
+
+	it("SC-20: first spawn with elevated=true sends AUTH_PROMPT; second spawn uses cache", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Use auto-respond client: first AUTH_PROMPT gets "hunter2" automatically.
+		const client = makeAutoRespondClient("c-sc20", received, "hunter2");
+		sm.addClient(client);
+
+		// Agent has launch-profiles capability
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// ── First spawn: AUTH_PROMPT sent → auto-responded → spawn completes ─
+		await sm.handleSpawn("c-sc20", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// AUTH_PROMPT should have been sent and auto-responded
+		const prompts = received.filter((m) => m.type === "AUTH_PROMPT") as AuthPromptMessage[];
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0]?.promptType).toBe("elevation");
+
+		// Elevation cache should now be set
+		const cache = getElevationCache();
+		expect(cache.has(localHostId)).toBe(true);
+		expect(cache.get(localHostId)?.secret).toBe("hunter2");
+
+		// ── Second spawn: cache hit → no new AUTH_PROMPT ─────────────────
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		await sm.handleSpawn("c-sc20", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore); // no new AUTH_PROMPT
+	});
+
+	it("SC-20b: expired cache entry causes new AUTH_PROMPT on next spawn", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Auto-respond client: any AUTH_PROMPT gets "new-secret"
+		const client = makeAutoRespondClient("c-sc20b", received, "new-secret");
+		sm.addClient(client);
+
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Pre-seed the cache with an expired entry
+		getElevationCache().set(localHostId, { secret: "old-secret", expiresAt: Date.now() - 1 });
+
+		// Spawn: expired cache → AUTH_PROMPT triggered → auto-responded → completes
+		await sm.handleSpawn("c-sc20b", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// AUTH_PROMPT should have been sent (cache was expired)
+		const prompts = received.filter((m) => m.type === "AUTH_PROMPT") as AuthPromptMessage[];
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0]?.promptType).toBe("elevation");
+
+		// Cache should be updated with the new secret
+		expect(getElevationCache().get(localHostId)?.secret).toBe("new-secret");
+	});
+
+	it("SC-20: user cancels elevation prompt → spawn returns null, ELEVATION_CANCELLED error sent", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Auto-respond with null (user cancel)
+		const client = makeAutoRespondClient("c-sc20c", received, null);
+		sm.addClient(client);
+
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn: AUTH_PROMPT auto-cancelled → handleSpawn returns null
+		const result = await sm.handleSpawn("c-sc20c", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+
+		// handleSpawn should return null
+		expect(result).toBeNull();
+
+		// An ELEVATION_CANCELLED error should have been sent to the client
+		const errMsg = received.find((m) => m.type === "ERROR") as
+			| (ProtocolMessage & { code?: string })
+			| undefined;
+		expect(errMsg?.code).toBe("ELEVATION_CANCELLED");
+
+		// No channel should have been created
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const sessions = dal.listSessions(localHostId);
+		const channels = sessions.flatMap((s) => dal.listChannels(s.id));
+		expect(channels).toHaveLength(0);
+	});
+});

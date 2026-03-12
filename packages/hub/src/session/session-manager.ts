@@ -131,6 +131,15 @@ export class SessionManager {
 	private bellTimestamps = new Map<string, number[]>();
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
 	private notificationTimestamps = new Map<string, number[]>();
+	/**
+	 * hostId → cached elevation secret + expiry (TTL 15 min).
+	 * Secrets are never persisted — this cache lives only in process memory.
+	 */
+	private elevationCache = new Map<string, { secret: string; expiresAt: number }>();
+	/** TTL for cached elevation secrets (ms). */
+	private static readonly ELEVATION_CACHE_TTL_MS = 900_000; // 15 minutes
+	/** hostId → capabilities string[] reported in the agent HELLO message */
+	private agentCapabilities = new Map<string, string[]>();
 
 	/**
 	 * Optional callback to resolve the current write-lock holder for a channel.
@@ -450,6 +459,64 @@ export class SessionManager {
 			}
 		}
 
+		// ── Elevation: Windows-SSH rejection + capability check + cache ──────
+		let elevationSecret: string | undefined;
+		if (resolvedElevated) {
+			// ERR-04: Windows SSH elevation not supported in MVP.
+			// We check host.type === 'ssh' — if the remote OS is Windows (or unknown)
+			// we cannot forward a UAC prompt, so we strip the elevation flag.
+			// (gsudo Windows-local works fine; only SSH is blocked here.)
+			if (host.type === "ssh") {
+				console.warn(
+					`[session-manager] ERR-04: elevation not supported over SSH (hostId=${hostId}). Spawning without elevation.`,
+				);
+				resolvedElevated = false;
+			}
+		}
+
+		if (resolvedElevated) {
+			// ERR-05: agent must support launch-profiles capability.
+			const caps = this.agentCapabilities.get(hostId) ?? [];
+			if (!caps.includes("launch-profiles")) {
+				console.warn(
+					`[session-manager] ERR-05: agent for hostId=${hostId} does not advertise 'launch-profiles' capability. Spawning without elevation.`,
+				);
+				resolvedElevated = false;
+			}
+		}
+
+		if (resolvedElevated) {
+			// Check elevation cache.
+			const cached = this.elevationCache.get(hostId);
+			if (cached && cached.expiresAt > Date.now()) {
+				// Cache hit — reuse secret, no AUTH_PROMPT needed.
+				elevationSecret = cached.secret;
+			} else {
+				// Cache miss or expired — prompt the user.
+				const promptFn = this._buildPromptAuth(client);
+				const hostname = host.sshHost ?? host.label ?? hostId;
+				const secret = await promptFn(
+					hostId,
+					"elevation",
+					`Enter password for elevated shell on ${hostname}`,
+				);
+				if (secret === null) {
+					// ERR-10: user cancelled elevation prompt — abort spawn.
+					client.send({
+						type: "ERROR",
+						code: "ELEVATION_CANCELLED",
+						message: "Elevation cancelled by user",
+					});
+					return null;
+				}
+				this.elevationCache.set(hostId, {
+					secret,
+					expiresAt: Date.now() + SessionManager.ELEVATION_CACHE_TTL_MS,
+				});
+				elevationSecret = secret;
+			}
+		}
+
 		const agentSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
@@ -461,6 +528,7 @@ export class SessionManager {
 			rows,
 			...(resolvedDirectProcess && { directProcess: true }),
 			...(resolvedElevated && { elevated: true }),
+			...(resolvedElevated && elevationSecret !== undefined && { elevationSecret }),
 		};
 		agent.send(agentSpawn);
 
@@ -900,6 +968,9 @@ export class SessionManager {
 			pending.resolve(null);
 		}
 		this.pendingAuthPrompts.clear();
+		// Clear elevation cache on shutdown — secrets must not outlive the process lifecycle.
+		this.elevationCache.clear();
+		this.agentCapabilities.clear();
 		this.scheduler.shutdown();
 		this.chunker.shutdown();
 		this.gc.stop();
@@ -1043,6 +1114,10 @@ export class SessionManager {
 						helloMsg.defaultShell,
 					);
 				}
+				// Cache agent capabilities for this host (used by elevation ERR-05 check).
+				if (Array.isArray(helloMsg.capabilities)) {
+					this.agentCapabilities.set(hostId, helloMsg.capabilities);
+				}
 			} else if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
 				// Broadcast to clients first (real-time, no delay)
@@ -1087,6 +1162,7 @@ export class SessionManager {
 			const session = this.sessions.get(hostId);
 			const host = this.metaDal.getHost(hostId);
 			this.agents.delete(hostId);
+			this.agentCapabilities.delete(hostId);
 
 			if (!session) return;
 
