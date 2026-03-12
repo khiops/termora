@@ -54,12 +54,31 @@
 			>×</span>
 		</button>
 
-		<button
-			class="tab-bar__add"
-			aria-label="Open new terminal"
-			title="New terminal"
-			@click="emit('add-tab')"
-		>+</button>
+		<!-- Split "+" button: left part spawns, right chevron opens profile dropdown -->
+		<div class="tab-bar__add-group">
+			<button
+				class="tab-bar__add tab-bar__add--main"
+				aria-label="Open new terminal"
+				title="New terminal"
+				@click="emit('add-tab')"
+			>+</button>
+			<button
+				ref="chevronBtnEl"
+				class="tab-bar__add tab-bar__add--chevron"
+				aria-label="Launch from profile"
+				title="Launch from profile"
+				aria-haspopup="menu"
+				:aria-expanded="profileDropdownVisible"
+				@click.stop="toggleProfileDropdown"
+			>▾</button>
+		</div>
+
+		<ProfileDropdown
+			:visible="profileDropdownVisible"
+			:anchor-el="chevronBtnEl"
+			:host-id="activeHostId"
+			@close="profileDropdownVisible = false"
+		/>
 
 		<TabContextMenu
 			:visible="ctxMenu.visible"
@@ -93,11 +112,21 @@ import { useRename } from "../composables/useRename.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useConfigStore } from "../stores/config.js";
 import { useNotificationStore } from "../stores/notifications.js";
+import ProfileDropdown from "./ProfileDropdown.vue";
 import TabContextMenu from "./TabContextMenu.vue";
 
 const channelsStore = useChannelsStore();
 const configStore = useConfigStore();
 const notificationStore = useNotificationStore();
+
+// Profile dropdown state
+const profileDropdownVisible = ref(false);
+const chevronBtnEl = ref<HTMLElement | null>(null);
+const activeHostId = computed(() => channelsStore.activeHostId);
+
+function toggleProfileDropdown(): void {
+	profileDropdownVisible.value = !profileDropdownVisible.value;
+}
 
 const showCloseButton = computed(() => configStore.uiConfig.tabs?.closeButton !== false);
 
@@ -484,13 +513,16 @@ function onTabDragEnd(): void {
 	min-width: 0;
 }
 
-.tab-bar__add {
+.tab-bar__add-group {
+	display: flex;
 	flex-shrink: 0;
-	width: 32px;
+	align-self: stretch;
+}
+
+.tab-bar__add {
 	background: transparent;
 	border: none;
 	color: var(--nt-tab-hover);
-	font-size: 18px;
 	line-height: 1;
 	cursor: pointer;
 	display: flex;
@@ -498,6 +530,18 @@ function onTabDragEnd(): void {
 	justify-content: center;
 	transition: color 0.1s, background 0.1s;
 	align-self: stretch;
+}
+
+.tab-bar__add--main {
+	width: 32px;
+	font-size: 18px;
+}
+
+.tab-bar__add--chevron {
+	width: 16px;
+	font-size: 11px;
+	border-left: 1px solid var(--nt-border);
+	padding: 0 2px;
 }
 
 .tab-bar__add:hover {
