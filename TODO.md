@@ -17,6 +17,8 @@
 - [x] ✅ [Web] ConfigureCommandDialog: error feedback on restart failure (2026-03-12)
 - [x] ✅ [Web+Hub] Unified exit overlay for all channel types: contextual message + exit code + Configure only for directProcess (2026-03-12)
 
+- [x] ✅ [Web] Restart channel: reattach terminal + fix canWrite race after restart (2026-03-12)
+- [x] ✅ [Web] WS-wins: fetchChannels preserves WS-driven state (status, titles, exitCode) instead of overwriting with stale REST (2026-03-12)
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
 

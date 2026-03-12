@@ -176,14 +176,24 @@ export const useChannelsStore = defineStore("channels", () => {
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
 
-			const prevDisplayTitles = new Map<string, string>();
+			// WS-wins: preserve real-time fields (status, titles, exitCode)
+			// that arrived via WebSocket — they are always fresher than REST.
+			// REST is authoritative only for structural fields (shell, args,
+			// cwd, groupId, icon, etc.) and for the initial load.
+			const prevById = new Map<string, Channel>();
 			for (const ch of channels.value) {
-				if (ch.displayTitle) prevDisplayTitles.set(ch.id, ch.displayTitle);
+				prevById.set(ch.id, ch);
 			}
 			for (const ch of data) {
-				if (!ch.displayTitle) {
-					const prev = prevDisplayTitles.get(ch.id);
-					if (prev) ch.displayTitle = prev;
+				const prev = prevById.get(ch.id);
+				if (prev) {
+					// Status + exitCode: WS CHANNEL_STATE is source of truth
+					if (prev.status) ch.status = prev.status;
+					if (prev.exitCode !== undefined) ch.exitCode = prev.exitCode;
+					// Titles: WS TITLE_CHANGE / PROCESS_TITLE are source of truth
+					if (prev.displayTitle) ch.displayTitle = prev.displayTitle;
+					if (prev.dynamicTitle) ch.dynamicTitle = prev.dynamicTitle;
+					if (prev.processTitle) ch.processTitle = prev.processTitle;
 				}
 			}
 
