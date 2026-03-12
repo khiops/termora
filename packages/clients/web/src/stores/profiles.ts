@@ -1,4 +1,10 @@
 import { type LaunchProfile, toCamelCase } from "@nexterm/shared";
+
+/** Profile with host-specific override info (from GET /api/hosts/:id/profiles). */
+export type HostVisibleProfile = LaunchProfile & {
+	overrideType?: "pin" | "hide" | "default";
+	effectiveSort: number;
+};
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -41,13 +47,13 @@ export const useProfilesStore = defineStore("profiles", () => {
 	// REST: fetch host-visible profiles (filtered + overridden)
 	// -------------------------------------------------------------------------
 
-	async function fetchHostProfiles(hostId: string): Promise<LaunchProfile[]> {
+	async function fetchHostProfiles(hostId: string): Promise<HostVisibleProfile[]> {
 		if (authStore.token === null) return [];
 		const res = await fetch(`/api/hosts/${encodeURIComponent(hostId)}/profiles`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) throw new Error(`GET /api/hosts/${hostId}/profiles failed: ${res.status}`);
-		return toCamelCase(await res.json()) as LaunchProfile[];
+		return toCamelCase(await res.json()) as HostVisibleProfile[];
 	}
 
 	// -------------------------------------------------------------------------

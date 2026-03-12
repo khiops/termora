@@ -70,6 +70,7 @@
 
 <script setup lang="ts">
 import type { LaunchProfile } from "@nexterm/shared";
+import type { HostVisibleProfile } from "../stores/profiles.js";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useProfilesStore } from "../stores/profiles.js";
 import QuickCommandInput from "./QuickCommandInput.vue";
@@ -90,7 +91,7 @@ const profilesStore = useProfilesStore();
 
 const dropdownEl = ref<HTMLElement | null>(null);
 const loadingProfiles = ref(false);
-const visibleProfiles = ref<LaunchProfile[]>([]);
+const visibleProfiles = ref<HostVisibleProfile[]>([]);
 const showQuickInput = ref(false);
 
 // -------------------------------------------------------------------------
@@ -161,14 +162,9 @@ onUnmounted(() => {
 // -------------------------------------------------------------------------
 
 /** Whether a profile is the "default" for this host (marked via overrideType=default). */
-function isDefault(_profileId: string): boolean {
-	// The overrideType info is not present in the LaunchProfile entity itself —
-	// it comes from HostLaunchProfileOverride. The host-profiles endpoint
-	// returns the filtered list but doesn't embed the override type.
-	// The default check would require a separate join — for now, we mark
-	// the first profile returned as "default" only if the API puts it first.
-	// TODO: update once /api/hosts/:id/profiles embeds overrideType in response
-	return false;
+function isDefault(profileId: string): boolean {
+	const profile = visibleProfiles.value.find((p) => p.id === profileId);
+	return profile?.overrideType === "default";
 }
 
 function profileIcon(profile: LaunchProfile): string {
@@ -198,12 +194,13 @@ function onRunCommand(): void {
 	showQuickInput.value = true;
 }
 
-// Expose for host-profile default detection
-// (unused until API embeds overrideType)
-const _defaultProfileId = computed(() => {
-	const def = visibleProfiles.value.find(() => false);
+/** ID of the default profile for this host (if any). */
+const defaultProfileId = computed(() => {
+	const def = visibleProfiles.value.find((p) => p.overrideType === "default");
 	return def?.id ?? null;
 });
+
+defineExpose({ defaultProfileId });
 </script>
 
 <style scoped>
