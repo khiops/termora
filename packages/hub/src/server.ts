@@ -20,6 +20,7 @@ import { ConfigResolver, loadGcConfig } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
+import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js";
 import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
 
@@ -117,6 +118,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		);
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
+		migrateLegacyShellDefaults(metaDal, configResolver);
 
 		// First-run: ensure the built-in "local" host exists
 		const wasNew = !metaDal.getHostByLabel("local");

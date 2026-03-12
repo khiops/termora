@@ -17,7 +17,7 @@
 - [x] ✅ Block 2: Agent Shell Discovery (agent, hub) (2026-03-12)
 - [x] ✅ Block 3: Spawn Resolution + Variable Expansion (shared, hub, agent) (2026-03-12)
 - [x] ✅ Block 4: Elevation Support (agent, hub) (2026-03-12)
-- [ ] Block 5: Migration Logic (hub)
+- [x] ✅ Block 5: Migration Logic (hub) (2026-03-12)
 - [ ] Block 6: UI — "+" Dropdown (web)
 - [ ] Block 7: UI — Settings > Profiles Tab (web)
 - [ ] Block 8: Command Palette + Keyboard Shortcuts (web)
