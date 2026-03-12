@@ -9,7 +9,6 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
-import { useSessionStore } from "./session.js";
 
 /**
  * Profiles store — manages launch profiles.
@@ -121,21 +120,14 @@ export const useProfilesStore = defineStore("profiles", () => {
 
 	/**
 	 * Spawn a terminal using the given launch profile.
-	 * Sends SPAWN with launchProfileId — the hub resolves shell/args/env
-	 * from the profile at spawn time.
+	 * Delegates to channelsStore.spawnChannel which handles SPAWN_OK,
+	 * fetchChannels, and selectChannel.
 	 */
 	function spawnFromProfile(profileId: string): void {
 		const channelsStore = useChannelsStore();
-		const sessionStore = useSessionStore();
-
 		const hostId = channelsStore.activeHostId;
 		if (hostId === null) return;
-
-		sessionStore.wsClient.send({
-			type: "SPAWN",
-			hostId,
-			launchProfileId: profileId,
-		});
+		void channelsStore.spawnChannel(hostId, { launchProfileId: profileId });
 	}
 
 	/**
@@ -148,8 +140,6 @@ export const useProfilesStore = defineStore("profiles", () => {
 		if (trimmed === "") return;
 
 		const channelsStore = useChannelsStore();
-		const sessionStore = useSessionStore();
-
 		const hostId = channelsStore.activeHostId;
 		if (hostId === null) return;
 
@@ -157,11 +147,9 @@ export const useProfilesStore = defineStore("profiles", () => {
 		const shell = parts[0] as string;
 		const args = parts.slice(1);
 
-		sessionStore.wsClient.send({
-			type: "SPAWN",
-			hostId,
+		void channelsStore.spawnChannel(hostId, {
 			shell,
-			...(args.length > 0 ? { args } : {}),
+			args,
 			directProcess: true,
 		});
 	}

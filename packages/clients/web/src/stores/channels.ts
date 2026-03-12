@@ -490,7 +490,15 @@ export const useChannelsStore = defineStore("channels", () => {
 
 	function spawnChannel(
 		hostId: string,
-		opts?: { cols?: number; rows?: number; select?: boolean },
+		opts?: {
+			cols?: number;
+			rows?: number;
+			select?: boolean;
+			launchProfileId?: string;
+			shell?: string;
+			args?: string[];
+			directProcess?: boolean;
+		},
 	): Promise<string> {
 		const sessionStore = useSessionStore();
 		const configStore = useConfigStore();
@@ -528,6 +536,10 @@ export const useChannelsStore = defineStore("channels", () => {
 				...(opts?.cols !== undefined && opts?.rows !== undefined
 					? { cols: opts.cols, rows: opts.rows }
 					: {}),
+				...(opts?.launchProfileId !== undefined ? { launchProfileId: opts.launchProfileId } : {}),
+				...(opts?.shell !== undefined ? { shell: opts.shell } : {}),
+				...(opts?.args !== undefined && opts.args.length > 0 ? { args: opts.args } : {}),
+				...(opts?.directProcess ? { directProcess: true } : {}),
 			});
 		});
 	}
