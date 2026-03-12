@@ -35,9 +35,8 @@ const UI_VALUE_VALIDATORS: Record<string, Record<string, (v: unknown) => boolean
 		autoOpenWelcome: (v) => typeof v === "boolean",
 	},
 	title: {
-		source: (v) => v === "dynamic" || v === "static",
-		fallback: (v) => v === "channel" || v === "shell" || v === "custom",
-		fallbackCustom: (v) => typeof v === "string",
+		source: (v) => v === "dynamic" || v === "static" || v === "process",
+		staticTitle: (v) => typeof v === "string",
 		maxLength: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1,
 		truncation: (v) => v === "end" || v === "middle" || v === "start",
 		prefix: (v) => typeof v === "string",
@@ -60,6 +59,7 @@ export function registerConfigRoutes(
 	server: FastifyInstance,
 	metaDal: MetaDAL,
 	configResolver: ConfigResolver,
+	sessionManager?: { broadcastDisplayTitles(): void },
 ): void {
 	// GET /api/config/defaults — Layer 1 built-in defaults
 	server.get("/api/config/defaults", async () => {
@@ -165,6 +165,11 @@ export function registerConfigRoutes(
 				for (const [key, value] of Object.entries(sectionData as Record<string, unknown>)) {
 					await configResolver.saveGlobalKey(section, key, value);
 				}
+			}
+
+			// Re-broadcast displayTitles if the title config section was changed
+			if (sessionManager && Object.keys(body).includes("title")) {
+				sessionManager.broadcastDisplayTitles();
 			}
 
 			return { ok: true };

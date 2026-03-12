@@ -16,6 +16,7 @@ import type {
 	SnapshotReqMessage,
 } from "@nexterm/shared";
 import { PtyManager } from "./pty.js";
+import { startProcessTitlePolling } from "./process-title.js";
 
 const SIGNAL_NAMES: Record<number, string> = {
 	1: "SIGHUP",
@@ -43,6 +44,8 @@ export class AgentHandler {
 	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private lastBellTimestamps = new Map<string, number>();
 	private lastOsc9Timestamps = new Map<string, number>();
+	/** channelId → stop polling function for process title */
+	private processTitleStoppers = new Map<string, () => void>();
 
 	constructor(
 		private readonly sendMessage: (msg: ProtocolMessage) => void,
@@ -83,6 +86,10 @@ export class AgentHandler {
 		this.titleDebounceTimers.clear();
 		this.lastBellTimestamps.clear();
 		this.lastOsc9Timestamps.clear();
+		for (const stop of this.processTitleStoppers.values()) {
+			stop();
+		}
+		this.processTitleStoppers.clear();
 		this.ptyManager.destroyAll();
 	}
 
@@ -138,11 +145,17 @@ export class AgentHandler {
 
 			this.setupOutputBatching(channelId);
 			this.setupTitleChangeHandler(channelId);
+			this.setupProcessTitlePolling(channelId);
 			this.setupBellHandler(channelId);
 			this.setupOsc9Handler(channelId);
 
 			this.ptyManager.onExit(channelId, (exit) => {
 				this.clearTitleDebounce(channelId);
+				const stopPolling = this.processTitleStoppers.get(channelId);
+				if (stopPolling) {
+					stopPolling();
+					this.processTitleStoppers.delete(channelId);
+				}
 				const exitMsg: ProtocolMessage =
 					exit.signal !== undefined
 						? {
@@ -269,6 +282,26 @@ export class AgentHandler {
 	}
 
 	/**
+	 * Poll the foreground process name for a channel and send PROCESS_TITLE
+	 * whenever it changes.  Polling stops automatically when the channel exits.
+	 */
+	private setupProcessTitlePolling(channelId: string): void {
+		const pid = this.ptyManager.getPid(channelId);
+		if (pid === null || pid === undefined) return;
+
+		const stop = startProcessTitlePolling(pid, (title) => {
+			// Bail out if the channel has already been destroyed
+			if (!this.ptyManager.has(channelId)) {
+				stop();
+				this.processTitleStoppers.delete(channelId);
+				return;
+			}
+			this.sendMessage({ type: "PROCESS_TITLE", channelId, title });
+		});
+		this.processTitleStoppers.set(channelId, stop);
+	}
+
+	/**
 	 * Throttle bell events per channel: max 1 BELL per BELL_THROTTLE_MS.
 	 * Uses a simple timestamp comparison (not debounce — first-write-wins).
 	 */
@@ -334,6 +367,11 @@ export class AgentHandler {
 
 	private handleDestroy(msg: DestroyMessage): void {
 		this.clearTitleDebounce(msg.channelId);
+		const stopPolling = this.processTitleStoppers.get(msg.channelId);
+		if (stopPolling) {
+			stopPolling();
+			this.processTitleStoppers.delete(msg.channelId);
+		}
 		this.ptyManager.destroy(msg.channelId);
 	}
 

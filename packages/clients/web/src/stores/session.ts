@@ -1,9 +1,14 @@
-import { DEFAULT_NOTIFICATION_CONFIG, generateId } from "@nexterm/shared";
+import {
+	DEFAULT_CHANNEL_NAME,
+	DEFAULT_NOTIFICATION_CONFIG,
+	generateId,
+} from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
 import { playBellSound } from "../composables/useBellSound.js";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
+import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
@@ -58,6 +63,15 @@ export const useSessionStore = defineStore("session", () => {
 		writeLockStore.setWsClient(wsClient);
 		_registerWriteLockHandlers(writeLockStore);
 
+		// Register auth-prompt message routing
+		const authPromptStore = useAuthPromptStore();
+		authPromptStore.setWsClient(wsClient);
+		wsClient.on("AUTH_PROMPT", (msg) => {
+			if (msg.type === "AUTH_PROMPT") {
+				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
+			}
+		});
+
 		// Route SESSION_STATE messages to hosts store for rail status dots
 		const hostsStore = useHostsStore();
 		wsClient.on("SESSION_STATE", (msg) => {
@@ -78,6 +92,19 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("TITLE_CHANGE", (msg) => {
 			if (msg.type === "TITLE_CHANGE") {
 				channelsStore.setDynamicTitle(msg.channelId, msg.title);
+				if (msg.displayTitle) {
+					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
+				}
+			}
+		});
+
+		// Route PROCESS_TITLE messages to channels store for process titles
+		wsClient.on("PROCESS_TITLE", (msg) => {
+			if (msg.type === "PROCESS_TITLE") {
+				channelsStore.updateProcessTitle(msg.channelId, msg.title);
+				if (msg.displayTitle) {
+					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
+				}
 			}
 		});
 
@@ -107,7 +134,7 @@ export const useSessionStore = defineStore("session", () => {
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
 					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
-					const name = ch?.title ?? ch?.dynamicTitle ?? "Terminal";
+					const name = ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
 				}
 			}
@@ -148,6 +175,9 @@ export const useSessionStore = defineStore("session", () => {
 					const hostId = sessionHostMap.get(ch.sessionId);
 					if (hostId) {
 						channelsStore.registerChannelHost(ch.channelId, hostId);
+					}
+					if (ch.displayTitle) {
+						channelsStore.setDisplayTitle(ch.channelId, ch.displayTitle);
 					}
 				}
 				channelsStore.applyStateSync(msg.channels);

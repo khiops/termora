@@ -1,8 +1,15 @@
+import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerConfigRoutes } from "../api/config.js";
+import { ConfigResolver } from "../config.js";
 import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
+import { MetaDAL } from "../storage/meta.js";
 
 vi.mock("ssh2", () => ({
 	Client: vi.fn().mockImplementation(() => ({
@@ -248,5 +255,88 @@ describe("PUT /api/config/ui value validation", () => {
 		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+
+// ─── broadcastDisplayTitles: called on PUT /api/config/ui with title section ──
+
+describe("PUT /api/config/ui — broadcastDisplayTitles integration", () => {
+	let miniServer: FastifyInstance;
+	let testDbs: ReturnType<typeof openTestDatabases>;
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = join(tmpdir(), `nexterm-bdt-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		testDbs = openTestDatabases();
+		miniServer = Fastify({ logger: false });
+	});
+
+	afterEach(async () => {
+		await miniServer.close();
+		testDbs.close();
+	});
+
+	it("calls sessionManager.broadcastDisplayTitles() when title section is in body", async () => {
+		const called: boolean[] = [];
+		const mockSessionManager = {
+			broadcastDisplayTitles: () => {
+				called.push(true);
+			},
+		};
+
+		const metaDal = new MetaDAL(testDbs.meta);
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(tempDir);
+		registerConfigRoutes(miniServer, metaDal, resolver, mockSessionManager);
+
+		const res = await miniServer.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { title: { source: "static", staticTitle: "My Tab" } },
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(called.length).toBeGreaterThan(0);
+	});
+
+	it("does NOT call broadcastDisplayTitles() when title section is absent", async () => {
+		const called: boolean[] = [];
+		const mockSessionManager = {
+			broadcastDisplayTitles: () => {
+				called.push(true);
+			},
+		};
+
+		const metaDal = new MetaDAL(testDbs.meta);
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(tempDir);
+		registerConfigRoutes(miniServer, metaDal, resolver, mockSessionManager);
+
+		const res = await miniServer.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { tabs: { closeButton: false } },
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(called.length).toBe(0);
+	});
+
+	it("does NOT call broadcastDisplayTitles() when no sessionManager provided", async () => {
+		// Regression guard: omitting sessionManager (old call-site) must not throw
+		const metaDal = new MetaDAL(testDbs.meta);
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(tempDir);
+		registerConfigRoutes(miniServer, metaDal, resolver); // no sessionManager
+
+		const res = await miniServer.inject({
+			method: "PUT",
+			url: "/api/config/ui",
+			payload: { title: { source: "dynamic" } },
+		});
+
+		expect(res.statusCode).toBe(200);
 	});
 });

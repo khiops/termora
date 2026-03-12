@@ -171,6 +171,15 @@ export interface AgentTitleChangeMessage {
 	type: "TITLE_CHANGE";
 	channelId: string;
 	title: string; // already sanitized by agent
+	displayTitle?: string;
+}
+
+/** Agent → Hub: foreground process name changed (polled from PTY PID). */
+export interface AgentProcessTitleMessage {
+	type: "PROCESS_TITLE";
+	channelId: string;
+	title: string;
+	displayTitle?: string;
 }
 
 /** Agent → Hub: terminal bell (BEL character, \x07) */
@@ -245,6 +254,8 @@ export interface UiAttachOkMessage {
 	writeLockHolder: string | null;
 	cached: boolean;
 	dynamicTitle?: string;
+	processTitle?: string;
+	displayTitle?: string;
 }
 
 /** UI → Hub: detach this client from a channel (keep channel alive) */
@@ -339,6 +350,7 @@ export interface StateSyncMessage {
 		sessionId: string;
 		status: ChannelStatus;
 		exitCode?: number;
+		displayTitle?: string;
 	}>;
 }
 
@@ -371,6 +383,45 @@ export interface HostVerifyResponseMessage {
 	action: "trust_permanent" | "trust_once" | "reject";
 }
 
+/** Hub → UI: request a secret from the user during SSH connection */
+export interface AuthPromptMessage {
+	type: "AUTH_PROMPT";
+	hostId: string;
+	promptType: "password" | "passphrase";
+	message: string;
+}
+
+/** UI → Hub: user provides the secret (or cancels) */
+export interface AuthPromptResponseMessage {
+	type: "AUTH_PROMPT_RESPONSE";
+	hostId: string;
+	secret: string | null; // null = user cancelled
+}
+
+/** UI → Hub: test SSH connectivity (with optional auth prompting) */
+export interface TestConnectMessage {
+	type: "TEST_CONNECT";
+	hostId: string; // real host ID for saved hosts, client-generated temp ID for unsaved
+	hostname: string;
+	port: number;
+	sshAuth: "agent" | "key" | "password";
+	sshKeyPath?: string;
+	sshUser?: string;
+}
+
+/** Hub → UI: test connectivity succeeded */
+export interface TestConnectOkMessage {
+	type: "TEST_CONNECT_OK";
+	hostId: string;
+}
+
+/** Hub → UI: test connectivity failed */
+export interface TestConnectFailMessage {
+	type: "TEST_CONNECT_FAIL";
+	hostId: string;
+	message: string;
+}
+
 // ---------------------------------------------------------------------------
 // Union types
 // ---------------------------------------------------------------------------
@@ -388,6 +439,7 @@ export type AgentMessage =
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
 	| AgentTitleChangeMessage
+	| AgentProcessTitleMessage
 	| AgentBellMessage
 	| AgentNotificationMessage
 	| ErrorMessage;
@@ -418,6 +470,8 @@ export type UiMessage =
 	| WriteDenyMessage
 	| PingMessage
 	| HostVerifyResponseMessage
+	| AuthPromptResponseMessage
+	| TestConnectMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the UI */
@@ -436,10 +490,14 @@ export type HubToUiMessage =
 	| WriteRevokedMessage
 	| WriteLockMessage
 	| AgentTitleChangeMessage
+	| AgentProcessTitleMessage
 	| AgentBellMessage
 	| AgentNotificationMessage
 	| PongMessage
 	| HostVerifyMessage
+	| AuthPromptMessage
+	| TestConnectOkMessage
+	| TestConnectFailMessage
 	| ErrorMessage;
 
 /** Master union of every distinct protocol message type */
@@ -482,9 +540,15 @@ export type ProtocolMessage =
 	| PongMessage
 	| HostVerifyMessage
 	| HostVerifyResponseMessage
+	| AuthPromptMessage
+	| AuthPromptResponseMessage
 	| AgentChannelStateMessage
 	| ChannelStateEndMessage
 	| AgentTitleChangeMessage
+	| AgentProcessTitleMessage
 	| AgentBellMessage
 	| AgentNotificationMessage
+	| TestConnectMessage
+	| TestConnectOkMessage
+	| TestConnectFailMessage
 	| ErrorMessage;

@@ -820,23 +820,6 @@ describe("extractUiConfig — title section", () => {
 		expect(config.title.source).toBe(DEFAULT_TITLE_CONFIG.source);
 	});
 
-	it('parses fallback = "shell"', () => {
-		const config = extractUiConfig({ title: { fallback: "shell" } });
-		expect(config.title.fallback).toBe("shell");
-	});
-
-	it('parses fallback = "custom"', () => {
-		const config = extractUiConfig({ title: { fallback: "custom" } });
-		expect(config.title.fallback).toBe("custom");
-	});
-
-	it("parses fallback_custom string", () => {
-		const config = extractUiConfig({
-			title: { fallback: "custom", fallback_custom: "My Terminal" },
-		});
-		expect(config.title.fallbackCustom).toBe("My Terminal");
-	});
-
 	it("parses max_length", () => {
 		const config = extractUiConfig({ title: { max_length: 30 } });
 		expect(config.title.maxLength).toBe(30);
@@ -881,8 +864,7 @@ describe("extractUiConfig — title section", () => {
 		const config = extractUiConfig({
 			title: {
 				source: "static",
-				fallback: "custom",
-				fallback_custom: "Shell",
+				static_title: "My Term",
 				max_length: 25,
 				truncation: "middle",
 				prefix: "DEV ",
@@ -892,8 +874,7 @@ describe("extractUiConfig — title section", () => {
 		});
 		expect(config.title).toEqual({
 			source: "static",
-			fallback: "custom",
-			fallbackCustom: "Shell",
+			staticTitle: "My Term",
 			maxLength: 25,
 			truncation: "middle",
 			prefix: "DEV ",

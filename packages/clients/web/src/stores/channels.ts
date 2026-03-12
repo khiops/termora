@@ -47,6 +47,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 		ch.args = row.args as string[];
 	}
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title as string;
+	if (row.process_title != null) ch.processTitle = row.process_title as string;
 	return ch;
 }
 
@@ -280,6 +281,38 @@ export const useChannelsStore = defineStore("channels", () => {
 		if (existing.dynamicTitle === title) return;
 		const next = [...channels.value];
 		next[idx] = { ...existing, dynamicTitle: title };
+		channels.value = next;
+	}
+
+	/**
+	 * Update the hub-resolved display title for a channel.
+	 * Called on TITLE_CHANGE, PROCESS_TITLE, ATTACH_OK, and STATE_SYNC.
+	 * Silently ignored if the channel is not loaded yet.
+	 */
+	function setDisplayTitle(channelId: string, displayTitle: string): void {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		if (existing.displayTitle === displayTitle) return;
+		const next = [...channels.value];
+		next[idx] = { ...existing, displayTitle };
+		channels.value = next;
+	}
+
+	/**
+	 * Update the process title for a channel (from PROCESS_TITLE WS message or ATTACH_OK).
+	 * Silently ignored if the channel is not loaded yet.
+	 */
+	function updateProcessTitle(channelId: string, title: string): void {
+		const idx = channels.value.findIndex((c) => c.id === channelId);
+		if (idx === -1) return;
+		const existing = channels.value[idx];
+		if (existing === undefined) return;
+		// Avoid unnecessary reactivity triggers if title hasn't changed
+		if (existing.processTitle === title) return;
+		const next = [...channels.value];
+		next[idx] = { ...existing, processTitle: title };
 		channels.value = next;
 	}
 
@@ -779,7 +812,57 @@ export const useChannelsStore = defineStore("channels", () => {
 				Authorization: `Bearer ${authStore.token}`,
 			},
 		});
-		return res.ok;
+		if (!res.ok) return false;
+
+		// Optimistically update local status so UI reflects the restart
+		const ch = channels.value.find((c) => c.id === channelId);
+		if (ch) ch.status = "born";
+
+		return true;
+	}
+
+	/**
+	 * Purge a dead channel: DELETE /api/channels/:id which now removes the record
+	 * and all spool chunks. Removes from local state on success.
+	 */
+	async function deleteChannel(channelId: string): Promise<boolean> {
+		if (authStore.token === null) return false;
+		const res = await fetch(`/api/channels/${channelId}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${authStore.token}` },
+		});
+		if (!res.ok) return false;
+		channels.value = channels.value.filter((c) => c.id !== channelId);
+		const nextMap = new Map(channelHostMap.value);
+		nextMap.delete(channelId);
+		channelHostMap.value = nextMap;
+		return true;
+	}
+
+	/**
+	 * Bulk purge all dead channels for the active host.
+	 * Returns the number of channels purged.
+	 */
+	async function purgeDeadChannels(): Promise<number> {
+		if (authStore.token === null || activeHostId.value === null) return 0;
+		const res = await fetch("/api/channels/purge-dead", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authStore.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ host_id: activeHostId.value }),
+		});
+		if (!res.ok) return 0;
+		const data = (await res.json()) as { purged: number };
+		const deadIds = new Set(channels.value.filter((c) => c.status === "dead").map((c) => c.id));
+		channels.value = channels.value.filter((c) => c.status !== "dead");
+		const nextMap = new Map(channelHostMap.value);
+		for (const id of deadIds) {
+			nextMap.delete(id);
+		}
+		channelHostMap.value = nextMap;
+		return data.purged;
 	}
 
 	return {
@@ -799,6 +882,8 @@ export const useChannelsStore = defineStore("channels", () => {
 		markUnread,
 		updateChannelStatus,
 		setDynamicTitle,
+		setDisplayTitle,
+		updateProcessTitle,
 		applyStateSync,
 		removeChannel,
 		addChannel,
@@ -820,5 +905,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		clearWelcomeChannel,
 		updateChannelConfig,
 		restartChannel,
+		deleteChannel,
+		purgeDeadChannels,
 	};
 });

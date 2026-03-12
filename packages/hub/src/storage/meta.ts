@@ -106,6 +106,7 @@ interface ChannelRow {
 	icon: string | null;
 	direct_process: number;
 	dynamic_title: string | null;
+	process_title: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -189,6 +190,7 @@ function rowToChannel(row: ChannelRow): Channel {
 	if (row.icon != null) ch.icon = row.icon;
 	if (row.direct_process === 1) ch.directProcess = true;
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title;
+	if (row.process_title != null) ch.processTitle = row.process_title;
 	if (row.args && row.args !== "[]") {
 		try {
 			const parsed = JSON.parse(row.args) as string[];
@@ -740,13 +742,9 @@ export class MetaDAL {
 		const rows = (
 			sessionId
 				? this.db
-						.prepare(
-							"SELECT * FROM channels WHERE session_id = ? AND status != 'dead' ORDER BY created_at ASC",
-						)
+						.prepare("SELECT * FROM channels WHERE session_id = ? ORDER BY created_at ASC")
 						.all(sessionId)
-				: this.db
-						.prepare("SELECT * FROM channels WHERE status != 'dead' ORDER BY created_at ASC")
-						.all()
+				: this.db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all()
 		) as ChannelRow[];
 		return rows.map(rowToChannel);
 	}
@@ -784,6 +782,13 @@ export class MetaDAL {
 		const now = new Date().toISOString();
 		this.db
 			.prepare("UPDATE channels SET dynamic_title = ?, updated_at = ? WHERE id = ?")
+			.run(title, now, channelId);
+	}
+
+	updateProcessTitle(channelId: string, title: string): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE channels SET process_title = ?, updated_at = ? WHERE id = ?")
 			.run(title, now, channelId);
 	}
 
@@ -834,6 +839,7 @@ export class MetaDAL {
 	}
 
 	deleteChannel(id: string): void {
+		this.db.prepare("DELETE FROM cache_index WHERE channel_id = ?").run(id);
 		this.db.prepare("DELETE FROM channels WHERE id = ?").run(id);
 	}
 

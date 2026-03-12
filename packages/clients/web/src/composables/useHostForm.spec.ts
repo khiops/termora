@@ -10,7 +10,6 @@ vi.mock("../stores/hosts.js", () => ({
 		hosts: [],
 		createHost: createHostSpy,
 		updateHost: updateHostSpy,
-		testConnection: vi.fn().mockResolvedValue({ ok: true }),
 	}),
 }));
 

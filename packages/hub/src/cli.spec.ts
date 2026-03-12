@@ -91,12 +91,6 @@ describe("parseArgs", () => {
 			expect(r?.json).toBe(true);
 		});
 
-		it("parses host test <label>", () => {
-			const r = parseArgs(["host", "test", "prod"]);
-			expect(r?.command).toBe("host-test");
-			expect(r?.label).toBe("prod");
-		});
-
 		it("parses host remove <label>", () => {
 			const r = parseArgs(["host", "remove", "old-server"]);
 			expect(r?.command).toBe("host-remove");

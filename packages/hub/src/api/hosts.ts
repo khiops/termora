@@ -1,7 +1,6 @@
 import { toSnakeCase } from "@nexterm/shared";
 import type { SshConfigImport } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
-import { Client } from "ssh2";
 import type { ParseResult } from "../ssh/ssh-config-parser.js";
 import { readSshConfig } from "../ssh/ssh-config-parser.js";
 import type { MetaDAL } from "../storage/meta.js";
@@ -50,24 +49,6 @@ interface UpdateHostBody {
 	profile_json?: string;
 }
 
-const SSH_TEST_TIMEOUT_MS = 10_000;
-
-const testConnectionAttempts = new Map<string, number[]>();
-
-function checkTestConnectionRateLimit(token: string): boolean {
-	const now = Date.now();
-	const window = 60_000;
-	const limit = 5;
-	const attempts = (testConnectionAttempts.get(token) ?? []).filter((t) => now - t < window);
-	if (attempts.length >= limit) {
-		testConnectionAttempts.set(token, attempts);
-		return false;
-	}
-	attempts.push(now);
-	testConnectionAttempts.set(token, attempts);
-	return true;
-}
-
 function validateCreateHost(body: CreateHostBody): string | null {
 	if (!body.label || body.label.trim().length === 0) {
 		return "Label is required";
@@ -109,84 +90,6 @@ function validateCreateHost(body: CreateHostBody): string | null {
 		return "color must be in hex format #rrggbb";
 	}
 	return null;
-}
-
-async function testSshConnectivity(
-	host: string,
-	port: number,
-	auth: "agent" | "key" | "password",
-	keyPath?: string,
-): Promise<{ ok: boolean; message?: string }> {
-	return new Promise((resolve) => {
-		const client = new Client();
-
-		const timer = setTimeout(() => {
-			client.destroy();
-			resolve({ ok: false, message: "Connection timed out" });
-		}, SSH_TEST_TIMEOUT_MS);
-
-		client.on("ready", () => {
-			clearTimeout(timer);
-			client.end();
-			resolve({ ok: true });
-		});
-
-		client.on("error", (err: Error) => {
-			clearTimeout(timer);
-			const msg = err.message ?? "Unknown error";
-			const lower = msg.toLowerCase();
-
-			if (
-				msg.includes("ECONNREFUSED") ||
-				msg.includes("ETIMEDOUT") ||
-				msg.includes("EHOSTUNREACH") ||
-				msg.includes("ENOTFOUND")
-			) {
-				resolve({ ok: false, message: msg });
-			} else if (
-				lower.includes("authentication") ||
-				lower.includes("permission denied") ||
-				lower.includes("publickey") ||
-				lower.includes("keyboard-interactive") ||
-				lower.includes("all configured authentication methods failed")
-			) {
-				client.end();
-				resolve({ ok: false, message: "Authentication failed" });
-			} else {
-				client.end();
-				resolve({ ok: false, message: msg });
-			}
-		});
-
-		try {
-			const connectConfig: Parameters<InstanceType<typeof Client>["connect"]>[0] = {
-				host,
-				port,
-				username: process.env.USER ?? "root",
-				readyTimeout: SSH_TEST_TIMEOUT_MS,
-			};
-
-			if (auth === "agent" || auth === "key") {
-				// For key auth: we don't have the key content here, fall back to agent
-				const authSock = process.env.SSH_AUTH_SOCK;
-				if (authSock) {
-					connectConfig.agent = authSock;
-				}
-			} else {
-				// password: we cannot actually auth without credentials, but
-				// the connect attempt will verify reachability
-				connectConfig.password = "";
-			}
-
-			client.connect(connectConfig);
-		} catch (err) {
-			clearTimeout(timer);
-			resolve({
-				ok: false,
-				message: err instanceof Error ? err.message : "Connection failed",
-			});
-		}
-	});
 }
 
 function validateAndClampVisualProfile(vp: Record<string, unknown>): string | null {
@@ -444,39 +347,6 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 		return reply.code(201).send(toSnakeCase(result));
 	});
 
-	// POST /api/hosts/:id/test
-	server.post<{ Params: { id: string } }>("/api/hosts/:id/test", async (request, reply) => {
-		const token = request.headers.authorization ?? "";
-		if (!checkTestConnectionRateLimit(token)) {
-			return reply.code(429).send({
-				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
-			});
-		}
-
-		const host = metaDal.getHost(request.params.id);
-		if (!host) {
-			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
-		}
-
-		if (host.type === "local") {
-			return { ok: true };
-		}
-
-		// SSH connectivity test
-		if (!host.sshHost) {
-			return { ok: false, message: "Host has no ssh_host configured" };
-		}
-
-		const result = await testSshConnectivity(
-			host.sshHost,
-			host.sshPort ?? 22,
-			host.sshAuth ?? "agent",
-			host.sshKeyPath,
-		);
-
-		return result;
-	});
-
 	// PUT /api/hosts/:id/welcome — set welcome channel for a host
 	server.put<{ Params: { id: string }; Body: { channel_id: string } }>(
 		"/api/hosts/:id/welcome",
@@ -632,36 +502,4 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			return reply.code(201).send(toSnakeCase(hosts));
 		},
 	);
-
-	// POST /api/hosts/test — test connection to an unsaved host
-	server.post<{
-		Body: {
-			hostname: string;
-			port?: number;
-			ssh_auth?: string;
-			ssh_key_path?: string;
-			ssh_user?: string;
-		};
-	}>("/api/hosts/test", async (request, reply) => {
-		const token = request.headers.authorization ?? "";
-		if (!checkTestConnectionRateLimit(token)) {
-			return reply.code(429).send({
-				error: { code: "RATE_LIMITED", message: "Too many test attempts. Try again in 1 minute." },
-			});
-		}
-
-		const { hostname, port, ssh_auth, ssh_key_path } = request.body;
-		if (!hostname) {
-			return reply.code(400).send({
-				error: { code: "VALIDATION_ERROR", message: "hostname is required" },
-			});
-		}
-		const result = await testSshConnectivity(
-			hostname,
-			port ?? 22,
-			(ssh_auth as "agent" | "key" | "password") ?? "agent",
-			ssh_key_path,
-		);
-		return result;
-	});
 }

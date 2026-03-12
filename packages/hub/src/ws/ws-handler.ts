@@ -1,10 +1,12 @@
 import type {
 	AuthMessage,
+	AuthPromptResponseMessage,
 	DetachMessage,
 	ErrorMessage,
 	InputMessage,
 	ProtocolMessage,
 	ResizeMessage,
+	TestConnectMessage,
 	UiAttachMessage,
 	UiSpawnMessage,
 	WriteClaimMessage,
@@ -287,6 +289,69 @@ export async function registerWsRoutes(
 				}
 				case "PING": {
 					client.send({ type: "PONG" });
+					break;
+				}
+				case "AUTH_PROMPT_RESPONSE": {
+					const apr = msg as AuthPromptResponseMessage;
+					if (!isValidUlid(apr.hostId)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
+						break;
+					}
+					if (apr.secret !== null && (typeof apr.secret !== "string" || apr.secret.length > 4096)) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "secret must be a string ≤ 4096 chars or null",
+						});
+						break;
+					}
+					sessionManager.handleAuthPromptResponse(clientId, apr.hostId, apr.secret);
+					break;
+				}
+				case "TEST_CONNECT": {
+					const tcMsg = msg as TestConnectMessage;
+					// hostId: not necessarily a ULID (can be client-generated temp ID), must be non-empty ≤ 128 chars
+					if (
+						typeof tcMsg.hostId !== "string" ||
+						tcMsg.hostId.length === 0 ||
+						tcMsg.hostId.length > 128
+					) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
+						break;
+					}
+					if (
+						typeof tcMsg.hostname !== "string" ||
+						tcMsg.hostname.length === 0 ||
+						tcMsg.hostname.length > 4096
+					) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostname" });
+						break;
+					}
+					if (typeof tcMsg.port !== "number" || tcMsg.port < 1 || tcMsg.port > 65535) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid port" });
+						break;
+					}
+					if (!["agent", "key", "password"].includes(tcMsg.sshAuth)) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshAuth" });
+						break;
+					}
+					if (
+						tcMsg.sshKeyPath !== undefined &&
+						(typeof tcMsg.sshKeyPath !== "string" || tcMsg.sshKeyPath.length > 4096)
+					) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshKeyPath" });
+						break;
+					}
+					if (
+						tcMsg.sshUser !== undefined &&
+						(typeof tcMsg.sshUser !== "string" || tcMsg.sshUser.length > 256)
+					) {
+						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshUser" });
+						break;
+					}
+					sessionManager.handleTestConnect(clientId, tcMsg).catch((err) => {
+						server.log.error({ err }, "TEST_CONNECT handling failed");
+					});
 					break;
 				}
 				default:

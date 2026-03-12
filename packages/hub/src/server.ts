@@ -18,6 +18,7 @@ import { getConfigDir } from "./cli.js";
 import { ConfigResolver, loadGcConfig } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
+import { MetaDAL } from "./storage/meta.js";
 import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
 
@@ -98,11 +99,16 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 		await server.register(websocket);
 
-		// Load GC config from config.toml before creating SessionManager
+		// Load config from config.toml before creating SessionManager
 		const configDir = options.configDir ?? getConfigDir();
 		const gcConfig = loadGcConfig(configDir);
 
-		const sessionManager = new SessionManager(options.dbManager, gcConfig);
+		// Build configResolver before SessionManager so it can be injected for title resolution
+		const metaDalForConfig = new MetaDAL(options.dbManager.meta);
+		const configResolver = new ConfigResolver(metaDalForConfig);
+		configResolver.loadFromFile(configDir);
+
+		const sessionManager = new SessionManager(options.dbManager, gcConfig, undefined, configResolver);
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
 
@@ -115,14 +121,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await sessionManager.startup();
 
 		await registerWsRoutes(server, sessionManager, options.authToken);
-		const configResolver = new ConfigResolver(metaDal);
-		configResolver.loadFromFile(configDir);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
-		registerChannelRoutes(server, metaDal, sessionManager);
+		registerChannelRoutes(server, metaDal, sessionManager, sessionManager.getSpoolDal());
 		registerGroupRoutes(server, metaDal);
-		registerConfigRoutes(server, metaDal, configResolver);
+		registerConfigRoutes(server, metaDal, configResolver, sessionManager);
 		registerFontRoutes(server, configDir);
 		registerWallpaperRoutes(server, configDir);
 		const themeManager = new ThemeManager(configDir);

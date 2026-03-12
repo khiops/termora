@@ -100,6 +100,7 @@
 			<button class="context-menu__item" @click="onSplitRight">Split Right</button>
 			<button class="context-menu__item" @click="onSplitDown">Split Down</button>
 			<hr class="context-menu__divider" />
+			<button class="context-menu__item" @click="onDetachPane">Detach</button>
 			<button class="context-menu__item context-menu__item--danger" @click="onClosePane">
 				Close Pane
 			</button>
@@ -157,6 +158,7 @@ const props = withDefaults(
 const emit = defineEmits<{
 	(e: "split-right", channelId: string): void;
 	(e: "split-down", channelId: string): void;
+	(e: "detach-pane", channelId: string): void;
 	(e: "close-pane", channelId: string): void;
 	(e: "channel-spawned", tempId: string, realId: string): void;
 	(e: "configure-command", channelId: string): void;
@@ -179,10 +181,24 @@ const error = ref<string | null>(null);
 
 const hostsStore = useHostsStore();
 
+// Resolve per-host theme override (SC-03) from host.profileJson
+const hostThemeName = (() => {
+	if (!props.hostId) return undefined;
+	const host = hostsStore.hosts.find((h) => h.id === props.hostId);
+	if (!host?.profileJson) return undefined;
+	try {
+		const parsed = JSON.parse(host.profileJson) as { theme?: string };
+		return parsed.theme;
+	} catch {
+		return undefined;
+	}
+})();
+
 const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
 	configStore.profile,
+	hostThemeName,
 );
 
 // ---------------------------------------------------------------------------
@@ -442,6 +458,12 @@ function onSplitDown(): void {
 	if (chId !== null) emit("split-down", chId);
 }
 
+function onDetachPane(): void {
+	contextMenuVisible.value = false;
+	const chId = effectiveChannelId.value;
+	if (chId !== null) emit("detach-pane", chId);
+}
+
 function onClosePane(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
@@ -469,9 +491,8 @@ const matchPaneName = computed<string | null>(() => {
 	if (searchScope.value !== "all") return null;
 	const matchChId = multiPaneSearch.matchPaneChannelId.value;
 	if (matchChId === null || matchChId === effectiveChannelId.value) return null;
-	// Resolve the name from channels store
 	const ch = channelsStore.channels.find((c) => c.id === matchChId);
-	return ch?.title ?? ch?.dynamicTitle ?? DEFAULT_CHANNEL_NAME;
+	return ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
 });
 
 /** Effective match count: aggregated when scope=all, local when scope=pane. */

@@ -90,6 +90,8 @@ const props = defineProps<{
 	x: number;
 	y: number;
 	tab: Tab | null;
+	/** The channelId of the active pane in the tab (resolved by parent). */
+	activeChannelId: string | null;
 	tabIndex: number;
 	tabCount: number;
 	isWelcome: boolean;
@@ -129,43 +131,43 @@ onUnmounted(() => {
 // ── Action handlers ─────────────────────────────────────────────────────
 
 function onRename(): void {
-	if (props.tab) {
-		emit("rename", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("rename", props.activeChannelId);
 	}
 	emit("close");
 }
 
 function onResetTitle(): void {
-	if (props.tab) {
-		emit("reset-title", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("reset-title", props.activeChannelId);
 	}
 	emit("close");
 }
 
 function onSetWelcome(): void {
-	if (props.tab) {
-		emit("set-welcome", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("set-welcome", props.activeChannelId);
 	}
 	emit("close");
 }
 
 function onConfigureCommand(): void {
-	if (props.tab) {
-		emit("configure-command", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("configure-command", props.activeChannelId);
 	}
 	emit("close");
 }
 
 function onSplitRight(): void {
-	if (props.tab) {
-		emit("split-right", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("split-right", props.activeChannelId);
 	}
 	emit("close");
 }
 
 function onSplitDown(): void {
-	if (props.tab) {
-		emit("split-down", props.tab.channelId);
+	if (props.tab && props.activeChannelId !== null) {
+		emit("split-down", props.activeChannelId);
 	}
 	emit("close");
 }

@@ -66,7 +66,6 @@ async function generate(): Promise<void> {
 		const res = await fetch("/api/pair", {
 			method: "POST",
 			headers: {
-				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token ?? ""}`,
 			},
 		});
@@ -129,21 +128,21 @@ async function copyCode(): Promise<void> {
 .gen-btn {
 	height: 36px;
 	padding: 0 16px;
-	background: var(--nt-border);
-	border: 1px solid var(--nt-tab-hover);
+	background: var(--nt-accent);
+	border: 1px solid var(--nt-accent);
 	border-radius: 6px;
-	color: var(--nt-fg);
+	color: #fff;
 	font-size: 13px;
 	font-weight: 500;
 	cursor: pointer;
-	transition: background 0.15s;
+	transition: background 0.15s, opacity 0.15s;
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
 }
 
 .gen-btn:hover:not(:disabled) {
-	background: var(--nt-tab-hover);
+	opacity: 0.85;
 }
 
 .gen-btn:disabled {

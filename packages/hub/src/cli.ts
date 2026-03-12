@@ -87,7 +87,8 @@ async function apiRequest(method: string, path: string, body?: unknown): Promise
 	}
 
 	const token = loadAuthToken();
-	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	const headers: Record<string, string> = {};
+	if (body !== undefined) headers["Content-Type"] = "application/json";
 	if (token) headers.Authorization = `Bearer ${token}`;
 
 	const url = `http://127.0.0.1:${runtime.port}${path}`;
@@ -202,9 +203,6 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 			result.command = "host-add";
 		} else if (sub1 === "list") {
 			result.command = "host-list";
-		} else if (sub1 === "test") {
-			result.command = "host-test";
-			if (!result.label && sub2) result.label = sub2;
 		} else if (sub1 === "remove") {
 			result.command = "host-remove";
 			if (!result.label && sub2) result.label = sub2;
@@ -413,27 +411,6 @@ async function cmdHostList(args: ParsedArgs): Promise<void> {
 	}
 }
 
-async function cmdHostTest(args: ParsedArgs): Promise<void> {
-	if (!args.label) {
-		console.error("Usage: nexterm host test <label>");
-		process.exit(1);
-	}
-
-	console.log(`Testing SSH connectivity to "${args.label}"…`);
-	const result = await apiRequest("POST", `/api/hosts/${encodeURIComponent(args.label)}/test`);
-	if (args.json) {
-		console.log(JSON.stringify(result));
-	} else {
-		const r = result as Record<string, unknown>;
-		const ok = r.success === true || r.status === "ok";
-		if (ok) {
-			console.log("Connection successful.");
-		} else {
-			console.log(`Connection failed: ${String(r.error ?? r.message ?? "unknown")}`);
-		}
-	}
-}
-
 async function cmdHostRemove(args: ParsedArgs): Promise<void> {
 	if (!args.label) {
 		console.error("Usage: nexterm host remove <label>");
@@ -516,7 +493,6 @@ Usage:
               [--ssh-port 22] [--user Z]
               [--auth agent|key]
   nexterm host list [--json]                    List all hosts
-  nexterm host test <label>                     Test SSH connection
   nexterm host remove <label>                   Remove a host
 
   nexterm session list [--json]                 List active sessions
@@ -560,9 +536,6 @@ export async function main(argv: string[]): Promise<void> {
 				break;
 			case "host-list":
 				await cmdHostList(parsed);
-				break;
-			case "host-test":
-				await cmdHostTest(parsed);
 				break;
 			case "host-remove":
 				await cmdHostRemove(parsed);

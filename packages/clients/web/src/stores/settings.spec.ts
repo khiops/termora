@@ -56,7 +56,6 @@ function makeCascade(overrides?: Partial<CascadeResponse>): CascadeResponse {
 				startup: { autoOpenWelcome: true },
 				title: {
 					source: "dynamic",
-					fallback: "channel",
 					maxLength: 50,
 					truncation: "end",
 					windowTitle: true,
@@ -86,7 +85,6 @@ function makeCascade(overrides?: Partial<CascadeResponse>): CascadeResponse {
 				startup: { autoOpenWelcome: true },
 				title: {
 					source: "dynamic",
-					fallback: "channel",
 					maxLength: 50,
 					truncation: "end",
 					windowTitle: true,

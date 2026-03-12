@@ -2,6 +2,7 @@ import { type Host, type HostGroup, type SessionStatus, toCamelCase } from "@nex
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useAuthStore } from "./auth.js";
+import { useSessionStore } from "./session.js";
 
 /** Derived per-host connectivity status rendered in the rail status dot. */
 export type HostStatus = "live" | "offline" | "error" | "reconnecting";
@@ -114,6 +115,12 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	function getHostStatus(hostId: string): HostStatus {
+		// Local host ≡ the hub itself — if the WS connection is up, it's live.
+		const host = hosts.value.find((h) => h.id === hostId);
+		if (host?.type === "local") {
+			const sessionStore = useSessionStore();
+			return sessionStore.connected ? "live" : "offline";
+		}
 		return sessionStatusToHostStatus(_sessionStatuses.value.get(hostId));
 	}
 
@@ -189,14 +196,6 @@ export const useHostsStore = defineStore("hosts", () => {
 		const host = toCamelCase(await res.json()) as Host;
 		hosts.value = [...hosts.value, host];
 		return host;
-	}
-
-	async function testConnection(id: string): Promise<{ ok: boolean; message?: string }> {
-		const res = await fetch(`/api/hosts/${id}/test`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${authStore.token}` },
-		});
-		return (await res.json()) as { ok: boolean; message?: string };
 	}
 
 	/** Returns the DB-backed HostGroup entities sorted by sortOrder. */
@@ -332,7 +331,6 @@ export const useHostsStore = defineStore("hosts", () => {
 		updateHost,
 		deleteHost,
 		duplicateHost,
-		testConnection,
 		getHostGroups,
 		createHostGroup,
 		renameHostGroup,

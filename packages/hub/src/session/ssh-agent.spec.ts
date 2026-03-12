@@ -6,8 +6,8 @@ import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
 import type { HelloMessage } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Server, type Server as SshServer } from "ssh2";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { SshAgent } from "./ssh-agent.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { type AuthPromptFn, SshAgent } from "./ssh-agent.js";
 
 const TEST_TIMEOUT = 10_000;
 
@@ -28,6 +28,21 @@ const { privateKey: CLIENT_PRIVATE_KEY_PEM } = generateKeyPairSync("rsa", {
 const KEY_TMPDIR = mkdtempSync(join(tmpdir(), "nexterm-ssh-agent-test-"));
 const CLIENT_KEY_PATH = join(KEY_TMPDIR, "client.pem");
 writeFileSync(CLIENT_KEY_PATH, CLIENT_PRIVATE_KEY_PEM, { mode: 0o600 });
+
+// Generate an encrypted client key (passphrase-protected) for passphrase tests.
+const PASSPHRASE = "test-passphrase-123";
+const { privateKey: ENCRYPTED_PRIVATE_KEY_PEM } = generateKeyPairSync("rsa", {
+	modulusLength: 2048,
+	publicKeyEncoding: { type: "pkcs1", format: "pem" },
+	privateKeyEncoding: {
+		type: "pkcs1",
+		format: "pem",
+		cipher: "aes-256-cbc",
+		passphrase: PASSPHRASE,
+	},
+});
+const ENCRYPTED_KEY_PATH = join(KEY_TMPDIR, "encrypted-client.pem");
+writeFileSync(ENCRYPTED_KEY_PATH, ENCRYPTED_PRIVATE_KEY_PEM, { mode: 0o600 });
 
 /** Minimal HELLO payload used by the mock agent. */
 const HELLO_MSG: HelloMessage = {
@@ -286,6 +301,153 @@ describe("SshAgent", () => {
 
 			// Prevent afterEach double-close
 			agents = agents.filter((a) => a !== agent);
+		},
+		TEST_TIMEOUT,
+	);
+});
+
+describe("SshAgent — auth prompting", () => {
+	let agents: SshAgent[] = [];
+	let servers: SshServer[] = [];
+
+	afterEach(async () => {
+		for (const agent of agents) {
+			try {
+				agent.close();
+			} catch {
+				// already closed
+			}
+		}
+		agents = [];
+
+		await Promise.all(
+			servers.map(
+				(srv) =>
+					new Promise<void>((resolve) => {
+						srv.close(() => resolve());
+					}),
+			),
+		);
+		servers = [];
+	});
+
+	it(
+		"key auth with encrypted key: calls promptAuth with passphrase type, connects",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue(PASSPHRASE);
+			const agent = new SshAgent(makeHost(port, { sshKeyPath: ENCRYPTED_KEY_PATH }), promptAuth);
+			agents.push(agent);
+
+			const hello = await agent.start();
+			expect(hello.type).toBe("HELLO");
+			expect(promptAuth).toHaveBeenCalledOnce();
+			expect(promptAuth).toHaveBeenCalledWith(
+				expect.any(String),
+				"passphrase",
+				expect.stringContaining(ENCRYPTED_KEY_PATH),
+			);
+			expect(agent.connected).toBe(true);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"key auth with encrypted key: user cancels (null) → throws 'cancelled'",
+		async () => {
+			const { server, port } = await createMockSshServer(() => {
+				// never called — cancelled before connect
+			});
+			servers.push(server);
+
+			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue(null);
+			const agent = new SshAgent(makeHost(port, { sshKeyPath: ENCRYPTED_KEY_PATH }), promptAuth);
+			agents.push(agent);
+
+			await expect(agent.start()).rejects.toThrow("Authentication cancelled by user");
+			expect(promptAuth).toHaveBeenCalledOnce();
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"key auth with encrypted key: no promptAuth callback → throws",
+		async () => {
+			const { server, port } = await createMockSshServer(() => {
+				// never called
+			});
+			servers.push(server);
+
+			const agent = new SshAgent(makeHost(port, { sshKeyPath: ENCRYPTED_KEY_PATH }));
+			agents.push(agent);
+
+			await expect(agent.start()).rejects.toThrow(
+				"Key is passphrase-protected but no prompt callback available",
+			);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"password auth: calls promptAuth with password type, connects",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue("hunter2");
+			const agent = new SshAgent(makeHost(port, { sshAuth: "password" }), promptAuth);
+			agents.push(agent);
+
+			const hello = await agent.start();
+			expect(hello.type).toBe("HELLO");
+			expect(promptAuth).toHaveBeenCalledOnce();
+			expect(promptAuth).toHaveBeenCalledWith(
+				expect.any(String),
+				"password",
+				expect.stringContaining("127.0.0.1"),
+			);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"password auth: user cancels (null) → throws 'cancelled'",
+		async () => {
+			const { server, port } = await createMockSshServer(() => {
+				// never called
+			});
+			servers.push(server);
+
+			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue(null);
+			const agent = new SshAgent(makeHost(port, { sshAuth: "password" }), promptAuth);
+			agents.push(agent);
+
+			await expect(agent.start()).rejects.toThrow("Authentication cancelled by user");
+			expect(promptAuth).toHaveBeenCalledOnce();
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"password auth without promptAuth callback → throws",
+		async () => {
+			const { server, port } = await createMockSshServer(() => {
+				// never called
+			});
+			servers.push(server);
+
+			const agent = new SshAgent(makeHost(port, { sshAuth: "password" }));
+			agents.push(agent);
+
+			await expect(agent.start()).rejects.toThrow(
+				"password auth not yet supported without promptAuth callback",
+			);
 		},
 		TEST_TIMEOUT,
 	);

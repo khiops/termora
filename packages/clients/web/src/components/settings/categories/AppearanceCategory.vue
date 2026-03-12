@@ -243,12 +243,14 @@ const lightThemeOptions = computed(() =>
 );
 
 // Sync auto-switch state from appearance config
+// Set theme names BEFORE enabled — the enabled watcher is flush:sync
+// and calls start() immediately, which reads darkThemeName/lightThemeName.
 watch(
 	() => themeStore.appearance,
 	(cfg) => {
-		autoSwitch.enabled.value = cfg.autoSwitch.enabled;
 		autoSwitch.darkThemeName.value = cfg.autoSwitch.darkTheme;
 		autoSwitch.lightThemeName.value = cfg.autoSwitch.lightTheme;
+		autoSwitch.enabled.value = cfg.autoSwitch.enabled;
 	},
 	{ immediate: true },
 );

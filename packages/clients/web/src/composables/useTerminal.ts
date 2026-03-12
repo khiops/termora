@@ -19,6 +19,8 @@ export function useTerminal(
 	containerRef: Ref<HTMLElement | null>,
 	wsClient: IWsClient,
 	profile?: TerminalProfile,
+	/** Explicit per-host theme name from host.profileJson (SC-03 override). */
+	hostThemeName?: string,
 ) {
 	const terminal = ref<Terminal | null>(null);
 	const fitAddon = new FitAddon();
@@ -77,9 +79,10 @@ export function useTerminal(
 		const p = profile;
 		const themeStore = useThemeStore();
 
-		// Resolve per-host theme override (SC-03) or fall back to global
-		const hostTheme = p?.theme
-			? themeStore.availableThemes.find((t) => t.name === p.theme)
+		// Per-host theme override (SC-03): use hostThemeName from host.profileJson
+		// if explicitly set. Otherwise use the runtime active theme.
+		const hostTheme = hostThemeName
+			? themeStore.availableThemes.find((t) => t.name === hostThemeName)
 			: undefined;
 		const initialColors = (hostTheme ?? themeStore.activeTheme)?.colors;
 		const initialXtermTheme = initialColors ? themeStore.toXtermTheme(initialColors) : {};
@@ -152,7 +155,7 @@ export function useTerminal(
 		titleChangeDispose = () => titleDisposable.dispose();
 
 		// Subscribe to global theme changes so all terminals update live.
-		// Per-host override (SC-03): if a host-specific theme is set, use that instead.
+		// Per-host override (SC-03): if a host-specific theme is set, keep it.
 		themeUnsubscribe = themeStore.onTerminalThemeChange((xtermTheme) => {
 			if (terminal.value) {
 				if (hostTheme) {

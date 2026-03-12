@@ -117,6 +117,19 @@ export const useWriteLockStore = defineStore("writelock", () => {
 		incomingRequest.value = null;
 	}
 
+	/**
+	 * Remove lock entries for channels that are dead.
+	 * Called after fetchChannels to clear stale "Writer" labels.
+	 */
+	function pruneDeadLocks(deadChannelIds: Set<string>): void {
+		if (deadChannelIds.size === 0) return;
+		const next = new Map(locks.value);
+		for (const id of deadChannelIds) {
+			next.delete(id);
+		}
+		locks.value = next;
+	}
+
 	return {
 		locks,
 		incomingRequest,
@@ -133,5 +146,6 @@ export const useWriteLockStore = defineStore("writelock", () => {
 		release,
 		setInitialHolder,
 		dismissRequest,
+		pruneDeadLocks,
 	};
 });

@@ -119,7 +119,6 @@ export const DEFAULT_STARTUP_CONFIG: StartupConfig = {
 
 export const DEFAULT_TITLE_CONFIG: TitleConfig = {
 	source: "dynamic",
-	fallback: "channel",
 	maxLength: 50,
 	truncation: "end",
 	windowTitle: true,
@@ -242,17 +241,14 @@ export function extractUiConfig(parsed: TOML.JsonMap): UiConfig {
 	const titleSection = parsed.title;
 	if (titleSection != null && typeof titleSection === "object") {
 		const raw = titleSection as Record<string, unknown>;
-		if (typeof raw.source === "string" && (raw.source === "dynamic" || raw.source === "static")) {
+		if (
+			typeof raw.source === "string" &&
+			(raw.source === "dynamic" || raw.source === "static" || raw.source === "process")
+		) {
 			config.title.source = raw.source;
 		}
-		if (
-			typeof raw.fallback === "string" &&
-			(raw.fallback === "channel" || raw.fallback === "shell" || raw.fallback === "custom")
-		) {
-			config.title.fallback = raw.fallback;
-		}
-		if (typeof raw.fallback_custom === "string") {
-			config.title.fallbackCustom = raw.fallback_custom;
+		if (typeof raw.static_title === "string") {
+			config.title.staticTitle = raw.static_title;
 		}
 		if (typeof raw.max_length === "number" && raw.max_length >= 1) {
 			config.title.maxLength = raw.max_length;

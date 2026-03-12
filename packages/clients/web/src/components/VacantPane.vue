@@ -12,11 +12,11 @@
 				class="vacant-channel"
 				@click="emit('select-channel', vacantId, ch.id)"
 			>
-				{{ ch.title || "Terminal" }}
+				{{ ch.displayTitle || "Terminal" }}
 			</button>
 		</div>
-		<button class="vacant-rearrange" @click="emit('rearrange', vacantId)">
-			Remove slot
+		<button class="vacant-close" @click="emit('rearrange', vacantId)">
+			Close Pane
 		</button>
 	</div>
 </template>
@@ -125,19 +125,20 @@ const detachedChannels = computed(() => {
 	background: var(--nt-tab-hover);
 }
 
-.vacant-rearrange {
-	padding: 4px 10px;
-	border: none;
+.vacant-close {
+	padding: 6px 14px;
+	border: 1px solid var(--nt-danger, #e55);
 	border-radius: 4px;
 	background: transparent;
-	color: var(--nt-text-muted);
-	font-size: 11px;
+	color: var(--nt-danger, #e55);
+	font-size: 12px;
 	font-family: inherit;
 	cursor: pointer;
-	transition: color 0.12s;
+	transition: background 0.12s, color 0.12s;
 }
 
-.vacant-rearrange:hover {
-	color: var(--nt-fg);
+.vacant-close:hover {
+	background: var(--nt-danger, #e55);
+	color: var(--nt-bg, #fff);
 }
 </style>

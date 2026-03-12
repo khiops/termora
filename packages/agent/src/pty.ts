@@ -138,6 +138,11 @@ export class PtyManager {
 		return this.channels.has(channelId);
 	}
 
+	/** Return the shell PID for a channel, or null if the channel does not exist. */
+	getPid(channelId: string): number | null {
+		return this.channels.get(channelId)?.pty.pid ?? null;
+	}
+
 	/** Kill and remove every active channel. */
 	destroyAll(): void {
 		for (const [id] of this.channels) {

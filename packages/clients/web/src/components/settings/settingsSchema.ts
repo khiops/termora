@@ -18,6 +18,11 @@ export interface SettingDefinition {
 	max?: number;
 	step?: number;
 	default?: string | number | boolean | undefined;
+	/**
+	 * Conditional visibility: only show this setting when another setting in the
+	 * same section matches a specific value.
+	 */
+	showWhen?: { key: string; section: string; value: string };
 }
 
 /** UI config sub-sections — these route through PUT /api/config/ui */
@@ -104,22 +109,20 @@ export const settingsSchema: SettingDefinition[] = [
 		scopes: ["global"],
 		options: [
 			{ label: "Dynamic (OSC 0/2)", value: "dynamic" },
-			{ label: "Static (fallback only)", value: "static" },
+			{ label: "Static", value: "static" },
+			{ label: "Process name", value: "process" },
 		],
 		description: "Whether to use dynamic terminal title from the shell",
 	},
 	{
-		key: "fallback",
-		label: "Title Fallback",
-		type: "select",
+		key: "staticTitle",
+		label: "Static Title",
+		type: "text",
 		category: "terminal",
 		section: "title",
 		scopes: ["global"],
-		options: [
-			{ label: "Channel name", value: "channel" },
-			{ label: "Shell name", value: "shell" },
-			{ label: "Custom", value: "custom" },
-		],
+		default: "Terminal",
+		showWhen: { key: "source", section: "title", value: "static" },
 	},
 	{
 		key: "maxLength",

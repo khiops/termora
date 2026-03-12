@@ -1,12 +1,21 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
 import type { HelloMessage } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
+import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
+
+/** Callback to prompt the user for a secret (password or key passphrase). */
+export type AuthPromptFn = (
+	hostId: string,
+	promptType: "password" | "passphrase",
+	message: string,
+) => Promise<string | null>;
 
 /**
  * Parse the username and hostname from an sshHost string.
@@ -38,13 +47,82 @@ function parseSshHost(sshHost: string): { username: string; hostname: string } {
  *   agent.on("message", (msg) => { ... });
  *   agent.close();
  */
+
+/**
+ * Build the ssh2 ConnectConfig for a given auth method.
+ * Throws on missing config or user-cancelled prompts.
+ * Call sites that need non-throwing behavior (e.g. test-connect) should catch
+ * and convert to their own error representation.
+ */
+export async function buildSshConnectConfig(
+	auth: { method: string; keyPath?: string | undefined },
+	hostname: string,
+	port: number,
+	user: string,
+	promptAuth?: AuthPromptFn | undefined,
+	hostId?: string | undefined,
+): Promise<Parameters<InstanceType<typeof Client>["connect"]>[0]> {
+	const connectConfig: Parameters<InstanceType<typeof Client>["connect"]>[0] = {
+		host: hostname,
+		port,
+		username: user,
+	};
+
+	if (auth.method === "password") {
+		if (!promptAuth || !hostId) {
+			throw new Error("password auth not yet supported without promptAuth callback");
+		}
+		const secret = await promptAuth(hostId, "password", `Enter password for ${user}@${hostname}`);
+		if (secret === null) {
+			throw new Error("Authentication cancelled by user");
+		}
+		connectConfig.password = secret;
+	} else if (auth.method === "agent") {
+		const authSock = process.env.SSH_AUTH_SOCK;
+		if (!authSock) {
+			throw new Error("SSH_AUTH_SOCK is not set; cannot use agent auth");
+		}
+		connectConfig.agent = authSock;
+	} else {
+		// "key" auth — read the private key file
+		if (!auth.keyPath) {
+			throw new Error("Key path is required for key auth");
+		}
+		const resolvedPath = auth.keyPath.startsWith("~")
+			? auth.keyPath.replace("~", homedir())
+			: auth.keyPath;
+		const keyContent = readFileSync(resolvedPath);
+		// Detect encrypted keys: use ssh2 parseKey which handles both
+		// legacy PEM ("ENCRYPTED" header) and modern OpenSSH format
+		const parsed = ssh2.utils.parseKey(keyContent);
+		if (parsed instanceof Error) {
+			if (!promptAuth || !hostId) {
+				throw new Error("Key is passphrase-protected but no prompt callback available");
+			}
+			const secret = await promptAuth(hostId, "passphrase", `Enter passphrase for ${auth.keyPath}`);
+			if (secret === null) {
+				throw new Error("Authentication cancelled by user");
+			}
+			connectConfig.privateKey = keyContent;
+			connectConfig.passphrase = secret;
+		} else {
+			connectConfig.privateKey = keyContent;
+		}
+	}
+
+	return connectConfig;
+}
+
 export class SshAgent extends AgentConnection {
 	private client: Client | null = null;
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
 	private readonly sendQueue = new SendQueue("ssh-agent");
 
-	constructor(private readonly host: Host) {
+	constructor(
+		private readonly host: Host,
+		private readonly promptAuth?: AuthPromptFn,
+	) {
 		super();
 	}
 
@@ -62,42 +140,28 @@ export class SshAgent extends AgentConnection {
 		const port = this.host.sshPort ?? 22;
 		const authMethod = this.host.sshAuth ?? "key";
 
-		if (authMethod === "password") {
-			throw new Error("password auth not yet supported");
-		}
-
 		const client = new Client();
 		this.client = client;
 
-		const connectConfig: Parameters<Client["connect"]>[0] = {
-			host: hostname,
+		const connectConfig = await buildSshConnectConfig(
+			{ method: authMethod, keyPath: this.host.sshKeyPath ?? undefined },
+			hostname,
 			port,
 			username,
-			// Accept all host keys for now, log the fingerprint for auditing.
-			// Known-hosts verification is a planned hardening step (see docs/SECURITY.md).
-			hostVerifier: ((key: Buffer) => {
-				const fingerprint = key
-					.toString("hex")
-					.replace(/(.{2})/g, "$1:")
-					.slice(0, -1);
-				console.log(`[ssh-agent] Accepting host key fingerprint: ${fingerprint}`);
-				return true;
-			}) as SyncHostVerifier,
-		};
+			this.promptAuth ?? undefined,
+			this.host.id,
+		);
 
-		if (authMethod === "agent") {
-			const authSock = process.env.SSH_AUTH_SOCK;
-			if (!authSock) {
-				throw new Error("SSH_AUTH_SOCK is not set; cannot use agent auth");
-			}
-			connectConfig.agent = authSock;
-		} else {
-			// "key" auth — read the private key file
-			if (!this.host.sshKeyPath) {
-				throw new Error("Host sshKeyPath is required for key auth");
-			}
-			connectConfig.privateKey = readFileSync(this.host.sshKeyPath);
-		}
+		// Accept all host keys for now, log the fingerprint for auditing.
+		// Known-hosts verification is a planned hardening step (see docs/SECURITY.md).
+		connectConfig.hostVerifier = ((key: Buffer) => {
+			const fingerprint = key
+				.toString("hex")
+				.replace(/(.{2})/g, "$1:")
+				.slice(0, -1);
+			console.log(`[ssh-agent] Accepting host key fingerprint: ${fingerprint}`);
+			return true;
+		}) as SyncHostVerifier;
 
 		return new Promise<HelloMessage>((resolve, reject) => {
 			const timeout = setTimeout(() => {

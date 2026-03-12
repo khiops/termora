@@ -1,5 +1,13 @@
 # nexterm — Backlog
 
+## Recently Completed
+
+- [x] ✅ [Web] Refactor tab identity — decouple from channelId: Tab.id ULID, activePaneIds tracking, localStorage migration, PaneLayout focus-pane events (2026-03-11)
+- [x] ✅ [Web] Fix splitPane no limit — enforce MAX_PANE_COUNT=4 in useLayout.ts (2026-03-11)
+- [x] ✅ [Web] Fix split direction inversion — command palette action:split-right/split-down had swapped directions (2026-03-11)
+
+(Archived → docs/historic/done-2026-03.md)
+
 ## Tier 1 — Next Sprint (UX + DX)
 
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
@@ -9,8 +17,12 @@
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
 
+- [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
+- [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
+
 ## Tier 2 — Quick Wins (batchable)
 
+- [ ] 💡 [Web+Hub] Dead channel display policy as setting (show/hide/auto-purge) with per-host override — Priority: L
 - [ ] 💡 [Web] Rail subtitle: middle truncation for hostnames (keep unique part) — Priority: L
 - [ ] 💡 [Web+Hub] ProxyJump auto-check in batch SSH import — Priority: L (from UX-03 /adversarial C-22)
 - [ ] 💡 [Web] Global notification rate limiter across all channels — Priority: L (from UX-05 /adversarial C-20)
@@ -19,7 +31,6 @@
 - [ ] 💡 [Hub] Upload security: apply MIME/quota/image-bomb to wallpapers too (currently extension-only) — Priority: L
 - [ ] 💡 [Hub] Color field validation on host-groups API (hex regex or allowlist) — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] Remove dead DAL methods renameHostGroup/deleteHostGroup/listHostGroups (legacy string-based) — Priority: L (from /review F-005)
-- [x] ✅ [Web] Replace window.prompt for group creation with GroupActionDialog + add channel group context menu (2026-03-09)
 
 ## Tier 3 — Strategic (milestones)
 
