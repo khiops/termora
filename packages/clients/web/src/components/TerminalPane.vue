@@ -9,13 +9,6 @@
 		>
 			<span class="pane-title">{{ paneTitle }}</span>
 			<WriteLockIndicator :channel-id="effectiveChannelId" :is-dead="isDead" class="pane-lock" />
-			<span
-				v-else-if="effectiveChannelId && !isWriter"
-				class="readonly-badge"
-				title="You are in read-only mode"
-			>
-				Read-only
-			</span>
 		</div>
 
 		<!-- Environment banner (UX-07) -->
@@ -771,18 +764,6 @@ function onDragEnd(): void {
 }
 
 .pane-lock {
-	flex-shrink: 0;
-}
-
-.readonly-badge {
-	font-size: 10px;
-	font-weight: 600;
-	color: var(--nt-yellow);
-	background: rgba(var(--nt-yellow-rgb), 0.12);
-	border: 1px solid rgba(var(--nt-yellow-rgb), 0.3);
-	border-radius: 3px;
-	padding: 1px 6px;
-	letter-spacing: 0.04em;
 	flex-shrink: 0;
 }
 
