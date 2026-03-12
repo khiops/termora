@@ -827,8 +827,9 @@ export const useChannelsStore = defineStore("channels", () => {
 		});
 		if (!res.ok) return false;
 
-		// Optimistically update local status so UI reflects the restart
-		updateChannelStatus(channelId, "born");
+		// No optimistic update — the hub broadcasts CHANNEL_STATE: live
+		// via WS which arrives before or alongside the HTTP response.
+		// Setting "born" here would overwrite the correct "live" status.
 
 		return true;
 	}

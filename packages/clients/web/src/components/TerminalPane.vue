@@ -416,7 +416,18 @@ onUnmounted(() => {
 async function onRestart(): Promise<void> {
 	const chId = effectiveChannelId.value;
 	if (chId !== null) {
-		await channelsStore.restartChannel(chId);
+		const ok = await channelsStore.restartChannel(chId);
+		if (ok) {
+			const result = await reattachChannel(chId);
+			if (result.writeLockHolder) {
+				writeLockStore.handleWriteLock(chId, result.writeLockHolder);
+			}
+			// Restore write permission — isDead watcher set canWrite=false
+			// when the channel died. If isWriter never changed (write-lock
+			// persists across restart for same channel ID), the isWriter
+			// watcher won't re-fire, so we must restore explicitly.
+			canWrite.value = isWriter.value;
+		}
 	}
 }
 
