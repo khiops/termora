@@ -14,7 +14,7 @@
 **Brief:** docs/briefs/launch-profiles.md
 
 - [x] ✅ Block 1: Data Model + DAL + REST API (shared, hub) (2026-03-12)
-- [ ] Block 2: Agent Shell Discovery (shared, agent, hub)
+- [x] ✅ Block 2: Agent Shell Discovery (agent, hub) (2026-03-12)
 - [ ] Block 3: Spawn Resolution + Variable Expansion (hub, agent)
 - [ ] Block 4: Elevation Support (agent, hub)
 - [ ] Block 5: Migration Logic (hub)

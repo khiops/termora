@@ -1005,7 +1005,17 @@ export class SessionManager {
 				}
 			}
 
-			if (msg.type === "OUTPUT") {
+			if (msg.type === "HELLO") {
+				// Cache discovered shells reported by the agent.
+				const helloMsg = msg as import("@nexterm/shared").HelloMessage;
+				if (helloMsg.availableShells !== undefined) {
+					this.metaDal.updateHostDiscoveredShells(
+						hostId,
+						helloMsg.availableShells,
+						helloMsg.defaultShell,
+					);
+				}
+			} else if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
 				// Broadcast to clients first (real-time, no delay)
 				this._broadcastToChannel(outputMsg.channelId, outputMsg);

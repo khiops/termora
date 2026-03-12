@@ -15,8 +15,9 @@ import type {
 	ResizeMessage,
 	SnapshotReqMessage,
 } from "@nexterm/shared";
-import { PtyManager } from "./pty.js";
 import { startProcessTitlePolling } from "./process-title.js";
+import { PtyManager } from "./pty.js";
+import { detectAvailableShells, getDefaultShell } from "./shell-detection.js";
 
 const SIGNAL_NAMES: Record<number, string> = {
 	1: "SIGHUP",
@@ -63,13 +64,19 @@ export class AgentHandler {
 		}
 	}
 
-	/** Send HELLO immediately after the agent starts. */
-	sendHello(): void {
+	/** Send HELLO immediately after the agent starts. Includes discovered shells. */
+	async sendHello(): Promise<void> {
+		const [availableShells, defaultShell] = await Promise.all([
+			detectAvailableShells(),
+			Promise.resolve(getDefaultShell()),
+		]);
 		this.sendMessage({
 			type: "HELLO",
 			version: PROTOCOL_VERSION,
 			agentVersion: "0.1.0",
-			capabilities: ["multiplex", "resize", "snapshot"],
+			capabilities: ["multiplex", "resize", "snapshot", "launch-profiles"],
+			...(availableShells.length > 0 && { availableShells }),
+			defaultShell,
 		});
 	}
 

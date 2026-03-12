@@ -193,28 +193,35 @@ export class DaemonServer {
 			}
 		});
 
-		// Send HELLO
-		this.handler.sendHello();
+		// Send HELLO (async: shell detection), then send channel state messages
+		// in order. CHANNEL_STATE_END must follow HELLO so the hub's
+		// waitForChannelState() sees them in the right sequence.
+		this.handler
+			.sendHello()
+			.then(() => {
+				// Send AGENT_CHANNEL_STATE for each alive channel
+				const channels = this.ptyManager.getChannels();
+				for (const ch of channels) {
+					const stateMsg: AgentChannelStateMessage = {
+						type: "AGENT_CHANNEL_STATE",
+						channelId: ch.id,
+						title: ch.title,
+						pid: ch.pid,
+						alive: true,
+					};
+					this.routeMessage(stateMsg);
+				}
 
-		// Send AGENT_CHANNEL_STATE for each alive channel
-		const channels = this.ptyManager.getChannels();
-		for (const ch of channels) {
-			const stateMsg: AgentChannelStateMessage = {
-				type: "AGENT_CHANNEL_STATE",
-				channelId: ch.id,
-				title: ch.title,
-				pid: ch.pid,
-				alive: true,
-			};
-			this.routeMessage(stateMsg);
-		}
+				// Send CHANNEL_STATE_END sentinel
+				const endMsg: ChannelStateEndMessage = { type: "CHANNEL_STATE_END" };
+				this.routeMessage(endMsg);
 
-		// Send CHANNEL_STATE_END sentinel
-		const endMsg: ChannelStateEndMessage = { type: "CHANNEL_STATE_END" };
-		this.routeMessage(endMsg);
-
-		// Flush any buffered output from previous disconnect
-		this.flushOutputBuffer();
+				// Flush any buffered output from previous disconnect
+				this.flushOutputBuffer();
+			})
+			.catch((err: unknown) => {
+				console.error("[nexterm-agent] sendHello failed:", err);
+			});
 	}
 
 	private routeMessage(msg: ProtocolMessage): void {

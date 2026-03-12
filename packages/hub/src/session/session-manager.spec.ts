@@ -621,6 +621,74 @@ describe("SessionManager", () => {
 		expect(sessions[0]?.status).toBe("active");
 	});
 
+	// ─── SC-23: HELLO shell caching ────────────────────────────────────────
+
+	it("SC-23: HELLO with available_shells caches discovered shells in hosts table", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		// Create SSH host and spawn so _wireAgentEvents is registered.
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-shells",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+
+		expect(mockSshAgentInstance).not.toBeFalsy();
+
+		// Simulate agent sending a HELLO with shells
+		mockSshAgentInstance!._emit("message", {
+			type: "HELLO",
+			version: 1,
+			agentVersion: "0.1.0",
+			capabilities: ["multiplex", "resize", "snapshot", "launch-profiles"],
+			availableShells: ["/bin/bash", "/bin/sh", "/usr/bin/fish"],
+			defaultShell: "/bin/bash",
+		});
+
+		// discoveredShells should now be persisted
+		const updatedHost = dal.getHost(host.id);
+		expect(updatedHost?.discoveredShells).toEqual(["/bin/bash", "/bin/sh", "/usr/bin/fish"]);
+		expect(updatedHost?.discoveredShellsAt).toBeTruthy();
+	});
+
+	it("SC-23: HELLO without available_shells does not call updateHostDiscoveredShells", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-no-shells",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+
+		// Simulate agent sending a HELLO without shells (older agent)
+		mockSshAgentInstance!._emit("message", {
+			type: "HELLO",
+			version: 1,
+			agentVersion: "0.1.0",
+			capabilities: ["multiplex", "resize", "snapshot"],
+		});
+
+		// discoveredShells should remain null (not updated)
+		const updatedHost = dal.getHost(host.id);
+		expect(updatedHost?.discoveredShells).toBeUndefined();
+	});
+
 	// ─── Block 3.4: ATTACH with Snapshot Restore ────────────────────────────
 
 	it("handleAttach on live channel (first attach after SPAWN): ATTACH_OK with no snapshot", async () => {
