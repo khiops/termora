@@ -502,4 +502,71 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			return reply.code(201).send(toSnakeCase(hosts));
 		},
 	);
+
+	// GET /api/hosts/:id/profiles — filtered launch profiles for this host
+	server.get<{ Params: { id: string }; Querystring: { os?: string } }>(
+		"/api/hosts/:id/profiles",
+		async (request, reply) => {
+			const host = metaDal.getHost(request.params.id);
+			if (!host) {
+				return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+			}
+			const hostOs = request.query.os ?? "any";
+			const profiles = metaDal.listHostProfiles(request.params.id, hostOs);
+			return toSnakeCase(profiles);
+		},
+	);
+
+	// PUT /api/hosts/:id/profiles/:profileId — upsert override
+	server.put<{
+		Params: { id: string; profileId: string };
+		Body: { override_type: string; sort_order?: number };
+	}>("/api/hosts/:id/profiles/:profileId", async (request, reply) => {
+		const host = metaDal.getHost(request.params.id);
+		if (!host) {
+			return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
+		}
+
+		const profile = metaDal.getLaunchProfile(request.params.profileId);
+		if (!profile) {
+			return reply
+				.code(404)
+				.send({ error: { code: "NOT_FOUND", message: "Launch profile not found" } });
+		}
+
+		const { override_type, sort_order } = request.body;
+		if (!["pin", "hide", "default"].includes(override_type)) {
+			return reply.code(400).send({
+				error: {
+					code: "VALIDATION_ERROR",
+					message: "override_type must be 'pin', 'hide', or 'default'",
+				},
+			});
+		}
+
+		metaDal.upsertHostProfileOverride(
+			request.params.id,
+			request.params.profileId,
+			override_type,
+			sort_order,
+		);
+		return reply.code(204).send();
+	});
+
+	// DELETE /api/hosts/:id/profiles/:profileId — remove override
+	server.delete<{ Params: { id: string; profileId: string } }>(
+		"/api/hosts/:id/profiles/:profileId",
+		async (request, reply) => {
+			const deleted = metaDal.deleteHostProfileOverride(
+				request.params.id,
+				request.params.profileId,
+			);
+			if (!deleted) {
+				return reply
+					.code(404)
+					.send({ error: { code: "NOT_FOUND", message: "Override not found" } });
+			}
+			return reply.code(204).send();
+		},
+	);
 }

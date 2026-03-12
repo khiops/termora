@@ -9,6 +9,7 @@ import { registerFontRoutes } from "./api/fonts.js";
 import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostGroupRoutes } from "./api/host-groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
+import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
@@ -108,7 +109,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const configResolver = new ConfigResolver(metaDalForConfig);
 		configResolver.loadFromFile(configDir);
 
-		const sessionManager = new SessionManager(options.dbManager, gcConfig, undefined, configResolver);
+		const sessionManager = new SessionManager(
+			options.dbManager,
+			gcConfig,
+			undefined,
+			configResolver,
+		);
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
 
@@ -123,6 +129,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await registerWsRoutes(server, sessionManager, options.authToken);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
+		registerLaunchProfileRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal, sessionManager, sessionManager.getSpoolDal());
 		registerGroupRoutes(server, metaDal);

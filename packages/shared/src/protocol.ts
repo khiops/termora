@@ -35,6 +35,8 @@ export interface HelloMessage {
 		badge?: { text: string; color: string };
 		themeOverlay?: Record<string, string>;
 	};
+	availableShells?: string[];
+	defaultShell?: string;
 }
 
 /** Hub → Agent: spawn a new PTY channel */
@@ -49,6 +51,8 @@ export interface AgentSpawnMessage {
 	cols: number;
 	rows: number;
 	directProcess?: boolean;
+	elevated?: boolean;
+	elevationSecret?: string;
 }
 
 /** Agent → Hub: PTY spawned successfully */
@@ -229,6 +233,8 @@ export interface UiSpawnMessage {
 	cols?: number;
 	rows?: number;
 	directProcess?: boolean;
+	launchProfileId?: string;
+	elevated?: boolean;
 }
 
 /** Hub → UI: channel spawned successfully */
@@ -387,7 +393,7 @@ export interface HostVerifyResponseMessage {
 export interface AuthPromptMessage {
 	type: "AUTH_PROMPT";
 	hostId: string;
-	promptType: "password" | "passphrase";
+	promptType: "password" | "passphrase" | "elevation";
 	message: string;
 }
 

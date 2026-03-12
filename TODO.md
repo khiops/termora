@@ -8,6 +8,20 @@
 
 (Archived → docs/historic/done-2026-03.md)
 
+## 🟡 IN PROGRESS: Launch Profiles
+
+**Spec:** docs/plans/launch-profiles.md
+**Brief:** docs/briefs/launch-profiles.md
+
+- [x] ✅ Block 1: Data Model + DAL + REST API (shared, hub) (2026-03-12)
+- [ ] Block 2: Agent Shell Discovery (shared, agent, hub)
+- [ ] Block 3: Spawn Resolution + Variable Expansion (hub, agent)
+- [ ] Block 4: Elevation Support (agent, hub)
+- [ ] Block 5: Migration Logic (hub)
+- [ ] Block 6: UI — "+" Dropdown (web)
+- [ ] Block 7: UI — Settings > Profiles Tab (web)
+- [ ] Block 8: Command Palette + Keyboard Shortcuts (web)
+
 ## Tier 1 — Next Sprint (UX + DX)
 
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
@@ -31,6 +45,9 @@
 - [ ] 💡 [Hub] Upload security: apply MIME/quota/image-bomb to wallpapers too (currently extension-only) — Priority: L
 - [ ] 💡 [Hub] Color field validation on host-groups API (hex regex or allowlist) — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] Remove dead DAL methods renameHostGroup/deleteHostGroup/listHostGroups (legacy string-based) — Priority: L (from /review F-005)
+- [ ] 💡 [Web] Env key warning for dangerous keys (PATH, LD_PRELOAD, LD_LIBRARY_PATH) in profile editor — Priority: L (from /adversarial C-08)
+- [ ] 🔧 [Shared] Rename `directProcess` → `mode` in AgentSpawnMessage (breaking change, next protocol version) — Priority: L (from /adversarial C-20)
+- [ ] 💡 [Agent] Windows SSH elevation via native helper (`CreateProcessWithLogonW`) — deferred to agent packaging milestone (from /adversarial + /llm)
 
 ## Tier 3 — Strategic (milestones)
 
