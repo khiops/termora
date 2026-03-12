@@ -2,29 +2,7 @@
 
 ## Recently Completed
 
-- [x] ✅ [Web] Refactor tab identity — decouple from channelId: Tab.id ULID, activePaneIds tracking, localStorage migration, PaneLayout focus-pane events (2026-03-11)
-- [x] ✅ [Web] Fix splitPane no limit — enforce MAX_PANE_COUNT=4 in useLayout.ts (2026-03-11)
-- [x] ✅ [Web] Fix split direction inversion — command palette action:split-right/split-down had swapped directions (2026-03-11)
-
 (Archived → docs/historic/done-2026-03.md)
-
-## 🟡 IN PROGRESS: Launch Profiles
-
-**Spec:** docs/plans/launch-profiles.md
-**Brief:** docs/briefs/launch-profiles.md
-
-- [x] ✅ Block 1: Data Model + DAL + REST API (shared, hub) (2026-03-12)
-- [x] ✅ Block 2: Agent Shell Discovery (agent, hub) (2026-03-12)
-- [x] ✅ Block 3: Spawn Resolution + Variable Expansion (shared, hub, agent) (2026-03-12)
-- [x] ✅ Block 4: Elevation Support (agent, hub) (2026-03-12)
-- [x] ✅ Block 5: Migration Logic (hub) (2026-03-12)
-- [x] ✅ Block 6: UI — "+" Dropdown (web) (2026-03-12)
-- [x] ✅ Block 7: UI — Settings > Profiles Tab (web) (2026-03-12)
-- [x] ✅ Block 8: Command Palette + Keyboard Shortcuts (web) (2026-03-12)
-- [x] ✅ [Web] Fix TypeScript build errors (vue-tsc --noEmit) — promptType elevation, exactOptionalPropertyTypes, Tab.channelId, useLayout cast (2026-03-12)
-- [x] ✅ [All] Fix 4 blocking review findings: F-001 ASKPASS injection, F-002 SC-17 profile override priority, F-003 HTTP method mismatch, F-004 host OS auto-resolve; + F-005/F-006/F-009 non-blocking (2026-03-12)
-- [x] ✅ [Web] F-008: isDefault() now uses overrideType from host-profiles API (2026-03-12)
-- [x] ✅ [Hub] Fix flaky crash-loop protection test — vi.useFakeTimers({ toFake: ["Date"] }) + setImmediate flush pattern (2026-03-12)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
@@ -35,7 +13,6 @@
 - [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M (from UX-03 /adversarial C-01)
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M (from /review F-003)
 
-- [ ] 🔧 [Hub] Crash-loop protection test flaky: timeout with fake timers + async mocks — Priority: M (from /review F-007)
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L (from /review F-004)
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L (from /review F-005)
 

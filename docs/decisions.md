@@ -4,6 +4,25 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## launch-profiles — Launch Profiles — Windows Terminal-style named launch configurations with elevation (2026-03-12)
+
+- LaunchProfile as first-class entity in meta.db (not config.toml) — relational queries, CRUD API, FK references
+- Dual-layer visibility: supported_os auto-filter + host_launch_profiles join table (pin/hide/default)
+- Seed pattern: profile copied into channel at spawn time, not inherited live
+- Variable expansion: one-pass left-to-right, agent-side, shared implementation
+- Elevation: hub-centric credential management — collect (Web UI modal) → store (hub cache) → deliver (spawn msg) → execute (agent ASKPASS/gsudo)
+- Linux/macOS elevation: sudo -A + ASKPASS script (password never in PTY stream)
+- Windows local elevation: gsudo + UAC caching (no password from hub)
+- Windows SSH elevation: NOT SUPPORTED MVP — deferred to agent packaging (CreateProcessWithLogonW)
+- Reuse AUTH_PROMPT with promptType: 'elevation' (no new message types)
+- Profile names: COLLATE NOCASE (case-insensitive uniqueness)
+- Command palette prefix: ~ for profiles (# already used for channels)
+- Shell validation: block ;|&$`, allow () for Windows paths
+- Env masking: sentinel ******** preserved on PUT (no round-trip clobber)
+- Migration 009: dual-source (hosts.default_shell + config.toml), per-host wins default slot
+
+---
+
 ## TITLE-HUB-RESOLVE — Move title resolution from client to hub (2026-03-11)
 
 - Hub resolves displayTitle using resolveChannelDisplayName (shared) — single source of truth

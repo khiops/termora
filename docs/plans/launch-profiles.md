@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: launch-profiles
   type: specification
   target_project: /mnt/wsl/shared/dev/nexterm
