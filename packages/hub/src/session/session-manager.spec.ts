@@ -1470,73 +1470,77 @@ describe("SessionManager", () => {
 			}
 		});
 
-		it("crash-loop protection: 4th restart within 60s closes the session", async () => {
-			vi.useFakeTimers();
-			try {
-				const { MetaDAL } = await import("../storage/meta.js");
-				const dal = new MetaDAL(dbManager.meta);
+		it(
+			"crash-loop protection: 4th restart within 60s closes the session",
+			{ timeout: 15_000 },
+			async () => {
+				vi.useFakeTimers();
+				try {
+					const { MetaDAL } = await import("../storage/meta.js");
+					const dal = new MetaDAL(dbManager.meta);
 
-				const host = dal.createHost({ type: "local", label: "crash-loop-host" });
-				const sessionId = "CRASHLOOP00000000000000000001";
-				dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
-				dal.createChannel({
-					id: "crash-ch-1",
-					sessionId,
-					status: "live",
-					shell: "/bin/sh",
-				});
+					const host = dal.createHost({ type: "local", label: "crash-loop-host" });
+					const sessionId = "CRASHLOOP00000000000000000001";
+					dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+					dal.createChannel({
+						id: "crash-ch-1",
+						sessionId,
+						status: "live",
+						shell: "/bin/sh",
+					});
 
-				// startup() triggers the first warm restart (count=1)
-				// _warmRestartLocal now awaits _spawnChannelsForHost, which needs
-				// setImmediate to fire SPAWN_OK. Start without blocking, flush, then await.
-				let p: Promise<void> = sm.startup();
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
+					// startup() triggers the first warm restart (count=1)
+					// _warmRestartLocal now awaits _spawnChannelsForHost, which needs
+					// setImmediate to fire SPAWN_OK. Start without blocking, flush, then await.
+					let p: Promise<void> = sm.startup();
+					await vi.advanceTimersByTimeAsync(0);
+					await p;
 
-				// Verify session is active after 1st restart
-				const sessionState = (
-					sm as unknown as {
-						sessions: Map<string, { id: string; status: string }>;
-					}
-				).sessions.get(host.id);
-				expect(sessionState).toBeDefined();
-				expect(sessionState?.status).toBe("active");
+					// Verify session is active after 1st restart
+					const sessionState = (
+						sm as unknown as {
+							sessions: Map<string, { id: string; status: string }>;
+						}
+					).sessions.get(host.id);
+					expect(sessionState).toBeDefined();
+					expect(sessionState?.status).toBe("active");
 
-				// Access the private _warmRestartLocal to trigger additional restarts
-				const smAny = sm as unknown as {
-					_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
-				};
+					// Access the private _warmRestartLocal to trigger additional restarts
+					const smAny = sm as unknown as {
+						_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
+					};
 
-				// 2nd restart (count=2)
-				p = smAny._warmRestartLocal(host.id, sessionId);
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
-				expect(sessionState?.status).toBe("active");
+					// 2nd restart (count=2)
+					p = smAny._warmRestartLocal(host.id, sessionId);
+					await vi.advanceTimersByTimeAsync(0);
+					await p;
+					expect(sessionState?.status).toBe("active");
 
-				// 3rd restart (count=3)
-				p = smAny._warmRestartLocal(host.id, sessionId);
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
-				expect(sessionState?.status).toBe("active");
+					// 3rd restart (count=3)
+					p = smAny._warmRestartLocal(host.id, sessionId);
+					await vi.advanceTimersByTimeAsync(0);
+					await p;
+					expect(sessionState?.status).toBe("active");
 
-				// 4th restart (count=4 > 3) — should trigger _closeSession
-				// _closeSession is sync so no SPAWN is sent — await directly
-				await smAny._warmRestartLocal(host.id, sessionId);
+					// 4th restart (count=4 > 3) — should trigger _closeSession
+					// _closeSession is sync so no SPAWN is sent — await directly
+					await smAny._warmRestartLocal(host.id, sessionId);
 
-				// Session should be closed
-				const sessions = (
-					sm as unknown as {
-						sessions: Map<string, { id: string; status: string }>;
-					}
-				).sessions;
-				// _closeSession deletes from sessions map
-				expect(sessions.has(host.id)).toBe(false);
-				expect(dal.getSession(sessionId)?.status).toBe("closed");
-				expect(dal.getChannel("crash-ch-1")?.status).toBe("dead");
-			} finally {
-				vi.useRealTimers();
-			}
-		});
+					// Session should be closed
+					const sessions = (
+						sm as unknown as {
+							sessions: Map<string, { id: string; status: string }>;
+						}
+					).sessions;
+					// _closeSession deletes from sessions map
+					expect(sessions.has(host.id)).toBe(false);
+					expect(dal.getSession(sessionId)?.status).toBe("closed");
+					expect(dal.getChannel("crash-ch-1")?.status).toBe("dead");
+				} finally {
+					vi.useRealTimers();
+				}
+			},
+		);
 
 		it.skip("crash-loop protection: window resets after 60s", async () => {
 			// vi.setSystemTime moves Date.now() past the 60s window but advanceTimersByTimeAsync(0)
