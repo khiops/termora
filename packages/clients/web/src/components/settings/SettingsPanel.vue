@@ -118,7 +118,7 @@ const hostName = computed(() => {
 const channelName = computed(() => {
 	if (!channelsStore.selectedChannelId) return undefined;
 	const ch = channelsStore.channels.find((c) => c.id === channelsStore.selectedChannelId);
-	return ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
+	return ch?.displayTitle ?? ch?.dynamicTitle ?? ch?.processTitle ?? DEFAULT_CHANNEL_NAME;
 });
 
 // ─── Load cascade when panel opens ────────────────────────────────────

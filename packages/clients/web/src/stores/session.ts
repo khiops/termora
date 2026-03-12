@@ -130,7 +130,8 @@ export const useSessionStore = defineStore("session", () => {
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
 					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
-					const name = ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
+					const name =
+						ch?.displayTitle ?? ch?.dynamicTitle ?? ch?.processTitle ?? DEFAULT_CHANNEL_NAME;
 					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
 				}
 			}

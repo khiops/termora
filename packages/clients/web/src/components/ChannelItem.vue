@@ -124,7 +124,13 @@ const notificationStore = useNotificationStore();
 const bellCount = computed(() => notificationStore.bellCounts.get(props.channel.id) ?? 0);
 const hasActivity = computed(() => notificationStore.activityDots.get(props.channel.id) ?? false);
 
-const displayLabel = computed(() => props.channel.displayTitle ?? DEFAULT_CHANNEL_NAME);
+const displayLabel = computed(
+	() =>
+		props.channel.displayTitle
+		?? props.channel.dynamicTitle
+		?? props.channel.processTitle
+		?? DEFAULT_CHANNEL_NAME,
+);
 
 // -------------------------------------------------------------------------
 // Inline rename
