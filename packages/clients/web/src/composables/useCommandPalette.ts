@@ -418,7 +418,7 @@ export function useCommandPalette() {
 
 			case "action:close-tab": {
 				if (activeTab === null) break;
-				const idx = layout.tabs.value.findIndex((t) => t.channelId === activeTab.channelId);
+				const idx = layout.tabs.value.findIndex((t) => t.id === activeTab.id);
 				if (idx !== -1) layout.closeTab(idx);
 				break;
 			}

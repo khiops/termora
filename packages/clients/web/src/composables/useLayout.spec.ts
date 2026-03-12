@@ -1435,7 +1435,7 @@ describe("findTabForChannel", () => {
 
 	it("prefers the active tab when the same channelId appears in two tabs", () => {
 		// Open two tabs for distinct channels so we get two real tab ids.
-		const [tabA, tabB] = openTabs("A", "B");
+		const [tabA, tabB] = openTabs("A", "B") as [string, string];
 
 		// Manually inject "ch-shared" into both tab layouts so that the channel
 		// exists in two tabs simultaneously (simulates split/copy scenario).

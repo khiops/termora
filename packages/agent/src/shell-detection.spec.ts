@@ -6,10 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Use vi.mock with a factory — hoisted automatically by vitest.
 // ---------------------------------------------------------------------------
 
-const mockReadFile = vi.fn<
-	[string, BufferEncoding],
-	Promise<string>
->();
+const mockReadFile = vi.fn<[string, BufferEncoding], Promise<string>>();
 const mockAccess = vi.fn<[string, number?], Promise<void>>();
 
 vi.mock("node:fs/promises", () => ({
@@ -18,11 +15,7 @@ vi.mock("node:fs/promises", () => ({
 	constants,
 }));
 
-import {
-	_resetShellCache,
-	detectAvailableShells,
-	getDefaultShell,
-} from "./shell-detection.js";
+import { _resetShellCache, detectAvailableShells, getDefaultShell } from "./shell-detection.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,9 +78,7 @@ describe("detectAvailableShells — Linux/macOS", () => {
 	});
 
 	it("returns empty array when /etc/shells does not exist", async () => {
-		mockReadFile.mockRejectedValue(
-			Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-		);
+		mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 		mockAccess.mockResolvedValue(undefined);
 
 		const shells = await detectAvailableShells();
@@ -168,9 +159,7 @@ describe("detectAvailableShells — Windows", () => {
 		const shells = await detectAvailableShells();
 
 		expect(shells).toContain("C:\\Windows\\System32\\cmd.exe");
-		expect(shells).toContain(
-			"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-		);
+		expect(shells).toContain("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
 		// pwsh.exe not installed — not in result
 		expect(shells).not.toContain("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
 	});
@@ -178,24 +167,18 @@ describe("detectAvailableShells — Windows", () => {
 	it("SC-22: includes ProgramFiles(x86) pwsh path when env var is set", async () => {
 		process.env["ProgramFiles(x86)"] = "C:\\Program Files (x86)";
 
-		const executable = new Set([
-			"C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe",
-		]);
+		const executable = new Set(["C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe"]);
 		mockAccess.mockImplementation(async (p: string) => {
 			if (executable.has(p)) return;
 			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 		});
 
 		const shells = await detectAvailableShells();
-		expect(shells).toContain(
-			"C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe",
-		);
+		expect(shells).toContain("C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe");
 	});
 
 	it("SC-22: returns empty array when no known shells are found", async () => {
-		mockAccess.mockRejectedValue(
-			Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-		);
+		mockAccess.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 
 		const shells = await detectAvailableShells();
 		expect(shells).toEqual([]);

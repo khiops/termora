@@ -325,10 +325,10 @@ function buildInitialForm(p?: LaunchProfile): FormState {
 		iconValue: p?.iconValue ?? "",
 		color: p?.color ?? "",
 		profileOverrides: {
-			fontFamily: p?.profileOverrides?.fontFamily,
-			fontSize: p?.profileOverrides?.fontSize,
-			cursorStyle: p?.profileOverrides?.cursorStyle,
-			scrollback: p?.profileOverrides?.scrollback,
+			...(p?.profileOverrides?.fontFamily !== undefined && { fontFamily: p.profileOverrides.fontFamily }),
+			...(p?.profileOverrides?.fontSize !== undefined && { fontSize: p.profileOverrides.fontSize }),
+			...(p?.profileOverrides?.cursorStyle !== undefined && { cursorStyle: p.profileOverrides.cursorStyle }),
+			...(p?.profileOverrides?.scrollback !== undefined && { scrollback: p.profileOverrides.scrollback }),
 		},
 	};
 }
@@ -455,26 +455,27 @@ async function handleSave(): Promise<void> {
 		if (form.profileOverrides.fontSize != null && form.profileOverrides.fontSize > 0) {
 			overrides.fontSize = form.profileOverrides.fontSize;
 		}
-		if (form.profileOverrides.cursorStyle && form.profileOverrides.cursorStyle !== "") {
-			overrides.cursorStyle = form.profileOverrides.cursorStyle as TerminalProfile["cursorStyle"];
+		if (form.profileOverrides.cursorStyle) {
+			overrides.cursorStyle = form.profileOverrides.cursorStyle;
 		}
 		if (form.profileOverrides.scrollback != null && form.profileOverrides.scrollback >= 0) {
 			overrides.scrollback = form.profileOverrides.scrollback;
 		}
 
+		const envRecord = buildEnvRecord();
 		const data: Partial<LaunchProfile> = {
 			name: form.name.trim(),
 			shell: form.shell.trim(),
-			args: form.args.length > 0 ? [...form.args] : undefined,
-			cwd: form.cwd.trim() !== "" ? form.cwd.trim() : undefined,
+			...(form.args.length > 0 && { args: [...form.args] }),
+			...(form.cwd.trim() !== "" && { cwd: form.cwd.trim() }),
 			mode: form.mode,
 			supportedOs: form.supportedOs,
 			elevated: form.elevated,
 			iconType: form.iconType,
-			iconValue: form.iconValue.trim() !== "" ? form.iconValue.trim() : undefined,
-			color: form.color.trim() !== "" ? form.color.trim() : undefined,
-			env: buildEnvRecord(),
-			profileOverrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+			...(form.iconValue.trim() !== "" && { iconValue: form.iconValue.trim() }),
+			...(form.color.trim() !== "" && { color: form.color.trim() }),
+			...(envRecord !== undefined && { env: envRecord }),
+			...(Object.keys(overrides).length > 0 && { profileOverrides: overrides }),
 		};
 
 		let saved: LaunchProfile;

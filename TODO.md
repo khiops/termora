@@ -21,6 +21,7 @@
 - [x] ✅ Block 6: UI — "+" Dropdown (web) (2026-03-12)
 - [x] ✅ Block 7: UI — Settings > Profiles Tab (web) (2026-03-12)
 - [x] ✅ Block 8: Command Palette + Keyboard Shortcuts (web) (2026-03-12)
+- [x] ✅ [Web] Fix TypeScript build errors (vue-tsc --noEmit) — promptType elevation, exactOptionalPropertyTypes, Tab.channelId, useLayout cast (2026-03-12)
 
 ## Tier 1 — Next Sprint (UX + DX)
 

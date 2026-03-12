@@ -149,12 +149,12 @@ export function useHostForm(editHost?: Host) {
 			const testHostId = isEdit && editHost ? editHost.id : generateId();
 
 			// Always read from form — it's initialized with editHost values,
-		// so form.value already reflects DB state + user edits
-		const host = form.value.sshHost;
-		const port = form.value.sshPort ?? 22;
-		const sshAuth = form.value.sshAuth;
-		const sshKeyPath = form.value.sshKeyPath;
-		const sshUser = form.value.sshUser;
+			// so form.value already reflects DB state + user edits
+			const host = form.value.sshHost;
+			const port = form.value.sshPort ?? 22;
+			const sshAuth = form.value.sshAuth;
+			const sshKeyPath = form.value.sshKeyPath;
+			const sshUser = form.value.sshUser;
 
 			const result = await new Promise<{ ok: boolean; message?: string }>((resolve) => {
 				const cleanup = (): void => {

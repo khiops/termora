@@ -1,8 +1,8 @@
-import Fastify from "fastify";
-import type { FastifyInstance } from "fastify";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Fastify from "fastify";
+import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerConfigRoutes } from "../api/config.js";
 import { ConfigResolver } from "../config.js";
@@ -257,7 +257,6 @@ describe("PUT /api/config/ui value validation", () => {
 		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 });
-
 
 // ─── broadcastDisplayTitles: called on PUT /api/config/ui with title section ──
 

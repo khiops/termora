@@ -1,4 +1,4 @@
-import { access, constants, readFile } from "node:fs/promises";
+import { constants, access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 /**
@@ -43,9 +43,7 @@ async function detectUnix(): Promise<string[]> {
 	}
 
 	// Parse: skip comments and blank lines, keep absolute paths.
-	const candidates = lines
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0 && !l.startsWith("#"));
+	const candidates = lines.map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("#"));
 
 	// Filter to paths that exist and are executable.
 	const checks = await Promise.all(candidates.map((p) => isExecutable(p)));
@@ -76,9 +74,7 @@ async function detectWindows(): Promise<string[]> {
 		`${SYSTEMROOT ?? "%SystemRoot%"}\\System32\\cmd.exe`,
 		`${SYSTEMROOT ?? "%SystemRoot%"}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
 		`${ProgramFiles ?? "%ProgramFiles%"}\\PowerShell\\7\\pwsh.exe`,
-		...(programFilesx86 !== undefined
-			? [`${programFilesx86}\\PowerShell\\7\\pwsh.exe`]
-			: []),
+		...(programFilesx86 !== undefined ? [`${programFilesx86}\\PowerShell\\7\\pwsh.exe`] : []),
 		`${LOCALAPPDATA ?? "%LOCALAPPDATA%"}\\Microsoft\\WindowsApps\\wt.exe`,
 		`${ProgramFiles ?? "%ProgramFiles%"}\\Git\\bin\\bash.exe`,
 		`${ProgramFiles ?? "%ProgramFiles%"}\\Git\\usr\\bin\\bash.exe`,
@@ -119,8 +115,7 @@ function getDefaultWindows(): string {
 export async function detectAvailableShells(): Promise<string[]> {
 	if (_cachedShells !== null) return _cachedShells;
 
-	const shells =
-		process.platform === "win32" ? await detectWindows() : await detectUnix();
+	const shells = process.platform === "win32" ? await detectWindows() : await detectUnix();
 
 	_cachedShells = shells;
 	return shells;
@@ -138,8 +133,7 @@ export async function detectAvailableShells(): Promise<string[]> {
 export function getDefaultShell(): string {
 	if (_cachedDefault !== null) return _cachedDefault;
 
-	const shell =
-		process.platform === "win32" ? getDefaultWindows() : getDefaultUnix();
+	const shell = process.platform === "win32" ? getDefaultWindows() : getDefaultUnix();
 
 	_cachedDefault = shell;
 	return shell;

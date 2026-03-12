@@ -562,7 +562,7 @@ function onSelectSshConfig(): void {
 
 function onPortInput(e: Event): void {
 	const val = (e.target as HTMLInputElement).value;
-	form.sshPort = val ? Number.parseInt(val, 10) || undefined : undefined;
+	form.value.sshPort = val ? Number.parseInt(val, 10) || undefined : undefined;
 }
 
 async function onSave(): Promise<void> {

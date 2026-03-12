@@ -3,7 +3,7 @@
 		<!-- ── Form view ──────────────────────────────────────────────────── -->
 		<ProfileForm
 			v-if="formMode !== 'list'"
-			:profile="editingProfile"
+			v-bind="editingProfile !== undefined ? { profile: editingProfile } : {}"
 			@saved="handleSaved"
 			@cancel="formMode = 'list'"
 		/>
