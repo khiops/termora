@@ -174,6 +174,18 @@ export const useChannelsStore = defineStore("channels", () => {
 			}
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
+
+			const prevDisplayTitles = new Map<string, string>();
+			for (const ch of channels.value) {
+				if (ch.displayTitle) prevDisplayTitles.set(ch.id, ch.displayTitle);
+			}
+			for (const ch of data) {
+				if (!ch.displayTitle) {
+					const prev = prevDisplayTitles.get(ch.id);
+					if (prev) ch.displayTitle = prev;
+				}
+			}
+
 			channels.value = data;
 			// Populate persistent channelId → hostId map (survives host switch)
 			const nextHostMap = new Map(channelHostMap.value);
