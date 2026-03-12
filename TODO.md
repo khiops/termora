@@ -22,6 +22,7 @@
 - [x] ✅ Block 7: UI — Settings > Profiles Tab (web) (2026-03-12)
 - [x] ✅ Block 8: Command Palette + Keyboard Shortcuts (web) (2026-03-12)
 - [x] ✅ [Web] Fix TypeScript build errors (vue-tsc --noEmit) — promptType elevation, exactOptionalPropertyTypes, Tab.channelId, useLayout cast (2026-03-12)
+- [x] ✅ [All] Fix 4 blocking review findings: F-001 ASKPASS injection, F-002 SC-17 profile override priority, F-003 HTTP method mismatch, F-004 host OS auto-resolve; + F-005/F-006/F-009 non-blocking (2026-03-12)
 
 ## Tier 1 — Next Sprint (UX + DX)
 

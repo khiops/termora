@@ -18,12 +18,13 @@ export interface AskpassResult {
 
 /**
  * Build the SUDO_ASKPASS environment for sudo(1) on Linux/macOS.
- * Creates a temporary shell script `#!/bin/sh\necho '<secret>'` that sudo
- * calls instead of showing a terminal password prompt.
+ * Creates a temporary shell script that reads the secret from the
+ * `_NEXTERM_ELEV` environment variable rather than embedding it in
+ * shell syntax, preventing command injection via single-quote escape.
  *
  * On Windows this is a no-op — gsudo handles UAC natively.
  *
- * @param secret  The elevation password to echo.
+ * @param secret  The elevation password to pass via environment variable.
  * @param platform  Defaults to process.platform (injected for testing).
  */
 export function buildAskpassEnv(
@@ -38,13 +39,14 @@ export function buildAskpassEnv(
 	const randomSuffix = crypto.randomBytes(8).toString("hex");
 	const tmpFile = path.join(os.tmpdir(), `nexterm-askpass-${randomSuffix}`);
 
-	// Write the ASKPASS script and make it owner-only executable.
-	fs.writeFileSync(tmpFile, `#!/bin/sh\necho '${secret}'`, { mode: 0o700 });
+	// The script reads the secret from an environment variable so the secret
+	// never enters shell syntax — preventing single-quote injection attacks.
+	fs.writeFileSync(tmpFile, `#!/bin/sh\necho "$_NEXTERM_ELEV"`, { mode: 0o700 });
 	// Explicit chmod in case the umask masked the mode bits above.
 	fs.chmodSync(tmpFile, 0o700);
 
 	return {
-		env: { SUDO_ASKPASS: tmpFile },
+		env: { SUDO_ASKPASS: tmpFile, _NEXTERM_ELEV: secret },
 		cleanup: () => {
 			try {
 				fs.unlinkSync(tmpFile);

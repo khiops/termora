@@ -1,4 +1,4 @@
-import { toSnakeCase } from "@nexterm/shared";
+import { type Host, toSnakeCase } from "@nexterm/shared";
 import type { SshConfigImport } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { ParseResult } from "../ssh/ssh-config-parser.js";
@@ -108,6 +108,36 @@ function validateAndClampVisualProfile(vp: Record<string, unknown>): string | nu
 		tint.opacity = 15;
 	}
 	return null;
+}
+
+/**
+ * Infer the OS of a host for launch profile filtering.
+ *
+ * Resolution order:
+ * 1. Agent-reported shells (discoveredShells): infer from path patterns.
+ * 2. Local host: use process.platform.
+ * 3. SSH host without HELLO data: 'unknown' (show all profiles).
+ *
+ * @param host  The host record from meta.db.
+ */
+export function resolveHostOs(host: Host): string {
+	if (host.discoveredShells && host.discoveredShells.length > 0) {
+		const hasWindowsShells = host.discoveredShells.some(
+			(s) => s.includes("\\") || s.toLowerCase().endsWith(".exe"),
+		);
+		if (hasWindowsShells) return "windows";
+		const hasMacPaths = host.discoveredShells.some(
+			(s) => s.includes("/usr/local/") || s.includes("/opt/homebrew/"),
+		);
+		if (hasMacPaths) return "darwin";
+		return "linux";
+	}
+	if (host.type === "local") {
+		if (process.platform === "win32") return "windows";
+		if (process.platform === "darwin") return "darwin";
+		return "linux";
+	}
+	return "unknown";
 }
 
 export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
@@ -511,7 +541,10 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			if (!host) {
 				return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Host not found" } });
 			}
-			const hostOs = request.query.os ?? "any";
+			// Auto-resolve OS from host data when client does not supply ?os=.
+			// This ensures profiles are correctly filtered without requiring the
+			// client to detect and send the remote OS.
+			const hostOs = request.query.os ?? resolveHostOs(host);
 			const profiles = metaDal.listHostProfiles(request.params.id, hostOs);
 			return toSnakeCase(profiles);
 		},

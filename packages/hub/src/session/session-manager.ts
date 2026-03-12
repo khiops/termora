@@ -447,12 +447,13 @@ export class SessionManager {
 		if (msg.launchProfileId) {
 			const profile = this.metaDal.getLaunchProfile(msg.launchProfileId);
 			if (profile) {
-				resolvedShell = profile.shell;
-				resolvedArgs = profile.args ?? [];
-				resolvedCwd = profile.cwd ?? resolvedCwd;
-				// Profile env overrides/supplements the UI-provided env
-				resolvedEnv = { ...resolvedEnv, ...(profile.env ?? {}) };
-				resolvedDirectProcess = profile.mode === "process";
+				// SC-17: UI fields win when explicitly provided — profile fills only unset fields
+				resolvedShell = msg.shell ?? profile.shell;
+				resolvedArgs = msg.args ?? profile.args ?? [];
+				resolvedCwd = msg.cwd ?? profile.cwd ?? resolvedCwd;
+				// Merge: profile env as base, UI env wins on conflict
+				resolvedEnv = { ...(profile.env ?? {}), ...(msg.env ?? {}) };
+				resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
 				// UI-level elevated flag can override the profile's setting
 				resolvedElevated = msg.elevated ?? profile.elevated;
 				resolvedLaunchProfileId = profile.id;

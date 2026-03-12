@@ -505,6 +505,50 @@ describe("SessionManager", () => {
 		expect(channel?.launchProfileId).toBe(profile.id);
 	});
 
+	it("SC-17: explicit UI fields override matching profile fields when launchProfileId is set", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Profile With Defaults",
+			shell: "/usr/bin/zsh",
+			args: ["-l"],
+			cwd: "/home/user",
+			env: { FROM_PROFILE: "yes", SHARED: "profile-value" },
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		// UI explicitly sends shell, args, cwd — all should win over profile
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+			shell: "/bin/bash",
+			args: ["--login"],
+			cwd: "/tmp/override",
+		});
+
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		const channel = dal.getChannel("local-ch-1");
+		// UI shell wins over profile shell
+		expect(channel?.shell).toBe("/bin/bash");
+		// UI args win over profile args
+		expect(channel?.args).toEqual(["--login"]);
+		// UI cwd wins over profile cwd
+		expect(channel?.cwd).toBe("/tmp/override");
+		// Note: env is forwarded to the agent only (not persisted in channel DB).
+		// The merge logic (profile env as base, UI env wins on conflict) is in
+		// the resolvedEnv assignment in _spawnChannel.
+	});
+
 	// ── End launch profile resolution ─────────────────────────────────────────
 
 	it("spawned channels have null title (dynamic title takes precedence)", async () => {
@@ -760,7 +804,7 @@ describe("SessionManager", () => {
 		expect(mockSshAgentInstance).not.toBeFalsy();
 
 		// Simulate agent sending a HELLO with shells
-		mockSshAgentInstance!._emit("message", {
+		mockSshAgentInstance?._emit("message", {
 			type: "HELLO",
 			version: 1,
 			agentVersion: "0.1.0",
@@ -793,7 +837,7 @@ describe("SessionManager", () => {
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
 
 		// Simulate agent sending a HELLO without shells (older agent)
-		mockSshAgentInstance!._emit("message", {
+		mockSshAgentInstance?._emit("message", {
 			type: "HELLO",
 			version: 1,
 			agentVersion: "0.1.0",

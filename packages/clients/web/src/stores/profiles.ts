@@ -1,4 +1,4 @@
-import type { LaunchProfile } from "@nexterm/shared";
+import { type LaunchProfile, toCamelCase } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -31,7 +31,7 @@ export const useProfilesStore = defineStore("profiles", () => {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (!res.ok) throw new Error(`GET /api/launch-profiles failed: ${res.status}`);
-			profiles.value = (await res.json()) as LaunchProfile[];
+			profiles.value = toCamelCase(await res.json()) as LaunchProfile[];
 		} finally {
 			loading.value = false;
 		}
@@ -47,7 +47,7 @@ export const useProfilesStore = defineStore("profiles", () => {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) throw new Error(`GET /api/hosts/${hostId}/profiles failed: ${res.status}`);
-		return (await res.json()) as LaunchProfile[];
+		return toCamelCase(await res.json()) as LaunchProfile[];
 	}
 
 	// -------------------------------------------------------------------------
@@ -65,7 +65,7 @@ export const useProfilesStore = defineStore("profiles", () => {
 			body: JSON.stringify(data),
 		});
 		if (!res.ok) throw new Error(`POST /api/launch-profiles failed: ${res.status}`);
-		const created = (await res.json()) as LaunchProfile;
+		const created = toCamelCase(await res.json()) as LaunchProfile;
 		profiles.value = [...profiles.value, created];
 		return created;
 	}
@@ -73,15 +73,15 @@ export const useProfilesStore = defineStore("profiles", () => {
 	async function updateProfile(id: string, data: Partial<LaunchProfile>): Promise<LaunchProfile> {
 		if (authStore.token === null) throw new Error("Not authenticated");
 		const res = await fetch(`/api/launch-profiles/${encodeURIComponent(id)}`, {
-			method: "PATCH",
+			method: "PUT",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token}`,
 			},
 			body: JSON.stringify(data),
 		});
-		if (!res.ok) throw new Error(`PATCH /api/launch-profiles/${id} failed: ${res.status}`);
-		const updated = (await res.json()) as LaunchProfile;
+		if (!res.ok) throw new Error(`PUT /api/launch-profiles/${id} failed: ${res.status}`);
+		const updated = toCamelCase(await res.json()) as LaunchProfile;
 		profiles.value = profiles.value.map((p) => (p.id === id ? updated : p));
 		return updated;
 	}
@@ -99,14 +99,14 @@ export const useProfilesStore = defineStore("profiles", () => {
 	async function reorderProfiles(ids: string[]): Promise<void> {
 		if (authStore.token === null) return;
 		const res = await fetch("/api/launch-profiles/reorder", {
-			method: "PUT",
+			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token}`,
 			},
 			body: JSON.stringify({ ids }),
 		});
-		if (!res.ok) throw new Error(`PUT /api/launch-profiles/reorder failed: ${res.status}`);
+		if (!res.ok) throw new Error(`POST /api/launch-profiles/reorder failed: ${res.status}`);
 	}
 
 	// -------------------------------------------------------------------------

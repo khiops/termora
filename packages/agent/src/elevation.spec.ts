@@ -52,14 +52,18 @@ describe("buildAskpassEnv", () => {
 				{ mode: number },
 			];
 			expect(filePath).toMatch(/^\/tmp\/nexterm-askpass-[0-9a-f]+$/);
-			expect(content).toBe("#!/bin/sh\necho 'mypassword'");
+			// Script must NOT embed the secret in shell syntax (injection prevention)
+			expect(content).not.toContain("mypassword");
+			// Script must reference the secret via env variable
+			expect(content).toBe('#!/bin/sh\necho "$_NEXTERM_ELEV"');
 			expect(options?.mode).toBe(0o700);
 
 			// chmod 700 applied explicitly
 			expect(mockChmodSync).toHaveBeenCalledWith(filePath, 0o700);
 
 			// env contains SUDO_ASKPASS pointing to the temp file
-			expect(result.env).toEqual({ SUDO_ASKPASS: filePath });
+			// AND _NEXTERM_ELEV carrying the secret (never in shell syntax)
+			expect(result.env).toEqual({ SUDO_ASKPASS: filePath, _NEXTERM_ELEV: "mypassword" });
 		});
 
 		it("SC-18: cleanup removes the temp file", () => {
@@ -113,7 +117,9 @@ describe("buildAskpassEnv", () => {
 			expect(result.env.SUDO_ASKPASS).toMatch(/^\/var\/folders\/tmp\/nexterm-askpass-/);
 			expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
 			const [, content] = mockWriteFileSync.mock.calls[0] as [string, string];
-			expect(content).toBe("#!/bin/sh\necho 'darwinpass'");
+			// Secret carried via env variable, not embedded in script
+			expect(content).toBe('#!/bin/sh\necho "$_NEXTERM_ELEV"');
+			expect(result.env._NEXTERM_ELEV).toBe("darwinpass");
 		});
 	});
 

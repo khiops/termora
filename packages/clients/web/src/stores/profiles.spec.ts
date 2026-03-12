@@ -344,3 +344,102 @@ describe("useProfilesStore — deleteProfile", () => {
 		expect(store.profiles.find((x) => x.id === "del-p")).toBeUndefined();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// F-003: HTTP method correctness
+// ---------------------------------------------------------------------------
+
+describe("useProfilesStore — HTTP method correctness (F-003)", () => {
+	it("updateProfile uses PUT (not PATCH)", async () => {
+		const updated = makeProfile({ id: "p1", name: "Updated" });
+		mockFetch.mockResolvedValueOnce(makeJsonResponse(updated));
+
+		const store = useProfilesStore();
+		await store.updateProfile("p1", { name: "Updated" });
+
+		const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+		expect(options.method).toBe("PUT");
+		expect(mockFetch).toHaveBeenCalledWith(
+			"/api/launch-profiles/p1",
+			expect.objectContaining({ method: "PUT" }),
+		);
+	});
+
+	it("reorderProfiles uses POST (not PUT)", async () => {
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve(null),
+		} as unknown as Response);
+
+		const store = useProfilesStore();
+		await store.reorderProfiles(["p1", "p2"]);
+
+		const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe("/api/launch-profiles/reorder");
+		expect(options.method).toBe("POST");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// F-009: toCamelCase applied to API responses
+// ---------------------------------------------------------------------------
+
+describe("useProfilesStore — toCamelCase conversion (F-009)", () => {
+	it("fetchProfiles converts snake_case API response to camelCase", async () => {
+		// Simulate snake_case response from hub API
+		const snakeResponse = [
+			{
+				id: "p1",
+				name: "Zsh",
+				shell: "/bin/zsh",
+				args: [],
+				mode: "shell",
+				elevated: false,
+				supported_os: "linux",
+				icon_type: "emoji",
+				icon_value: "🐚",
+				sort_order: 0,
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			},
+		];
+		mockFetch.mockResolvedValueOnce(makeJsonResponse(snakeResponse));
+
+		const store = useProfilesStore();
+		await store.fetchProfiles();
+
+		expect(store.profiles).toHaveLength(1);
+		// camelCase fields must be present
+		expect(store.profiles[0]?.supportedOs).toBe("linux");
+		expect(store.profiles[0]?.iconType).toBe("emoji");
+		expect(store.profiles[0]?.iconValue).toBe("🐚");
+		expect(store.profiles[0]?.sortOrder).toBe(0);
+		expect(store.profiles[0]?.createdAt).toBe("2026-01-01T00:00:00Z");
+	});
+
+	it("createProfile converts snake_case API response to camelCase", async () => {
+		const snakeResponse = {
+			id: "new-p",
+			name: "Fish",
+			shell: "/usr/bin/fish",
+			args: [],
+			mode: "shell",
+			elevated: false,
+			supported_os: "any",
+			icon_type: "auto",
+			icon_value: "",
+			sort_order: 1,
+			created_at: "2026-01-01T00:00:00Z",
+			updated_at: "2026-01-01T00:00:00Z",
+		};
+		mockFetch.mockResolvedValueOnce(makeJsonResponse(snakeResponse));
+
+		const store = useProfilesStore();
+		const result = await store.createProfile({ name: "Fish" });
+
+		expect(result.id).toBe("new-p");
+		expect(result.supportedOs).toBe("any");
+		expect(result.iconType).toBe("auto");
+		expect(result.sortOrder).toBe(1);
+	});
+});

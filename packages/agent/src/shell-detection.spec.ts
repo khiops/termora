@@ -127,6 +127,7 @@ describe("detectAvailableShells — Windows", () => {
 		process.env.SYSTEMROOT = "C:\\Windows";
 		process.env.ProgramFiles = "C:\\Program Files";
 		process.env.LOCALAPPDATA = "C:\\Users\\test\\AppData\\Local";
+		// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets the string "undefined")
 		delete process.env["ProgramFiles(x86)"];
 		// Ensure COMSPEC is set
 		process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe";
@@ -137,8 +138,9 @@ describe("detectAvailableShells — Windows", () => {
 			value: originalPlatform,
 			configurable: true,
 		});
-		// Restore env
+		// Restore env — delete is required here: assigning undefined sets the string "undefined"
 		for (const key of Object.keys(process.env)) {
+			// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets string "undefined")
 			if (!(key in originalEnv)) delete process.env[key];
 		}
 		Object.assign(process.env, originalEnv);
@@ -202,11 +204,13 @@ describe("getDefaultShell", () => {
 		if (originalShell !== undefined) {
 			process.env.SHELL = originalShell;
 		} else {
+			// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets string "undefined")
 			delete process.env.SHELL;
 		}
 		if (originalComspec !== undefined) {
 			process.env.COMSPEC = originalComspec;
 		} else {
+			// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets string "undefined")
 			delete process.env.COMSPEC;
 		}
 		_resetShellCache();
@@ -226,6 +230,7 @@ describe("getDefaultShell", () => {
 			value: "linux",
 			configurable: true,
 		});
+		// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets string "undefined")
 		delete process.env.SHELL;
 		expect(getDefaultShell()).toBe("/bin/sh");
 	});
@@ -244,6 +249,7 @@ describe("getDefaultShell", () => {
 			value: "win32",
 			configurable: true,
 		});
+		// biome-ignore lint/performance/noDelete: env var must be absent (undefined assignment sets string "undefined")
 		delete process.env.COMSPEC;
 		expect(getDefaultShell()).toBe("cmd.exe");
 	});

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
+import { resolveHostOs } from "./hosts.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -582,5 +583,118 @@ describe("DELETE /api/hosts/:id/profiles/:profileId", () => {
 			url: `/api/hosts/${hostId}/profiles/${profile.id}`,
 		});
 		expect(res.statusCode).toBe(404);
+	});
+});
+
+// ─── resolveHostOs (F-004) ─────────────────────────────────────────────────────
+
+describe("resolveHostOs", () => {
+	function makeHost(
+		overrides: Partial<{ type: string; discoveredShells: string[] }>,
+	): Parameters<typeof resolveHostOs>[0] {
+		return {
+			id: "h1",
+			type: (overrides.type ?? "local") as "local" | "ssh",
+			label: "Test",
+			iconType: "auto",
+			trustRemoteHints: "apply",
+			sortOrder: 0,
+			keepAliveSeconds: 0,
+			historyRetentionDays: 30,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+			...(overrides.discoveredShells !== undefined && {
+				discoveredShells: overrides.discoveredShells,
+			}),
+		};
+	}
+
+	it("returns 'windows' when discoveredShells contains .exe paths", () => {
+		const host = makeHost({
+			discoveredShells: ["C:\\Windows\\System32\\cmd.exe", "C:\\Windows\\powershell.exe"],
+		});
+		expect(resolveHostOs(host)).toBe("windows");
+	});
+
+	it("returns 'windows' when discoveredShells contains backslash paths", () => {
+		const host = makeHost({ discoveredShells: ["C:\\Windows\\System32\\cmd.exe"] });
+		expect(resolveHostOs(host)).toBe("windows");
+	});
+
+	it("returns 'darwin' when discoveredShells contain /opt/homebrew/ paths", () => {
+		const host = makeHost({
+			discoveredShells: ["/opt/homebrew/bin/fish", "/bin/zsh"],
+		});
+		expect(resolveHostOs(host)).toBe("darwin");
+	});
+
+	it("returns 'darwin' when discoveredShells contain /usr/local/ paths", () => {
+		const host = makeHost({
+			discoveredShells: ["/usr/local/bin/bash", "/bin/sh"],
+		});
+		expect(resolveHostOs(host)).toBe("darwin");
+	});
+
+	it("returns 'linux' when discoveredShells contain only standard Unix paths", () => {
+		const host = makeHost({ discoveredShells: ["/bin/bash", "/usr/bin/zsh"] });
+		expect(resolveHostOs(host)).toBe("linux");
+	});
+
+	it("returns process.platform-based OS for local host with no discoveredShells", () => {
+		const host = makeHost({ type: "local" });
+		const expected =
+			process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
+		expect(resolveHostOs(host)).toBe(expected);
+	});
+
+	it("returns 'unknown' for SSH host with no discoveredShells", () => {
+		const host = makeHost({ type: "ssh" });
+		expect(resolveHostOs(host)).toBe("unknown");
+	});
+
+	it("returns 'unknown' for SSH host with empty discoveredShells array", () => {
+		const host = makeHost({ type: "ssh", discoveredShells: [] });
+		expect(resolveHostOs(host)).toBe("unknown");
+	});
+});
+
+// ─── GET /api/hosts/:id/profiles — auto-OS resolution (F-004) ─────────────────
+
+describe("GET /api/hosts/:id/profiles — auto-OS resolution", () => {
+	it("auto-resolves OS from local host when ?os= is not supplied", async () => {
+		const hostsRes = await server.inject({ method: "GET", url: "/api/hosts" });
+		const hosts = hostsRes.json<Array<{ id: string; type: string }>>();
+		const localHost = hosts.find((h) => h.type === "local");
+		if (!localHost) throw new Error("local host not found");
+		const hostId = localHost.id;
+
+		// Create profiles for different OSes
+		await createProfile({ name: "Any OS Profile", supported_os: "any" });
+		await createProfile({ name: "Linux Profile", supported_os: "linux" });
+		await createProfile({ name: "Windows Profile", supported_os: "windows" });
+
+		// No ?os= query param — should auto-resolve from local host
+		const res = await server.inject({
+			method: "GET",
+			url: `/api/hosts/${hostId}/profiles`,
+		});
+
+		expect(res.statusCode).toBe(200);
+		const profiles = res.json<Array<{ name: string }>>();
+		const names = profiles.map((p) => p.name);
+
+		// "any" profiles always show
+		expect(names).toContain("Any OS Profile");
+		// Local OS-specific profile shows, other OS does not
+		// On Linux CI: linux shows, windows does not; on Windows: opposite
+		const expectedOs =
+			process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
+		if (expectedOs === "linux") {
+			expect(names).toContain("Linux Profile");
+			expect(names).not.toContain("Windows Profile");
+		} else if (expectedOs === "windows") {
+			expect(names).not.toContain("Linux Profile");
+			expect(names).toContain("Windows Profile");
+		}
 	});
 });
