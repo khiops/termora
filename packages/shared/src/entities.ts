@@ -13,6 +13,11 @@ export type LaunchProfileMode = "shell" | "process";
 export type SupportedOs = "linux" | "darwin" | "windows" | "any";
 export type ElevationMethod = "sudo" | "doas" | "pkexec" | "gsudo" | "custom";
 
+export const ELEVATION_METHODS_LINUX: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "custom"];
+export const ELEVATION_METHODS_DARWIN: readonly ElevationMethod[] = ["sudo", "doas", "custom"];
+export const ELEVATION_METHODS_WINDOWS: readonly ElevationMethod[] = ["gsudo", "custom"];
+export const ELEVATION_METHODS_ALL: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "gsudo", "custom"];
+
 export interface Host {
 	id: string; // ULID
 	type: HostType;
@@ -90,6 +95,8 @@ export interface Channel {
 	processTitle?: string;
 	displayTitle?: string;
 	launchProfileId?: string;
+	elevated?: boolean;
+	elevationMethod?: string;
 	createdAt: string;
 	updatedAt: string;
 }

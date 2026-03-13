@@ -60,6 +60,8 @@ export interface CreateChannelInput {
 	icon?: string;
 	directProcess?: boolean;
 	launchProfileId?: string;
+	elevated?: boolean;
+	elevationMethod?: string | null;
 }
 
 interface HostRow {
@@ -120,6 +122,8 @@ interface ChannelRow {
 	dynamic_title: string | null;
 	process_title: string | null;
 	launch_profile_id: string | null;
+	elevated: number;
+	elevation_method: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -215,6 +219,8 @@ function rowToChannel(row: ChannelRow): Channel {
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title;
 	if (row.process_title != null) ch.processTitle = row.process_title;
 	if (row.launch_profile_id != null) ch.launchProfileId = row.launch_profile_id;
+	if (row.elevated === 1) ch.elevated = true;
+	if (row.elevation_method != null) ch.elevationMethod = row.elevation_method;
 	if (row.args && row.args !== "[]") {
 		try {
 			const parsed = JSON.parse(row.args) as string[];
@@ -792,8 +798,9 @@ export class MetaDAL {
 			.prepare(
 				`INSERT INTO channels (
 					id, session_id, shell, args, cwd, title, status, cols, rows,
-					icon, direct_process, launch_profile_id, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					icon, direct_process, launch_profile_id, elevated, elevation_method,
+					created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				input.id,
@@ -808,6 +815,8 @@ export class MetaDAL {
 				input.icon ?? null,
 				input.directProcess ? 1 : 0,
 				input.launchProfileId ?? null,
+				input.elevated ? 1 : 0,
+				input.elevationMethod ?? null,
 				now,
 				now,
 			);

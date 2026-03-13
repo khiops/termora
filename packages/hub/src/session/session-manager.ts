@@ -85,6 +85,26 @@ interface SessionState {
 	status: SessionStatus;
 }
 
+/** Options for SessionManager._sendSpawnAndWait */
+interface SendSpawnOpts {
+	agent: AgentConnection;
+	spawnMsg: AgentSpawnMessage;
+	clientId: string;
+	hostId: string;
+	session: { id: string };
+	client: WsClient;
+	resolvedShell: string;
+	resolvedArgs: string[];
+	resolvedCwd: string;
+	resolvedDirectProcess: boolean;
+	resolvedLaunchProfileId: string | undefined;
+	cols: number;
+	rows: number;
+	suppressClientError?: boolean;
+	resolvedElevated?: boolean;
+	resolvedElevationMethod?: string;
+}
+
 export class SessionManager {
 	/** hostId → AgentConnection */
 	private agents = new Map<string, AgentConnection>();
@@ -140,12 +160,6 @@ export class SessionManager {
 	private static readonly ELEVATION_CACHE_TTL_MS = 900_000; // 15 minutes
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	private agentCapabilities = new Map<string, string[]>();
-	/**
-	 * Transient: code from the most recent SPAWN_ERR response.
-	 * Used by handleSpawn to distinguish ELEVATION_PASSWORD_REQUIRED from other errors.
-	 * Reset before each _sendSpawnAndWait call.
-	 */
-	private _lastSpawnErrCode = "";
 
 	/**
 	 * Optional callback to resolve the current write-lock holder for a channel.
@@ -378,29 +392,32 @@ export class SessionManager {
 	/**
 	 * Send a SPAWN message to an agent and wait for SPAWN_OK or SPAWN_ERR.
 	 * On SPAWN_OK: creates the channel in DB and memory, notifies all clients, returns channelId.
-	 * On SPAWN_ERR: sends ERROR to client (unless suppressClientError=true), returns null.
-	 * Sets this._lastSpawnErrCode to the error code on SPAWN_ERR.
+	 * On SPAWN_ERR: sends ERROR to client (unless suppressClientError=true), returns null errCode.
 	 */
 	private async _sendSpawnAndWait(
-		agent: AgentConnection,
-		spawnMsg: AgentSpawnMessage,
-		clientId: string,
-		hostId: string,
-		session: { id: string },
-		client: WsClient,
-		resolvedShell: string,
-		resolvedArgs: string[],
-		resolvedCwd: string,
-		resolvedDirectProcess: boolean,
-		resolvedLaunchProfileId: string | undefined,
-		cols: number,
-		rows: number,
-		suppressClientError = false,
-	): Promise<string | null> {
-		this._lastSpawnErrCode = "";
+		opts: SendSpawnOpts,
+	): Promise<{ channelId: string | null; errCode: string | null }> {
+		const {
+			agent,
+			spawnMsg,
+			clientId,
+			hostId,
+			session,
+			client,
+			resolvedShell,
+			resolvedArgs,
+			resolvedCwd,
+			resolvedDirectProcess,
+			resolvedLaunchProfileId,
+			cols,
+			rows,
+			suppressClientError = false,
+			resolvedElevated = false,
+			resolvedElevationMethod = undefined,
+		} = opts;
 		agent.send(spawnMsg);
 
-		return new Promise<string | null>((resolve, reject) => {
+		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pendingRequests.delete(spawnMsg.requestId);
 				reject(new Error("Agent SPAWN timeout"));
@@ -430,6 +447,10 @@ export class SessionManager {
 						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
 						...(resolvedLaunchProfileId !== undefined && {
 							launchProfileId: resolvedLaunchProfileId,
+						}),
+						...(resolvedElevated && { elevated: true }),
+						...(resolvedElevationMethod !== undefined && {
+							elevationMethod: resolvedElevationMethod,
 						}),
 					});
 
@@ -469,13 +490,11 @@ export class SessionManager {
 						sessionId: session.id,
 					};
 					client.send(response);
-					resolve(channelId);
+					resolve({ channelId, errCode: null });
 				} else if (incoming.type === "SPAWN_ERR") {
 					const spawnErr = incoming as AgentSpawnErrMessage;
 					clearTimeout(timer);
 					this.pendingRequests.delete(spawnMsg.requestId);
-
-					this._lastSpawnErrCode = spawnErr.code;
 
 					if (!suppressClientError) {
 						const errorMsg: ErrorMessage = {
@@ -485,7 +504,7 @@ export class SessionManager {
 						};
 						client.send(errorMsg);
 					}
-					resolve(null);
+					resolve({ channelId: null, errCode: spawnErr.code });
 				}
 			});
 		});
@@ -643,29 +662,34 @@ export class SessionManager {
 			// Check elevation secret cache first
 			const cached = this.elevationCache.get(hostId);
 			if (cached && cached.expiresAt > Date.now()) {
-				// Cache hit → send with secret (no prompt needed)
+				// Cache hit — send with secret (no prompt needed)
 				agentSpawn.elevationSecret = cached.secret;
-				return await this._sendSpawnAndWait(
-					agent,
-					agentSpawn,
-					clientId,
-					hostId,
-					session,
-					client,
-					resolvedShell,
-					resolvedArgs,
-					resolvedCwd,
-					resolvedDirectProcess,
-					resolvedLaunchProfileId,
-					cols,
-					rows,
-				);
+				return (
+					await this._sendSpawnAndWait({
+						agent,
+						spawnMsg: agentSpawn,
+						clientId,
+						hostId,
+						session,
+						client,
+						resolvedShell,
+						resolvedArgs,
+						resolvedCwd,
+						resolvedDirectProcess,
+						resolvedLaunchProfileId,
+						cols,
+						rows,
+						suppressClientError: false,
+						resolvedElevated: true,
+						resolvedElevationMethod: method,
+					})
+				).channelId;
 			}
 
-			// Cache miss → try passwordless first
-			const firstResponse = await this._sendSpawnAndWait(
+			// Cache miss — try passwordless first
+			const firstResult = await this._sendSpawnAndWait({
 				agent,
-				agentSpawn,
+				spawnMsg: agentSpawn,
 				clientId,
 				hostId,
 				session,
@@ -677,15 +701,17 @@ export class SessionManager {
 				resolvedLaunchProfileId,
 				cols,
 				rows,
-				/* suppressClientError */ true,
-			);
+				suppressClientError: true,
+				resolvedElevated: true,
+				resolvedElevationMethod: method,
+			});
 
-			if (firstResponse !== null || this._lastSpawnErrCode !== "ELEVATION_PASSWORD_REQUIRED") {
+			if (firstResult.channelId !== null || firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED") {
 				// Passwordless succeeded, or a non-password error occurred (already sent to client)
-				return firstResponse;
+				return firstResult.channelId;
 			}
 
-			// Passwordless failed with ELEVATION_PASSWORD_REQUIRED → prompt user
+			// Passwordless failed with ELEVATION_PASSWORD_REQUIRED — prompt user
 			const promptFn = this._buildPromptAuth(client);
 			const hostname = host.sshHost ?? host.label ?? hostId;
 			const secret = await promptFn(
@@ -714,9 +740,33 @@ export class SessionManager {
 				requestId: generateId(),
 				elevationSecret: secret,
 			};
-			return await this._sendSpawnAndWait(
+			return (
+				await this._sendSpawnAndWait({
+					agent,
+					spawnMsg: retrySpawn,
+					clientId,
+					hostId,
+					session,
+					client,
+					resolvedShell,
+					resolvedArgs,
+					resolvedCwd,
+					resolvedDirectProcess,
+					resolvedLaunchProfileId,
+					cols,
+					rows,
+					suppressClientError: false,
+					resolvedElevated: true,
+					resolvedElevationMethod: method,
+				})
+			).channelId;
+		}
+
+		// ── Non-elevated spawn ───────────────────────────────────────────────
+		return (
+			await this._sendSpawnAndWait({
 				agent,
-				retrySpawn,
+				spawnMsg: baseSpawnMsg,
 				clientId,
 				hostId,
 				session,
@@ -728,25 +778,8 @@ export class SessionManager {
 				resolvedLaunchProfileId,
 				cols,
 				rows,
-			);
-		}
-
-		// ── Non-elevated spawn ───────────────────────────────────────────────
-		return await this._sendSpawnAndWait(
-			agent,
-			baseSpawnMsg,
-			clientId,
-			hostId,
-			session,
-			client,
-			resolvedShell,
-			resolvedArgs,
-			resolvedCwd,
-			resolvedDirectProcess,
-			resolvedLaunchProfileId,
-			cols,
-			rows,
-		);
+			})
+		).channelId;
 	}
 
 	async handleAttach(clientId: string, channelId: string): Promise<boolean> {
@@ -992,7 +1025,7 @@ export class SessionManager {
 	 * Restart a channel: destroy the current PTY and respawn with the same config.
 	 * Used by POST /api/channels/:id/restart. Returns true on success.
 	 */
-	async restartChannel(channelId: string): Promise<boolean> {
+	async restartChannel(channelId: string, requestingClientId?: string): Promise<boolean> {
 		// Load latest config from DB (may have been updated via PATCH)
 		const info = this.metaDal.getChannelWithHost(channelId);
 		if (!info) return false;
@@ -1013,13 +1046,203 @@ export class SessionManager {
 		if (!agent?.connected) return false;
 
 		// Build SPAWN from DB config
-		const requestId = generateId();
 		const shell = channel.shell ?? process.env.SHELL ?? "/bin/sh";
 		const args = channel.args ?? [];
 		const cwd = channel.cwd ?? process.env.HOME ?? "/";
 		const cols = channel.cols;
 		const rows = channel.rows;
 
+		// ── Elevated restart: mirror the two-step flow from handleSpawn ──────
+		if (channel.elevated && channel.elevationMethod) {
+			const method = channel.elevationMethod;
+
+			// Resolve custom command if needed
+			const customCommand =
+				method === "custom" && this._configResolver
+					? this._configResolver.resolveCustomCommand(this.metaDal.getHost(hostId)?.customCommand)
+					: undefined;
+
+			const baseElevatedSpawn: AgentSpawnMessage = {
+				type: "SPAWN",
+				requestId: generateId(),
+				channelId,
+				shell,
+				...(args.length > 0 && { args }),
+				cwd,
+				env: {},
+				cols,
+				rows,
+				elevated: true,
+				elevationMethod: method,
+				...(customCommand !== undefined && { customCommand }),
+			};
+
+			// Find a client to prompt — prefer the requesting client, fall back to any attached client
+			let promptClient: WsClient | undefined;
+			if (requestingClientId) {
+				promptClient = this.clients.get(requestingClientId);
+			}
+			if (!promptClient) {
+				// Pick the first attached client for this channel (or any connected client)
+				const attachedClientId =
+					ch?.clients && ch.clients.size > 0 ? [...ch.clients][0] : undefined;
+				promptClient = attachedClientId ? this.clients.get(attachedClientId) : undefined;
+			}
+			if (!promptClient) {
+				// No client available for prompting — try cache or passwordless only
+				const cached = this.elevationCache.get(hostId);
+				if (cached && cached.expiresAt > Date.now()) {
+					const spawnWithSecret: AgentSpawnMessage = {
+						...baseElevatedSpawn,
+						requestId: generateId(),
+						elevationSecret: cached.secret,
+					};
+					return await this._restartSendAndWait(
+						agent,
+						spawnWithSecret,
+						channelId,
+						hostId,
+						sessionEntry,
+						ch,
+						shell,
+						args,
+						cwd,
+						cols,
+						rows,
+						channel.directProcess,
+					);
+				}
+				// No cache, no client — attempt passwordless
+				return await this._restartSendAndWait(
+					agent,
+					baseElevatedSpawn,
+					channelId,
+					hostId,
+					sessionEntry,
+					ch,
+					shell,
+					args,
+					cwd,
+					cols,
+					rows,
+					channel.directProcess,
+				);
+			}
+
+			// Check elevation secret cache first
+			const cached = this.elevationCache.get(hostId);
+			if (cached && cached.expiresAt > Date.now()) {
+				const spawnWithSecret: AgentSpawnMessage = {
+					...baseElevatedSpawn,
+					requestId: generateId(),
+					elevationSecret: cached.secret,
+				};
+				return await this._restartSendAndWait(
+					agent,
+					spawnWithSecret,
+					channelId,
+					hostId,
+					sessionEntry,
+					ch,
+					shell,
+					args,
+					cwd,
+					cols,
+					rows,
+					channel.directProcess,
+				);
+			}
+
+			// Cache miss — try passwordless first
+			let firstErrCode: string | null = null;
+			agent.send(baseElevatedSpawn);
+			const firstOk = await new Promise<boolean>((resolve) => {
+				const timer = setTimeout(() => {
+					this.pendingRequests.delete(baseElevatedSpawn.requestId);
+					resolve(false);
+				}, SPAWN_TIMEOUT_MS);
+				this.pendingRequests.set(baseElevatedSpawn.requestId, (incoming: ProtocolMessage) => {
+					clearTimeout(timer);
+					this.pendingRequests.delete(baseElevatedSpawn.requestId);
+					if (incoming.type === "SPAWN_OK") {
+						resolve(true);
+					} else if (incoming.type === "SPAWN_ERR") {
+						firstErrCode = (incoming as AgentSpawnErrMessage).code;
+						resolve(false);
+					} else {
+						resolve(false);
+					}
+				});
+			});
+
+			if (firstOk) {
+				this._applyRestartState(
+					channelId,
+					hostId,
+					sessionEntry,
+					ch,
+					shell,
+					args,
+					cwd,
+					cols,
+					rows,
+					channel.directProcess,
+				);
+				return true;
+			}
+
+			if (firstErrCode !== "ELEVATION_PASSWORD_REQUIRED") {
+				// Non-password error — cannot recover without a new spawn
+				return false;
+			}
+
+			// Passwordless failed with ELEVATION_PASSWORD_REQUIRED — prompt user
+			const promptFn = this._buildPromptAuth(promptClient);
+			const host = this.metaDal.getHost(hostId);
+			const hostname = host?.sshHost ?? host?.label ?? hostId;
+			const secret = await promptFn(
+				hostId,
+				"elevation",
+				`Enter password for elevated shell on ${hostname}`,
+			);
+			if (secret === null) {
+				promptClient.send({
+					type: "ERROR",
+					code: "ELEVATION_CANCELLED",
+					message: "Elevation cancelled by user",
+				} as ErrorMessage);
+				return false;
+			}
+
+			// Cache the secret and retry
+			this.elevationCache.set(hostId, {
+				secret,
+				expiresAt: Date.now() + SessionManager.ELEVATION_CACHE_TTL_MS,
+			});
+
+			const retrySpawn: AgentSpawnMessage = {
+				...baseElevatedSpawn,
+				requestId: generateId(),
+				elevationSecret: secret,
+			};
+			return await this._restartSendAndWait(
+				agent,
+				retrySpawn,
+				channelId,
+				hostId,
+				sessionEntry,
+				ch,
+				shell,
+				args,
+				cwd,
+				cols,
+				rows,
+				channel.directProcess,
+			);
+		}
+
+		// ── Non-elevated restart ─────────────────────────────────────────────
+		const requestId = generateId();
 		agent.send({
 			type: "SPAWN",
 			requestId,
@@ -1047,7 +1270,89 @@ export class SessionManager {
 
 		if (!ok) return false;
 
-		// Restore in-memory state
+		this._applyRestartState(
+			channelId,
+			hostId,
+			sessionEntry,
+			ch,
+			shell,
+			args,
+			cwd,
+			cols,
+			rows,
+			channel.directProcess,
+		);
+		return true;
+	}
+
+	/**
+	 * Send a SPAWN to the agent and wait for SPAWN_OK/SPAWN_ERR, then apply
+	 * restart state on success. Used by restartChannel's elevated path.
+	 */
+	private async _restartSendAndWait(
+		agent: AgentConnection,
+		spawnMsg: AgentSpawnMessage,
+		channelId: string,
+		hostId: string,
+		sessionEntry: { id: string; status: string },
+		ch: ChannelState | undefined,
+		shell: string,
+		args: string[],
+		cwd: string,
+		cols: number,
+		rows: number,
+		directProcess?: boolean,
+	): Promise<boolean> {
+		agent.send(spawnMsg);
+		const ok = await new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingRequests.delete(spawnMsg.requestId);
+				resolve(false);
+			}, SPAWN_TIMEOUT_MS);
+			this.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timer);
+				this.pendingRequests.delete(spawnMsg.requestId);
+				if (incoming.type === "SPAWN_OK") {
+					resolve(true);
+				} else if (incoming.type === "SPAWN_ERR") {
+					resolve(false);
+				} else {
+					resolve(false);
+				}
+			});
+		});
+		if (!ok) return false;
+		this._applyRestartState(
+			channelId,
+			hostId,
+			sessionEntry,
+			ch,
+			shell,
+			args,
+			cwd,
+			cols,
+			rows,
+			directProcess,
+		);
+		return true;
+	}
+
+	/**
+	 * Update in-memory + DB state after a successful restart SPAWN_OK.
+	 * Extracted to avoid duplication between elevated and non-elevated restart paths.
+	 */
+	private _applyRestartState(
+		channelId: string,
+		hostId: string,
+		sessionEntry: { id: string; status: string },
+		ch: ChannelState | undefined,
+		shell: string,
+		args: string[],
+		cwd: string,
+		cols: number,
+		rows: number,
+		directProcess?: boolean,
+	): void {
 		this.metaDal.updateChannelStatus(channelId, "live");
 		this.channels.set(channelId, {
 			sessionId: sessionEntry.id,
@@ -1059,7 +1364,7 @@ export class SessionManager {
 			cwd,
 			cols,
 			rows,
-			...(channel.directProcess && { directProcess: true }),
+			...(directProcess && { directProcess: true }),
 			dynamicTitle: null,
 			processTitle: null,
 			displayTitle: DEFAULT_CHANNEL_NAME,
@@ -1067,7 +1372,6 @@ export class SessionManager {
 		this.scheduler.trackChannel(channelId);
 		this.chunker.trackChannel(channelId);
 
-		// Broadcast new state
 		const channelStateMsg: ChannelStateMessage = {
 			type: "CHANNEL_STATE",
 			channelId,
@@ -1076,12 +1380,9 @@ export class SessionManager {
 		};
 		this._broadcastToAllClients(channelStateMsg);
 
-		// If session was detached, re-activate it now that a channel is live
 		if (sessionEntry.status === "detached") {
 			this._updateSessionStatus(hostId, sessionEntry.id, "active");
 		}
-
-		return true;
 	}
 
 	async shutdown(): Promise<void> {

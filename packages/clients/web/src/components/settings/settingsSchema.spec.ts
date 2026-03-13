@@ -98,7 +98,6 @@ describe("settingsSchema", () => {
 				"channels",
 				"search",
 				"startup",
-				"elevation",
 			];
 			for (const def of settingsSchema) {
 				expect(validCategories).toContain(def.category);
@@ -114,7 +113,6 @@ describe("settingsSchema", () => {
 				"search",
 				"startup",
 				"title",
-				"elevation",
 			];
 			for (const def of settingsSchema) {
 				expect(validSections).toContain(def.section);

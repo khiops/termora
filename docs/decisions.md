@@ -4,6 +4,24 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## ELEV-CONFIG — Configurable Elevation Methods + Passwordless-First Flow (2026-03-13)
+
+- ElevationMethod includes 'custom' option for user-defined elevation commands
+- Custom elevation: command receives '-- shell args...' suffix, no askpass flow
+- Passwordless-first: try without password → SPAWN_ERR → prompt → retry
+- Config cascade: global (config.toml) → per-host (meta.db)
+- Methods: sudo, doas, pkexec (Linux/macOS), gsudo (Windows), custom (all)
+- sudo -H flag fixes HOME issue (replaces -E alone)
+- customCommand added to AgentSpawnMessage for agent-side custom elevation
+- _sendSpawnAndWait extracted in session-manager for spawn retry pattern
+- Migration 010: elevation_method + custom_command columns on hosts with CHECK constraint
+- Per-OS custom commands: customCommandLinux/Darwin/Windows (not single customCommand)
+- Custom ElevationCategory.vue: 3 OS sections, custom command field disabled unless method=custom
+- Migration 011: elevated + elevation_method columns on channels (restart preserves elevation)
+- restartChannel: two-step elevation flow mirrors handleSpawn (cache → passwordless → prompt)
+
+---
+
 ## launch-profiles — Launch Profiles — Windows Terminal-style named launch configurations with elevation (2026-03-12)
 
 - LaunchProfile as first-class entity in meta.db (not config.toml) — relational queries, CRUD API, FK references

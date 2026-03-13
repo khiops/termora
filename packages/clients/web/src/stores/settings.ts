@@ -1,4 +1,4 @@
-import type { CascadeResponse } from "@nexterm/shared";
+import type { CascadeResponse, ElevationConfig } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useAuthStore } from "./auth.js";
@@ -111,6 +111,10 @@ export const useSettingsStore = defineStore("settings", () => {
 			return getNestedValue(cascade.value.ui.global, path);
 		}
 
+		if (section === "elevation") {
+			return cascade.value?.elevation?.[path as keyof ElevationConfig];
+		}
+
 		return undefined;
 	}
 
@@ -201,6 +205,8 @@ export const useSettingsStore = defineStore("settings", () => {
 			setNestedValue(next.ui.resolved as unknown as Record<string, unknown>, key, value);
 		} else if (section === "appearance") {
 			setNestedValue(next.appearance as unknown as Record<string, unknown>, key, value);
+		} else if (section === "elevation" && next.elevation) {
+			(next.elevation as unknown as Record<string, unknown>)[key] = value;
 		}
 
 		cascade.value = next;

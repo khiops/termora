@@ -302,6 +302,7 @@ export interface CascadeResponse {
 		resolved: UiConfig;
 	};
 	appearance: AppearanceConfig;
+	elevation: ElevationConfig;
 }
 
 // ─── Key whitelists for config write-back validation ──────────────────────────
@@ -382,7 +383,9 @@ export interface ElevationConfig {
 	methodLinux: ElevationMethod;
 	methodDarwin: ElevationMethod;
 	methodWindows: ElevationMethod;
-	customCommand?: string;
+	customCommandLinux?: string;
+	customCommandDarwin?: string;
+	customCommandWindows?: string;
 }
 
 export const DEFAULT_ELEVATION_CONFIG: ElevationConfig = {
@@ -391,4 +394,11 @@ export const DEFAULT_ELEVATION_CONFIG: ElevationConfig = {
 	methodWindows: "gsudo",
 };
 
-export const ELEVATION_CONFIG_KEYS = ["methodLinux", "methodDarwin", "methodWindows", "customCommand"] as const;
+export const ELEVATION_CONFIG_KEYS = [
+	"methodLinux",
+	"methodDarwin",
+	"methodWindows",
+	"customCommandLinux",
+	"customCommandDarwin",
+	"customCommandWindows",
+] as const;

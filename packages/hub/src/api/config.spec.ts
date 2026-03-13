@@ -415,24 +415,53 @@ describe("PUT /api/config/elevation", () => {
 		expect(res.statusCode).toBe(200);
 	});
 
-	it("accepts non-empty customCommand", async () => {
+	it("accepts non-empty customCommandLinux", async () => {
 		const res = await server.inject({
 			method: "PUT",
 			url: "/api/config/elevation",
-			payload: { customCommand: "/usr/local/bin/myelev" },
+			payload: { customCommandLinux: "/usr/local/bin/myelev" },
 		});
 		expect(res.statusCode).toBe(200);
 	});
 
-	it("rejects empty customCommand", async () => {
+	it("accepts non-empty customCommandDarwin", async () => {
 		const res = await server.inject({
 			method: "PUT",
 			url: "/api/config/elevation",
-			payload: { customCommand: "" },
+			payload: { customCommandDarwin: "/usr/local/bin/myelev-mac" },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("accepts non-empty customCommandWindows", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { customCommandWindows: "C:\\tools\\myelev.exe" },
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it("rejects empty customCommandLinux", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { customCommandLinux: "" },
 		});
 		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("INVALID_VALUE");
+	});
+
+	it("rejects unknown key customCommand (old name)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/elevation",
+			payload: { customCommand: "/usr/bin/sudo" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 
 	it("rejects non-object body", async () => {

@@ -1,6 +1,9 @@
 import {
 	DEFAULT_PROFILE,
 	ELEVATION_CONFIG_KEYS,
+	ELEVATION_METHODS_DARWIN,
+	ELEVATION_METHODS_LINUX,
+	ELEVATION_METHODS_WINDOWS,
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	UI_SECTION_KEYS,
@@ -306,38 +309,44 @@ export function registerConfigRoutes(
 			}
 		}
 
-		const linuxDarwinMethods = ["sudo", "doas", "pkexec", "custom"];
-		const windowsMethods = ["gsudo", "custom"];
-
 		for (const [key, value] of Object.entries(body)) {
-			if (key === "methodLinux" || key === "methodDarwin") {
-				if (typeof value !== "string" || !linuxDarwinMethods.includes(value)) {
+			if (key === "methodLinux") {
+				if (typeof value !== "string" || !(ELEVATION_METHODS_LINUX as readonly string[]).includes(value)) {
 					return reply.code(400).send({
 						error: {
 							code: "INVALID_VALUE",
-							message: `Invalid value for "${key}": must be one of ${linuxDarwinMethods.join(", ")}`,
+							message: `Invalid value for "${key}": must be one of ${ELEVATION_METHODS_LINUX.join(", ")}`,
+						},
+					});
+				}
+			} else if (key === "methodDarwin") {
+				if (typeof value !== "string" || !(ELEVATION_METHODS_DARWIN as readonly string[]).includes(value)) {
+					return reply.code(400).send({
+						error: {
+							code: "INVALID_VALUE",
+							message: `Invalid value for "${key}": must be one of ${ELEVATION_METHODS_DARWIN.join(", ")}`,
 						},
 					});
 				}
 			} else if (key === "methodWindows") {
-				if (typeof value !== "string" || !windowsMethods.includes(value)) {
+				if (typeof value !== "string" || !(ELEVATION_METHODS_WINDOWS as readonly string[]).includes(value)) {
 					return reply.code(400).send({
 						error: {
 							code: "INVALID_VALUE",
-							message: `Invalid value for "methodWindows": must be one of ${windowsMethods.join(", ")}`,
+							message: `Invalid value for "methodWindows": must be one of ${ELEVATION_METHODS_WINDOWS.join(", ")}`,
 						},
 					});
 				}
-			} else if (key === "customCommand") {
-				if (typeof value !== "string" || value.length === 0) {
-					return reply.code(400).send({
-						error: {
-							code: "INVALID_VALUE",
-							message: `Invalid value for "customCommand": must be a non-empty string`,
-						},
-					});
-				}
+			} else if (key === "customCommandLinux" || key === "customCommandDarwin" || key === "customCommandWindows") {
+			if (typeof value !== "string" || value.length === 0) {
+				return reply.code(400).send({
+					error: {
+						code: "INVALID_VALUE",
+						message: `Invalid value for "${key}": must be a non-empty string`,
+					},
+				});
 			}
+		}
 			await configResolver.saveGlobalKey("elevation", key, value);
 		}
 

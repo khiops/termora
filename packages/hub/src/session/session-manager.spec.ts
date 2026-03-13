@@ -2870,4 +2870,172 @@ describe("SessionManager — elevation support", () => {
 		const channels = sessions.flatMap((s) => dal.listChannels(s.id));
 		expect(channels).toHaveLength(0);
 	});
+
+	it("persist-01: elevated=true channel persists elevated+elevationMethod in DB", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-persist01", received, "s3cr3t");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		const channelId = await sm.handleSpawn("c-persist01", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.elevated).toBe(true);
+		expect(channel?.elevationMethod).toBeDefined();
+	});
+
+	it("persist-02: non-elevated channel has elevated=false in DB", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-persist02", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-persist02", {
+			type: "SPAWN",
+			hostId: localHostId,
+		});
+		expect(channelId).not.toBeNull();
+
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.elevated).toBeFalsy();
+		expect(channel?.elevationMethod).toBeUndefined();
+	});
+
+	it("restart-elev-01: restartChannel re-elevates using cache hit (no prompt)", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-restart01", received, "p@ss");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn an elevated channel (primes the cache)
+		const channelId = await sm.handleSpawn("c-restart01", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		// Verify cache was primed
+		const cache = getElevationCache();
+		expect(cache.has(localHostId)).toBe(true);
+
+		// Count AUTH_PROMPT messages before restart
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+
+		// Restart the channel — cache hit → no new AUTH_PROMPT
+		const ok = await sm.restartChannel(channelId!);
+		expect(ok).toBe(true);
+
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore);
+
+		// Channel should be live in DB
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.status).toBe("live");
+	});
+
+	it("restart-elev-02: restartChannel with expired cache prompts user for secret", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-restart02", received, "new-p@ss");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn elevated channel (auto-prompt fills cache)
+		const channelId = await sm.handleSpawn("c-restart02", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		// Expire the cache
+		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+
+		// Count AUTH_PROMPT messages before restart
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+
+		// Restart — expired cache → passwordless fails → AUTH_PROMPT → auto-respond → success
+		const ok = await sm.restartChannel(channelId!, "c-restart02");
+		expect(ok).toBe(true);
+
+		// A new AUTH_PROMPT should have been sent for the restart
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore + 1);
+
+		// Cache updated with new secret
+		expect(getElevationCache().get(localHostId)?.secret).toBe("new-p@ss");
+
+		// Channel should be live in DB
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.status).toBe("live");
+	});
+
+	it("restart-elev-03: restartChannel cancels elevation → returns false", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+		// For spawn, auto-respond with a secret. For restart, auto-respond with null (cancel).
+		let spawnDone = false;
+		const client: WsClient = {
+			id: "c-restart03",
+			send: (msg: ProtocolMessage) => {
+				received.push(msg);
+				if (msg.type === "AUTH_PROMPT") {
+					const promptMsg = msg as AuthPromptMessage;
+					Promise.resolve().then(() => {
+						sm.handleAuthPromptResponse(
+							"c-restart03",
+							promptMsg.hostId,
+							spawnDone ? null : "initial-pass",
+						);
+					});
+				}
+			},
+			attachedChannels: new Set(),
+		};
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn elevated channel successfully
+		const channelId = await sm.handleSpawn("c-restart03", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+		spawnDone = true;
+
+		// Expire cache so restart will prompt
+		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+
+		// Restart — user cancels prompt → returns false
+		const ok = await sm.restartChannel(channelId!, "c-restart03");
+		expect(ok).toBe(false);
+
+		// ELEVATION_CANCELLED error sent to client
+		const errMsg = received.find(
+			(m) => m.type === "ERROR" && (m as ProtocolMessage & { code?: string }).code === "ELEVATION_CANCELLED",
+		);
+		expect(errMsg).toBeDefined();
+	});
 });

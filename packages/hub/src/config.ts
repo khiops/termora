@@ -15,6 +15,9 @@ import { join } from "node:path";
 import TOML from "@iarna/toml";
 import {
 	DEFAULT_PROFILE,
+	ELEVATION_METHODS_DARWIN,
+	ELEVATION_METHODS_LINUX,
+	ELEVATION_METHODS_WINDOWS,
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	deepMerge,
@@ -426,20 +429,23 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 	if (section == null || typeof section !== "object") return result;
 	const raw = section as Record<string, unknown>;
 
-	const linuxMethods = ["sudo", "doas", "pkexec", "custom"] as const;
-	const windowsMethods = ["gsudo", "custom"] as const;
-
-	if (typeof raw.method_linux === "string" && (linuxMethods as readonly string[]).includes(raw.method_linux)) {
+	if (typeof raw.method_linux === "string" && (ELEVATION_METHODS_LINUX as readonly string[]).includes(raw.method_linux)) {
 		result.methodLinux = raw.method_linux as ElevationMethod;
 	}
-	if (typeof raw.method_darwin === "string" && (linuxMethods as readonly string[]).includes(raw.method_darwin)) {
+	if (typeof raw.method_darwin === "string" && (ELEVATION_METHODS_DARWIN as readonly string[]).includes(raw.method_darwin)) {
 		result.methodDarwin = raw.method_darwin as ElevationMethod;
 	}
-	if (typeof raw.method_windows === "string" && (windowsMethods as readonly string[]).includes(raw.method_windows)) {
+	if (typeof raw.method_windows === "string" && (ELEVATION_METHODS_WINDOWS as readonly string[]).includes(raw.method_windows)) {
 		result.methodWindows = raw.method_windows as ElevationMethod;
 	}
-	if (typeof raw.custom_command === "string" && raw.custom_command.length > 0) {
-		result.customCommand = raw.custom_command;
+	if (typeof raw.custom_command_linux === "string" && raw.custom_command_linux.length > 0) {
+		result.customCommandLinux = raw.custom_command_linux;
+	}
+	if (typeof raw.custom_command_darwin === "string" && raw.custom_command_darwin.length > 0) {
+		result.customCommandDarwin = raw.custom_command_darwin;
+	}
+	if (typeof raw.custom_command_windows === "string" && raw.custom_command_windows.length > 0) {
+		result.customCommandWindows = raw.custom_command_windows;
 	}
 
 	return result;
@@ -609,6 +615,7 @@ export class ConfigResolver {
 				resolved: this._uiConfig,
 			},
 			appearance: this._appearance,
+			elevation: { ...this._elevation },
 		};
 
 		return response;
@@ -679,7 +686,10 @@ export class ConfigResolver {
 	 */
 	resolveCustomCommand(hostCustomCommand?: string | null): string | undefined {
 		if (hostCustomCommand != null && hostCustomCommand.length > 0) return hostCustomCommand;
-		return this._elevation.customCommand;
+		const platform = process.platform;
+		if (platform === "win32") return this._elevation.customCommandWindows;
+		if (platform === "darwin") return this._elevation.customCommandDarwin;
+		return this._elevation.customCommandLinux;
 	}
 
 	/**

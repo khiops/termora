@@ -87,6 +87,11 @@ export function buildAskpassEnv(
 	// Explicit chmod in case the umask masked the mode bits above.
 	fs.chmodSync(tmpFile, 0o700);
 
+	// NOTE: DOAS_ASKPASS is not part of OpenBSD's canonical doas.
+	// Some Linux ports (e.g. doas-sudo-shim) support it.
+	// If the user's doas implementation ignores DOAS_ASKPASS,
+	// the askpass flow will fail and the passwordless-first
+	// fallback will handle it gracefully.
 	const askpassKey = method === "doas" ? "DOAS_ASKPASS" : "SUDO_ASKPASS";
 
 	return {

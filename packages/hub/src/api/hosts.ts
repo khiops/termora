@@ -1,4 +1,4 @@
-import { type Host, toSnakeCase } from "@nexterm/shared";
+import { type Host, ELEVATION_METHODS_ALL, toSnakeCase } from "@nexterm/shared";
 import type { SshConfigImport } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { ParseResult } from "../ssh/ssh-config-parser.js";
@@ -93,13 +93,12 @@ function validateCreateHost(body: CreateHostBody): string | null {
 	if (body.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
 		return "color must be in hex format #rrggbb";
 	}
-	const validElevationMethods = ["sudo", "doas", "pkexec", "gsudo", "custom"];
 	if (
 		body.elevation_method !== undefined &&
 		body.elevation_method !== null &&
-		!validElevationMethods.includes(body.elevation_method)
+		!(ELEVATION_METHODS_ALL as readonly string[]).includes(body.elevation_method)
 	) {
-		return "elevation_method must be one of: sudo, doas, pkexec, gsudo, custom";
+		return `elevation_method must be one of: ${ELEVATION_METHODS_ALL.join(", ")}`;
 	}
 	return null;
 }
@@ -362,15 +361,14 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				updateInput.historyRetentionDays = body.history_retention_days;
 			if (body.profile_json !== undefined) updateInput.profileJson = body.profile_json;
 			if (body.elevation_method !== undefined) {
-				const validElevationMethods = ["sudo", "doas", "pkexec", "gsudo", "custom"];
 				if (
 					body.elevation_method !== null &&
-					!validElevationMethods.includes(body.elevation_method)
+					!(ELEVATION_METHODS_ALL as readonly string[]).includes(body.elevation_method)
 				) {
 					return reply.code(400).send({
 						error: {
 							code: "VALIDATION_ERROR",
-							message: "elevation_method must be one of: sudo, doas, pkexec, gsudo, custom",
+							message: `elevation_method must be one of: ${ELEVATION_METHODS_ALL.join(", ")}`,
 						},
 					});
 				}

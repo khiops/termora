@@ -105,6 +105,11 @@ function makeCascade(overrides?: Partial<CascadeResponse>): CascadeResponse {
 			opacity: { terminal: 100, sidebar: 100, hostRail: 100, tabBar: 100 },
 			scrollbar: { style: "thin", thumbColor: "", trackColor: "", widthThin: 6, widthWide: 14 },
 		},
+		elevation: {
+			methodLinux: "sudo",
+			methodDarwin: "sudo",
+			methodWindows: "gsudo",
+		},
 		...overrides,
 	};
 }

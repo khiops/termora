@@ -1800,9 +1800,15 @@ describe("extractElevationConfig", () => {
 	});
 
 	it("parses method_darwin with valid value", () => {
+		const parsed = { elevation: { method_darwin: "doas" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.methodDarwin).toBe("doas");
+	});
+
+	it("rejects method_darwin with linux-only value (pkexec)", () => {
 		const parsed = { elevation: { method_darwin: "pkexec" } } as unknown as JsonMap;
 		const result = extractElevationConfig(parsed);
-		expect(result.methodDarwin).toBe("pkexec");
+		expect(result.methodDarwin).toBeUndefined();
 	});
 
 	it("parses method_windows with valid value", () => {
@@ -1817,18 +1823,34 @@ describe("extractElevationConfig", () => {
 		expect(result.methodWindows).toBeUndefined();
 	});
 
-	it("parses custom_command", () => {
+	it("parses custom_command_linux", () => {
 		const parsed = {
-			elevation: { custom_command: "/usr/local/bin/myelevate" },
+			elevation: { custom_command_linux: "/usr/local/bin/myelevate" },
 		} as unknown as import("@iarna/toml").JsonMap;
 		const result = extractElevationConfig(parsed);
-		expect(result.customCommand).toBe("/usr/local/bin/myelevate");
+		expect(result.customCommandLinux).toBe("/usr/local/bin/myelevate");
 	});
 
-	it("rejects empty custom_command", () => {
-		const parsed = { elevation: { custom_command: "" } } as unknown as JsonMap;
+	it("parses custom_command_darwin", () => {
+		const parsed = {
+			elevation: { custom_command_darwin: "/usr/local/bin/myelevate-mac" },
+		} as unknown as import("@iarna/toml").JsonMap;
 		const result = extractElevationConfig(parsed);
-		expect(result.customCommand).toBeUndefined();
+		expect(result.customCommandDarwin).toBe("/usr/local/bin/myelevate-mac");
+	});
+
+	it("parses custom_command_windows", () => {
+		const parsed = {
+			elevation: { custom_command_windows: "C:\\tools\\myelev.exe" },
+		} as unknown as import("@iarna/toml").JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.customCommandWindows).toBe("C:\\tools\\myelev.exe");
+	});
+
+	it("rejects empty custom_command_linux", () => {
+		const parsed = { elevation: { custom_command_linux: "" } } as unknown as JsonMap;
+		const result = extractElevationConfig(parsed);
+		expect(result.customCommandLinux).toBeUndefined();
 	});
 
 	it("parses all fields together", () => {
@@ -1837,14 +1859,18 @@ describe("extractElevationConfig", () => {
 				method_linux: "doas",
 				method_darwin: "sudo",
 				method_windows: "custom",
-				custom_command: "my-elev",
+				custom_command_linux: "my-elev-linux",
+				custom_command_darwin: "my-elev-mac",
+				custom_command_windows: "my-elev-win",
 			},
 		} as unknown as import("@iarna/toml").JsonMap;
 		const result = extractElevationConfig(parsed);
 		expect(result.methodLinux).toBe("doas");
 		expect(result.methodDarwin).toBe("sudo");
 		expect(result.methodWindows).toBe("custom");
-		expect(result.customCommand).toBe("my-elev");
+		expect(result.customCommandLinux).toBe("my-elev-linux");
+		expect(result.customCommandDarwin).toBe("my-elev-mac");
+		expect(result.customCommandWindows).toBe("my-elev-win");
 	});
 });
 
@@ -1882,18 +1908,18 @@ describe("ConfigResolver.elevationConfig", () => {
 		expect(resolver.elevationConfig.methodWindows).toBe("gsudo");
 	});
 
-	it("loads custom_command from config.toml", () => {
+	it("loads custom_command_linux from config.toml", () => {
 		const dir = join(tmpdir(), `nexterm-elev-custom-${Date.now()}`);
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "config.toml"),
-			'[elevation]\nmethod_linux = "custom"\ncustom_command = "/usr/local/bin/myelevate"\n',
+			'[elevation]\nmethod_linux = "custom"\ncustom_command_linux = "/usr/local/bin/myelevate"\n',
 		);
 
 		const resolver = new ConfigResolver(metaDal);
 		resolver.loadFromFile(dir);
 		expect(resolver.elevationConfig.methodLinux).toBe("custom");
-		expect(resolver.elevationConfig.customCommand).toBe("/usr/local/bin/myelevate");
+		expect(resolver.elevationConfig.customCommandLinux).toBe("/usr/local/bin/myelevate");
 	});
 });
 
@@ -1960,14 +1986,15 @@ describe("ConfigResolver.resolveCustomCommand", () => {
 		expect(cmd).toBe("/host/custom/cmd");
 	});
 
-	it("falls back to global custom_command when host not set", () => {
+	it("falls back to global custom_command_linux when host not set (Linux)", () => {
 		const dir = join(tmpdir(), `nexterm-custom-cmd-${Date.now()}`);
 		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "config.toml"), '[elevation]\ncustom_command = "/global/cmd"\n');
+		writeFileSync(join(dir, "config.toml"), '[elevation]\ncustom_command_linux = "/global/cmd"\n');
 
 		const resolver = new ConfigResolver(metaDal);
 		resolver.loadFromFile(dir);
 		const cmd = resolver.resolveCustomCommand(null);
+		// On Linux CI, resolveCustomCommand falls back to customCommandLinux
 		expect(cmd).toBe("/global/cmd");
 	});
 
