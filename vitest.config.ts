@@ -32,6 +32,14 @@ export default defineConfig({
 					environment: "happy-dom",
 				},
 			},
+			{
+				test: {
+					name: "scripts",
+					include: ["scripts/**/*.spec.ts"],
+					environment: "node",
+					testTimeout: 60_000,
+				},
+			},
 		],
 	},
 });

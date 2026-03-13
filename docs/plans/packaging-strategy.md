@@ -1,238 +1,291 @@
 ---
 doc-meta:
-  status: draft
+  status: validated
   created: 2026-03-09
+  updated: 2026-03-13
 ---
 
 # Packaging & Distribution Strategy
 
-> **Project:** /mnt/wsl/shared/dev/nexterm
+> **Project:** nexterm
 
 ## Problem
 
-nexterm has two runtime components:
-- **Hub+Agent** — Node.js daemon (node-pty, better-sqlite3, ssh2 — native addons)
+nexterm has three distinct runtime components:
+- **Agent** — PTY manager (node-pty, MessagePack codec). Runs on remote machines.
+- **Hub** — Orchestrator (Fastify, better-sqlite3, ssh2). Runs on the user's machine or a server.
 - **Web UI** — Vue 3 SPA (embedded by hub as static files, or served by Vite in dev)
 
-Users need a zero-friction install. Node.js as a prerequisite is acceptable for developers but not for general users.
+Distribution must support two parallel channels:
+1. **npm** — full ecosystem support, every package installable via npm/npx
+2. **Standalone binaries** — zero-prerequisite deployment, no Node.js needed
 
-## Architecture: Binary vs Installer
+The agent binary is the highest-impact deliverable: remote machines should not require Node.js.
+
+## Architecture: Two Binaries + Optional Desktop Shell
 
 ```
-┌───────────────────────────────────────────────────────┐
-│  BINARY = the application that runs                   │
-│                                                       │
-│  Hub+Agent binary (Node SEA or native)                │
-│  + Tauri shell (optional, for native window/tray)     │
-└──────────────────────┬────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  BINARIES                                               │
+│                                                         │
+│  nexterm-agent  (Node SEA, ~20-30MB)                    │
+│    └── node-pty, msgpack codec                          │
+│                                                         │
+│  nexterm-hub    (Node SEA, ~50-60MB)                    │
+│    └── fastify, better-sqlite3, web UI static           │
+│                                                         │
+│  Tauri app      (optional desktop shell)                │
+│    └── sidecar: nexterm-hub                             │
+│    └── webview → hub's web UI                           │
+└──────────────────────┬──────────────────────────────────┘
                        │
-┌──────────────────────▼────────────────────────────────┐
-│  INSTALLER = how it reaches users                     │
-│                                                       │
-│  npm pack / npx (devs) — winget / scoop (Windows)     │
-│  brew (macOS) — AppImage / flatpak (Linux)            │
-│  GitHub Releases (universal)                          │
-└───────────────────────────────────────────────────────┘
+┌──────────────────────▼──────────────────────────────────┐
+│  DISTRIBUTION CHANNELS                                  │
+│                                                         │
+│  npm (all packages) — GitHub Releases (binaries)        │
+│  winget / scoop (Windows) — brew (macOS/Linux)          │
+│  Tauri installers (.exe / .dmg / .AppImage)             │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Phase 1: npm pack (now)
+## Decisions (validated 2026-03-13)
+
+| # | Decision | Chosen | Rejected | Why |
+|---|----------|--------|----------|-----|
+| D1 | Binary split | Two separate binaries (agent + hub) | Single combined binary | Independent deployment, agent on remote machines |
+| D2 | Hub ↔ Agent local | Hub finds `nexterm-agent` in PATH or same directory | Embedded/extracted agent | Simple, installer handles placement |
+| D3 | Native addons | Node SEA native `assets` field + `getRawAsset()` + `process.dlopen()` (tmpdir extraction) | Ship .node files alongside, @aspect/node-addon-loader (does not exist) | Official Node.js API, single file, tmpdir available on all platforms |
+| D4 | SEA engine | Node SEA (Node 22+) | pkg (abandoned), nexe (fragile), Bun compile (no native addons) | Official Node.js feature, maintained |
+| D5 | Desktop shell | Tauri v2 | Electron (150MB), Neutralino | Lightweight (~5MB), system webview, native features |
+| D6 | Tauri sidecar | Hub binary directly (no glue) | Intermediate manager process | Tauri has native sidecar lifecycle API |
+| D7 | npm publishing | ALL packages published | Hub excluded | npm = full parallel channel for Node.js ecosystem |
+| D8 | Auto-deploy agent | Hub deploys agent binary via SSH | Manual install only | Zero-setup remote machines, killer feature |
+| D9 | Remote OS detection | Host `os`/`arch` field in DB + auto-detect fallback | SSH-only detection | User knows target OS at host creation, more reliable |
+| D10 | Windows installer | NSIS .exe | .msix (requires signing cert) | No signing cert needed for MVP |
+
+## Host OS/Arch Model
+
+Hosts gain `os` and `arch` fields:
+
+```typescript
+interface Host {
+  // ... existing fields
+  os: 'linux' | 'darwin' | 'windows' | null;    // null = auto-detect
+  arch: 'x64' | 'arm64' | null;                 // null = auto-detect
+}
+```
+
+- **Host add modal:** OS/arch selector (optional, default "Auto-detect")
+- **First SSH connection:** if null, detect via `uname -sm` (Linux/macOS) or `%PROCESSOR_ARCHITECTURE%` (Windows), update host record
+- **Used by:** auto-deploy agent, launch profiles (OS-aware filtering), UI hints
+
+## Phase 1: npm pack (current)
 
 **Goal:** Test on Windows immediately, no publishing required.
 
 ```bash
-# On dev machine (WSL/Linux)
 cd /mnt/wsl/shared/dev/nexterm
-pnpm build
-npm pack                            # → nexterm-0.1.0.tgz
-
-# On Windows
-npm i -g ./nexterm-0.1.0.tgz       # installs globally
-nexterm                             # starts hub on localhost:4100
+pnpm build && npm pack          # → nexterm-0.1.0.tgz
+# On target: npm i -g ./nexterm-0.1.0.tgz && nexterm
 ```
 
-**Pros:** Zero setup, works today.
-**Cons:** Requires Node.js installed. Native addons need build tools (node-gyp).
+Native addons mitigated via `prebuild-install` (both node-pty & better-sqlite3 support prebuilt binaries).
 
-### Native addon issue on Windows
+## Phase 2a: Agent SEA Binary
 
-`node-pty` and `better-sqlite3` need compilation. Windows requires:
-- Visual Studio Build Tools (or `windows-build-tools` npm package)
-- Python 3.x
+**Goal:** Standalone agent binary deployable via `scp` on any remote machine.
 
-**Mitigation:** Ship prebuilt binaries via `prebuild-install` (both packages support it).
+### What goes in
 
-## Phase 2: Node SEA (MVP)
+| Dependency | Included | Why |
+|------------|----------|-----|
+| node-pty | yes (native addon via loader) | PTY management |
+| @msgpack/msgpack | yes (bundled JS) | Wire protocol |
+| @nexterm/shared (codec) | yes (bundled JS) | Framing, types |
+| better-sqlite3 | **no** | Agent has no DB |
+| fastify | **no** | Agent has no HTTP |
 
-**Goal:** Single binary, no Node.js prerequisite.
-
-### What is Node SEA?
-
-Node.js Single Executable Applications (stable since Node 22). Embeds the app into the Node binary itself.
+### Build process
 
 ```bash
-# 1. Bundle all JS into one file (esbuild)
-esbuild packages/hub/src/server.ts --bundle --platform=node --outfile=dist/nexterm.cjs
+# 1. Bundle agent JS into single file
+esbuild packages/agent/src/main.ts --bundle --platform=node --outfile=dist/agent.cjs
 
-# 2. Create SEA config
-echo '{ "main": "dist/nexterm.cjs", "output": "dist/sea-prep.blob" }' > sea-config.json
+# 2. Configure native addon loader for node-pty
+# (embeds .node as asset, extracts to tmpdir at runtime)
 
-# 3. Generate blob
-node --experimental-sea-config sea-config.json
-
-# 4. Copy node binary and inject
-cp $(which node) dist/nexterm       # or nexterm.exe on Windows
-npx postject dist/nexterm NODE_SEA_BLOB dist/sea-prep.blob \
+# 3. Generate SEA blob + inject into Node binary
+node --experimental-sea-config sea-config-agent.json
+cp $(which node) dist/nexterm-agent
+npx postject dist/nexterm-agent NODE_SEA_BLOB dist/sea-prep.blob \
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-
-# 5. Sign (Windows/macOS)
-# signtool sign /fd SHA256 dist/nexterm.exe    # Windows
-# codesign --sign "..." dist/nexterm           # macOS
 ```
-
-### Native addons with SEA
-
-**Challenge:** `node-pty` and `better-sqlite3` are native `.node` files — they can't be embedded in the SEA blob.
-
-**Solution:** Ship them alongside the binary:
-```
-nexterm/
-├── nexterm.exe          # SEA binary (~50MB)
-├── node_pty.node        # native addon
-├── better_sqlite3.node  # native addon
-└── (runtime.json, etc.)
-```
-
-Or use `@aspect/node-addon-loader` to bundle `.node` files as assets extracted at runtime.
-
-### Build matrix
-
-| Platform | Node binary | Native addons |
-|----------|-------------|---------------|
-| Windows x64 | node-v22-win-x64 | prebuild-install |
-| macOS x64 | node-v22-darwin-x64 | prebuild-install |
-| macOS arm64 | node-v22-darwin-arm64 | prebuild-install |
-| Linux x64 | node-v22-linux-x64 | prebuild-install |
-| Linux arm64 | node-v22-linux-arm64 | prebuild-install |
-
-CI: GitHub Actions matrix build, artifacts uploaded to Releases.
 
 ### Result
 
-- `nexterm` / `nexterm.exe` — ~50MB standalone binary
-- User opens browser to `http://localhost:4100`
-- No Node.js prerequisite
-- No build tools prerequisite
+- `nexterm-agent` / `nexterm-agent.exe` — ~20-30MB single file
+- Deploy: `scp nexterm-agent user@host:~/bin/ && chmod +x ~/bin/nexterm-agent`
+- No Node.js, no npm, no build tools on the remote machine
 
-## Phase 3: Tauri v2 (v1 release)
+## Phase 2b: Hub SEA Binary
 
-**Goal:** Native window with system tray, auto-update, proper desktop app experience.
+**Goal:** Standalone hub binary with embedded web UI.
+
+### What goes in
+
+| Dependency | Included | Why |
+|------------|----------|-----|
+| fastify + plugins | yes (bundled JS) | HTTP/WS server |
+| better-sqlite3 | yes (native addon via loader) | Storage |
+| ssh2 | yes (bundled JS) | Remote agent connections |
+| @nexterm/shared | yes (bundled JS) | Codec, types, config |
+| Web UI (dist/) | yes (embedded static) | Serves at / |
+| node-pty | **no** | Agent's responsibility |
+
+### Result
+
+- `nexterm-hub` / `nexterm-hub.exe` — ~50-60MB single file
+- Requires `nexterm-agent` in PATH or same directory for local sessions
+- Serves web UI at `http://localhost:4100`
+
+## Phase 2c: CI Build Matrix
+
+GitHub Actions matrix producing binaries for all platforms:
+
+| Platform | Agent | Hub | Priority |
+|----------|-------|-----|----------|
+| Windows x64 | `nexterm-agent.exe` | `nexterm-hub.exe` | P0 (test first) |
+| Linux x64 | `nexterm-agent` | `nexterm-hub` | P0 |
+| Linux arm64 | `nexterm-agent` | `nexterm-hub` | P0 |
+| macOS arm64 | `nexterm-agent` | `nexterm-hub` | P1 |
+| macOS x64 | `nexterm-agent` | `nexterm-hub` | P2 |
+
+Artifacts uploaded to GitHub Releases per version tag.
+
+## Phase 2d: Auto-Deploy Agent
+
+**Goal:** Hub automatically deploys agent binary on remote hosts via SSH.
+
+### Flow
+
+1. User adds host (OS/arch from modal, or "auto-detect")
+2. User clicks "Connect" → hub opens SSH to host
+3. If agent not found on remote:
+   a. Detect OS/arch if not set: `uname -sm` (Linux/macOS) or `echo %PROCESSOR_ARCHITECTURE%` (Windows cmd)
+   b. Select matching binary from local cache (`~/.local/state/nexterm/binaries/`)
+   c. Upload via SFTP: `~/.local/bin/nexterm-agent` (Linux/macOS) or `%LOCALAPPDATA%\nexterm\nexterm-agent.exe` (Windows)
+   d. `chmod +x` (Linux/macOS)
+   e. Launch agent over SSH as usual
+
+### Binary cache
+
+Hub downloads or ships with agent binaries for all platforms:
+```
+~/.local/state/nexterm/binaries/
+├── nexterm-agent-linux-x64
+├── nexterm-agent-linux-arm64
+├── nexterm-agent-darwin-arm64
+├── nexterm-agent-darwin-x64
+└── nexterm-agent-windows-x64.exe
+```
+
+Source: embedded in hub package, or downloaded from GitHub Releases on first need.
+
+## Phase 3: Tauri Desktop App
+
+**Goal:** Native desktop experience replacing the browser tab.
 
 ### Architecture
 
 ```
-┌────────────────────────────────────────────┐
-│  Tauri shell (Rust, ~5MB)                  │
-│  ├── System webview (Edge/WebKit/WebKitGTK)│
-│  │   └── Vue 3 UI (bundled)               │
-│  ├── Sidecar: nexterm-hub (Node SEA, ~50MB)│
-│  │   ├── Hub (Fastify, REST, WS)          │
-│  │   └── Agent (node-pty, MessagePack)     │
-│  └── Tauri features:                       │
-│      ├── System tray icon + menu           │
-│      ├── Auto-updater (GitHub Releases)    │
-│      ├── Native notifications              │
-│      ├── Deep links (nexterm://)           │
-│      └── Global shortcuts                  │
-└────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  Tauri app (~5MB Rust shell)                    │
+│  ├── System webview (Edge/WebKit/WebKitGTK)     │
+│  │   └── loads hub web UI (localhost:4100)       │
+│  ├── Sidecar: nexterm-hub (Node SEA binary)     │
+│  │   └── spawns nexterm-agent for local sessions│
+│  └── Native features:                           │
+│      ├── System tray icon + menu                │
+│      ├── Auto-updater (GitHub Releases)         │
+│      ├── Native notifications                   │
+│      ├── Deep links (nexterm://)                │
+│      └── Global keyboard shortcuts              │
+└─────────────────────────────────────────────────┘
 ```
 
-### Why Tauri over Electron?
+### Tauri as browser replacement
 
-| Aspect | Tauri v2 | Electron |
-|--------|----------|----------|
-| Binary size | ~5-10MB (+ sidecar) | ~150MB |
-| Memory | System webview | Bundled Chromium |
-| Security | Rust process isolation | Node in renderer (risky) |
-| Auto-update | Built-in (GitHub) | electron-updater |
-| Cross-platform | Windows/macOS/Linux/iOS/Android | Windows/macOS/Linux |
+Tauri is an **optional client**, not a prerequisite. The web UI remains the reference client.
 
-### Sidecar pattern
+| Mode | Description | Use case |
+|------|-------------|----------|
+| **Browser** | `http://localhost:4100` in any browser | Dev, headless servers, quick access |
+| **Tauri local** | App starts hub as sidecar, loads webview | Daily desktop use |
+| **Tauri remote** | App connects to a remote hub | Multi-device, mobile (future) |
 
-Tauri's sidecar feature manages the hub process lifecycle:
+### Sidecar = hub binary directly
 
-```rust
-// src-tauri/src/main.rs
-use tauri::api::process::Command;
+No glue layer. Tauri's built-in sidecar API manages the hub process:
 
-fn main() {
-    tauri::Builder::default()
-        .setup(|app| {
-            // Start hub sidecar
-            let (mut rx, _child) = Command::new_sidecar("nexterm-hub")?
-                .args(["--port", "4100"])
-                .spawn()?;
-            // Hub starts, Tauri webview loads http://localhost:4100
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error running tauri");
+```json
+// tauri.conf.json
+{
+  "bundle": {
+    "externalBin": ["binaries/nexterm-hub"]
+  }
 }
 ```
 
-The sidecar binary = the Node SEA from Phase 2. Tauri manages its lifecycle (start/stop/restart).
+Tauri start → spawn `nexterm-hub --port 4100` → webview loads `localhost:4100`.
+Tauri close → kill hub gracefully.
 
 ### Build output
 
 | Platform | Installer | Size |
 |----------|-----------|------|
-| Windows | `.exe` (NSIS) or `.msi` | ~60MB |
-| macOS | `.dmg` | ~55MB |
-| Linux | `.AppImage` + `.deb` | ~55MB |
+| Windows | `.exe` (NSIS) | ~65MB |
+| macOS | `.dmg` | ~60MB |
+| Linux | `.AppImage` + `.deb` | ~60MB |
+
+## npm Publishing (parallel channel)
+
+All packages remain publishable on npm. Binary distribution does not replace npm.
+
+| Package | npm name | bin | Use case |
+|---------|----------|-----|----------|
+| Root CLI | `nexterm` | `nexterm` | `npx nexterm` quick start |
+| Agent | `@nexterm/agent` | `nexterm-agent` | `npm i -g` on remote machines with Node |
+| Hub | `@nexterm/hub` | — | `npm i -g` for Node.js users |
+| Shared | `@nexterm/shared` | — | Library for integrators/plugins |
+| Web | `@nexterm/web` | — | NOT published (embedded in hub) |
 
 ## Distribution Channels
 
-### Phase 2 (SEA binary)
+### Phase 2 (SEA binaries)
 
-| Channel | Format | Effort | Priority |
-|---------|--------|--------|----------|
-| GitHub Releases | .zip/.tar.gz per platform | CI only | P0 |
-| npm (`npx nexterm`) | npm registry | ~1h | P0 |
-| Scoop (Windows) | bucket manifest | ~1h | P1 |
-| Homebrew (macOS/Linux) | tap formula | ~1h | P1 |
+| Channel | Format | Priority |
+|---------|--------|----------|
+| GitHub Releases | Single-file per platform | P0 |
+| npm registry | All packages | P0 |
+| Scoop (Windows) | Bucket manifest | P1 |
+| Homebrew (macOS/Linux) | Tap formula | P1 |
 
 ### Phase 3 (Tauri app)
 
-| Channel | Format | Effort | Priority |
-|---------|--------|--------|----------|
-| GitHub Releases | platform installers | CI (Tauri action) | P0 |
-| winget (Windows) | .exe + YAML manifest | ~2h | P1 |
-| Homebrew Cask (macOS) | cask formula | ~1h | P1 |
-| Flathub (Linux) | flatpak manifest | ~3h | P2 |
-| Snap Store (Linux) | snapcraft.yaml | ~3h | P2 |
+| Channel | Format | Priority |
+|---------|--------|----------|
+| GitHub Releases | Platform installers | P0 |
+| winget (Windows) | .exe + YAML manifest | P1 |
+| Homebrew Cask (macOS) | Cask formula | P1 |
+| Flathub (Linux) | Flatpak manifest | P2 |
+| Snap Store (Linux) | snapcraft.yaml | P2 |
 
-### winget specifics
+## Implementation Phases
 
-winget accepts **both** `.exe` and `.msix`:
-- `.exe` (NSIS/Inno): No Microsoft signing required. Submit YAML manifest to `microsoft/winget-pkgs` repo.
-- `.msix`: Requires code signing certificate. Optionally published to Microsoft Store.
-
-**Recommendation:** Start with `.exe` (loose manifest). Upgrade to `.msix` only if Microsoft Store distribution is desired.
-
-## Decision Log
-
-| Decision | Chosen | Rejected | Why |
-|----------|--------|----------|-----|
-| Phase 1 binary | npm pack | - | Immediate, zero infra |
-| Phase 2 binary | Node SEA | pkg (abandoned), nexe (fragile), Bun compile (no native addons) | Official Node.js feature, maintained |
-| Phase 3 shell | Tauri v2 | Electron (150MB), Neutralino (no Node) | Lightweight, native, cross-platform |
-| Phase 3 sidecar | Node SEA | Embedded Node | Clean separation, independent lifecycle |
-| Windows installer | NSIS .exe | .msix | No signing cert needed for MVP |
-| Auto-update | Tauri built-in (GitHub) | Squirrel, electron-updater | Zero config with Tauri |
-
-## Timeline
-
-| Phase | When | Deliverable |
-|-------|------|-------------|
-| 1 | Now | `npm pack` for manual Windows testing |
-| 2 | Next milestone | SEA binary + GitHub Releases + npx |
-| 3 | v1 release | Tauri desktop app + store distribution |
+| Phase | What | Depends on | Deliverable |
+|-------|------|------------|-------------|
+| **2a** | Agent SEA binary | esbuild + postject + node-addon-loader | `nexterm-agent` single file |
+| **2b** | Hub SEA binary | 2a + embed web build | `nexterm-hub` single file |
+| **2c** | CI matrix | 2a + 2b | GitHub Actions → Releases |
+| **2d** | Auto-deploy agent | 2a + 2c + host os/arch field | Hub deploys agent via SSH |
+| **3** | Tauri desktop app | 2b | Native app + installers |

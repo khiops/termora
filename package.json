@@ -24,7 +24,9 @@
 		"test:run": "vitest run",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
-		"typecheck": "pnpm -r typecheck"
+		"typecheck": "pnpm -r typecheck",
+		"build:sea-agent": "tsx scripts/build-sea-agent.ts",
+		"package:sea-agent": "tsx scripts/package-sea-agent.ts"
 	},
 	"dependencies": {
 		"@nexterm/hub": "workspace:*"
@@ -32,7 +34,10 @@
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"concurrently": "catalog:",
+		"esbuild": "catalog:",
 		"happy-dom": "^20.8.3",
+		"postject": "^1.0.0-alpha.6",
+		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

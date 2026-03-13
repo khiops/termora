@@ -63,6 +63,9 @@ catalogs:
     concurrently:
       specifier: ^9.0.0
       version: 9.2.1
+    esbuild:
+      specifier: ^0.27.0
+      version: 0.27.3
     fastify:
       specifier: ^5.0.0
       version: 5.7.4
@@ -111,9 +114,15 @@ importers:
       concurrently:
         specifier: 'catalog:'
         version: 9.2.1
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.27.3
       happy-dom:
         specifier: ^20.8.3
         version: 20.8.3
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
       typescript:
         specifier: 'catalog:'
         version: 5.7.3

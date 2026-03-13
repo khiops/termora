@@ -3,6 +3,7 @@
 ## Recently Completed
 
 (Archived → docs/historic/done-2026-03.md)
+- [x] ✅ [PKG] Block 1: esbuild bundle + SEA addon loader bootstrap (2026-03-13)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
@@ -33,8 +34,8 @@
 
 ## Tier 3 — Strategic (milestones)
 
+- [ ] 🟡 [PKG] Full packaging pipeline (10 blocks) — Phases 2a/2b/2c/2d/3 — IN PROGRESS
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1
-- [ ] 💡 [UI] Desktop packaging (Tauri v2 or alternative) — Priority: P1 (see docs/plans/packaging-strategy.md)
 - [ ] 💡 [Hub] Search in scrollback (FTS5 full-text index + search UI) — Priority: P1
 - [ ] 💡 [Hub] OS keychain for auth token (keytar) — Priority: P1
 
@@ -54,3 +55,6 @@
 ## Completed
 
 (Archived → docs/historic/done-2026-03.md)
+- [x] ✅ [PKG] Block 1: esbuild bundle + SEA addon loader bootstrap (2026-03-13)
+- [x] ✅ [PKG] Block 2: Agent SEA build script (2026-03-13)
+- [x] ✅ [PKG] Block 3: Agent SEA E2E validation — 6 tests, 1875 total (2026-03-13)
