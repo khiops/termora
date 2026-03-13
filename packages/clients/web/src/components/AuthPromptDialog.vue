@@ -41,13 +41,27 @@ const prompt = computed(() => authPromptStore.pendingPrompt);
 const inputValue = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
 
-const dialogTitle = computed(() =>
-	prompt.value?.promptType === "passphrase" ? "SSH Key Passphrase" : "SSH Password",
-);
+const dialogTitle = computed(() => {
+	switch (prompt.value?.promptType) {
+		case "passphrase":
+			return "SSH Key Passphrase";
+		case "elevation":
+			return "Elevation Required";
+		default:
+			return "SSH Password";
+	}
+});
 
-const inputPlaceholder = computed(() =>
-	prompt.value?.promptType === "passphrase" ? "Enter key passphrase…" : "Enter SSH password…",
-);
+const inputPlaceholder = computed(() => {
+	switch (prompt.value?.promptType) {
+		case "passphrase":
+			return "Enter key passphrase…";
+		case "elevation":
+			return "Enter your password…";
+		default:
+			return "Enter SSH password…";
+	}
+});
 
 watch(
 	prompt,

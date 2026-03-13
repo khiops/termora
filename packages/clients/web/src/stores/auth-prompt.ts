@@ -4,7 +4,7 @@ import type { IWsClient } from "../services/ws-client.js";
 
 export interface AuthPromptRequest {
 	hostId: string;
-	promptType: "password" | "passphrase";
+	promptType: "password" | "passphrase" | "elevation";
 	message: string;
 }
 
@@ -23,7 +23,7 @@ export const useAuthPromptStore = defineStore("authPrompt", () => {
 
 	function handleAuthPrompt(
 		hostId: string,
-		promptType: "password" | "passphrase",
+		promptType: "password" | "passphrase" | "elevation",
 		message: string,
 	): void {
 		pendingPrompt.value = { hostId, promptType, message };

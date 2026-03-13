@@ -29,8 +29,20 @@ vi.mock("./local-agent.js", () => {
 		start = vi.fn().mockResolvedValue(undefined);
 		send = vi.fn((msg: ProtocolMessage) => {
 			if (msg.type === "SPAWN") {
-				const spawnMsg = msg as unknown as Record<string, string>;
-				const channelId = spawnMsg.channelId ?? nextLocalChannelId();
+				const spawnMsg = msg as unknown as Record<string, unknown>;
+				const channelId = (spawnMsg.channelId as string | undefined) ?? nextLocalChannelId();
+				// Two-step elevation: if elevated=true but no elevationSecret, return SPAWN_ERR
+				if (spawnMsg.elevated === true && !spawnMsg.elevationSecret) {
+					setImmediate(() => {
+						this.emit("message", {
+							type: "SPAWN_ERR",
+							requestId: spawnMsg.requestId,
+							code: "ELEVATION_PASSWORD_REQUIRED",
+							message: "Elevation password required",
+						});
+					});
+					return;
+				}
 				setImmediate(() => {
 					this.emit("message", {
 						type: "SPAWN_OK",
@@ -391,6 +403,166 @@ describe("SessionManager", () => {
 		expect(channels[0]?.title).toBeFalsy();
 	});
 
+	// ─── Launch profile resolution ─────────────────────────────────────────
+
+	it("handleSpawn with launchProfileId stores resolved shell and args in channel DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Create a launch profile in meta.db
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Test Profile",
+			shell: "/usr/bin/zsh",
+			args: ["-l", "-i"],
+			cwd: "/tmp",
+			env: { MY_VAR: "hello" },
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		// Verify SPAWN_OK was sent (spawn succeeded)
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		// Verify the channel DB record has the resolved shell and args
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.shell).toBe("/usr/bin/zsh");
+		expect(channel?.args).toEqual(["-l", "-i"]);
+		expect(channel?.cwd).toBe("/tmp");
+	});
+
+	it("handleSpawn with launchProfileId mode=process stores directProcess in channel DB", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Process Profile",
+			shell: "/usr/bin/htop",
+			args: [],
+			mode: "process",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.shell).toBe("/usr/bin/htop");
+		expect(channel?.directProcess).toBe(true);
+	});
+
+	it("handleSpawn with unknown launchProfileId falls back to default spawn", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		// Use a non-existent profile ID — should not error, just use defaults
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: "nonexistent-profile-id",
+		});
+
+		const spawnOk = received.find((m) => m.type === "SPAWN_OK");
+		expect(spawnOk).toBeTruthy(); // Should still spawn successfully
+	});
+
+	it("handleSpawn with launchProfileId stores launchProfileId in channel DB record", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Seed Profile",
+			shell: "/bin/bash",
+			args: [],
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+		});
+
+		const channel = dal.getChannel("local-ch-1");
+		expect(channel?.launchProfileId).toBe(profile.id);
+	});
+
+	it("SC-17: explicit UI fields override matching profile fields when launchProfileId is set", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const profile = dal.createLaunchProfile({
+			name: "Profile With Defaults",
+			shell: "/usr/bin/zsh",
+			args: ["-l"],
+			cwd: "/home/user",
+			env: { FROM_PROFILE: "yes", SHARED: "profile-value" },
+			mode: "shell",
+			elevated: false,
+			supportedOs: "any",
+			iconType: "auto",
+			sortOrder: 0,
+		});
+
+		// UI explicitly sends shell, args, cwd — all should win over profile
+		await sm.handleSpawn("c1", {
+			type: "SPAWN",
+			hostId: "local",
+			launchProfileId: profile.id,
+			shell: "/bin/bash",
+			args: ["--login"],
+			cwd: "/tmp/override",
+		});
+
+		expect(received.find((m) => m.type === "SPAWN_OK")).toBeTruthy();
+
+		const channel = dal.getChannel("local-ch-1");
+		// UI shell wins over profile shell
+		expect(channel?.shell).toBe("/bin/bash");
+		// UI args win over profile args
+		expect(channel?.args).toEqual(["--login"]);
+		// UI cwd wins over profile cwd
+		expect(channel?.cwd).toBe("/tmp/override");
+		// Note: env is forwarded to the agent only (not persisted in channel DB).
+		// The merge logic (profile env as base, UI env wins on conflict) is in
+		// the resolvedEnv assignment in _spawnChannel.
+	});
+
+	// ── End launch profile resolution ─────────────────────────────────────────
+
 	it("spawned channels have null title (dynamic title takes precedence)", async () => {
 		const received: ProtocolMessage[] = [];
 		const client = makeClient("c1", received);
@@ -619,6 +791,74 @@ describe("SessionManager", () => {
 		const sessions = dal.listSessions();
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0]?.status).toBe("active");
+	});
+
+	// ─── SC-23: HELLO shell caching ────────────────────────────────────────
+
+	it("SC-23: HELLO with available_shells caches discovered shells in hosts table", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		// Create SSH host and spawn so _wireAgentEvents is registered.
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-shells",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+
+		expect(mockSshAgentInstance).not.toBeFalsy();
+
+		// Simulate agent sending a HELLO with shells
+		mockSshAgentInstance?._emit("message", {
+			type: "HELLO",
+			version: 1,
+			agentVersion: "0.1.0",
+			capabilities: ["multiplex", "resize", "snapshot", "launch-profiles"],
+			availableShells: ["/bin/bash", "/bin/sh", "/usr/bin/fish"],
+			defaultShell: "/bin/bash",
+		});
+
+		// discoveredShells should now be persisted
+		const updatedHost = dal.getHost(host.id);
+		expect(updatedHost?.discoveredShells).toEqual(["/bin/bash", "/bin/sh", "/usr/bin/fish"]);
+		expect(updatedHost?.discoveredShellsAt).toBeTruthy();
+	});
+
+	it("SC-23: HELLO without available_shells does not call updateHostDiscoveredShells", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-no-shells",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c1", received);
+		sm.addClient(client);
+		await sm.handleSpawn("c1", { type: "SPAWN", hostId: host.id });
+
+		// Simulate agent sending a HELLO without shells (older agent)
+		mockSshAgentInstance?._emit("message", {
+			type: "HELLO",
+			version: 1,
+			agentVersion: "0.1.0",
+			capabilities: ["multiplex", "resize", "snapshot"],
+		});
+
+		// discoveredShells should remain null (not updated)
+		const updatedHost = dal.getHost(host.id);
+		expect(updatedHost?.discoveredShells).toBeUndefined();
 	});
 
 	// ─── Block 3.4: ATTACH with Snapshot Restore ────────────────────────────
@@ -1287,7 +1527,12 @@ describe("SessionManager", () => {
 		});
 
 		it("crash-loop protection: 4th restart within 60s closes the session", async () => {
-			vi.useFakeTimers();
+			// Fake only Date so Date.now() is stable; leave setImmediate/setTimeout real.
+			// With fully-faked timers, vi.advanceTimersByTimeAsync(0) cannot reliably flush
+			// setImmediate callbacks queued by MockLocalAgent before the awaiting promise
+			// resolves, causing intermittent hangs. Keeping setImmediate real lets us flush
+			// it deterministically with `await new Promise(r => setImmediate(r))`.
+			vi.useFakeTimers({ toFake: ["Date"] });
 			try {
 				const { MetaDAL } = await import("../storage/meta.js");
 				const dal = new MetaDAL(dbManager.meta);
@@ -1302,12 +1547,12 @@ describe("SessionManager", () => {
 					shell: "/bin/sh",
 				});
 
-				// startup() triggers the first warm restart (count=1)
-				// _warmRestartLocal now awaits _spawnChannelsForHost, which needs
-				// setImmediate to fire SPAWN_OK. Start without blocking, flush, then await.
-				let p: Promise<void> = sm.startup();
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
+				// startup() triggers the first warm restart (count=1).
+				// _spawnChannelsForHost sends SPAWN; MockLocalAgent replies via setImmediate.
+				// Await the promise after flushing setImmediate so SPAWN_OK is processed.
+				const p1 = sm.startup();
+				await new Promise((r) => setImmediate(r));
+				await p1;
 
 				// Verify session is active after 1st restart
 				const sessionState = (
@@ -1324,19 +1569,19 @@ describe("SessionManager", () => {
 				};
 
 				// 2nd restart (count=2)
-				p = smAny._warmRestartLocal(host.id, sessionId);
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
+				const p2 = smAny._warmRestartLocal(host.id, sessionId);
+				await new Promise((r) => setImmediate(r));
+				await p2;
 				expect(sessionState?.status).toBe("active");
 
 				// 3rd restart (count=3)
-				p = smAny._warmRestartLocal(host.id, sessionId);
-				await vi.advanceTimersByTimeAsync(0);
-				await p;
+				const p3 = smAny._warmRestartLocal(host.id, sessionId);
+				await new Promise((r) => setImmediate(r));
+				await p3;
 				expect(sessionState?.status).toBe("active");
 
-				// 4th restart (count=4 > 3) — should trigger _closeSession
-				// _closeSession is sync so no SPAWN is sent — await directly
+				// 4th restart (count=4 > 3) — triggers _closeSession synchronously,
+				// no SPAWN is sent so no setImmediate flush is needed.
 				await smAny._warmRestartLocal(host.id, sessionId);
 
 				// Session should be closed
@@ -2412,5 +2657,385 @@ describe("SessionManager — broadcastDisplayTitles", () => {
 			| undefined;
 		expect(msg?.title).toBe("zsh — ~/projects");
 		expect(msg?.displayTitle).toBe("zsh — ~/projects");
+	});
+});
+
+// ─── Elevation support ────────────────────────────────────────────────────────
+
+describe("SessionManager — elevation support", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	/** Access private agentCapabilities map for test setup. */
+	function setAgentCapabilities(hostId: string, caps: string[]): void {
+		(
+			sm as unknown as {
+				agentCapabilities: Map<string, string[]>;
+			}
+		).agentCapabilities.set(hostId, caps);
+	}
+
+	/** Access private elevationCache map for test inspection/setup. */
+	function getElevationCache(): Map<string, { secret: string; expiresAt: number }> {
+		return (
+			sm as unknown as {
+				elevationCache: Map<string, { secret: string; expiresAt: number }>;
+			}
+		).elevationCache;
+	}
+
+	/**
+	 * Build a WsClient that automatically responds to AUTH_PROMPT messages.
+	 * When the client receives an AUTH_PROMPT, it calls handleAuthPromptResponse
+	 * with `responseSecret` on the next microtask.
+	 */
+	function makeAutoRespondClient(
+		id: string,
+		received: ProtocolMessage[],
+		responseSecret: string | null,
+	): WsClient {
+		return {
+			id,
+			send: (msg: ProtocolMessage) => {
+				received.push(msg);
+				if (msg.type === "AUTH_PROMPT") {
+					const promptMsg = msg as AuthPromptMessage;
+					// Respond on next microtask so the pending entry is registered first
+					Promise.resolve().then(() => {
+						sm.handleAuthPromptResponse(id, promptMsg.hostId, responseSecret);
+					});
+				}
+			},
+			attachedChannels: new Set(),
+		};
+	}
+
+	it("SC-19: SSH host with elevated=true: stripped — spawn proceeds without elevation", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "windows-ssh",
+			sshHost: "user@192.168.1.1",
+			sshAuth: "password",
+		});
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-sc19", received);
+		sm.addClient(client);
+
+		// Perform the spawn — SSH agent mock auto-resolves SPAWN_OK.
+		// Since elevation is stripped (SSH host), no AUTH_PROMPT is sent.
+		await sm.handleSpawn("c-sc19", { type: "SPAWN", hostId: host.id, elevated: true });
+
+		// No AUTH_PROMPT should have been sent (elevation was stripped for SSH hosts)
+		const authPrompts = received.filter((m) => m.type === "AUTH_PROMPT");
+		expect(authPrompts).toHaveLength(0);
+
+		// A channel should have been created (spawn succeeded without elevation)
+		const sessions = dal.listSessions(host.id);
+		expect(sessions.length).toBeGreaterThan(0);
+		const channels = dal.listChannels(sessions[0]?.id);
+		expect(channels.length).toBeGreaterThan(0);
+
+		// The agent should have received a SPAWN without elevated flag
+		const spawnMsg = mockSshAgentInstance?.send.mock.calls.find(
+			(c) => (c[0] as ProtocolMessage).type === "SPAWN",
+		)?.[0] as import("@nexterm/shared").AgentSpawnMessage | undefined;
+		expect(spawnMsg?.elevated).toBeFalsy();
+		expect(spawnMsg?.elevationSecret).toBeUndefined();
+	});
+
+	it("SC-19: local host with elevated=true but agent lacks launch-profiles: stripped", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-sc19b", received);
+		sm.addClient(client);
+
+		// Agent does NOT have launch-profiles capability (pre-set, HELLO not emitted by mock)
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot"]);
+
+		await sm.handleSpawn("c-sc19b", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// No AUTH_PROMPT sent (elevation stripped due to missing capability)
+		const authPrompts = received.filter((m) => m.type === "AUTH_PROMPT");
+		expect(authPrompts).toHaveLength(0);
+	});
+
+	it("SC-20: first spawn with elevated=true sends AUTH_PROMPT; second spawn uses cache", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Use auto-respond client: first AUTH_PROMPT gets "hunter2" automatically.
+		const client = makeAutoRespondClient("c-sc20", received, "hunter2");
+		sm.addClient(client);
+
+		// Agent has launch-profiles capability
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// ── First spawn: AUTH_PROMPT sent → auto-responded → spawn completes ─
+		await sm.handleSpawn("c-sc20", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// AUTH_PROMPT should have been sent and auto-responded
+		const prompts = received.filter((m) => m.type === "AUTH_PROMPT") as AuthPromptMessage[];
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0]?.promptType).toBe("elevation");
+
+		// Elevation cache should now be set
+		const cache = getElevationCache();
+		expect(cache.has(localHostId)).toBe(true);
+		expect(cache.get(localHostId)?.secret).toBe("hunter2");
+
+		// ── Second spawn: cache hit → no new AUTH_PROMPT ─────────────────
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		await sm.handleSpawn("c-sc20", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore); // no new AUTH_PROMPT
+	});
+
+	it("SC-20b: expired cache entry causes new AUTH_PROMPT on next spawn", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Auto-respond client: any AUTH_PROMPT gets "new-secret"
+		const client = makeAutoRespondClient("c-sc20b", received, "new-secret");
+		sm.addClient(client);
+
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Pre-seed the cache with an expired entry
+		getElevationCache().set(localHostId, { secret: "old-secret", expiresAt: Date.now() - 1 });
+
+		// Spawn: expired cache → AUTH_PROMPT triggered → auto-responded → completes
+		await sm.handleSpawn("c-sc20b", { type: "SPAWN", hostId: localHostId, elevated: true });
+
+		// AUTH_PROMPT should have been sent (cache was expired)
+		const prompts = received.filter((m) => m.type === "AUTH_PROMPT") as AuthPromptMessage[];
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0]?.promptType).toBe("elevation");
+
+		// Cache should be updated with the new secret
+		expect(getElevationCache().get(localHostId)?.secret).toBe("new-secret");
+	});
+
+	it("SC-20: user cancels elevation prompt → spawn returns null, ELEVATION_CANCELLED error sent", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+
+		// Auto-respond with null (user cancel)
+		const client = makeAutoRespondClient("c-sc20c", received, null);
+		sm.addClient(client);
+
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn: AUTH_PROMPT auto-cancelled → handleSpawn returns null
+		const result = await sm.handleSpawn("c-sc20c", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+
+		// handleSpawn should return null
+		expect(result).toBeNull();
+
+		// An ELEVATION_CANCELLED error should have been sent to the client
+		const errMsg = received.find((m) => m.type === "ERROR") as
+			| (ProtocolMessage & { code?: string })
+			| undefined;
+		expect(errMsg?.code).toBe("ELEVATION_CANCELLED");
+
+		// No channel should have been created
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const sessions = dal.listSessions(localHostId);
+		const channels = sessions.flatMap((s) => dal.listChannels(s.id));
+		expect(channels).toHaveLength(0);
+	});
+
+	it("persist-01: elevated=true channel persists elevated+elevationMethod in DB", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-persist01", received, "s3cr3t");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		const channelId = await sm.handleSpawn("c-persist01", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.elevated).toBe(true);
+		expect(channel?.elevationMethod).toBeDefined();
+	});
+
+	it("persist-02: non-elevated channel has elevated=false in DB", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-persist02", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-persist02", {
+			type: "SPAWN",
+			hostId: localHostId,
+		});
+		expect(channelId).not.toBeNull();
+
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.elevated).toBeFalsy();
+		expect(channel?.elevationMethod).toBeUndefined();
+	});
+
+	it("restart-elev-01: restartChannel re-elevates using cache hit (no prompt)", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-restart01", received, "p@ss");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn an elevated channel (primes the cache)
+		const channelId = await sm.handleSpawn("c-restart01", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		// Verify cache was primed
+		const cache = getElevationCache();
+		expect(cache.has(localHostId)).toBe(true);
+
+		// Count AUTH_PROMPT messages before restart
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+
+		// Restart the channel — cache hit → no new AUTH_PROMPT
+		const ok = await sm.restartChannel(channelId!);
+		expect(ok).toBe(true);
+
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore);
+
+		// Channel should be live in DB
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.status).toBe("live");
+	});
+
+	it("restart-elev-02: restartChannel with expired cache prompts user for secret", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const received: ProtocolMessage[] = [];
+		const client = makeAutoRespondClient("c-restart02", received, "new-p@ss");
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn elevated channel (auto-prompt fills cache)
+		const channelId = await sm.handleSpawn("c-restart02", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+
+		// Expire the cache
+		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+
+		// Count AUTH_PROMPT messages before restart
+		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
+
+		// Restart — expired cache → passwordless fails → AUTH_PROMPT → auto-respond → success
+		const ok = await sm.restartChannel(channelId!, "c-restart02");
+		expect(ok).toBe(true);
+
+		// A new AUTH_PROMPT should have been sent for the restart
+		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
+		expect(promptsAfter).toBe(promptsBefore + 1);
+
+		// Cache updated with new secret
+		expect(getElevationCache().get(localHostId)?.secret).toBe("new-p@ss");
+
+		// Channel should be live in DB
+		const channel = dal.getChannel(channelId!);
+		expect(channel?.status).toBe("live");
+	});
+
+	it("restart-elev-03: restartChannel cancels elevation → returns false", async () => {
+		const localHostId = await sm.ensureLocalHost();
+
+		const received: ProtocolMessage[] = [];
+		// For spawn, auto-respond with a secret. For restart, auto-respond with null (cancel).
+		let spawnDone = false;
+		const client: WsClient = {
+			id: "c-restart03",
+			send: (msg: ProtocolMessage) => {
+				received.push(msg);
+				if (msg.type === "AUTH_PROMPT") {
+					const promptMsg = msg as AuthPromptMessage;
+					Promise.resolve().then(() => {
+						sm.handleAuthPromptResponse(
+							"c-restart03",
+							promptMsg.hostId,
+							spawnDone ? null : "initial-pass",
+						);
+					});
+				}
+			},
+			attachedChannels: new Set(),
+		};
+		sm.addClient(client);
+		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
+
+		// Spawn elevated channel successfully
+		const channelId = await sm.handleSpawn("c-restart03", {
+			type: "SPAWN",
+			hostId: localHostId,
+			elevated: true,
+		});
+		expect(channelId).not.toBeNull();
+		spawnDone = true;
+
+		// Expire cache so restart will prompt
+		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+
+		// Restart — user cancels prompt → returns false
+		const ok = await sm.restartChannel(channelId!, "c-restart03");
+		expect(ok).toBe(false);
+
+		// ELEVATION_CANCELLED error sent to client
+		const errMsg = received.find(
+			(m) => m.type === "ERROR" && (m as ProtocolMessage & { code?: string }).code === "ELEVATION_CANCELLED",
+		);
+		expect(errMsg).toBeDefined();
 	});
 });

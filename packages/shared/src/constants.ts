@@ -55,6 +55,9 @@ export function resolveChannelDisplayName(
 			if (staticTitle) return staticTitle;
 			break;
 	}
+	// Fallback chain: dynamicTitle → processTitle → default
+	if (channel?.dynamicTitle) return channel.dynamicTitle;
+	if (channel?.processTitle) return channel.processTitle;
 	return DEFAULT_CHANNEL_NAME;
 }
 

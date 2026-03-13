@@ -104,7 +104,7 @@ export function useTabTitle(
 			if (live != null && live !== "") return live;
 		}
 
-		// Hub-computed display title is the authoritative value.
+		// Hub-computed display title is authoritative.
 		return ch.displayTitle ?? DEFAULT_CHANNEL_NAME;
 	});
 

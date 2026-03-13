@@ -1,12 +1,22 @@
 // In-memory TypeScript entity types for nexterm
 // These represent the domain model; DB types are defined in hub/storage
 
+import type { TerminalProfile } from "./config.js";
+
 export type SessionStatus = "starting" | "active" | "detached" | "disconnected" | "closed";
 export type ChannelStatus = "born" | "live" | "orphan" | "dead";
 export type HostType = "local" | "ssh";
 export type SshAuthMethod = "agent" | "key" | "password";
 export type IconType = "auto" | "emoji" | "image";
 export type TrustPolicy = "apply" | "ask" | "ignore";
+export type LaunchProfileMode = "shell" | "process";
+export type SupportedOs = "linux" | "darwin" | "windows" | "any";
+export type ElevationMethod = "sudo" | "doas" | "pkexec" | "gsudo" | "custom";
+
+export const ELEVATION_METHODS_LINUX: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "custom"];
+export const ELEVATION_METHODS_DARWIN: readonly ElevationMethod[] = ["sudo", "doas", "custom"];
+export const ELEVATION_METHODS_WINDOWS: readonly ElevationMethod[] = ["gsudo", "custom"];
+export const ELEVATION_METHODS_ALL: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "gsudo", "custom"];
 
 export interface Host {
 	id: string; // ULID
@@ -23,6 +33,8 @@ export interface Host {
 	trustRemoteHints: TrustPolicy;
 	defaultShell?: string;
 	defaultCwd?: string;
+	elevationMethod?: ElevationMethod | null;
+	customCommand?: string | null;
 	hostGroup?: string | null;
 	hostGroupId?: string | null;
 	sortOrder: number;
@@ -30,6 +42,8 @@ export interface Host {
 	sshUser?: string | null;
 	keepAliveSeconds: number;
 	historyRetentionDays: number;
+	discoveredShells?: string[];
+	discoveredShellsAt?: string;
 	createdAt: string; // ISO 8601
 	updatedAt: string;
 }
@@ -80,6 +94,9 @@ export interface Channel {
 	dynamicTitle?: string;
 	processTitle?: string;
 	displayTitle?: string;
+	launchProfileId?: string;
+	elevated?: boolean;
+	elevationMethod?: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -120,6 +137,32 @@ export interface SshConfigImport {
 	name: string;
 	label: string;
 	hostGroup?: string;
+}
+
+export interface LaunchProfile {
+	id: string;
+	name: string;
+	shell: string;
+	args?: string[];
+	cwd?: string;
+	env?: Record<string, string>;
+	mode: LaunchProfileMode;
+	elevated: boolean;
+	supportedOs: SupportedOs;
+	iconType: IconType;
+	iconValue?: string;
+	color?: string;
+	profileOverrides?: Partial<TerminalProfile>;
+	sortOrder: number;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface HostLaunchProfileOverride {
+	hostId: string;
+	profileId: string;
+	overrideType: "pin" | "hide" | "default";
+	sortOrder?: number;
 }
 
 export interface TestConnectionResult {

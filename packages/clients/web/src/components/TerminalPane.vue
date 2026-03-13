@@ -9,16 +9,6 @@
 		>
 			<span class="pane-title">{{ paneTitle }}</span>
 			<WriteLockIndicator :channel-id="effectiveChannelId" :is-dead="isDead" class="pane-lock" />
-			<span v-if="isDead" class="dead-badge" title="Channel has exited">
-				Closed
-			</span>
-			<span
-				v-else-if="effectiveChannelId && !isWriter"
-				class="readonly-badge"
-				title="You are in read-only mode"
-			>
-				Read-only
-			</span>
 		</div>
 
 		<!-- Environment banner (UX-07) -->
@@ -44,12 +34,12 @@
 		<!-- Background tint overlay (UX-07) -->
 		<div v-if="tintStyle" class="tint-overlay" :style="tintStyle" />
 
-		<!-- Exit overlay for direct process channels -->
-		<div v-if="isDead && isDirectProcess" class="exit-overlay">
-			<div class="exit-message">Process exited</div>
+		<!-- Exit overlay for all dead channels -->
+		<div v-if="isDead" class="exit-overlay">
+			<div class="exit-message">{{ exitMessage }}</div>
 			<div class="exit-actions">
 				<button class="exit-btn" @click="onRestart">Restart</button>
-				<button class="exit-btn" @click="onConfigure">Configure</button>
+				<button v-if="isDirectProcess" class="exit-btn" @click="onConfigure">Configure</button>
 				<button class="exit-btn exit-btn--danger" @click="onClosePaneFromOverlay">Close</button>
 			</div>
 		</div>
@@ -307,6 +297,18 @@ const isDirectProcess = computed(() => {
 	return channel?.directProcess === true;
 });
 
+const exitMessage = computed(() => {
+	const chId = effectiveChannelId.value;
+	if (!chId) return "Exited";
+	const channel = channelsStore.channels.find((c) => c.id === chId);
+	const label = channel?.directProcess ? "Process" : "Shell";
+	const code = channel?.exitCode;
+	if (code !== undefined && code !== null) {
+		return `${label} exited (code ${code})`;
+	}
+	return `${label} exited`;
+});
+
 watch(isDead, (dead) => {
 	if (dead) canWrite.value = false;
 });
@@ -414,7 +416,18 @@ onUnmounted(() => {
 async function onRestart(): Promise<void> {
 	const chId = effectiveChannelId.value;
 	if (chId !== null) {
-		await channelsStore.restartChannel(chId);
+		const ok = await channelsStore.restartChannel(chId);
+		if (ok) {
+			const result = await reattachChannel(chId);
+			if (result.writeLockHolder) {
+				writeLockStore.handleWriteLock(chId, result.writeLockHolder);
+			}
+			// Restore write permission — isDead watcher set canWrite=false
+			// when the channel died. If isWriter never changed (write-lock
+			// persists across restart for same channel ID), the isWriter
+			// watcher won't re-fire, so we must restore explicitly.
+			canWrite.value = isWriter.value;
+		}
 	}
 }
 
@@ -762,30 +775,6 @@ function onDragEnd(): void {
 }
 
 .pane-lock {
-	flex-shrink: 0;
-}
-
-.readonly-badge {
-	font-size: 10px;
-	font-weight: 600;
-	color: var(--nt-yellow);
-	background: rgba(var(--nt-yellow-rgb), 0.12);
-	border: 1px solid rgba(var(--nt-yellow-rgb), 0.3);
-	border-radius: 3px;
-	padding: 1px 6px;
-	letter-spacing: 0.04em;
-	flex-shrink: 0;
-}
-
-.dead-badge {
-	font-size: 10px;
-	font-weight: 600;
-	color: var(--nt-text-muted);
-	background: rgba(var(--nt-fg-rgb), 0.12);
-	border: 1px solid rgba(var(--nt-fg-rgb), 0.3);
-	border-radius: 3px;
-	padding: 1px 6px;
-	letter-spacing: 0.04em;
 	flex-shrink: 0;
 }
 

@@ -13,7 +13,7 @@ const HELLO_TIMEOUT_MS = 5_000;
 /** Callback to prompt the user for a secret (password or key passphrase). */
 export type AuthPromptFn = (
 	hostId: string,
-	promptType: "password" | "passphrase",
+	promptType: "password" | "passphrase" | "elevation",
 	message: string,
 ) => Promise<string | null>;
 

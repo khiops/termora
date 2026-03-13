@@ -1,5 +1,10 @@
 import { EventEmitter } from "node:events";
-import { FrameReader, PROTOCOL_VERSION, type ProtocolMessage } from "@nexterm/shared";
+import {
+	FrameReader,
+	type HelloMessage,
+	PROTOCOL_VERSION,
+	type ProtocolMessage,
+} from "@nexterm/shared";
 
 /**
  * Abstract base class for communicating with a nexterm agent (local or remote SSH).
@@ -13,6 +18,9 @@ import { FrameReader, PROTOCOL_VERSION, type ProtocolMessage } from "@nexterm/sh
 export abstract class AgentConnection extends EventEmitter {
 	protected reader = new FrameReader();
 	protected ready = false;
+
+	/** The HELLO message received during handshake (available after "ready"). */
+	helloMessage: HelloMessage | undefined;
 
 	/** Send a protocol message to the agent. */
 	abstract send(msg: ProtocolMessage): void;
@@ -39,6 +47,7 @@ export abstract class AgentConnection extends EventEmitter {
 					return;
 				}
 				this.ready = true;
+				this.helloMessage = msg as HelloMessage;
 				this.emit("ready", msg);
 			}
 			this.emit("message", msg);

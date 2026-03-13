@@ -3,6 +3,7 @@ import {
 	OUTPUT_BATCH_BYTES,
 	OUTPUT_BATCH_MS,
 	PROTOCOL_VERSION,
+	expandVars,
 	sanitizeTitle,
 } from "@nexterm/shared";
 import type {
@@ -15,8 +16,10 @@ import type {
 	ResizeMessage,
 	SnapshotReqMessage,
 } from "@nexterm/shared";
-import { PtyManager } from "./pty.js";
+import { buildAskpassEnv, checkPasswordless, wrapWithElevation } from "./elevation.js";
 import { startProcessTitlePolling } from "./process-title.js";
+import { PtyManager } from "./pty.js";
+import { detectAvailableShells, getDefaultShell } from "./shell-detection.js";
 
 const SIGNAL_NAMES: Record<number, string> = {
 	1: "SIGHUP",
@@ -63,13 +66,19 @@ export class AgentHandler {
 		}
 	}
 
-	/** Send HELLO immediately after the agent starts. */
-	sendHello(): void {
+	/** Send HELLO immediately after the agent starts. Includes discovered shells. */
+	async sendHello(): Promise<void> {
+		const [availableShells, defaultShell] = await Promise.all([
+			detectAvailableShells(),
+			Promise.resolve(getDefaultShell()),
+		]);
 		this.sendMessage({
 			type: "HELLO",
 			version: PROTOCOL_VERSION,
 			agentVersion: "0.1.0",
-			capabilities: ["multiplex", "resize", "snapshot"],
+			capabilities: ["multiplex", "resize", "snapshot", "launch-profiles"],
+			...(availableShells.length > 0 && { availableShells }),
+			defaultShell,
 		});
 	}
 
@@ -133,15 +142,99 @@ export class AgentHandler {
 
 	private handleSpawn(msg: AgentSpawnMessage): void {
 		try {
+			// ── Variable expansion (agent-side, one-pass) ─────────────────────
+			// shell is NOT expanded (must be an exact path).
+			// args, cwd, and env values are expanded with process.env merged
+			// with the spawn-message env as the lookup table.
+			const isWindows = process.platform === "win32";
+			// spawnEnv: process.env is the base, profile env overrides on top.
+			// Filter out undefined values (NodeJS.ProcessEnv allows string | undefined).
+			const processEnvStrings: Record<string, string> = {};
+			for (const [k, v] of Object.entries(process.env)) {
+				if (v !== undefined) processEnvStrings[k] = v;
+			}
+			const spawnEnv: Record<string, string> = { ...processEnvStrings, ...msg.env };
+			const expandedArgs = msg.args?.map((arg) => expandVars(arg, spawnEnv, isWindows));
+			const expandedCwd = expandVars(msg.cwd, spawnEnv, isWindows);
+			const expandedEnv: Record<string, string> = {};
+			for (const [k, v] of Object.entries(msg.env)) {
+				expandedEnv[k] = expandVars(v, spawnEnv, isWindows);
+			}
+
+			// ── Elevation ─────────────────────────────────────────────────
+			// If elevated=true, wrap the shell/args with sudo (Linux/macOS) or
+			// gsudo (Windows) and inject the SUDO_ASKPASS env variable.
+			// elevationSecret is zeroed immediately after use — never log it.
+			let ptyShell = msg.shell;
+			let ptyArgs = expandedArgs;
+			let ptyEnv = expandedEnv;
+			let askpassCleanup: (() => void) | null = null;
+
+			if (msg.elevated) {
+				const method = msg.elevationMethod ?? (process.platform === "win32" ? "gsudo" : "sudo");
+
+				if (msg.elevationSecret) {
+					// Secret provided → askpass mode
+					const askpass = buildAskpassEnv(msg.elevationSecret, method, process.platform);
+					ptyEnv = { ...ptyEnv, ...askpass.env };
+					askpassCleanup = askpass.cleanup;
+
+					const wrapped = wrapWithElevation(
+						msg.shell,
+						expandedArgs ?? [],
+						method,
+						"askpass",
+						process.platform,
+						msg.customCommand,
+					);
+					ptyShell = wrapped.shell;
+					ptyArgs = wrapped.args;
+
+					// Zero the secret from memory immediately after it has been consumed.
+					msg.elevationSecret = "";
+				} else {
+					// No secret → try passwordless
+					if (checkPasswordless(method, process.platform)) {
+						const wrapped = wrapWithElevation(
+							msg.shell,
+							expandedArgs ?? [],
+							method,
+							"passwordless",
+							process.platform,
+							msg.customCommand,
+						);
+						ptyShell = wrapped.shell;
+						ptyArgs = wrapped.args;
+					} else {
+						// Cannot proceed without a password — tell hub to prompt.
+						this.sendMessage({
+							type: "SPAWN_ERR",
+							requestId: msg.requestId,
+							code: "ELEVATION_PASSWORD_REQUIRED",
+							message: `${method} requires a password`,
+						});
+						return;
+					}
+				}
+			}
+
 			const channelId = this.ptyManager.spawn({
 				...(msg.channelId !== undefined && { id: msg.channelId }),
-				shell: msg.shell,
-				...(msg.args !== undefined && msg.args.length > 0 && { args: msg.args }),
-				cwd: msg.cwd,
-				env: msg.env,
+				shell: ptyShell,
+				...(ptyArgs !== undefined && ptyArgs.length > 0 && { args: ptyArgs }),
+				cwd: expandedCwd,
+				env: ptyEnv,
 				cols: msg.cols,
 				rows: msg.rows,
 			});
+
+			// Remove the ASKPASS temp script ~1 s after spawn so sudo has time to read it.
+			if (askpassCleanup !== null) {
+				const cleanup = askpassCleanup;
+				setTimeout(() => {
+					cleanup();
+				}, 1000);
+			}
 
 			this.setupOutputBatching(channelId);
 			this.setupTitleChangeHandler(channelId);

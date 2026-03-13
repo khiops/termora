@@ -5,6 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
 import { type Ref, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";
+import { useChannelsStore } from "../stores/channels.js";
 import { useThemeStore } from "../stores/theme.js";
 import { useTerminalSearch } from "./useTerminalSearch.js";
 
@@ -219,6 +220,7 @@ export function useTerminal(
 			tail: Uint8Array[];
 			writeLockHolder: string | null;
 			dynamicTitle: string | null;
+			displayTitle: string | null;
 		}>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				unsubOk();
@@ -238,6 +240,7 @@ export function useTerminal(
 						tail: uiMsg.tail ?? [],
 						writeLockHolder: uiMsg.writeLockHolder ?? null,
 						dynamicTitle: uiMsg.dynamicTitle ?? null,
+						displayTitle: uiMsg.displayTitle ?? null,
 					});
 				}
 			});
@@ -279,6 +282,10 @@ export function useTerminal(
 			titleStack.length = 0;
 			titleStack.push(result.dynamicTitle);
 			currentDynamicTitle.value = result.dynamicTitle;
+		}
+
+		if (result.displayTitle) {
+			useChannelsStore().setDisplayTitle(id, result.displayTitle);
 		}
 
 		// Set channelId — same ID always (respawn reuses the same channel ID)

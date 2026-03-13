@@ -9,6 +9,7 @@ import { registerFontRoutes } from "./api/fonts.js";
 import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostGroupRoutes } from "./api/host-groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
+import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
@@ -19,6 +20,7 @@ import { ConfigResolver, loadGcConfig } from "./config.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
+import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js";
 import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
 
@@ -108,9 +110,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const configResolver = new ConfigResolver(metaDalForConfig);
 		configResolver.loadFromFile(configDir);
 
-		const sessionManager = new SessionManager(options.dbManager, gcConfig, undefined, configResolver);
+		const sessionManager = new SessionManager(
+			options.dbManager,
+			gcConfig,
+			undefined,
+			configResolver,
+		);
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
+		migrateLegacyShellDefaults(metaDal, configResolver);
 
 		// First-run: ensure the built-in "local" host exists
 		const wasNew = !metaDal.getHostByLabel("local");
@@ -123,6 +131,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await registerWsRoutes(server, sessionManager, options.authToken);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
+		registerLaunchProfileRoutes(server, metaDal);
 		registerSessionRoutes(server, metaDal, sessionManager);
 		registerChannelRoutes(server, metaDal, sessionManager, sessionManager.getSpoolDal());
 		registerGroupRoutes(server, metaDal);

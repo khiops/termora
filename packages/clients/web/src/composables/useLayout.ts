@@ -96,7 +96,7 @@ function loadFromStorage(): PersistedState | null {
 			const newTabs: Tab[] = [];
 			const newLayouts: Record<string, PaneNode | null> = {};
 			const newActivePaneIds: Record<string, string> = {};
-			const oldLayouts = parsed.layouts as Record<string, PaneNode | null> | undefined ?? {};
+			const oldLayouts = (parsed.layouts as Record<string, PaneNode | null> | undefined) ?? {};
 
 			for (const oldTab of rawTabs) {
 				const oldChannelId = oldTab.channelId as string;
@@ -123,7 +123,7 @@ function loadFromStorage(): PersistedState | null {
 		}
 
 		// New format
-		const state = parsed as PersistedState;
+		const state = parsed as unknown as PersistedState;
 		// Migrate old layouts that lack paneId; enforce max pane count (INV-10)
 		for (const key of Object.keys(state.layouts)) {
 			let tree = state.layouts[key];
@@ -387,8 +387,7 @@ export function purgeDeadTabs(
 			const root = layouts[tab.id];
 			if (root !== null && root !== undefined) {
 				const terminalIds = collectTerminalChannelIds(root);
-				const allDead =
-					terminalIds.length > 0 && terminalIds.every((id) => deadIds.has(id));
+				const allDead = terminalIds.length > 0 && terminalIds.every((id) => deadIds.has(id));
 				if (allDead) closeTab(i);
 			}
 		}
@@ -712,8 +711,10 @@ export function useLayout() {
 				// Clean up layouts for removed tabs
 				const keptLayout = welcomeTabId ? layouts.value[welcomeTabId] : undefined;
 				const keptPaneId = welcomeTabId ? activePaneIds.value[welcomeTabId] : undefined;
-				const removedLayouts = welcomeTabId && keptLayout != null ? { [welcomeTabId]: keptLayout } : {};
-				const removedPanes = welcomeTabId && keptPaneId !== undefined ? { [welcomeTabId]: keptPaneId } : {};
+				const removedLayouts =
+					welcomeTabId && keptLayout != null ? { [welcomeTabId]: keptLayout } : {};
+				const removedPanes =
+					welcomeTabId && keptPaneId !== undefined ? { [welcomeTabId]: keptPaneId } : {};
 				tabs.value = kept;
 				layouts.value = removedLayouts;
 				activePaneIds.value = removedPanes;
@@ -754,10 +755,7 @@ export function useLayout() {
 	 * If the layout is null (no tabs), this is a no-op.
 	 * The active pane does NOT change on split.
 	 */
-	function splitPane(
-		channelId: string,
-		direction: "horizontal" | "vertical",
-	): void {
+	function splitPane(channelId: string, direction: "horizontal" | "vertical"): void {
 		const tab = activeTab.value;
 		if (tab === null) return;
 
@@ -970,7 +968,6 @@ export function useLayout() {
 		layouts.value = { ...layouts.value, [tab.id]: newRoot };
 	}
 
-
 	/**
 	 * Detach a terminal pane: replace it with a vacant slot.
 	 * The channel/PTY keeps running — only the pane slot is cleared.
@@ -1045,7 +1042,6 @@ export function useLayout() {
 			}
 		}
 	}
-
 
 	// ------------------------------------------------------------------
 	// Cross-tab pane DnD

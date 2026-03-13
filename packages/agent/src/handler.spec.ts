@@ -1,6 +1,17 @@
 import { PROTOCOL_VERSION, encodeFrame } from "@nexterm/shared";
 import type { ProtocolMessage } from "@nexterm/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Mock shell-detection so handler.spec.ts never touches the real fs.
+// ---------------------------------------------------------------------------
+
+vi.mock("./shell-detection.js", () => ({
+	detectAvailableShells: vi.fn().mockResolvedValue(["/bin/bash", "/bin/sh"]),
+	getDefaultShell: vi.fn().mockReturnValue("/bin/bash"),
+	_resetShellCache: vi.fn(),
+}));
+
 import { AgentHandler } from "./handler.js";
 import type { PtyManager } from "./pty.js";
 
@@ -126,9 +137,9 @@ describe("AgentHandler", () => {
 	// HELLO
 	// -------------------------------------------------------------------------
 
-	it("sendHello emits HELLO with correct version and capabilities", () => {
+	it("sendHello emits HELLO with correct version and capabilities", async () => {
 		const { handler, sent } = makeHandler(mock);
-		handler.sendHello();
+		await handler.sendHello();
 
 		expect(sent).toHaveLength(1);
 		const msg = sent[0] as { type: string; version: number; capabilities: string[] };
@@ -137,6 +148,26 @@ describe("AgentHandler", () => {
 		expect(msg.capabilities).toContain("multiplex");
 		expect(msg.capabilities).toContain("resize");
 		expect(msg.capabilities).toContain("snapshot");
+	});
+
+	// SC-23: HELLO includes shells and launch-profiles capability
+	it("SC-23: sendHello includes available_shells, default_shell, and launch-profiles capability", async () => {
+		const { handler, sent } = makeHandler(mock);
+		await handler.sendHello();
+
+		expect(sent).toHaveLength(1);
+		const msg = sent[0] as {
+			type: string;
+			capabilities: string[];
+			availableShells?: string[];
+			defaultShell?: string;
+		};
+		expect(msg.type).toBe("HELLO");
+		// Capabilities must include the new entry
+		expect(msg.capabilities).toContain("launch-profiles");
+		// Shell discovery results must be present (mocked values)
+		expect(msg.availableShells).toEqual(["/bin/bash", "/bin/sh"]);
+		expect(msg.defaultShell).toBe("/bin/bash");
 	});
 
 	// -------------------------------------------------------------------------

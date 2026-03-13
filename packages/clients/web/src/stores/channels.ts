@@ -48,6 +48,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 	}
 	if (row.dynamic_title != null) ch.dynamicTitle = row.dynamic_title as string;
 	if (row.process_title != null) ch.processTitle = row.process_title as string;
+	if (row.display_title != null) ch.displayTitle = row.display_title as string;
 	return ch;
 }
 
@@ -174,6 +175,28 @@ export const useChannelsStore = defineStore("channels", () => {
 			}
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
+
+			// WS-wins: preserve real-time fields (status, titles, exitCode)
+			// that arrived via WebSocket — they are always fresher than REST.
+			// REST is authoritative only for structural fields (shell, args,
+			// cwd, groupId, icon, etc.) and for the initial load.
+			const prevById = new Map<string, Channel>();
+			for (const ch of channels.value) {
+				prevById.set(ch.id, ch);
+			}
+			for (const ch of data) {
+				const prev = prevById.get(ch.id);
+				if (prev) {
+					// Status + exitCode: WS CHANNEL_STATE is source of truth
+					if (prev.status) ch.status = prev.status;
+					if (prev.exitCode !== undefined) ch.exitCode = prev.exitCode;
+					// Titles: WS TITLE_CHANGE / PROCESS_TITLE are source of truth
+					if (prev.displayTitle) ch.displayTitle = prev.displayTitle;
+					if (prev.dynamicTitle) ch.dynamicTitle = prev.dynamicTitle;
+					if (prev.processTitle) ch.processTitle = prev.processTitle;
+				}
+			}
+
 			channels.value = data;
 			// Populate persistent channelId → hostId map (survives host switch)
 			const nextHostMap = new Map(channelHostMap.value);
@@ -467,7 +490,15 @@ export const useChannelsStore = defineStore("channels", () => {
 
 	function spawnChannel(
 		hostId: string,
-		opts?: { cols?: number; rows?: number; select?: boolean },
+		opts?: {
+			cols?: number;
+			rows?: number;
+			select?: boolean;
+			launchProfileId?: string;
+			shell?: string;
+			args?: string[];
+			directProcess?: boolean;
+		},
 	): Promise<string> {
 		const sessionStore = useSessionStore();
 		const configStore = useConfigStore();
@@ -505,6 +536,10 @@ export const useChannelsStore = defineStore("channels", () => {
 				...(opts?.cols !== undefined && opts?.rows !== undefined
 					? { cols: opts.cols, rows: opts.rows }
 					: {}),
+				...(opts?.launchProfileId !== undefined ? { launchProfileId: opts.launchProfileId } : {}),
+				...(opts?.shell !== undefined ? { shell: opts.shell } : {}),
+				...(opts?.args !== undefined && opts.args.length > 0 ? { args: opts.args } : {}),
+				...(opts?.directProcess ? { directProcess: true } : {}),
 			});
 		});
 	}
@@ -814,9 +849,9 @@ export const useChannelsStore = defineStore("channels", () => {
 		});
 		if (!res.ok) return false;
 
-		// Optimistically update local status so UI reflects the restart
-		const ch = channels.value.find((c) => c.id === channelId);
-		if (ch) ch.status = "born";
+		// No optimistic update — the hub broadcasts CHANNEL_STATE: live
+		// via WS which arrives before or alongside the HTTP response.
+		// Setting "born" here would overwrite the correct "live" status.
 
 		return true;
 	}

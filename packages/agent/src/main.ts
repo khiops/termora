@@ -100,9 +100,13 @@ function startStdio(): void {
 		}
 	});
 
-	// Announce ourselves immediately; hub will not send commands until it
-	// receives HELLO.
-	handler.sendHello();
+	// Announce ourselves; hub will not send commands until HELLO is received.
+	// Shell detection (file stats) is fast. Errors are non-fatal — we exit to
+	// let the hub detect the missing HELLO and surface a connection error.
+	handler.sendHello().catch((err) => {
+		console.error("[nexterm-agent] sendHello failed:", err);
+		process.exit(1);
+	});
 
 	process.stdin.on("data", (data: Buffer) => {
 		try {

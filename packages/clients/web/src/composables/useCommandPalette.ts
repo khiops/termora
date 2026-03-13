@@ -2,6 +2,7 @@ import { computed, ref } from "vue";
 import { useAuthStore } from "../stores/auth.js";
 import { useChannelsStore } from "../stores/channels.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { useProfilesStore } from "../stores/profiles.js";
 import { useWriteLockStore } from "../stores/writelock.js";
 import { formatConnectionString } from "../utils/host-display.js";
 import { useLayout } from "./useLayout.js";
@@ -9,7 +10,7 @@ import { useRecentPaletteItems } from "./useRecentPaletteItems.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PaletteItemType = "host" | "channel" | "action";
+export type PaletteItemType = "host" | "channel" | "action" | "profile";
 
 export interface PaletteItem {
 	id: string;
@@ -81,6 +82,7 @@ function parsePrefix(raw: string): PrefixResult {
 	if (raw.startsWith(">")) return { prefix: "action", searchQuery: raw.slice(1).trim() };
 	if (raw.startsWith("@")) return { prefix: "host", searchQuery: raw.slice(1).trim() };
 	if (raw.startsWith("#")) return { prefix: "channel", searchQuery: raw.slice(1).trim() };
+	if (raw.startsWith("~")) return { prefix: "profile", searchQuery: raw.slice(1).trim() };
 	return { prefix: null, searchQuery: raw.trim() };
 }
 
@@ -107,6 +109,7 @@ export function useCommandPalette() {
 	const channelsStore = useChannelsStore();
 	const writeLockStore = useWriteLockStore();
 	const authStore = useAuthStore();
+	const profilesStore = useProfilesStore();
 	const layout = useLayout();
 	const { recentIds, pushRecent } = useRecentPaletteItems();
 
@@ -248,6 +251,28 @@ export function useCommandPalette() {
 			}
 		}
 
+		// ── Profiles (SC-28) ──────────────────────────────────────────────────
+		if (prefix === null || prefix === "profile") {
+			for (const p of profilesStore.profiles) {
+				const score = q ? fuzzyMatch(q, p.name) : 1;
+				if (score > 0) {
+					// Profiles in general search get lower priority (score halved)
+					const adjustedScore = prefix === "profile" ? score : Math.floor(score / 2);
+					scored.push({
+						item: {
+							id: `profile:${p.id}`,
+							label: p.name,
+							description: p.shell,
+							type: "profile",
+							icon: p.iconType === "emoji" && p.iconValue ? p.iconValue : "▶",
+							payload: p.id,
+						},
+						score: adjustedScore,
+					});
+				}
+			}
+		}
+
 		// Sort by score descending (INV-04: deterministic)
 		scored.sort((a, b) => b.score - a.score);
 
@@ -347,6 +372,12 @@ export function useCommandPalette() {
 				_executeAction(item.id);
 				break;
 			}
+
+			case "profile": {
+				const profileId = item.payload as string;
+				profilesStore.spawnFromProfile(profileId);
+				break;
+			}
 		}
 	}
 
@@ -387,7 +418,7 @@ export function useCommandPalette() {
 
 			case "action:close-tab": {
 				if (activeTab === null) break;
-				const idx = layout.tabs.value.findIndex((t) => t.channelId === activeTab.channelId);
+				const idx = layout.tabs.value.findIndex((t) => t.id === activeTab.id);
 				if (idx !== -1) layout.closeTab(idx);
 				break;
 			}
@@ -413,10 +444,7 @@ export function useCommandPalette() {
 		}
 	}
 
-	function _spawnAndSplit(
-		existingChannelId: string,
-		direction: "horizontal" | "vertical",
-	): void {
+	function _spawnAndSplit(existingChannelId: string, direction: "horizontal" | "vertical"): void {
 		layout.splitPane(existingChannelId, direction);
 	}
 

@@ -6,6 +6,7 @@
 			class="control-text"
 			:value="modelValue"
 			:disabled="disabled"
+			:placeholder="placeholder"
 			@input="onInput"
 		/>
 
@@ -83,6 +84,7 @@ defineProps<{
 	max?: number;
 	step?: number;
 	disabled?: boolean;
+	placeholder?: string;
 }>();
 
 const emit = defineEmits<{

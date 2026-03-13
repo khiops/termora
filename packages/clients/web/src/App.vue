@@ -290,6 +290,7 @@ import { useWriteLockStore } from "./stores/writelock.js";
 import { countPanes, purgeDeadTabs, purgeOrphanedTabs, collectTerminalChannelIds, useLayout } from "./composables/useLayout.js";
 import type { DropZone } from "./composables/useLayout.js";
 import { useCommandPalette } from "./composables/useCommandPalette.js";
+import { useProfilesStore } from "./stores/profiles.js";
 import { useWindowTitle } from "./composables/useWindowTitle.js";
 import { useTabTitle } from "./composables/useTabTitle.js";
 import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
@@ -381,6 +382,7 @@ const layout = useLayout();
 const multiPaneSearch = useMultiPaneSearch();
 provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
+const profilesStore = useProfilesStore();
 const showSettings = ref(false);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
@@ -654,6 +656,7 @@ onMounted(async () => {
 			themeStore.applyOpacity(themeStore.appearance.opacity);
 			themeStore.applyScrollbar(themeStore.appearance.scrollbar);
 			await hostsStore.fetchHosts();
+			await profilesStore.fetchProfiles();
 			// Apply channel/host theme override if an active channel exists
 			if (channelsStore.selectedChannelId) {
 				await applyCascadeTheme(channelsStore.selectedChannelId);
@@ -811,8 +814,20 @@ watch(
 );
 
 /**
+ * Returns true when a terminal PTY element has keyboard focus.
+ * xterm.js routes input through a hidden textarea inside the .xterm container.
+ * We guard Ctrl+Shift+1..9 shortcuts so they pass through to the PTY when focused (INV-13).
+ */
+function isPtyFocused(): boolean {
+	const el = document.activeElement;
+	if (el === null) return false;
+	return el.closest(".xterm") !== null;
+}
+
+/**
  * Global keydown handler attached to the app root.
  * Intercepts Ctrl+K (Windows/Linux) and Cmd+K (macOS) to toggle the palette (SC-14).
+ * Intercepts Ctrl+Shift+1..9 to spawn profile N (INV-13: only when PTY is NOT focused).
  */
 function onGlobalKeydown(event: KeyboardEvent): void {
 	const isK = event.key === "k" || event.key === "K";
@@ -822,6 +837,20 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 		commandPalette.toggle();
 		return;
 	}
+
+	// Ctrl+Shift+1..9 — spawn profile N (INV-13: skip when PTY has focus)
+	if (event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey) {
+		const digit = parseInt(event.key, 10);
+		if (digit >= 1 && digit <= 9 && !isPtyFocused()) {
+			const profile = profilesStore.profiles[digit - 1];
+			if (profile !== undefined) {
+				event.preventDefault();
+				profilesStore.spawnFromProfile(profile.id);
+			}
+			return;
+		}
+	}
+
 	if (event.key === "Escape" && showSettings.value) {
 		showSettings.value = false;
 	}

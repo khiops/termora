@@ -1,5 +1,6 @@
 // Config types and deep merge utility for nexterm config cascade
 import type { AppearanceConfig } from "./appearance.js";
+import type { ElevationMethod } from "./entities.js";
 import { isPlainObject } from "./utils.js";
 
 export interface TerminalProfile {
@@ -301,6 +302,7 @@ export interface CascadeResponse {
 		resolved: UiConfig;
 	};
 	appearance: AppearanceConfig;
+	elevation: ElevationConfig;
 }
 
 // ─── Key whitelists for config write-back validation ──────────────────────────
@@ -376,3 +378,27 @@ export const UI_SECTION_KEYS: Record<string, readonly string[]> = {
 	search: SEARCH_CONFIG_KEYS,
 	layout: LAYOUT_CONFIG_KEYS,
 };
+
+export interface ElevationConfig {
+	methodLinux: ElevationMethod;
+	methodDarwin: ElevationMethod;
+	methodWindows: ElevationMethod;
+	customCommandLinux?: string;
+	customCommandDarwin?: string;
+	customCommandWindows?: string;
+}
+
+export const DEFAULT_ELEVATION_CONFIG: ElevationConfig = {
+	methodLinux: "sudo",
+	methodDarwin: "sudo",
+	methodWindows: "gsudo",
+};
+
+export const ELEVATION_CONFIG_KEYS = [
+	"methodLinux",
+	"methodDarwin",
+	"methodWindows",
+	"customCommandLinux",
+	"customCommandDarwin",
+	"customCommandWindows",
+] as const;
