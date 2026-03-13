@@ -79,10 +79,17 @@ async function handleSubmit(): Promise<void> {
 		});
 
 		if (!res.ok) {
-			const body = (await res.json().catch(() => ({ message: "Verification failed" }))) as {
-				message?: string;
-			};
-			throw new Error(body.message ?? `HTTP ${res.status}`);
+			const text = await res.text();
+			if (text.startsWith("<")) {
+				throw new Error(`Server error (${res.status})`);
+			}
+			let message: string | undefined;
+			try {
+				message = (JSON.parse(text) as { message?: string }).message;
+			} catch {
+				// not JSON
+			}
+			throw new Error(message ?? `HTTP ${res.status}`);
 		}
 
 		const data = (await res.json()) as { token: string };

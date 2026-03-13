@@ -32,6 +32,13 @@ fn read_hub_auth_token() -> Option<String> {
     if valid { Some(token) } else { None }
 }
 
+
+#[tauri::command]
+fn get_hub_auth_token() -> Option<String> {
+    read_hub_auth_token()
+}
+
+
 /// In release builds, spawn the hub sidecar and wait for it to become ready.
 /// In dev builds, the hub is already running externally — just show the window.
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -92,16 +99,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Inject the hub auth token into localStorage before showing the window,
-    // so the frontend finds it already set when it initialises.
-    // token is validated as 64-char lowercase hex — safe for JS string literal.
-    if let Some(token) = read_hub_auth_token() {
-        if let Some(window) = app.get_webview_window("main") {
-            let js = format!("localStorage.setItem('nexterm_token', '{}');", token);
-            let _ = window.eval(&js);
-        }
-    }
-
     // Show the main window (hidden by default in config)
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -116,6 +113,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![get_hub_auth_token])
         .setup(setup_app)
         .run(tauri::generate_context!())
         .expect("error while running nexterm");

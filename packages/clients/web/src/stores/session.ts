@@ -180,6 +180,21 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 
+		// In Tauri desktop, fetch the hub auth token via invoke so the token
+		// is available synchronously before AUTH is sent. This avoids the
+		// WebView2 race where window.eval() of localStorage.setItem() is
+		// async and the store may have already been initialised with null.
+		try {
+			const { invoke } = await import("@tauri-apps/api/core");
+			const tauriToken = await invoke<string | null>("get_hub_auth_token");
+			if (tauriToken) {
+				const authStore = useAuthStore();
+				authStore.setToken(tauriToken);
+			}
+		} catch {
+			// Not in Tauri context — ignore
+		}
+
 		// Authenticate immediately after connecting
 		await _authenticate();
 
