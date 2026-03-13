@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all SEA artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sea-*
+          path: release-staging/
+          merge-multiple: true
+
+      - name: Download all Tauri artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tauri-*
+          path: release-staging/
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lh release-staging/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-staging/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

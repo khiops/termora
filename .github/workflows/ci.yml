@@ -7,41 +7,5 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            node: 22
-          - os: macos-latest
-            node: 22
-          - os: windows-latest
-            node: 22
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm exec tsc --noEmit --project tsconfig.json || true
-
-      - name: Test
-        run: pnpm test --run
+  build:
+    uses: ./.github/workflows/build.yml

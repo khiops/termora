@@ -1,12 +1,7 @@
-name: Release SEA Binaries
+name: Build
 
 on:
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: write
+  workflow_call:
 
 jobs:
   # Build the web UI once (architecture-independent)
@@ -100,21 +95,21 @@ jobs:
         run: pnpm run package:sea-hub
 
       - name: Rename agent binary (Unix)
-        if: matrix.target_os != "windows"
+        if: matrix.target_os != 'windows'
         env:
           TARGET_OS: ${{ matrix.target_os }}
           TARGET_ARCH: ${{ matrix.target_arch }}
         run: mv dist/sea/nexterm-agent dist/sea/nexterm-agent-${TARGET_OS}-${TARGET_ARCH}
 
       - name: Rename hub binary (Unix)
-        if: matrix.target_os != "windows"
+        if: matrix.target_os != 'windows'
         env:
           TARGET_OS: ${{ matrix.target_os }}
           TARGET_ARCH: ${{ matrix.target_arch }}
         run: mv dist/sea/nexterm-hub dist/sea/nexterm-hub-${TARGET_OS}-${TARGET_ARCH}
 
       - name: Rename agent binary (Windows)
-        if: matrix.target_os == "windows"
+        if: matrix.target_os == 'windows'
         env:
           TARGET_OS: ${{ matrix.target_os }}
           TARGET_ARCH: ${{ matrix.target_arch }}
@@ -122,7 +117,7 @@ jobs:
         shell: pwsh
 
       - name: Rename hub binary (Windows)
-        if: matrix.target_os == "windows"
+        if: matrix.target_os == 'windows'
         env:
           TARGET_OS: ${{ matrix.target_os }}
           TARGET_ARCH: ${{ matrix.target_arch }}
@@ -248,39 +243,3 @@ jobs:
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.nsis
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.dmg
           retention-days: 7
-
-  # Publish GitHub Release with all binaries
-  release:
-    name: Create GitHub Release
-    needs: [build-sea, build-tauri]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download all SEA artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: sea-*
-          path: release-staging/
-          merge-multiple: true
-
-      - name: Download all Tauri artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: tauri-*
-          path: release-staging/
-          merge-multiple: true
-
-      - name: List release assets
-        run: ls -lh release-staging/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: release-staging/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
