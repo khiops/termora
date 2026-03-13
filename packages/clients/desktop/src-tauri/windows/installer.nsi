@@ -520,8 +520,14 @@ Function .onInit
   StrCpy $InstallHub ${BST_CHECKED}
   StrCpy $InstallAgent ${BST_CHECKED}
 
-  ; DEBUG — remove after confirming template variables
-  MessageBox MB_OK "DEBUG: INSTALLMODE=${INSTALLMODE} | PassiveMode=$PassiveMode | UpdateMode=$UpdateMode"
+  ; DEBUG — write template variables to a debug file
+  FileOpen $R9 "$TEMP\nexterm-nsis-debug.txt" w
+  FileWrite $R9 "INSTALLMODE=${INSTALLMODE}$\r$\n"
+  FileWrite $R9 "LICENSE=${LICENSE}$\r$\n"
+  FileWrite $R9 "PRODUCTNAME=${PRODUCTNAME}$\r$\n"
+  FileWrite $R9 "PassiveMode=$PassiveMode$\r$\n"
+  FileWrite $R9 "UpdateMode=$UpdateMode$\r$\n"
+  FileClose $R9
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY
