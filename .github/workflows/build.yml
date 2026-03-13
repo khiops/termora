@@ -178,6 +178,15 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
+      - name: Setup sccache
+        uses: Mozilla-Actions/sccache-action@v0.0.7
+
+      - name: Verify sccache server
+        id: sccache
+        continue-on-error: true
+        shell: bash
+        run: sccache --start-server 2>/dev/null && sccache --show-stats && echo "ok=true" >> "$GITHUB_OUTPUT" || echo "ok=false" >> "$GITHUB_OUTPUT"
+
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -227,6 +236,8 @@ jobs:
       - name: Build Tauri app
         env:
           TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
+          RUSTC_WRAPPER: ${{ steps.sccache.outputs.ok == 'true' && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ steps.sccache.outputs.ok == 'true' && 'true' || 'false' }}
         run: pnpm -F @nexterm/desktop exec tauri build
 
       - name: Upload Tauri installer artifacts
