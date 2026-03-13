@@ -38,7 +38,7 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"externalBin": ["binaries/nexterm-hub", "binaries/nexterm-agent"],
+		"externalBin": ["nexterm-hub", "nexterm-agent"],
 		"createUpdaterArtifacts": false,
 		"resources": {}
 	},

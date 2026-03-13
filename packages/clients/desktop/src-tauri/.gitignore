@@ -1,4 +1,4 @@
-/binaries/nexterm-*
-!/binaries/.gitkeep
+/nexterm-hub-*
+/nexterm-agent-*
 /gen/
 /target/

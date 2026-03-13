@@ -31,7 +31,7 @@ detect_target_triple() {
 }
 
 TARGET_TRIPLE="$(detect_target_triple)"
-BINARIES_DIR="$ROOT/packages/clients/desktop/src-tauri/binaries"
+BINARIES_DIR="$ROOT/packages/clients/desktop/src-tauri"
 EXE_EXT=""
 [[ "$TARGET_TRIPLE" == *windows* ]] && EXE_EXT=".exe"
 
@@ -55,8 +55,6 @@ echo ""
 
 # Step 4: Copy binaries to Tauri sidecar directory
 echo "==> Step 4/4: Placing sidecars..."
-mkdir -p "$BINARIES_DIR"
-
 # Hub sidecar (required — Tauri manages this)
 cp "$ROOT/dist/sea/nexterm-hub${EXE_EXT}" "$BINARIES_DIR/nexterm-hub-${TARGET_TRIPLE}${EXE_EXT}"
 echo "  Hub: $BINARIES_DIR/nexterm-hub-${TARGET_TRIPLE}${EXE_EXT}"

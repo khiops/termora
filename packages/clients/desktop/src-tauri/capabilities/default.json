@@ -19,12 +19,12 @@
 			"allow": [
 				{
 					"args": true,
-					"name": "binaries/nexterm-hub",
+					"name": "nexterm-hub",
 					"sidecar": true
 				},
 				{
 					"args": true,
-					"name": "binaries/nexterm-agent",
+					"name": "nexterm-agent",
 					"sidecar": true
 				}
 			]

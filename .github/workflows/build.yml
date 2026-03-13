@@ -202,22 +202,20 @@ jobs:
       - name: Place sidecar binaries (Unix)
         if: matrix.target_os != 'windows'
         run: |
-          mkdir -p packages/clients/desktop/src-tauri/binaries
           cp sea-artifacts/nexterm-hub-${{ matrix.target_os }}-${{ matrix.target_arch }} \
-            packages/clients/desktop/src-tauri/binaries/nexterm-hub-${{ matrix.rust_target }}
-          chmod +x packages/clients/desktop/src-tauri/binaries/nexterm-hub-${{ matrix.rust_target }}
+            packages/clients/desktop/src-tauri/nexterm-hub-${{ matrix.rust_target }}
+          chmod +x packages/clients/desktop/src-tauri/nexterm-hub-${{ matrix.rust_target }}
           cp sea-artifacts/nexterm-agent-${{ matrix.target_os }}-${{ matrix.target_arch }} \
-            packages/clients/desktop/src-tauri/binaries/nexterm-agent-${{ matrix.rust_target }}
-          chmod +x packages/clients/desktop/src-tauri/binaries/nexterm-agent-${{ matrix.rust_target }}
+            packages/clients/desktop/src-tauri/nexterm-agent-${{ matrix.rust_target }}
+          chmod +x packages/clients/desktop/src-tauri/nexterm-agent-${{ matrix.rust_target }}
 
       - name: Place sidecar binaries (Windows)
         if: matrix.target_os == 'windows'
         run: |
-          New-Item -ItemType Directory -Force -Path packages/clients/desktop/src-tauri/binaries
           Copy-Item sea-artifacts/nexterm-hub-${{ matrix.target_os }}-${{ matrix.target_arch }}.exe `
-            packages/clients/desktop/src-tauri/binaries/nexterm-hub-${{ matrix.rust_target }}.exe
+            packages/clients/desktop/src-tauri/nexterm-hub-${{ matrix.rust_target }}.exe
           Copy-Item sea-artifacts/nexterm-agent-${{ matrix.target_os }}-${{ matrix.target_arch }}.exe `
-            packages/clients/desktop/src-tauri/binaries/nexterm-agent-${{ matrix.rust_target }}.exe
+            packages/clients/desktop/src-tauri/nexterm-agent-${{ matrix.rust_target }}.exe
         shell: pwsh
 
       - name: Build shared package
