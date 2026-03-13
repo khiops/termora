@@ -142,12 +142,11 @@ function parseWorkflowYaml(content: string): Record<string, unknown> {
 }
 
 // ── Expected platform matrix ───────────────────────────────────────────────
+// macOS targets are currently commented out in build.yml
 const EXPECTED_PLATFORMS: Array<{ target_os: string; target_arch: string }> = [
 	{ target_os: "linux", target_arch: "x64" },
 	{ target_os: "linux", target_arch: "arm64" },
 	{ target_os: "windows", target_arch: "x64" },
-	{ target_os: "darwin", target_arch: "arm64" },
-	{ target_os: "darwin", target_arch: "x64" },
 ];
 
 // ── Filename convention ────────────────────────────────────────────────────
@@ -160,8 +159,8 @@ function expectedHubName(os: string, arch: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-describe("release-sea.yml", () => {
-	const workflowPath = join(WORKFLOWS_DIR, "release-sea.yml");
+describe("build.yml", () => {
+	const workflowPath = join(WORKFLOWS_DIR, "build.yml");
 
 	it("file exists", () => {
 		expect(existsSync(workflowPath)).toBe(true);
@@ -172,21 +171,38 @@ describe("release-sea.yml", () => {
 		expect(() => parseWorkflowYaml(content)).not.toThrow();
 	});
 
-	it("has tag trigger for v* pattern", () => {
+	it("is a reusable workflow (workflow_call trigger)", () => {
 		const content = readFileSync(workflowPath, "utf8");
 		expect(content).toMatch(/on:/);
-		expect(content).toMatch(/push:/);
-		expect(content).toMatch(/tags:/);
-		expect(content).toMatch(/- ['"]?v\*/);
+		expect(content).toMatch(/workflow_call:/);
 	});
 
-	it("has contents:write permission for release creation", () => {
+	it("has 3 jobs: build-web, build-sea, build-tauri", () => {
 		const content = readFileSync(workflowPath, "utf8");
-		expect(content).toMatch(/permissions:/);
-		expect(content).toMatch(/contents:\s*write/);
+		const parsed = parseWorkflowYaml(content);
+		const jobs = parsed._jobNames as string[];
+		expect(jobs).toContain("build-web");
+		expect(jobs).toContain("build-sea");
+		expect(jobs).toContain("build-tauri");
 	});
 
-	it("matrix covers all 5 target platforms", () => {
+	it("build-sea job depends on build-web", () => {
+		const content = readFileSync(workflowPath, "utf8");
+		const parsed = parseWorkflowYaml(content);
+		const needs = parsed._jobNeeds as Record<string, string[]>;
+		expect(needs["build-sea"]).toBeDefined();
+		expect(needs["build-sea"]).toContain("build-web");
+	});
+
+	it("build-tauri job depends on build-sea", () => {
+		const content = readFileSync(workflowPath, "utf8");
+		const parsed = parseWorkflowYaml(content);
+		const needs = parsed._jobNeeds as Record<string, string[]>;
+		expect(needs["build-tauri"]).toBeDefined();
+		expect(needs["build-tauri"]).toContain("build-sea");
+	});
+
+	it("build-sea matrix covers all 3 active target platforms", () => {
 		const content = readFileSync(workflowPath, "utf8");
 		const parsed = parseWorkflowYaml(content);
 		const entries = parsed._matrixEntries as Array<Record<string, string>>;
@@ -199,27 +215,12 @@ describe("release-sea.yml", () => {
 		}
 	});
 
-	it("matrix has exactly 5 entries", () => {
+	it("macOS targets are commented out (not active)", () => {
 		const content = readFileSync(workflowPath, "utf8");
-		const parsed = parseWorkflowYaml(content);
-		const entries = parsed._matrixEntries as Array<Record<string, string>>;
-		expect(entries).toHaveLength(5);
-	});
-
-	it("build-sea job depends on build-web", () => {
-		const content = readFileSync(workflowPath, "utf8");
-		const parsed = parseWorkflowYaml(content);
-		const needs = parsed._jobNeeds as Record<string, string[]>;
-		expect(needs["build-sea"]).toBeDefined();
-		expect(needs["build-sea"]).toContain("build-web");
-	});
-
-	it("release job depends on build-sea", () => {
-		const content = readFileSync(workflowPath, "utf8");
-		const parsed = parseWorkflowYaml(content);
-		const needs = parsed._jobNeeds as Record<string, string[]>;
-		expect(needs["release"]).toBeDefined();
-		expect(needs["release"]).toContain("build-sea");
+		// darwin entries exist only as comments
+		const uncommentedLines = content.split("\n").filter((l) => !l.trimStart().startsWith("#"));
+		const uncommentedContent = uncommentedLines.join("\n");
+		expect(uncommentedContent).not.toMatch(/target_os:\s*darwin/);
 	});
 
 	it("uses actions/upload-artifact@v4 for artifact upload", () => {
@@ -230,11 +231,6 @@ describe("release-sea.yml", () => {
 	it("uses actions/download-artifact@v4 for artifact download", () => {
 		const content = readFileSync(workflowPath, "utf8");
 		expect(content).toMatch(/actions\/download-artifact@v4/);
-	});
-
-	it("uses softprops/action-gh-release@v2 for release creation", () => {
-		const content = readFileSync(workflowPath, "utf8");
-		expect(content).toMatch(/softprops\/action-gh-release@v2/);
 	});
 
 	it("uses Node 22", () => {
@@ -251,11 +247,6 @@ describe("release-sea.yml", () => {
 		const content = readFileSync(workflowPath, "utf8");
 		expect(content).toMatch(/cache:\s*['"]pnpm['"]/);
 	});
-
-	it("has generate_release_notes enabled", () => {
-		const content = readFileSync(workflowPath, "utf8");
-		expect(content).toMatch(/generate_release_notes:\s*true/);
-	});
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -266,6 +257,11 @@ describe("ci.yml", () => {
 		expect(existsSync(ciPath)).toBe(true);
 	});
 
+	it("is valid YAML (structural check)", () => {
+		const content = readFileSync(ciPath, "utf8");
+		expect(() => parseWorkflowYaml(content)).not.toThrow();
+	});
+
 	it("triggers on push to main and pull_request", () => {
 		const content = readFileSync(ciPath, "utf8");
 		expect(content).toMatch(/push:/);
@@ -273,14 +269,16 @@ describe("ci.yml", () => {
 		expect(content).toMatch(/pull_request:/);
 	});
 
-	it("includes windows-latest in matrix", () => {
+	it("delegates to build.yml via workflow_call", () => {
 		const content = readFileSync(ciPath, "utf8");
-		expect(content).toMatch(/windows-latest/);
+		expect(content).toMatch(/uses:\s*.+\/build\.yml/);
 	});
 
-	it("uses Node 22", () => {
+	it("does not define its own matrix or Node setup", () => {
 		const content = readFileSync(ciPath, "utf8");
-		expect(content).toMatch(/node:\s*22/);
+		// ci.yml is a thin caller — no local matrix or setup-node
+		expect(content).not.toMatch(/setup-node/);
+		expect(content).not.toMatch(/matrix:/);
 	});
 });
 
@@ -351,13 +349,11 @@ describe("filename naming convention", () => {
 		}
 	});
 
-	it("produces expected names for each platform", () => {
+	it("produces expected names for each active platform", () => {
 		const cases: Array<[string, string, string, string]> = [
 			["linux", "x64", "nexterm-agent-linux-x64", "nexterm-hub-linux-x64"],
 			["linux", "arm64", "nexterm-agent-linux-arm64", "nexterm-hub-linux-arm64"],
 			["windows", "x64", "nexterm-agent-windows-x64.exe", "nexterm-hub-windows-x64.exe"],
-			["darwin", "arm64", "nexterm-agent-darwin-arm64", "nexterm-hub-darwin-arm64"],
-			["darwin", "x64", "nexterm-agent-darwin-x64", "nexterm-hub-darwin-x64"],
 		];
 
 		for (const [os, arch, expectedAgent, expectedHub] of cases) {

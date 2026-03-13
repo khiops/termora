@@ -92,6 +92,9 @@ onUnmounted(() => {
 	user-select: none;
 	-webkit-user-select: none;
 	flex-shrink: 0;
+	/* Stay above PairingScreen overlay (z-index: 1000) */
+	position: relative;
+	z-index: 1100;
 }
 
 .titlebar-drag {

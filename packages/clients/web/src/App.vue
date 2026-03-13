@@ -635,6 +635,19 @@ onMounted(async () => {
 	// Load fonts before terminals are created (no auth needed)
 	await configStore.loadFonts();
 
+	// In Tauri desktop, fetch the hub auth token via invoke BEFORE the
+	// token check — connect() is gated by token !== null, so the invoke
+	// inside _doConnect() was never reached on first launch.
+	try {
+		const { invoke } = await import("@tauri-apps/api/core");
+		const tauriToken = await invoke<string | null>("get_hub_auth_token");
+		if (tauriToken) {
+			authStore.setToken(tauriToken);
+		}
+	} catch {
+		// Not in Tauri context — ignore
+	}
+
 	if (authStore.token !== null) {
 		try {
 			await sessionStore.connect();

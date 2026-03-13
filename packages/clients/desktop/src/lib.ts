@@ -6,7 +6,7 @@ let hubProcess: Awaited<ReturnType<Command<string>["spawn"]>> | null = null;
 export async function startHub(port = 4100): Promise<void> {
 	if (hubProcess) return; // Already running
 
-	const command = Command.sidecar("binaries/nexterm-hub", ["--port", String(port)]);
+	const command = Command.sidecar("nexterm-hub", ["--port", String(port)]);
 
 	command.on("error", (error) => {
 		console.error("[nexterm-desktop] hub error:", error);

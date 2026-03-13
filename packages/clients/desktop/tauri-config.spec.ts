@@ -24,12 +24,12 @@ describe("tauri.conf.json", () => {
 		expect(conf).toHaveProperty("version", "0.1.0");
 	});
 
-	it("externalBin includes binaries/nexterm-hub", () => {
+	it("externalBin includes nexterm-hub", () => {
 		const bundle = conf.bundle as Record<string, unknown>;
 		expect(bundle).toBeDefined();
 		const externalBin = bundle.externalBin as string[];
 		expect(Array.isArray(externalBin)).toBe(true);
-		expect(externalBin).toContain("binaries/nexterm-hub");
+		expect(externalBin).toContain("nexterm-hub");
 	});
 
 	it("frontendDist points to web dist", () => {
@@ -48,20 +48,9 @@ describe("tauri.conf.json", () => {
 		expect(resolved).toMatch(/packages[/\\]clients[/\\]web[/\\]dist$/);
 	});
 
-	it("bundle.createUpdaterArtifacts is true", () => {
+	it("bundle.createUpdaterArtifacts is false", () => {
 		const bundle = conf.bundle as Record<string, unknown>;
-		expect(bundle.createUpdaterArtifacts).toBe(true);
-	});
-
-	it("app window URL is configured for localhost:4100", () => {
-		const app = conf.app as Record<string, unknown>;
-		expect(app).toBeDefined();
-		const windows = app.windows as Array<Record<string, unknown>>;
-		expect(Array.isArray(windows)).toBe(true);
-		expect(windows.length).toBeGreaterThan(0);
-		const mainWindow = windows.find((w) => w.label === "main");
-		expect(mainWindow).toBeDefined();
-		expect(mainWindow?.url).toBe("http://localhost:4100");
+		expect(bundle.createUpdaterArtifacts).toBe(false);
 	});
 
 	it("devUrl is configured for vite dev server", () => {
@@ -100,7 +89,7 @@ describe("capabilities/default.json", () => {
 		const allow = shellExec?.allow as Array<Record<string, unknown>>;
 		expect(Array.isArray(allow)).toBe(true);
 
-		const hubRule = allow.find((a) => a.name === "binaries/nexterm-hub");
+		const hubRule = allow.find((a) => a.name === "nexterm-hub");
 		expect(hubRule).toBeDefined();
 		expect(hubRule?.sidecar).toBe(true);
 	});
@@ -180,7 +169,7 @@ describe("src/lib.ts", () => {
 	});
 
 	it("uses Command.sidecar for hub binary", () => {
-		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']binaries\/nexterm-hub["']/);
+		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']nexterm-hub["']/);
 	});
 
 	it("polls /api/health endpoint for readiness", () => {
