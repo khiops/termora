@@ -1,4 +1,4 @@
-import { type Host, ELEVATION_METHODS_ALL, toSnakeCase } from "@nexterm/shared";
+import { ELEVATION_METHODS_ALL, type Host, toSnakeCase } from "@nexterm/shared";
 import type { SshConfigImport } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { ParseResult } from "../ssh/ssh-config-parser.js";
@@ -27,6 +27,8 @@ interface CreateHostBody {
 	profile_json?: string;
 	elevation_method?: "sudo" | "doas" | "pkexec" | "gsudo" | "custom" | null;
 	custom_command?: string | null;
+	os?: "linux" | "darwin" | "windows" | null;
+	arch?: "x64" | "arm64" | null;
 }
 
 interface UpdateHostBody {
@@ -51,6 +53,8 @@ interface UpdateHostBody {
 	profile_json?: string;
 	elevation_method?: "sudo" | "doas" | "pkexec" | "gsudo" | "custom" | null;
 	custom_command?: string | null;
+	os?: "linux" | "darwin" | "windows" | null;
+	arch?: "x64" | "arm64" | null;
 }
 
 function validateCreateHost(body: CreateHostBody): string | null {
@@ -100,6 +104,16 @@ function validateCreateHost(body: CreateHostBody): string | null {
 	) {
 		return `elevation_method must be one of: ${ELEVATION_METHODS_ALL.join(", ")}`;
 	}
+	if (
+		body.os !== undefined &&
+		body.os !== null &&
+		!["linux", "darwin", "windows"].includes(body.os)
+	) {
+		return "os must be 'linux', 'darwin', or 'windows'";
+	}
+	if (body.arch !== undefined && body.arch !== null && !["x64", "arm64"].includes(body.arch)) {
+		return "arch must be 'x64' or 'arm64'";
+	}
 	return null;
 }
 
@@ -132,6 +146,8 @@ function validateAndClampVisualProfile(vp: Record<string, unknown>): string | nu
  * @param host  The host record from meta.db.
  */
 export function resolveHostOs(host: Host): string {
+	// Prefer explicitly stored OS (set after auto-detect on first SSH connect)
+	if (host.os != null) return host.os;
 	if (host.discoveredShells && host.discoveredShells.length > 0) {
 		const hasWindowsShells = host.discoveredShells.some(
 			(s) => s.includes("\\") || s.toLowerCase().endsWith(".exe"),
@@ -225,6 +241,8 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			...(body.profile_json !== undefined && { profileJson: body.profile_json }),
 			...(body.elevation_method !== undefined && { elevationMethod: body.elevation_method }),
 			...(body.custom_command !== undefined && { customCommand: body.custom_command }),
+			...(body.os !== undefined && { os: body.os }),
+			...(body.arch !== undefined && { arch: body.arch }),
 		});
 
 		return reply.code(201).send(toSnakeCase(host));
@@ -375,6 +393,25 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				updateInput.elevationMethod = body.elevation_method;
 			}
 			if (body.custom_command !== undefined) updateInput.customCommand = body.custom_command;
+			if (body.os !== undefined) {
+				if (body.os !== null && !["linux", "darwin", "windows"].includes(body.os)) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "os must be 'linux', 'darwin', or 'windows'",
+						},
+					});
+				}
+				updateInput.os = body.os;
+			}
+			if (body.arch !== undefined) {
+				if (body.arch !== null && !["x64", "arm64"].includes(body.arch)) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: "arch must be 'x64' or 'arm64'" },
+					});
+				}
+				updateInput.arch = body.arch;
+			}
 
 			const updated = metaDal.updateHost(request.params.id, updateInput);
 

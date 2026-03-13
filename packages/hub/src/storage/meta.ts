@@ -4,8 +4,10 @@ import type {
 	ChannelStatus,
 	ElevationMethod,
 	Host,
+	HostArch,
 	HostGroup,
 	HostLaunchProfileOverride,
+	HostOs,
 	LaunchProfile,
 	LaunchProfileMode,
 	Session,
@@ -39,6 +41,8 @@ export interface CreateHostInput {
 	historyRetentionDays?: number;
 	elevationMethod?: ElevationMethod | null;
 	customCommand?: string | null;
+	os?: HostOs | null;
+	arch?: HostArch | null;
 }
 
 export interface CreateSessionInput {
@@ -90,6 +94,8 @@ interface HostRow {
 	discovered_shells_at: string | null;
 	elevation_method: string | null;
 	custom_command: string | null;
+	os: string | null;
+	arch: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -157,6 +163,8 @@ function rowToHost(row: HostRow): Host {
 		sortOrder: row.sort_order,
 		keepAliveSeconds: row.keep_alive_seconds,
 		historyRetentionDays: row.history_retention_days,
+		os: row.os as HostOs | null,
+		arch: row.arch as HostArch | null,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
@@ -353,12 +361,14 @@ export class MetaDAL {
 					host_group, host_group_id, sort_order, ssh_config_host, ssh_user,
 					keep_alive_seconds, history_retention_days,
 					elevation_method, custom_command,
+					os, arch,
 					created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?,
 					?, ?, ?, ?, ?,
 					?, ?,
 					?, ?, ?, ?, ?,
+					?, ?,
 					?, ?,
 					?, ?,
 					?, ?
@@ -388,6 +398,8 @@ export class MetaDAL {
 				input.historyRetentionDays ?? 30,
 				input.elevationMethod ?? null,
 				input.customCommand ?? null,
+				input.os ?? null,
+				input.arch ?? null,
 				now,
 				now,
 			);
@@ -445,6 +457,8 @@ export class MetaDAL {
 			historyRetentionDays: "history_retention_days",
 			elevationMethod: "elevation_method",
 			customCommand: "custom_command",
+			os: "os",
+			arch: "arch",
 		};
 
 		const setClauses: string[] = ["updated_at = ?"];
@@ -467,6 +481,13 @@ export class MetaDAL {
 			throw new Error(`Host not found after update: ${id}`);
 		}
 		return updated;
+	}
+
+	updateHostOsArch(id: string, os: HostOs, arch: HostArch): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE hosts SET os = ?, arch = ?, updated_at = ? WHERE id = ?")
+			.run(os, arch, now, id);
 	}
 
 	deleteHost(id: string): boolean {

@@ -26,7 +26,11 @@
 		"lint:fix": "biome check --write .",
 		"typecheck": "pnpm -r typecheck",
 		"build:sea-agent": "tsx scripts/build-sea-agent.ts",
-		"package:sea-agent": "tsx scripts/package-sea-agent.ts"
+		"build:sea-hub": "tsx scripts/build-sea-hub.ts",
+		"package:sea-agent": "tsx scripts/package-sea-agent.ts",
+		"package:sea-hub": "tsx scripts/package-sea-hub.ts",
+		"prepare:desktop": "bash scripts/prepare-desktop.sh",
+		"build:desktop": "bash scripts/prepare-desktop.sh && cd packages/clients/desktop && pnpm tauri build"
 	},
 	"dependencies": {
 		"@nexterm/hub": "workspace:*"

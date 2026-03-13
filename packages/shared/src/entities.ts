@@ -12,11 +12,24 @@ export type TrustPolicy = "apply" | "ask" | "ignore";
 export type LaunchProfileMode = "shell" | "process";
 export type SupportedOs = "linux" | "darwin" | "windows" | "any";
 export type ElevationMethod = "sudo" | "doas" | "pkexec" | "gsudo" | "custom";
+export type HostOs = "linux" | "darwin" | "windows";
+export type HostArch = "x64" | "arm64";
 
-export const ELEVATION_METHODS_LINUX: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "custom"];
+export const ELEVATION_METHODS_LINUX: readonly ElevationMethod[] = [
+	"sudo",
+	"doas",
+	"pkexec",
+	"custom",
+];
 export const ELEVATION_METHODS_DARWIN: readonly ElevationMethod[] = ["sudo", "doas", "custom"];
 export const ELEVATION_METHODS_WINDOWS: readonly ElevationMethod[] = ["gsudo", "custom"];
-export const ELEVATION_METHODS_ALL: readonly ElevationMethod[] = ["sudo", "doas", "pkexec", "gsudo", "custom"];
+export const ELEVATION_METHODS_ALL: readonly ElevationMethod[] = [
+	"sudo",
+	"doas",
+	"pkexec",
+	"gsudo",
+	"custom",
+];
 
 export interface Host {
 	id: string; // ULID
@@ -44,6 +57,10 @@ export interface Host {
 	historyRetentionDays: number;
 	discoveredShells?: string[];
 	discoveredShellsAt?: string;
+	/** Operating system of the remote host (null = auto-detect on first connect) */
+	os: HostOs | null;
+	/** CPU architecture (null = auto-detect on first connect) */
+	arch: HostArch | null;
 	createdAt: string; // ISO 8601
 	updatedAt: string;
 }

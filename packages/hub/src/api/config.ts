@@ -311,7 +311,10 @@ export function registerConfigRoutes(
 
 		for (const [key, value] of Object.entries(body)) {
 			if (key === "methodLinux") {
-				if (typeof value !== "string" || !(ELEVATION_METHODS_LINUX as readonly string[]).includes(value)) {
+				if (
+					typeof value !== "string" ||
+					!(ELEVATION_METHODS_LINUX as readonly string[]).includes(value)
+				) {
 					return reply.code(400).send({
 						error: {
 							code: "INVALID_VALUE",
@@ -320,7 +323,10 @@ export function registerConfigRoutes(
 					});
 				}
 			} else if (key === "methodDarwin") {
-				if (typeof value !== "string" || !(ELEVATION_METHODS_DARWIN as readonly string[]).includes(value)) {
+				if (
+					typeof value !== "string" ||
+					!(ELEVATION_METHODS_DARWIN as readonly string[]).includes(value)
+				) {
 					return reply.code(400).send({
 						error: {
 							code: "INVALID_VALUE",
@@ -329,7 +335,10 @@ export function registerConfigRoutes(
 					});
 				}
 			} else if (key === "methodWindows") {
-				if (typeof value !== "string" || !(ELEVATION_METHODS_WINDOWS as readonly string[]).includes(value)) {
+				if (
+					typeof value !== "string" ||
+					!(ELEVATION_METHODS_WINDOWS as readonly string[]).includes(value)
+				) {
 					return reply.code(400).send({
 						error: {
 							code: "INVALID_VALUE",
@@ -337,16 +346,20 @@ export function registerConfigRoutes(
 						},
 					});
 				}
-			} else if (key === "customCommandLinux" || key === "customCommandDarwin" || key === "customCommandWindows") {
-			if (typeof value !== "string" || value.length === 0) {
-				return reply.code(400).send({
-					error: {
-						code: "INVALID_VALUE",
-						message: `Invalid value for "${key}": must be a non-empty string`,
-					},
-				});
+			} else if (
+				key === "customCommandLinux" ||
+				key === "customCommandDarwin" ||
+				key === "customCommandWindows"
+			) {
+				if (typeof value !== "string" || value.length === 0) {
+					return reply.code(400).send({
+						error: {
+							code: "INVALID_VALUE",
+							message: `Invalid value for "${key}": must be a non-empty string`,
+						},
+					});
+				}
 			}
-		}
 			await configResolver.saveGlobalKey("elevation", key, value);
 		}
 

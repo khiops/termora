@@ -11,13 +11,13 @@
  *   pnpm run package:sea-agent
  */
 
-import { build } from "esbuild";
-import { resolve, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync, existsSync } from "node:fs";
+import { build } from "esbuild";
+import { buildOptions } from "./build-sea-agent.js";
 import type { SeaBuildConfig } from "./build-sea-binary.js";
 import { buildSeaBinary } from "./build-sea-binary.js";
-import { buildOptions } from "./build-sea-agent.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -43,14 +43,7 @@ function locatePtyNode(): string {
 	}
 
 	// Fallback: root-level node_modules (hoisted installs / npm/yarn)
-	const rootNodeModules = join(
-		ROOT,
-		"node_modules",
-		"node-pty",
-		"build",
-		"Release",
-		"pty.node",
-	);
+	const rootNodeModules = join(ROOT, "node_modules", "node-pty", "build", "Release", "pty.node");
 	if (existsSync(rootNodeModules)) {
 		return rootNodeModules;
 	}

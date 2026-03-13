@@ -94,6 +94,8 @@ function makeHost(id: string, label: string): Host {
 		sortOrder: 0,
 		keepAliveSeconds: 0,
 		historyRetentionDays: 30,
+		os: null,
+		arch: null,
 		createdAt: "2025-01-01T00:00:00Z",
 		updatedAt: "2025-01-01T00:00:00Z",
 	};

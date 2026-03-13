@@ -10,13 +10,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import {
-	accessSync,
-	existsSync,
-	constants as fsConstants,
-	readFileSync,
-	statSync,
-} from "node:fs";
+import { accessSync, existsSync, constants as fsConstants, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,15 +180,11 @@ function waitForPredicate(
 }
 
 /** Check if an OUTPUT message's data field contains the given string. */
-function outputContains(
-	m: Record<string, unknown>,
-	needle: string,
-): boolean {
+function outputContains(m: Record<string, unknown>, needle: string): boolean {
 	if (m["type"] !== "OUTPUT") return false;
 	const data = m["data"];
 	if (typeof data === "string") return data.includes(needle);
-	if (data instanceof Uint8Array)
-		return Buffer.from(data).toString().includes(needle);
+	if (data instanceof Uint8Array) return Buffer.from(data).toString().includes(needle);
 	return false;
 }
 
@@ -216,260 +206,207 @@ function killAgent(proc: ChildProcess): Promise<void> {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe(
-	"nexterm-agent SEA binary E2E",
-	{ timeout: 30_000 },
-	() => {
-		let agent: ChildProcess | null = null;
+describe("nexterm-agent SEA binary E2E", { timeout: 30_000 }, () => {
+	let agent: ChildProcess | null = null;
 
-		beforeEach(() => {
+	beforeEach(() => {
+		agent = null;
+	});
+
+	afterEach(async () => {
+		if (agent !== null) {
+			await killAgent(agent);
 			agent = null;
+		}
+	});
+
+	// ── Test 1: binary exists and is executable ───────────────────────────
+
+	it.skipIf(!BINARY_AVAILABLE)("binary exists and is executable", () => {
+		expect(existsSync(SEA_BINARY)).toBe(true);
+
+		// Must be executable
+		expect(() => accessSync(SEA_BINARY, fsConstants.X_OK)).not.toThrow();
+
+		// Must be > 10 MB (includes the Node.js runtime)
+		const stat = statSync(SEA_BINARY);
+		expect(stat.size).toBeGreaterThan(10 * 1024 * 1024);
+	});
+
+	// ── Test 2: outputs HELLO on stdio ───────────────────────────────────
+
+	it.skipIf(!BINARY_AVAILABLE)("outputs HELLO on stdio with version and capabilities", async () => {
+		agent = spawnAgent();
+
+		const hello = await waitForMessage(agent, "HELLO", 10_000);
+
+		expect(hello["type"]).toBe("HELLO");
+		expect(hello["version"]).toBe(1);
+
+		const capabilities = hello["capabilities"] as string[];
+		expect(Array.isArray(capabilities)).toBe(true);
+		expect(capabilities).toContain("multiplex");
+		expect(capabilities).toContain("resize");
+		expect(capabilities).toContain("snapshot");
+	});
+
+	// ── Test 3: spawns PTY and produces output ────────────────────────────
+
+	it.skipIf(!BINARY_AVAILABLE)("spawns a PTY and echoes INPUT back via OUTPUT", async () => {
+		agent = spawnAgent();
+		const { messages } = collectMessages(agent);
+
+		// Wait for HELLO
+		await waitForPredicate(messages, (m) => m["type"] === "HELLO", 10_000);
+
+		// Send SPAWN with all required fields
+		sendFrame(agent, makeSpawn("e2e-test"));
+
+		// Wait for SPAWN_OK
+		const spawnOk = await waitForPredicate(
+			messages,
+			(m) => m["type"] === "SPAWN_OK" && m["requestId"] === "e2e-test",
+			10_000,
+		);
+		const channelId = spawnOk["channelId"] as string;
+		expect(typeof channelId).toBe("string");
+		expect(channelId.length).toBeGreaterThan(0);
+
+		// Send INPUT — echo a unique string
+		sendFrame(agent, {
+			type: "INPUT",
+			channelId,
+			data: "echo E2E_TEST_OK\n",
 		});
 
-		afterEach(async () => {
-			if (agent !== null) {
-				await killAgent(agent);
-				agent = null;
+		// Wait for OUTPUT containing our echo
+		await waitForPredicate(messages, (m) => outputContains(m, "E2E_TEST_OK"), 15_000);
+
+		// Send DESTROY
+		sendFrame(agent, { type: "DESTROY", channelId });
+	});
+
+	// ── Test 4: unknown message type does not crash the agent ────────────
+
+	it.skipIf(!BINARY_AVAILABLE)(
+		"handles unknown message type gracefully without crashing",
+		async () => {
+			agent = spawnAgent();
+
+			// Wait for HELLO so the agent is fully up
+			await waitForMessage(agent, "HELLO", 10_000);
+
+			// Send an unknown message type
+			sendFrame(agent, { type: "NONEXISTENT", data: "test" });
+
+			// The agent must stay alive for at least 2 seconds
+			const alive = await new Promise<boolean>((resolve) => {
+				const earlyExit = (): void => resolve(false);
+				agent!.once("exit", earlyExit);
+				setTimeout(() => {
+					agent!.off("exit", earlyExit);
+					resolve(agent!.exitCode === null);
+				}, 2_000);
+			});
+
+			expect(alive).toBe(true);
+		},
+	);
+
+	// ── Test 5: pty.node addon is extracted to cache ──────────────────────
+
+	it.skipIf(!BINARY_AVAILABLE)(
+		"pty.node addon is extracted to cache dir after PTY spawn",
+		async () => {
+			agent = spawnAgent();
+			const { messages } = collectMessages(agent);
+
+			// Wait for HELLO
+			await waitForPredicate(messages, (m) => m["type"] === "HELLO", 10_000);
+
+			// Spawn a PTY to trigger addon extraction
+			sendFrame(agent, makeSpawn("e2e-addon-test"));
+
+			await waitForPredicate(
+				messages,
+				(m) => m["type"] === "SPAWN_OK" && m["requestId"] === "e2e-addon-test",
+				10_000,
+			);
+
+			// Give the addon loader a moment to flush the cache write
+			await new Promise((r) => setTimeout(r, 500));
+
+			// Locate the cache dir: ~/.cache/nexterm/addons/<version>/pty.node
+			const cacheBase = process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache");
+			const agentPkgPath = join(ROOT, "packages", "agent", "package.json");
+			const agentPkg = JSON.parse(readFileSync(agentPkgPath, "utf8")) as { version?: string };
+			const version = agentPkg.version ?? "0.1.0";
+			const ptyNodeCached = join(cacheBase, "nexterm", "addons", version, "pty.node");
+
+			expect(existsSync(ptyNodeCached)).toBe(true);
+
+			// On Linux: first 4 bytes must be ELF magic (0x7f 45 4c 46)
+			if (process.platform === "linux") {
+				const bytes = readFileSync(ptyNodeCached);
+				expect(bytes[0]).toBe(0x7f);
+				expect(bytes[1]).toBe(0x45); // 'E'
+				expect(bytes[2]).toBe(0x4c); // 'L'
+				expect(bytes[3]).toBe(0x46); // 'F'
 			}
-		});
+		},
+	);
 
-		// ── Test 1: binary exists and is executable ───────────────────────────
+	// ── Test 6: multiple PTY channels ────────────────────────────────────
 
-		it.skipIf(!BINARY_AVAILABLE)(
-			"binary exists and is executable",
-			() => {
-				expect(existsSync(SEA_BINARY)).toBe(true);
+	it.skipIf(!BINARY_AVAILABLE)("handles multiple PTY channels concurrently", async () => {
+		agent = spawnAgent();
+		const { messages } = collectMessages(agent);
 
-				// Must be executable
-				expect(() =>
-					accessSync(SEA_BINARY, fsConstants.X_OK),
-				).not.toThrow();
+		// Wait for HELLO
+		await waitForPredicate(messages, (m) => m["type"] === "HELLO", 10_000);
 
-				// Must be > 10 MB (includes the Node.js runtime)
-				const stat = statSync(SEA_BINARY);
-				expect(stat.size).toBeGreaterThan(10 * 1024 * 1024);
-			},
-		);
+		// Spawn 3 channels
+		const requestIds = ["multi-1", "multi-2", "multi-3"];
+		for (const requestId of requestIds) {
+			sendFrame(agent, makeSpawn(requestId));
+		}
 
-		// ── Test 2: outputs HELLO on stdio ───────────────────────────────────
+		// Collect all 3 SPAWN_OKs
+		const channelIds: string[] = [];
+		for (const requestId of requestIds) {
+			const ok = await waitForPredicate(
+				messages,
+				(m) => m["type"] === "SPAWN_OK" && m["requestId"] === requestId,
+				10_000,
+			);
+			const channelId = ok["channelId"] as string;
+			expect(typeof channelId).toBe("string");
+			channelIds.push(channelId);
+		}
 
-		it.skipIf(!BINARY_AVAILABLE)(
-			"outputs HELLO on stdio with version and capabilities",
-			async () => {
-				agent = spawnAgent();
+		// All channel IDs must be unique
+		const unique = new Set(channelIds);
+		expect(unique.size).toBe(3);
 
-				const hello = await waitForMessage(agent, "HELLO", 10_000);
+		// Send unique INPUT to each channel and verify OUTPUT
+		for (let i = 0; i < channelIds.length; i++) {
+			const tag = `MULTI_TAG_${i}`;
+			sendFrame(agent, {
+				type: "INPUT",
+				channelId: channelIds[i],
+				data: `echo ${tag}\n`,
+			});
 
-				expect(hello["type"]).toBe("HELLO");
-				expect(hello["version"]).toBe(1);
+			await waitForPredicate(
+				messages,
+				(m) => m["channelId"] === channelIds[i] && outputContains(m, tag),
+				15_000,
+			);
+		}
 
-				const capabilities = hello["capabilities"] as string[];
-				expect(Array.isArray(capabilities)).toBe(true);
-				expect(capabilities).toContain("multiplex");
-				expect(capabilities).toContain("resize");
-				expect(capabilities).toContain("snapshot");
-			},
-		);
-
-		// ── Test 3: spawns PTY and produces output ────────────────────────────
-
-		it.skipIf(!BINARY_AVAILABLE)(
-			"spawns a PTY and echoes INPUT back via OUTPUT",
-			async () => {
-				agent = spawnAgent();
-				const { messages } = collectMessages(agent);
-
-				// Wait for HELLO
-				await waitForPredicate(
-					messages,
-					(m) => m["type"] === "HELLO",
-					10_000,
-				);
-
-				// Send SPAWN with all required fields
-				sendFrame(agent, makeSpawn("e2e-test"));
-
-				// Wait for SPAWN_OK
-				const spawnOk = await waitForPredicate(
-					messages,
-					(m) => m["type"] === "SPAWN_OK" && m["requestId"] === "e2e-test",
-					10_000,
-				);
-				const channelId = spawnOk["channelId"] as string;
-				expect(typeof channelId).toBe("string");
-				expect(channelId.length).toBeGreaterThan(0);
-
-				// Send INPUT — echo a unique string
-				sendFrame(agent, {
-					type: "INPUT",
-					channelId,
-					data: "echo E2E_TEST_OK\n",
-				});
-
-				// Wait for OUTPUT containing our echo
-				await waitForPredicate(
-					messages,
-					(m) => outputContains(m, "E2E_TEST_OK"),
-					15_000,
-				);
-
-				// Send DESTROY
-				sendFrame(agent, { type: "DESTROY", channelId });
-			},
-		);
-
-		// ── Test 4: unknown message type does not crash the agent ────────────
-
-		it.skipIf(!BINARY_AVAILABLE)(
-			"handles unknown message type gracefully without crashing",
-			async () => {
-				agent = spawnAgent();
-
-				// Wait for HELLO so the agent is fully up
-				await waitForMessage(agent, "HELLO", 10_000);
-
-				// Send an unknown message type
-				sendFrame(agent, { type: "NONEXISTENT", data: "test" });
-
-				// The agent must stay alive for at least 2 seconds
-				const alive = await new Promise<boolean>((resolve) => {
-					const earlyExit = (): void => resolve(false);
-					agent!.once("exit", earlyExit);
-					setTimeout(() => {
-						agent!.off("exit", earlyExit);
-						resolve(agent!.exitCode === null);
-					}, 2_000);
-				});
-
-				expect(alive).toBe(true);
-			},
-		);
-
-		// ── Test 5: pty.node addon is extracted to cache ──────────────────────
-
-		it.skipIf(!BINARY_AVAILABLE)(
-			"pty.node addon is extracted to cache dir after PTY spawn",
-			async () => {
-				agent = spawnAgent();
-				const { messages } = collectMessages(agent);
-
-				// Wait for HELLO
-				await waitForPredicate(
-					messages,
-					(m) => m["type"] === "HELLO",
-					10_000,
-				);
-
-				// Spawn a PTY to trigger addon extraction
-				sendFrame(agent, makeSpawn("e2e-addon-test"));
-
-				await waitForPredicate(
-					messages,
-					(m) =>
-						m["type"] === "SPAWN_OK" &&
-						m["requestId"] === "e2e-addon-test",
-					10_000,
-				);
-
-				// Give the addon loader a moment to flush the cache write
-				await new Promise((r) => setTimeout(r, 500));
-
-				// Locate the cache dir: ~/.cache/nexterm/addons/<version>/pty.node
-				const cacheBase =
-					process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache");
-				const agentPkgPath = join(
-					ROOT,
-					"packages",
-					"agent",
-					"package.json",
-				);
-				const agentPkg = JSON.parse(
-					readFileSync(agentPkgPath, "utf8"),
-				) as { version?: string };
-				const version = agentPkg.version ?? "0.1.0";
-				const ptyNodeCached = join(
-					cacheBase,
-					"nexterm",
-					"addons",
-					version,
-					"pty.node",
-				);
-
-				expect(existsSync(ptyNodeCached)).toBe(true);
-
-				// On Linux: first 4 bytes must be ELF magic (0x7f 45 4c 46)
-				if (process.platform === "linux") {
-					const bytes = readFileSync(ptyNodeCached);
-					expect(bytes[0]).toBe(0x7f);
-					expect(bytes[1]).toBe(0x45); // 'E'
-					expect(bytes[2]).toBe(0x4c); // 'L'
-					expect(bytes[3]).toBe(0x46); // 'F'
-				}
-			},
-		);
-
-		// ── Test 6: multiple PTY channels ────────────────────────────────────
-
-		it.skipIf(!BINARY_AVAILABLE)(
-			"handles multiple PTY channels concurrently",
-			async () => {
-				agent = spawnAgent();
-				const { messages } = collectMessages(agent);
-
-				// Wait for HELLO
-				await waitForPredicate(
-					messages,
-					(m) => m["type"] === "HELLO",
-					10_000,
-				);
-
-				// Spawn 3 channels
-				const requestIds = ["multi-1", "multi-2", "multi-3"];
-				for (const requestId of requestIds) {
-					sendFrame(agent, makeSpawn(requestId));
-				}
-
-				// Collect all 3 SPAWN_OKs
-				const channelIds: string[] = [];
-				for (const requestId of requestIds) {
-					const ok = await waitForPredicate(
-						messages,
-						(m) =>
-							m["type"] === "SPAWN_OK" && m["requestId"] === requestId,
-						10_000,
-					);
-					const channelId = ok["channelId"] as string;
-					expect(typeof channelId).toBe("string");
-					channelIds.push(channelId);
-				}
-
-				// All channel IDs must be unique
-				const unique = new Set(channelIds);
-				expect(unique.size).toBe(3);
-
-				// Send unique INPUT to each channel and verify OUTPUT
-				for (let i = 0; i < channelIds.length; i++) {
-					const tag = `MULTI_TAG_${i}`;
-					sendFrame(agent, {
-						type: "INPUT",
-						channelId: channelIds[i],
-						data: `echo ${tag}\n`,
-					});
-
-					await waitForPredicate(
-						messages,
-						(m) =>
-							m["channelId"] === channelIds[i] &&
-							outputContains(m, tag),
-						15_000,
-					);
-				}
-
-				// Destroy all channels
-				for (const channelId of channelIds) {
-					sendFrame(agent, { type: "DESTROY", channelId });
-				}
-			},
-		);
-	},
-);
+		// Destroy all channels
+		for (const channelId of channelIds) {
+			sendFrame(agent, { type: "DESTROY", channelId });
+		}
+	});
+});

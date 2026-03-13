@@ -4,6 +4,27 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## PKG — Full Packaging Pipeline: SEA Binaries + CI + Auto-Deploy + Tauri (2026-03-13)
+
+- Two separate SEA binaries: nexterm-agent (node-pty) + nexterm-hub (better-sqlite3)
+- Hub finds agent binary in same directory or PATH (sea-agent-resolver.ts)
+- Node SEA assets + getRawAsset() + process.dlopen() for native addon loading
+- --experimental-sea-config + postject workflow (Node 20+ compatible)
+- Agent: node-pty external (extracted to cache dir at startup)
+- Hub: better-sqlite3 external (same pattern)
+- Web UI embedded as static-manifest.json SEA asset, served in-memory by Fastify
+- Hub SQL migrations embedded inline via esbuild plugin (no filesystem reads at runtime)
+- Host os/arch: nullable fields with auto-detect fallback (migration 012, uname + PROCESSOR_ARCHITECTURE)
+- Auto-deploy: best-effort, SshAgentDeployOptions opt-in, SFTP fastPut for large binaries
+- Binary cache: ~/.local/state/nexterm/binaries/nexterm-agent-{os}-{arch}
+- sshExec utility: generic SSH command execution with configurable timeout
+- checkRemoteAgent: which/where first, then common paths fallback
+- CI: 3-job pipeline (build-web → build-sea 5-platform matrix → release), GitHub Releases
+- Tauri v2: hub as sidecar (no glue layer), webview loads localhost:4100
+- System tray (show/quit), auto-updater (pubkey placeholder), shell plugin for sidecar
+
+---
+
 ## ELEV-CONFIG — Configurable Elevation Methods + Passwordless-First Flow (2026-03-13)
 
 - ElevationMethod includes 'custom' option for user-defined elevation commands

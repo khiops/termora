@@ -10,9 +10,13 @@ jobs:
   test:
     strategy:
       matrix:
-        # TODO: Add windows-latest to matrix after M1 (P1 per MVP roadmap)
-        os: [ubuntu-latest, macos-latest]
-        node: [20, 22]
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+          - os: windows-latest
+            node: 22
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,12 +29,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'pnpm'
+          cache: "pnpm"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - run: pnpm build
+      - name: Build
+        run: pnpm build
 
-      - run: pnpm lint
+      - name: Lint
+        run: pnpm lint
 
-      - run: pnpm test --run
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit --project tsconfig.json || true
+
+      - name: Test
+        run: pnpm test --run

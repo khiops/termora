@@ -21,6 +21,8 @@ function mockHost(overrides: Record<string, unknown> = {}) {
 		historyRetentionDays: 30,
 		trustRemoteHints: "apply" as const,
 		sortOrder: 0,
+		os: null,
+		arch: null,
 		createdAt: "2026-01-01T00:00:00Z",
 		updatedAt: "2026-01-01T00:00:00Z",
 		...overrides,

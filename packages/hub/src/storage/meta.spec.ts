@@ -202,6 +202,73 @@ describe("MetaDAL — Hosts CRUD", () => {
 	});
 });
 
+// ─── OS / Arch ────────────────────────────────────────────────────────────────
+
+describe("MetaDAL — host os/arch fields", () => {
+	let dbs: DatabaseManager;
+	let dal: MetaDAL;
+
+	beforeEach(() => {
+		dbs = openTestDatabases();
+		dal = new MetaDAL(dbs.meta);
+	});
+
+	afterEach(() => {
+		dbs.close();
+	});
+
+	it("createHost with os/arch stores and returns them", () => {
+		const host = dal.createHost({
+			type: "ssh",
+			label: "linux-box",
+			sshHost: "10.0.0.1",
+			os: "linux",
+			arch: "x64",
+		});
+		expect(host.os).toBe("linux");
+		expect(host.arch).toBe("x64");
+	});
+
+	it("createHost without os/arch defaults to null", () => {
+		const host = dal.createHost({ type: "local", label: "no-os" });
+		expect(host.os).toBeNull();
+		expect(host.arch).toBeNull();
+	});
+
+	it("listHosts returns os/arch on each host", () => {
+		dal.createHost({
+			type: "ssh",
+			label: "arm-server",
+			sshHost: "10.0.0.2",
+			os: "linux",
+			arch: "arm64",
+		});
+		const hosts = dal.listHosts();
+		const arm = hosts.find((h) => h.label === "arm-server");
+		expect(arm?.os).toBe("linux");
+		expect(arm?.arch).toBe("arm64");
+	});
+
+	it("updateHost with os/arch updates the values", () => {
+		const host = dal.createHost({ type: "ssh", label: "update-os", sshHost: "10.0.0.3" });
+		expect(host.os).toBeNull();
+		const updated = dal.updateHost(host.id, { os: "darwin", arch: "arm64" });
+		expect(updated.os).toBe("darwin");
+		expect(updated.arch).toBe("arm64");
+	});
+
+	it("updateHostOsArch sets both values and updates updated_at", async () => {
+		const host = dal.createHost({ type: "ssh", label: "detect-os", sshHost: "10.0.0.4" });
+		// Ensure a tiny time gap so updated_at changes
+		await new Promise((r) => setTimeout(r, 5));
+		dal.updateHostOsArch(host.id, "windows", "x64");
+		const found = dal.getHost(host.id);
+		expect(found?.os).toBe("windows");
+		expect(found?.arch).toBe("x64");
+		expect(found?.updatedAt).not.toBe(host.updatedAt);
+	});
+});
+
 describe("MetaDAL — Host Management fields", () => {
 	let dbs: DatabaseManager;
 	let dal: MetaDAL;

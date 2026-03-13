@@ -15,18 +15,12 @@
  *   7. Print final binary size.
  */
 
-import {
-	mkdirSync,
-	writeFileSync,
-	copyFileSync,
-	chmodSync,
-	statSync,
-	rmSync,
-} from "node:fs";
-import { join, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
+import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface SeaBuildConfig {
 	/** Path to the bundled .cjs entry point */
@@ -46,29 +40,20 @@ export interface SeaBuildConfig {
 }
 
 /** The sentinel fuse string required by postject. */
-const SENTINEL_FUSE =
-	"NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
+const SENTINEL_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 
 /**
  * Run a child process synchronously.
  * Throws a descriptive Error if the process exits with a non-zero code.
  */
-function run(
-	cmd: string,
-	args: string[],
-	label: string,
-): void {
+function run(cmd: string, args: string[], label: string): void {
 	console.log(`[build-sea] ${label}: ${cmd} ${args.join(" ")}`);
 	const result = spawnSync(cmd, args, { stdio: "inherit", shell: false });
 	if (result.error) {
-		throw new Error(
-			`[build-sea] ${label} failed to start: ${result.error.message}`,
-		);
+		throw new Error(`[build-sea] ${label} failed to start: ${result.error.message}`);
 	}
 	if (result.status !== 0) {
-		throw new Error(
-			`[build-sea] ${label} exited with code ${result.status ?? "null"}`,
-		);
+		throw new Error(`[build-sea] ${label} exited with code ${result.status ?? "null"}`);
 	}
 }
 
@@ -85,10 +70,7 @@ function resolveNodeBinary(): string {
  * Build a SEA config object for the given SeaBuildConfig.
  * The `output` field points to the blob file (not the binary).
  */
-export function buildSeaConfigJson(
-	cfg: SeaBuildConfig,
-	blobPath: string,
-): Record<string, unknown> {
+export function buildSeaConfigJson(cfg: SeaBuildConfig, blobPath: string): Record<string, unknown> {
 	const assets: Record<string, string> = {};
 	for (const [name, filePath] of Object.entries(cfg.nativeAddons)) {
 		assets[name] = filePath;
@@ -120,7 +102,7 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 	// ------------------------------------------------------------------
 	// 1. Write sea-config.json to a temp location
 	// ------------------------------------------------------------------
-	const tmpBase = join(tmpdir(), `nexterm-sea-${Date.now()}`);
+	const tmpBase = join(tmpdir(), `nexterm-sea-${randomBytes(8).toString("hex")}`);
 	mkdirSync(tmpBase, { recursive: true });
 
 	const configPath = join(tmpBase, "sea-config.json");
@@ -178,9 +160,7 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 		// ------------------------------------------------------------------
 		const stat = statSync(cfg.outputBinary);
 		const sizeMB = (stat.size / (1024 * 1024)).toFixed(1);
-		console.log(
-			`[build-sea] ${cfg.name} binary ready: ${cfg.outputBinary} (${sizeMB} MB)`,
-		);
+		console.log(`[build-sea] ${cfg.name} binary ready: ${cfg.outputBinary} (${sizeMB} MB)`);
 	} finally {
 		// Clean up temp files
 		try {

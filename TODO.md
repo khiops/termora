@@ -3,10 +3,10 @@
 ## Recently Completed
 
 (Archived → docs/historic/done-2026-03.md)
-- [x] ✅ [PKG] Block 1: esbuild bundle + SEA addon loader bootstrap (2026-03-13)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
+- [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json before enabling auto-update in production — Priority: M (from /review F-006)
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — same pattern as wallpapers — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
@@ -34,7 +34,6 @@
 
 ## Tier 3 — Strategic (milestones)
 
-- [ ] 🟡 [PKG] Full packaging pipeline (10 blocks) — Phases 2a/2b/2c/2d/3 — IN PROGRESS
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops (NextermAgent.connectTunnel) — Priority: P1
 - [ ] 💡 [Hub] Search in scrollback (FTS5 full-text index + search UI) — Priority: P1
 - [ ] 💡 [Hub] OS keychain for auth token (keytar) — Priority: P1
@@ -47,7 +46,6 @@
 - [ ] 💡 [Hub] Workspace export/import with blobs — Priority: P2
 - [ ] 💡 [Hub] SQLCipher encryption at rest — Priority: P2
 - [ ] 💡 [Hub] OIDC / mTLS — Priority: P2
-- [ ] 💡 [Agent] Auto-install agent binary — Priority: P2 (depends on packaging decision)
 - [ ] 💡 [Hub] Multi-writer collaboration (CRDT) — Priority: P2
 - [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: P2 (needs native addon; 0700 dir perms sufficient)
 - [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: P2 (needs native FFI/WinAPI)
@@ -55,6 +53,3 @@
 ## Completed
 
 (Archived → docs/historic/done-2026-03.md)
-- [x] ✅ [PKG] Block 1: esbuild bundle + SEA addon loader bootstrap (2026-03-13)
-- [x] ✅ [PKG] Block 2: Agent SEA build script (2026-03-13)
-- [x] ✅ [PKG] Block 3: Agent SEA E2E validation — 6 tests, 1875 total (2026-03-13)

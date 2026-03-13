@@ -17,6 +17,7 @@ import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { validateToken } from "./auth.js";
 import { getConfigDir } from "./cli.js";
 import { ConfigResolver, loadGcConfig } from "./config.js";
+import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
@@ -152,9 +153,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		});
 	}
 
-	// Serve the embedded web client from the static/ directory.
-	// Graceful degradation: skip if the directory does not exist (dev mode uses Vite).
+	// Serve the embedded web client.
+	// Priority: disk static/ directory → SEA embedded manifest → dev mode (no serving).
 	await registerStaticIfExists(server);
+	// When running as a SEA binary there is no static/ on disk — fall back to
+	// the in-memory manifest embedded in the SEA blob.
+	await registerSeaStaticServing(server);
 
 	return server;
 }

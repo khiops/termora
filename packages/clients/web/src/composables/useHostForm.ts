@@ -24,6 +24,8 @@ export interface HostFormData {
 	trustRemoteHints: "apply" | "ask" | "ignore";
 	elevationMethod: string;
 	customCommand: string;
+	os: "linux" | "darwin" | "windows" | null;
+	arch: "x64" | "arm64" | null;
 }
 
 export function useHostForm(editHost?: Host) {
@@ -50,6 +52,8 @@ export function useHostForm(editHost?: Host) {
 		trustRemoteHints: editHost?.trustRemoteHints ?? "apply",
 		elevationMethod: editHost?.elevationMethod ?? "",
 		customCommand: "",
+		os: editHost?.os ?? null,
+		arch: editHost?.arch ?? null,
 	});
 
 	// INV-13: clear key path when switching away from key auth
@@ -242,8 +246,10 @@ export function useHostForm(editHost?: Host) {
 				keep_alive_seconds: form.value.keepAliveSeconds,
 				history_retention_days: form.value.historyRetentionDays,
 				trust_remote_hints: form.value.trustRemoteHints,
-			elevation_method: form.value.elevationMethod || null,
-			custom_command: form.value.customCommand || null,
+				elevation_method: form.value.elevationMethod || null,
+				custom_command: form.value.customCommand || null,
+				os: form.value.os,
+				arch: form.value.arch,
 				...extraBody,
 			};
 

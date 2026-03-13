@@ -1,0 +1,288 @@
+/**
+ * package-sea-hub.ts
+ *
+ * Hub-specific SEA packaging script.
+ *
+ * Steps:
+ *   1. Build web UI (pnpm -F @nexterm/web build) if static/ doesn't exist
+ *   2. Embed web UI (scripts/embed-web.js) if static/ doesn't exist
+ *   3. esbuild bundle (build-sea-hub.ts → nexterm-hub.cjs)
+ *   4. Create static-files manifest (JSON of all web UI files → static-manifest.json)
+ *   5. SEA binary packaging (build-sea-binary.ts → nexterm-hub binary)
+ *
+ * Usage:
+ *   pnpm run package:sea-hub
+ */
+
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
+import type { SeaBuildConfig } from "./build-sea-binary.js";
+import { buildSeaBinary } from "./build-sea-binary.js";
+import { buildOptions } from "./build-sea-hub.js";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = resolve(__dirname, "..");
+
+/** Binary extension — empty on Linux/macOS, .exe on Windows. */
+const EXE_EXT = process.platform === "win32" ? ".exe" : "";
+
+/** Extension → MIME content-type map for web assets. */
+const CONTENT_TYPES: Record<string, string> = {
+	".html": "text/html",
+	".js": "application/javascript",
+	".mjs": "application/javascript",
+	".css": "text/css",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ttf": "font/ttf",
+	".otf": "font/otf",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".ico": "image/x-icon",
+	".json": "application/json",
+	".txt": "text/plain",
+	".map": "application/json",
+};
+
+/** Resolve MIME type for a given file path. */
+export function resolveContentType(filePath: string): string {
+	const ext = extname(filePath).toLowerCase();
+	return CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+
+/** All extension keys in the content-type map (for testing). */
+export const KNOWN_EXTENSIONS = Object.keys(CONTENT_TYPES);
+
+/**
+ * Locate the better-sqlite3 native addon from the hub's node_modules.
+ * Falls back to root-level node_modules for hoisted installs.
+ */
+export function locateBetterSqlite3(): string {
+	// Primary: hub package symlink (pnpm virtual store)
+	const hubNodeModules = join(
+		ROOT,
+		"packages",
+		"hub",
+		"node_modules",
+		"better-sqlite3",
+		"build",
+		"Release",
+		"better_sqlite3.node",
+	);
+	if (existsSync(hubNodeModules)) {
+		return hubNodeModules;
+	}
+
+	// Fallback: root-level node_modules (hoisted installs / npm/yarn)
+	const rootNodeModules = join(
+		ROOT,
+		"node_modules",
+		"better-sqlite3",
+		"build",
+		"Release",
+		"better_sqlite3.node",
+	);
+	if (existsSync(rootNodeModules)) {
+		return rootNodeModules;
+	}
+
+	throw new Error(
+		`[package-sea-hub] better-sqlite3 addon not found.\n` +
+			`  Checked:\n` +
+			`    ${hubNodeModules}\n` +
+			`    ${rootNodeModules}\n` +
+			`  Run \`pnpm install\` to build native addons first.`,
+	);
+}
+
+/** Read the hub package version from its package.json. */
+function readHubVersion(): string {
+	const pkgPath = join(ROOT, "packages", "hub", "package.json");
+	const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+		version?: string;
+	};
+	return pkg.version ?? "0.0.0";
+}
+
+/** Static file manifest entry. */
+export interface StaticFileEntry {
+	data: string; // base64-encoded file contents
+	contentType: string;
+}
+
+/** Manifest structure written to static-manifest.json. */
+export type StaticManifest = Record<string, StaticFileEntry>;
+
+/**
+ * Walk `dir` recursively and collect all file paths relative to `dir`.
+ * Returns sorted list for deterministic output.
+ */
+function walkDir(dir: string): string[] {
+	const results: string[] = [];
+
+	function walk(current: string): void {
+		const entries = readdirSync(current, { withFileTypes: true });
+		for (const entry of entries) {
+			const fullPath = join(current, entry.name);
+			if (entry.isDirectory()) {
+				walk(fullPath);
+			} else if (entry.isFile()) {
+				results.push(fullPath);
+			}
+		}
+	}
+
+	walk(dir);
+	return results.sort();
+}
+
+/**
+ * Build a static manifest JSON from all files under `staticDir`.
+ * Each file is base64-encoded and assigned a MIME content-type.
+ *
+ * @param staticDir - Absolute path to the web UI static directory.
+ * @returns Stringified JSON ready to write to disk.
+ */
+export function buildStaticManifest(staticDir: string): string {
+	const files = walkDir(staticDir);
+	const manifest: StaticManifest = {};
+
+	for (const filePath of files) {
+		const relativePath = relative(staticDir, filePath).replace(/\\/g, "/");
+		const data = readFileSync(filePath);
+		manifest[relativePath] = {
+			data: data.toString("base64"),
+			contentType: resolveContentType(filePath),
+		};
+	}
+
+	return JSON.stringify(manifest);
+}
+
+async function main(): Promise<void> {
+	console.log("[package-sea-hub] starting hub SEA packaging...");
+
+	const staticDir = join(ROOT, "packages", "hub", "static");
+
+	// ------------------------------------------------------------------
+	// Step 1 & 2: Build + embed web UI if static/ doesn't exist
+	// ------------------------------------------------------------------
+	if (!existsSync(staticDir)) {
+		console.log("[package-sea-hub] step 1/5: building web UI (pnpm -F @nexterm/web build)");
+		const webBuild = spawnSync("pnpm", ["-F", "@nexterm/web", "build"], {
+			stdio: "inherit",
+			cwd: ROOT,
+			shell: false,
+		});
+		if (webBuild.status !== 0) {
+			console.error("[package-sea-hub] web UI build failed (exit code:", webBuild.status, ")");
+			process.exit(1);
+		}
+
+		console.log("[package-sea-hub] step 2/5: embedding web UI (scripts/embed-web.js)");
+		const embedScript = join(ROOT, "scripts", "embed-web.js");
+		const embed = spawnSync(process.execPath, [embedScript], {
+			stdio: "inherit",
+			cwd: ROOT,
+			shell: false,
+		});
+		if (embed.status !== 0) {
+			console.error("[package-sea-hub] web UI embed failed (exit code:", embed.status, ")");
+			process.exit(1);
+		}
+	} else {
+		console.log("[package-sea-hub] step 1/5: web UI already built — skipping");
+		console.log("[package-sea-hub] step 2/5: web UI already embedded — skipping");
+	}
+
+	// ------------------------------------------------------------------
+	// Step 3: esbuild bundle (hub TS → nexterm-hub.cjs)
+	// ------------------------------------------------------------------
+	console.log("[package-sea-hub] step 3/5: esbuild bundle");
+	const esbuildResult = await build(buildOptions);
+	if (esbuildResult.errors.length > 0) {
+		console.error("[package-sea-hub] esbuild failed:");
+		for (const err of esbuildResult.errors) {
+			console.error("  ", err.text);
+		}
+		process.exit(1);
+	}
+	console.log("[package-sea-hub] esbuild bundle complete");
+
+	// ------------------------------------------------------------------
+	// Step 4: Create static-files manifest
+	// ------------------------------------------------------------------
+	console.log("[package-sea-hub] step 4/5: building static file manifest");
+	const outDir = join(ROOT, "dist", "sea");
+	mkdirSync(outDir, { recursive: true });
+
+	const staticManifestPath = join(outDir, "static-manifest.json");
+
+	if (!existsSync(staticDir)) {
+		console.warn(
+			"[package-sea-hub] WARNING: packages/hub/static/ not found — " +
+				"web UI will NOT be embedded in the SEA binary. " +
+				"Run `pnpm build:embed` before packaging to include the web UI.",
+		);
+		// Write an empty manifest so the SEA asset is always present.
+		writeFileSync(staticManifestPath, JSON.stringify({}), "utf8");
+	} else {
+		console.log(`[package-sea-hub] scanning static dir: ${staticDir}`);
+		const manifestJson = buildStaticManifest(staticDir);
+		writeFileSync(staticManifestPath, manifestJson, "utf8");
+		const sizeMB = (Buffer.byteLength(manifestJson, "utf8") / (1024 * 1024)).toFixed(1);
+		console.log(`[package-sea-hub] static manifest written: ${staticManifestPath} (${sizeMB} MB)`);
+	}
+
+	// ------------------------------------------------------------------
+	// Step 5: SEA binary packaging
+	// ------------------------------------------------------------------
+	console.log("[package-sea-hub] step 5/5: SEA binary packaging");
+
+	const betterSqlite3Path = locateBetterSqlite3();
+	const version = readHubVersion();
+
+	console.log(`[package-sea-hub] better-sqlite3 addon: ${betterSqlite3Path}`);
+	console.log(`[package-sea-hub] hub version: ${version}`);
+
+	const outputBinary = join(ROOT, "dist", "sea", `nexterm-hub${EXE_EXT}`);
+
+	// Write VERSION asset file.
+	const versionFilePath = join(ROOT, "dist", "sea", "VERSION");
+	writeFileSync(versionFilePath, version, "utf8");
+
+	const seaCfg: SeaBuildConfig = {
+		entryScript: join(ROOT, "dist", "sea", "nexterm-hub.cjs"),
+		outputBinary,
+		name: "nexterm-hub",
+		nativeAddons: {
+			"better_sqlite3.node": betterSqlite3Path,
+		},
+		extraAssets: {
+			VERSION: versionFilePath,
+			"static-manifest.json": staticManifestPath,
+		},
+		useCodeCache: true,
+		disableExperimentalSEAWarning: true,
+	};
+
+	await buildSeaBinary(seaCfg);
+
+	console.log("[package-sea-hub] packaging complete.");
+	console.log(`[package-sea-hub] binary: ${outputBinary}`);
+}
+
+// Only run when invoked directly (not when imported by tests).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	main().catch((err: unknown) => {
+		console.error("[package-sea-hub] fatal:", err);
+		process.exit(1);
+	});
+}

@@ -40,6 +40,13 @@ export default defineConfig({
 					testTimeout: 60_000,
 				},
 			},
+			{
+				test: {
+					name: "desktop",
+					include: ["packages/clients/desktop/**/*.spec.ts"],
+					environment: "node",
+				},
+			},
 		],
 	},
 });

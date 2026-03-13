@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
-import type { HelloMessage } from "@nexterm/shared";
+import type { HelloMessage, HostArch, HostOs } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
+import { deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -113,6 +114,21 @@ export async function buildSshConnectConfig(
 	return connectConfig;
 }
 
+/**
+ * Options for auto-deploying the agent binary to a remote host.
+ * When provided, SshAgent will attempt to upload the binary via SFTP
+ * if nexterm-agent is not found on the remote host after SSH connect.
+ */
+export interface SshAgentDeployOptions {
+	/** Path to the local binary cache directory (~/.local/state/nexterm/binaries). */
+	binaryCache: string;
+	/**
+	 * Called when OS/arch is detected on the remote host so the caller can
+	 * persist it to the DB without SshAgent depending on MetaDAL.
+	 */
+	onOsDetected?: (hostId: string, os: HostOs, arch: HostArch) => void;
+}
+
 export class SshAgent extends AgentConnection {
 	private client: Client | null = null;
 	private channel: ClientChannel | null = null;
@@ -122,6 +138,7 @@ export class SshAgent extends AgentConnection {
 	constructor(
 		private readonly host: Host,
 		private readonly promptAuth?: AuthPromptFn,
+		private readonly deployOptions?: SshAgentDeployOptions,
 	) {
 		super();
 	}
@@ -195,39 +212,62 @@ export class SshAgent extends AgentConnection {
 			});
 
 			client.on("ready", () => {
-				// ssh2's exec() executes a command on the remote side over SSH.
-				// This is the ssh2 Client API — not Node's child_process.exec().
-				client.exec("nexterm-agent --stdio", (err, stream) => {
-					if (err) {
-						rejectOnce(err);
-						return;
-					}
+				// Attach stream handler — called after deploy (or immediately if no deploy needed).
+				const runAgent = (agentPath: string): void => {
+					// ssh2 Client — sends command over encrypted SSH channel to remote host
+					client.exec(agentPath, (err, stream) => {
+						if (err) {
+							rejectOnce(err);
+							return;
+						}
 
-					this.channel = stream;
-					this.channelOpen = true;
+						this.channel = stream;
+						this.channelOpen = true;
 
-					stream.on("data", (data: Buffer) => {
-						this.handleData(data);
+						stream.on("data", (data: Buffer) => {
+							this.handleData(data);
+						});
+
+						stream.on("close", () => {
+							this.sendQueue.clear();
+							this.channel = null;
+							this.channelOpen = false;
+							client.end();
+						});
+
+						stream.on("error", (streamErr: Error) => {
+							this.emit("error", streamErr);
+						});
+
+						this.sendQueue.attach(stream);
+
+						// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
+						this.once("ready", (msg: HelloMessage) => {
+							resolveOnce(msg);
+						});
 					});
+				};
 
-					stream.on("close", () => {
-						this.sendQueue.clear();
-						this.channel = null;
-						this.channelOpen = false;
-						client.end();
-					});
-
-					stream.on("error", (err: Error) => {
-						this.emit("error", err);
-					});
-
-					this.sendQueue.attach(stream);
-
-					// Wait for HELLO — emitted by AgentConnection.handleData once HELLO is decoded
-					this.once("ready", (msg: HelloMessage) => {
-						resolveOnce(msg);
-					});
-				});
+				if (this.deployOptions) {
+					// Auto-deploy is best-effort: if it fails, we still try to run the agent
+					// (the user may have installed it manually in a non-standard path).
+					deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
+						.then((result) => {
+							// Notify caller if new OS/arch info was detected (either via deploy or detection)
+							if (result.os && result.arch) {
+								this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
+							}
+							runAgent(result.remotePath);
+						})
+						.catch((deployErr: unknown) => {
+							console.warn(
+								`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
+							);
+							runAgent("nexterm-agent --stdio");
+						});
+				} else {
+					runAgent("nexterm-agent --stdio");
+				}
 			});
 
 			client.connect(connectConfig);

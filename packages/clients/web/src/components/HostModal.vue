@@ -264,7 +264,28 @@
 								/>
 							</div>
 
-							<!-- Test Connection -->
+							<!-- System (OS + Architecture) -->
+							<div class="form-row">
+								<div class="field flex-1">
+									<label class="field-label">Operating System</label>
+									<select v-model="form.os" class="field-select">
+										<option :value="null">Auto-detect</option>
+										<option value="linux">Linux</option>
+										<option value="darwin">macOS</option>
+										<option value="windows">Windows</option>
+									</select>
+								</div>
+								<div class="field flex-1">
+									<label class="field-label">Architecture</label>
+									<select v-model="form.arch" class="field-select">
+										<option :value="null">Auto-detect</option>
+										<option value="x64">x64 (AMD64)</option>
+										<option value="arm64">ARM64</option>
+									</select>
+								</div>
+							</div>
+
+						<!-- Test Connection -->
 							<div class="field field-test">
 								<button
 									class="btn btn-test"

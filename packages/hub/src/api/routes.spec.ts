@@ -160,6 +160,65 @@ describe("POST /api/hosts", () => {
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("CONFLICT");
 	});
+
+	it("creates SSH host with os/arch and returns them in snake_case", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "os-arch-host",
+				ssh_host: "10.0.0.9",
+				os: "linux",
+				arch: "arm64",
+			},
+		});
+		expect(res.statusCode).toBe(201);
+		const body = res.json<Record<string, unknown>>();
+		expect(body.os).toBe("linux");
+		expect(body.arch).toBe("arm64");
+	});
+
+	it("returns 400 for invalid os value", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "bad-os", os: "bsd" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 for invalid arch value", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "bad-arch", arch: "riscv" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("GET /api/hosts returns os/arch fields in snake_case", async () => {
+		await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: {
+				type: "ssh",
+				label: "list-os-host",
+				ssh_host: "10.0.0.10",
+				os: "darwin",
+				arch: "x64",
+			},
+		});
+		const res = await server.inject({ method: "GET", url: "/api/hosts" });
+		const hosts = res.json<Array<Record<string, unknown>>>();
+		const h = hosts.find((x) => x.label === "list-os-host");
+		expect(h?.os).toBe("darwin");
+		expect(h?.arch).toBe("x64");
+	});
 });
 
 describe("GET /api/hosts/:id", () => {
@@ -216,6 +275,40 @@ describe("PUT /api/hosts/:id", () => {
 			payload: { label: "x" },
 		});
 		expect(res.statusCode).toBe(404);
+	});
+
+	it("updates arch field and returns 200", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "ssh", label: "arch-update", ssh_host: "10.0.0.11" },
+		});
+		const created = createRes.json<Record<string, unknown>>();
+		const res = await server.inject({
+			method: "PUT",
+			url: `/api/hosts/${created.id}`,
+			payload: { arch: "arm64" },
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<Record<string, unknown>>();
+		expect(body.arch).toBe("arm64");
+	});
+
+	it("returns 400 for invalid os on PUT", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/hosts",
+			payload: { type: "local", label: "put-bad-os" },
+		});
+		const created = createRes.json<Record<string, unknown>>();
+		const res = await server.inject({
+			method: "PUT",
+			url: `/api/hosts/${created.id}`,
+			payload: { os: "bsd" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 });
 

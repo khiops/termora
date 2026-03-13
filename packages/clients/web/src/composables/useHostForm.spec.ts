@@ -47,6 +47,8 @@ describe("useHostForm", () => {
 				historyRetentionDays: 30,
 				trustRemoteHints: "apply" as const,
 				sortOrder: 0,
+				os: null as null,
+				arch: null as null,
 				createdAt: "2026-01-01T00:00:00Z",
 				updatedAt: "2026-01-01T00:00:00Z",
 			};

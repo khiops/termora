@@ -91,29 +91,14 @@ describe("settingsSchema", () => {
 		});
 
 		it("all settings have a valid category", () => {
-			const validCategories = [
-				"terminal",
-				"tabs",
-				"panes",
-				"channels",
-				"search",
-				"startup",
-			];
+			const validCategories = ["terminal", "tabs", "panes", "channels", "search", "startup"];
 			for (const def of settingsSchema) {
 				expect(validCategories).toContain(def.category);
 			}
 		});
 
 		it("all settings have a valid section", () => {
-			const validSections = [
-				"terminal",
-				"tabs",
-				"panes",
-				"channels",
-				"search",
-				"startup",
-				"title",
-			];
+			const validSections = ["terminal", "tabs", "panes", "channels", "search", "startup", "title"];
 			for (const def of settingsSchema) {
 				expect(validSections).toContain(def.section);
 			}

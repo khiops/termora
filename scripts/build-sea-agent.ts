@@ -116,6 +116,9 @@ function importMetaShimPlugin(): Plugin {
  * In normal Node.js mode (no SEA), __seaPtyExports is undefined and the shim
  * falls back to the regular require(), which works because node-pty can find
  * its .node binary on disk.
+ *
+ * NOTE: This extraction logic mirrors packages/agent/src/sea-addon-loader.ts
+ * (canonical source). Changes here must be reflected there, and vice versa.
  */
 const SEA_BOOTSTRAP_BANNER = `
 // ── SEA native addon bootstrap ────────────────────────────────────────────────

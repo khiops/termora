@@ -26,10 +26,10 @@ import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@nexterm/shared";
 import { DEFAULT_LAYOUT_CONFIG } from "@nexterm/shared";
 import type {
 	AppearanceConfig,
-	ElevationConfig,
-	ElevationMethod,
 	CascadeResponse,
 	ChannelsConfig,
+	ElevationConfig,
+	ElevationMethod,
 	LayoutConfig,
 	PanesConfig,
 	SearchConfig,
@@ -429,13 +429,22 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 	if (section == null || typeof section !== "object") return result;
 	const raw = section as Record<string, unknown>;
 
-	if (typeof raw.method_linux === "string" && (ELEVATION_METHODS_LINUX as readonly string[]).includes(raw.method_linux)) {
+	if (
+		typeof raw.method_linux === "string" &&
+		(ELEVATION_METHODS_LINUX as readonly string[]).includes(raw.method_linux)
+	) {
 		result.methodLinux = raw.method_linux as ElevationMethod;
 	}
-	if (typeof raw.method_darwin === "string" && (ELEVATION_METHODS_DARWIN as readonly string[]).includes(raw.method_darwin)) {
+	if (
+		typeof raw.method_darwin === "string" &&
+		(ELEVATION_METHODS_DARWIN as readonly string[]).includes(raw.method_darwin)
+	) {
 		result.methodDarwin = raw.method_darwin as ElevationMethod;
 	}
-	if (typeof raw.method_windows === "string" && (ELEVATION_METHODS_WINDOWS as readonly string[]).includes(raw.method_windows)) {
+	if (
+		typeof raw.method_windows === "string" &&
+		(ELEVATION_METHODS_WINDOWS as readonly string[]).includes(raw.method_windows)
+	) {
 		result.methodWindows = raw.method_windows as ElevationMethod;
 	}
 	if (typeof raw.custom_command_linux === "string" && raw.custom_command_linux.length > 0) {

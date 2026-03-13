@@ -9,7 +9,8 @@
  *
  * In normal Node.js mode (no SEA), this module is a complete no-op.
  *
- * Must be called via initSeaAddons() BEFORE any module that imports node-pty.
+ * Must be called via initSeaAddons() BEFORE any module that imports
+ * better-sqlite3.
  */
 
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
@@ -18,7 +19,7 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
 /** Names of .node assets embedded in the SEA binary. */
-const SEA_ADDON_ASSETS: readonly string[] = ["pty.node"] as const;
+const SEA_ADDON_ASSETS: readonly string[] = ["better_sqlite3.node"] as const;
 
 /** Detect whether we are running inside a Node SEA binary. */
 export function detectSea(): boolean {
@@ -50,8 +51,9 @@ export function getAddonCacheDir(version: string): string {
  * Extract a single .node asset from the SEA binary to disk.
  * Skips extraction if a file with the correct size already exists (idempotent).
  *
- * @param assetName  - The asset key used in the SEA config (e.g. "pty.node").
+ * @param assetName  - The asset key used in the SEA config (e.g. "better_sqlite3.node").
  * @param cacheDir   - Target directory (created if absent).
+ * @param assetData  - Raw bytes of the addon.
  * @returns The absolute path to the extracted .node file.
  */
 export function extractAddonToDir(assetName: string, cacheDir: string, assetData: Buffer): string {
@@ -95,7 +97,7 @@ export function dlopenAddon(addonPath: string): void {
 /**
  * Load a native addon: extract from SEA assets to cache dir, then dlopen.
  *
- * @param name      - Asset name (e.g. "pty.node").
+ * @param name      - Asset name (e.g. "better_sqlite3.node").
  * @param cacheDir  - Pre-computed cache directory path.
  * @param seaModule - Injected SEA module interface (for testability).
  */
@@ -111,10 +113,10 @@ export function loadNativeAddon(
 }
 
 /**
- * Called once at agent startup (before any native module imports).
+ * Called once at hub startup (before any better-sqlite3 imports).
  *
  * In SEA mode: extracts all embedded .node addons to the cache dir and
- * pre-loads them so subsequent require('node-pty') calls resolve correctly.
+ * pre-loads them so subsequent require('better-sqlite3') calls resolve.
  *
  * In normal Node.js mode: complete no-op.
  */
@@ -147,11 +149,11 @@ export function initSeaAddons(): void {
 		try {
 			loadNativeAddon(assetName, cacheDir, seaMod);
 		} catch (err) {
-			// Extraction or dlopen failure is fatal — the agent cannot function
-			// without PTY support. Let the process crash with a clear message.
+			// Extraction or dlopen failure is fatal — the hub cannot function
+			// without SQLite support. Let the process crash with a clear message.
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(
-				`[nexterm-agent] fatal: failed to load SEA addon '${assetName}': ${msg}\n`,
+				`[nexterm-hub] fatal: failed to load SEA addon '${assetName}': ${msg}\n`,
 			);
 			process.exit(1);
 		}

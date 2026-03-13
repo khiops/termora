@@ -3034,7 +3034,9 @@ describe("SessionManager — elevation support", () => {
 
 		// ELEVATION_CANCELLED error sent to client
 		const errMsg = received.find(
-			(m) => m.type === "ERROR" && (m as ProtocolMessage & { code?: string }).code === "ELEVATION_CANCELLED",
+			(m) =>
+				m.type === "ERROR" &&
+				(m as ProtocolMessage & { code?: string }).code === "ELEVATION_CANCELLED",
 		);
 		expect(errMsg).toBeDefined();
 	});
