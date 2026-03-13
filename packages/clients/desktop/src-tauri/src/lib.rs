@@ -76,7 +76,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         use tauri_plugin_shell::ShellExt;
 
         let sidecar = app.shell().sidecar("nexterm-hub").unwrap();
-        let (rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
+        let (mut rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
 
         // Store the child handle so it stays alive for the app's lifetime
         // (dropping it would kill the sidecar)
