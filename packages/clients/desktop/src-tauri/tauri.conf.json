@@ -44,10 +44,10 @@
 		"shortDescription": "Local-first session terminal platform",
 		"category": "DeveloperTool",
 		"copyright": "© 2026 Nexterm contributors",
+		"licenseFile": "../../../../LICENSE",
 		"windows": {
 			"nsis": {
 				"installMode": "both",
-				"license": "../../../../LICENSE",
 				"installerIcon": "icons/icon.ico",
 				"headerImage": null,
 				"sidebarImage": null,
