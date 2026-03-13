@@ -89,7 +89,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::create_dir_all(&log_dir);
         let log_path = log_dir.join("hub.log");
 
-        std::thread::spawn(move || {
+        tauri::async_runtime::spawn(async move {
             let mut file = match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -100,7 +100,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             };
 
             use tauri_plugin_shell::process::CommandEvent;
-            while let Ok(event) = rx.recv() {
+            while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
                         let _ = writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
