@@ -61,9 +61,6 @@ jobs:
           - target_os: darwin
             target_arch: arm64
             runner: macos-latest
-          - target_os: darwin
-            target_arch: x64
-            runner: macos-13
 
     runs-on: ${{ matrix.runner }}
 
@@ -161,10 +158,6 @@ jobs:
             target_arch: arm64
             runner: macos-latest
             rust_target: aarch64-apple-darwin
-          - target_os: darwin
-            target_arch: x64
-            runner: macos-13
-            rust_target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.runner }}
 
