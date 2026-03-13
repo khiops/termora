@@ -28,6 +28,7 @@
 
 <script setup lang="ts">
 import { ref, onUnmounted } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "../stores/auth.js";
 
 const authStore = useAuthStore();
@@ -63,7 +64,7 @@ async function generate(): Promise<void> {
 	clearCountdown();
 
 	try {
-		const res = await fetch("/api/pair", {
+		const res = await fetch(`${hubBaseUrl()}/api/pair`, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${authStore.token ?? ""}`,

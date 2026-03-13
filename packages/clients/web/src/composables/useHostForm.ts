@@ -1,6 +1,7 @@
 import type { Host, SshConfigEntry } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "../stores/auth.js";
 import { useHostsStore } from "../stores/hosts.js";
 import { resolveEmojiShortcode } from "../utils/emoji-shortcodes.js";
@@ -110,7 +111,7 @@ export function useHostForm(editHost?: Host) {
 	async function loadSshConfig(): Promise<void> {
 		loadingSshConfig.value = true;
 		try {
-			const res = await fetch("/api/ssh-config", {
+			const res = await fetch(`${hubBaseUrl()}/api/ssh-config`, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (!res.ok) {

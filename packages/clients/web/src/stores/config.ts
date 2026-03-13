@@ -11,6 +11,7 @@ import {
 } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "./auth.js";
 
 interface FontFile {
@@ -97,7 +98,7 @@ export const useConfigStore = defineStore("config", () => {
 	 */
 	async function loadFonts(): Promise<void> {
 		try {
-			const fontList: FontFamily[] = await fetch("/api/fonts").then((r) => r.json());
+			const fontList: FontFamily[] = await fetch(`${hubBaseUrl()}/api/fonts`).then((r) => r.json());
 			fonts.value = fontList;
 			injectFontFaces(fontList);
 
@@ -127,7 +128,7 @@ export const useConfigStore = defineStore("config", () => {
 	async function loadProfile(): Promise<void> {
 		try {
 			const authStore = useAuthStore();
-			const resp = await fetch("/api/config/resolved", {
+			const resp = await fetch(`${hubBaseUrl()}/api/config/resolved`, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (resp.ok) {
@@ -146,7 +147,7 @@ export const useConfigStore = defineStore("config", () => {
 	async function loadUiConfig(): Promise<void> {
 		try {
 			const authStore = useAuthStore();
-			const resp = await fetch("/api/config/ui", {
+			const resp = await fetch(`${hubBaseUrl()}/api/config/ui`, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (resp.ok) {

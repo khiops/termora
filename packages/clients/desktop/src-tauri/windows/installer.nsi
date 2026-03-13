@@ -146,6 +146,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
+!define MUI_WELCOMEPAGE_TITLE "Welcome to the Nexterm Setup Wizard"
+!define MUI_WELCOMEPAGE_TEXT "This wizard will install Nexterm on your computer.$\r$\n$\r$\nNexterm is a local-first session terminal platform with hub, agent, and desktop components.$\r$\n$\r$\nClick Next to continue."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_WELCOME
 

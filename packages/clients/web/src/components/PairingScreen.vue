@@ -39,6 +39,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "../stores/auth.js";
 import { useSessionStore } from "../stores/session.js";
 
@@ -72,7 +73,7 @@ async function handleSubmit(): Promise<void> {
 	successMsg.value = null;
 
 	try {
-		const res = await fetch("/api/pair/verify", {
+		const res = await fetch(`${hubBaseUrl()}/api/pair/verify`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ code: code.value }),

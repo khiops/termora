@@ -83,6 +83,7 @@
 import { ref, computed, onMounted } from "vue";
 import type { NexTermTheme } from "@nexterm/shared";
 import { BUNDLED_THEME_NAMES, validateTheme } from "@nexterm/shared";
+import { hubBaseUrl } from "../../utils/hub-url.js";
 import { useThemeStore } from "../../stores/theme.js";
 import { useAuthStore } from "../../stores/auth.js";
 import ThemeCard from "./ThemeCard.vue";
@@ -124,7 +125,7 @@ async function handleImport(event: Event) {
 			return;
 		}
 
-		const response = await fetch("/api/themes", {
+		const response = await fetch(`${hubBaseUrl()}/api/themes`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",

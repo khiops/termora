@@ -297,6 +297,7 @@ import { useWindowTitle } from "./composables/useWindowTitle.js";
 import { useTabTitle } from "./composables/useTabTitle.js";
 import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
 import { useAutoSwitch } from "./composables/useAutoSwitch.js";
+import { hubBaseUrl } from "./utils/hub-url.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
 import TabBar from "./components/TabBar.vue";
@@ -326,7 +327,7 @@ const configStore = useConfigStore();
 
 function saveLayoutWidth(key: string, value: number): void {
 	if (authStore.token === null) return;
-	void fetch("/api/config/ui", {
+	void fetch(`${hubBaseUrl()}/api/config/ui`, {
 		method: "PUT",
 		headers: {
 			"Content-Type": "application/json",
@@ -474,7 +475,7 @@ async function applyCascadeTheme(channelId: string): Promise<void> {
 		const params = new URLSearchParams();
 		if (hostId) params.set("host_id", hostId);
 		params.set("channel_id", channelId);
-		const res = await fetch(`/api/config/cascade?${params.toString()}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/config/cascade?${params.toString()}`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) return;

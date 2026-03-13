@@ -143,6 +143,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { SshConfigEntry } from "@nexterm/shared";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "../stores/auth.js";
 
 /** Wire format from GET /api/ssh-config (snake_case keys). */
@@ -248,7 +249,7 @@ async function fetchSshConfig(): Promise<void> {
 	conflictError.value = null;
 	successMessage.value = null;
 	try {
-		const res = await fetch("/api/ssh-config", {
+		const res = await fetch(`${hubBaseUrl()}/api/ssh-config`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) {
@@ -301,7 +302,7 @@ async function onImport(): Promise<void> {
 	}));
 
 	try {
-		const res = await fetch("/api/hosts/import", {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts/import`, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,

@@ -18,6 +18,7 @@
 
 ## Tier 2 — Quick Wins (batchable)
 
+- [ ] 💡 [Hub+Agent] Configurable logging — `[logging]` section in config.toml (level, format text/json, output stderr/file) → pino for hub (via Fastify), same for agent — Priority: M
 - [ ] 💡 [Web+Hub] Dead channel display policy as setting (show/hide/auto-purge) with per-host override — Priority: L
 - [ ] 💡 [Web] Rail subtitle: middle truncation for hostnames (keep unique part) — Priority: L
 - [ ] 💡 [Web+Hub] ProxyJump auto-check in batch SSH import — Priority: L (from UX-03 /adversarial C-22)

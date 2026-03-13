@@ -4,6 +4,7 @@ import { markRaw, ref } from "vue";
 import { playBellSound } from "../composables/useBellSound.js";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
+import { hubWsUrl } from "../utils/hub-url.js";
 import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
@@ -49,8 +50,7 @@ export const useSessionStore = defineStore("session", () => {
 	}
 
 	async function _doConnect(): Promise<void> {
-		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-		const wsUrl = `${protocol}//${window.location.host}/ws`;
+		const wsUrl = `${hubWsUrl()}/ws`;
 		await wsClient.connect(wsUrl);
 		connected.value = true;
 

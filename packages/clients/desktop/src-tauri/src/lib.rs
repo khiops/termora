@@ -1,3 +1,4 @@
+use std::io::Write;
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -23,6 +24,7 @@ fn read_hub_auth_token() -> Option<String> {
     };
 
     let auth_path = config_dir.join("nexterm").join("auth.json");
+    eprintln!("[nexterm] checking auth.json at: {}", auth_path.display());
     let contents = std::fs::read_to_string(&auth_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let token = parsed.get("token")?.as_str()?.to_string();
@@ -35,7 +37,12 @@ fn read_hub_auth_token() -> Option<String> {
 
 #[tauri::command]
 fn get_hub_auth_token() -> Option<String> {
-    read_hub_auth_token()
+    let result = read_hub_auth_token();
+    match &result {
+        Some(_) => eprintln!("[nexterm] auto-auth: token found in auth.json"),
+        None => eprintln!("[nexterm] auto-auth: no valid token in auth.json"),
+    }
+    result
 }
 
 
@@ -69,11 +76,49 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         use tauri_plugin_shell::ShellExt;
 
         let sidecar = app.shell().sidecar("nexterm-hub").unwrap();
-        let (_rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
+        let (rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
 
         // Store the child handle so it stays alive for the app's lifetime
         // (dropping it would kill the sidecar)
         app.manage(_child);
+
+        // Capture sidecar stdout/stderr to a log file
+        let log_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("nexterm");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("hub.log");
+
+        std::thread::spawn(move || {
+            let mut file = match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                Ok(f) => f,
+                Err(_) => return,
+            };
+
+            use tauri_plugin_shell::process::CommandEvent;
+            while let Ok(event) = rx.recv() {
+                match event {
+                    CommandEvent::Stdout(line) => {
+                        let _ = writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
+                    }
+                    CommandEvent::Stderr(line) => {
+                        let _ = writeln!(file, "[hub:stderr] {}", String::from_utf8_lossy(&line));
+                    }
+                    CommandEvent::Terminated(payload) => {
+                        let _ = writeln!(file, "[hub:exit] code={:?} signal={:?}", payload.code, payload.signal);
+                        break;
+                    }
+                    CommandEvent::Error(err) => {
+                        let _ = writeln!(file, "[hub:error] {}", err);
+                    }
+                    _ => {}
+                }
+            }
+        });
 
         // Wait for hub to be ready (poll /api/health)
         let url = format!("http://localhost:{}/api/health", 4100);

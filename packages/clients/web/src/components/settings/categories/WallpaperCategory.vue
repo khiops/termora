@@ -115,6 +115,7 @@
 <script setup lang="ts">
 import { MAX_WALLPAPER_SIZE, WALLPAPER_EXTENSIONS } from "@nexterm/shared";
 import { computed, onMounted, ref } from "vue";
+import { hubBaseUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";
 import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
@@ -159,7 +160,7 @@ const hasWallpaperOverride = computed(() => {
 
 async function loadWallpapers(): Promise<void> {
 	try {
-		const resp = await fetch("/api/wallpapers");
+		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`);
 		if (resp.ok) {
 			const data = await resp.json();
 			wallpapers.value = data.wallpapers;
@@ -206,7 +207,7 @@ async function handleUpload(event: Event): Promise<void> {
 	formData.append("image", file);
 
 	try {
-		const resp = await fetch("/api/wallpapers", {
+		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${authStore.token ?? ""}` },
 			body: formData,
@@ -232,7 +233,7 @@ async function handleUpload(event: Event): Promise<void> {
 
 async function deleteWallpaper(filename: string): Promise<void> {
 	try {
-		await fetch(`/api/wallpapers/${encodeURIComponent(filename)}`, {
+		await fetch(`${hubBaseUrl()}/api/wallpapers/${encodeURIComponent(filename)}`, {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${authStore.token ?? ""}` },
 		});

@@ -1,6 +1,7 @@
 import { type Host, type HostGroup, type SessionStatus, toCamelCase } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "./auth.js";
 import { useSessionStore } from "./session.js";
 
@@ -50,7 +51,7 @@ export const useHostsStore = defineStore("hosts", () => {
 
 	async function fetchHostGroups(): Promise<void> {
 		if (authStore.token === null) return;
-		const res = await fetch("/api/host-groups", {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) return;
@@ -77,7 +78,7 @@ export const useHostsStore = defineStore("hosts", () => {
 		loading.value = true;
 		error.value = null;
 		try {
-			const res = await fetch("/api/hosts", {
+			const res = await fetch(`${hubBaseUrl()}/api/hosts`, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (!res.ok) {
@@ -125,7 +126,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function reorderHosts(groupId: string | null, hostIds: string[]): Promise<void> {
-		await fetch("/api/hosts/reorder", {
+		await fetch(`${hubBaseUrl()}/api/hosts/reorder`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -144,7 +145,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function createHost(body: Record<string, unknown>): Promise<Host | null> {
-		const res = await fetch("/api/hosts", {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts`, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -159,7 +160,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function updateHost(id: string, body: Record<string, unknown>): Promise<Host | null> {
-		const res = await fetch(`/api/hosts/${id}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts/${id}`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -175,7 +176,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function deleteHost(id: string): Promise<boolean> {
-		const res = await fetch(`/api/hosts/${id}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts/${id}`, {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
@@ -188,7 +189,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function duplicateHost(id: string): Promise<Host | null> {
-		const res = await fetch(`/api/hosts/${id}/duplicate`, {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts/${id}/duplicate`, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
@@ -205,7 +206,7 @@ export const useHostsStore = defineStore("hosts", () => {
 
 	async function createHostGroup(name: string): Promise<HostGroup | null> {
 		if (authStore.token === null) return null;
-		const res = await fetch("/api/host-groups", {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups`, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -236,7 +237,7 @@ export const useHostsStore = defineStore("hosts", () => {
 
 	async function renameHostGroup(id: string, name: string): Promise<void> {
 		if (authStore.token === null) return;
-		const res = await fetch(`/api/host-groups/${id}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups/${id}`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -254,7 +255,7 @@ export const useHostsStore = defineStore("hosts", () => {
 
 	async function deleteHostGroup(id: string): Promise<void> {
 		if (authStore.token === null) return;
-		const res = await fetch(`/api/host-groups/${id}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups/${id}`, {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
@@ -283,7 +284,7 @@ export const useHostsStore = defineStore("hosts", () => {
 		}
 		hostGroups.value = reordered;
 
-		const res = await fetch("/api/host-groups/reorder", {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups/reorder`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -299,7 +300,7 @@ export const useHostsStore = defineStore("hosts", () => {
 
 	async function moveHostToGroup(hostId: string, groupId: string | null): Promise<void> {
 		if (authStore.token === null) return;
-		const res = await fetch(`/api/hosts/${hostId}`, {
+		const res = await fetch(`${hubBaseUrl()}/api/hosts/${hostId}`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
