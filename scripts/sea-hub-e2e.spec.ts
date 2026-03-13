@@ -48,7 +48,9 @@ function isBinaryAvailable(): boolean {
 	}
 }
 
-const BINARY_AVAILABLE = isBinaryAvailable();
+/** SEA E2E tests only run in CI (after build-sea produces a fresh binary).
+ *  Locally the binary may be stale/incompatible — skip to avoid 7× 30s timeouts. */
+const RUN_SEA_TESTS = !!process.env.CI && isBinaryAvailable();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -226,7 +228,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 1: binary exists and is executable ───────────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)("binary exists and is executable", () => {
+	it.skipIf(!RUN_SEA_TESTS)("binary exists and is executable", () => {
 		expect(existsSync(SEA_BINARY)).toBe(true);
 
 		// Must be executable
@@ -239,7 +241,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 2: hub starts and responds to /api/health ───────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"starts and responds to /api/health with status ok",
 		{ timeout: 60_000 },
 		async () => {
@@ -255,7 +257,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 3: hub serves web UI from SEA assets ────────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"serves web UI index.html and JS assets from SEA embedded assets",
 		{ timeout: 60_000 },
 		async () => {
@@ -290,7 +292,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 4: API requires authentication ──────────────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"API routes require authentication — returns 401 without token",
 		{ timeout: 60_000 },
 		async () => {
@@ -304,7 +306,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 5: pairing flow works ────────────────────────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"pairing flow: POST /api/pair → /api/pair/verify → authenticated /api/hosts",
 		{ timeout: 60_000 },
 		async () => {
@@ -327,7 +329,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 6: hub + agent integration (optional) ───────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE || !existsSync(AGENT_BINARY))(
+	it.skipIf(!RUN_SEA_TESTS || !existsSync(AGENT_BINARY))(
 		"agent binary is co-located with hub binary (resolver can find it)",
 		{ timeout: 60_000 },
 		async () => {
@@ -357,7 +359,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 7: hub writes auth.json on first start ───────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"writes auth.json with a hex token on first start",
 		{ timeout: 60_000 },
 		async () => {
@@ -377,7 +379,7 @@ describe("nexterm-hub SEA binary E2E", { timeout: 120_000 }, () => {
 
 	// ── Test 8: hub creates databases on startup ──────────────────────────
 
-	it.skipIf(!BINARY_AVAILABLE)(
+	it.skipIf(!RUN_SEA_TESTS)(
 		"creates meta.db and spool.db in the state directory on startup",
 		{ timeout: 60_000 },
 		async () => {

@@ -40,7 +40,20 @@
 		],
 		"externalBin": ["nexterm-hub", "nexterm-agent"],
 		"createUpdaterArtifacts": false,
-		"resources": {}
+		"resources": {},
+		"shortDescription": "Local-first session terminal platform",
+		"category": "DeveloperTool",
+		"copyright": "© 2026 Nexterm contributors",
+		"windows": {
+			"nsis": {
+				"installMode": "both",
+				"license": "../../../../LICENSE",
+				"installerIcon": "icons/icon.ico",
+				"headerImage": null,
+				"sidebarImage": null,
+				"template": "windows/installer.nsi"
+			}
+		}
 	},
 	"plugins": {
 		"updater": {
