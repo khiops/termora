@@ -515,6 +515,9 @@ Function .onInit
   StrCpy $InstallHub ${BST_CHECKED}
   StrCpy $InstallAgent ${BST_CHECKED}
 
+  ; DEBUG — remove after confirming template variables
+  MessageBox MB_OK "DEBUG: INSTALLMODE=${INSTALLMODE} | PassiveMode=$PassiveMode | UpdateMode=$UpdateMode"
+
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY
   !endif
