@@ -37,6 +37,7 @@ ${StrLoc}
 !define VERSIONWITHBUILD "{{version_with_build}}"
 !define HOMEPAGE "{{homepage}}"
 !define INSTALLMODE "{{install_mode}}"
+!warning "NEXTERM_CUSTOM_TEMPLATE: INSTALLMODE=${INSTALLMODE}"
 !define LICENSE "{{license}}"
 !define INSTALLERICON "{{installer_icon}}"
 !define SIDEBARIMAGE "{{sidebar_image}}"
@@ -159,11 +160,15 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; 3. Install mode (if it is set to `both`)
 !if "${INSTALLMODE}" == "both"
+  !warning "NEXTERM: INSTALLMODE IS BOTH — compiling MULTIUSER_PAGE"
   !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
   !insertmacro MULTIUSER_PAGE_INSTALLMODE
+!else
+  !warning "NEXTERM: INSTALLMODE IS NOT BOTH — value is: ${INSTALLMODE}"
 !endif
 
 ; 4. Component selection page
+!warning "NEXTERM: COMPILING COMPONENTS PAGE"
 Page custom PageComponents PageComponentsLeave
 
 ; 5. Custom page to ask user if he wants to reinstall/uninstall
