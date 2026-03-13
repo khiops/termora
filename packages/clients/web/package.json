@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@msgpack/msgpack": "catalog:",
 		"@nexterm/shared": "workspace:*",
+		"@tauri-apps/api": "^2.10.1",
 		"@xterm/addon-fit": "catalog:",
 		"@xterm/addon-search": "catalog:",
 		"@xterm/addon-unicode11": "catalog:",

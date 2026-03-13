@@ -1,5 +1,6 @@
 <template>
 	<div class="app-root">
+		<TitleBar />
 		<!-- Write-request dialog — rendered globally, outside layout, via Teleport -->
 		<WriteRequestDialog />
 
@@ -277,6 +278,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, ref, toRef, watch } from "vue";
+import TitleBar from "./components/TitleBar.vue";
 import { useResizable } from "./composables/useResizable.js";
 import { generateId } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
@@ -1335,12 +1337,15 @@ body,
 
 .app-root {
 	height: 100%;
+	display: flex;
+	flex-direction: column;
 }
 
 .app-layout {
 	display: grid;
 	grid-template-columns: var(--rail-w, 48px) var(--sidebar-w, 200px) 1fr;
-	height: 100vh;
+	flex: 1;
+	min-height: 0;
 	background: var(--nt-bg);
 	color: var(--nt-fg);
 	position: relative;
@@ -1473,6 +1478,7 @@ body.nexterm-dragging * {
 	align-items: center;
 	justify-content: center;
 	z-index: 999;
+	flex: 1;
 }
 
 .app-loading-spinner {

@@ -1,0 +1,36 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "default",
+	"description": "Default capabilities for Nexterm desktop",
+	"windows": ["main"],
+	"permissions": [
+		"core:default",
+		"core:window:default",
+		"core:window:allow-minimize",
+		"core:window:allow-toggle-maximize",
+		"core:window:allow-close",
+		"core:window:allow-start-dragging",
+		"core:window:allow-is-maximized",
+		"core:window:allow-show",
+		"core:window:allow-set-focus",
+		"core:window:allow-start-resize-dragging",
+		{
+			"identifier": "shell:allow-execute",
+			"allow": [
+				{
+					"args": true,
+					"name": "binaries/nexterm-hub",
+					"sidecar": true
+				},
+				{
+					"args": true,
+					"name": "binaries/nexterm-agent",
+					"sidecar": true
+				}
+			]
+		},
+		"shell:allow-spawn",
+		"shell:allow-stdin-write",
+		"updater:default"
+	]
+}

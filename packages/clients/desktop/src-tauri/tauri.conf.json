@@ -1,0 +1,55 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Nexterm",
+	"identifier": "app.nexterm.desktop",
+	"version": "0.1.0",
+	"build": {
+		"devUrl": "http://localhost:5173",
+		"frontendDist": "../../web/dist",
+		"beforeDevCommand": "",
+		"beforeBuildCommand": "cd ../../.. && bash scripts/prepare-desktop.sh"
+	},
+	"app": {
+		"windows": [
+			{
+				"label": "main",
+				"title": "Nexterm",
+				"width": 1280,
+				"height": 800,
+				"minWidth": 800,
+				"minHeight": 600,
+				"resizable": true,
+				"fullscreen": false,
+				"decorations": false,
+				"visible": false
+			}
+		],
+		"security": {
+			"csp": "default-src 'self' http://localhost:4100 ws://localhost:4100; connect-src 'self' http://localhost:4100 ws://localhost:4100; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' http://localhost:4100 data:"
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		],
+		"externalBin": ["binaries/nexterm-hub", "binaries/nexterm-agent"],
+		"createUpdaterArtifacts": false,
+		"resources": {}
+	},
+	"plugins": {
+		"updater": {
+			"endpoints": ["https://github.com/niceda/nexterm/releases/latest/download/latest.json"],
+			"dialog": true,
+			"pubkey": ""
+		},
+		"shell": {
+			"open": false
+		}
+	}
+}
