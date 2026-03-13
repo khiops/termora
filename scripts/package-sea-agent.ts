@@ -25,34 +25,37 @@ const ROOT = resolve(__dirname, "..");
 /** Binary extension — empty on Linux/macOS, .exe on Windows. */
 const EXE_EXT = process.platform === "win32" ? ".exe" : "";
 
+/** Map process.platform + process.arch to node-pty prebuild directory name. */
+function prebuildDir(): string {
+	const platform = process.platform; // linux, darwin, win32
+	const arch = process.arch; // x64, arm64
+	return `${platform}-${arch}`;
+}
+
 /** Locate the node-pty native addon from the agent's node_modules. */
 function locatePtyNode(): string {
-	// Primary: agent package symlink (pnpm virtual store)
-	const agentNodeModules = join(
-		ROOT,
-		"packages",
-		"agent",
-		"node_modules",
-		"node-pty",
-		"build",
-		"Release",
-		"pty.node",
-	);
-	if (existsSync(agentNodeModules)) {
-		return agentNodeModules;
-	}
+	const ptyBase = join(ROOT, "packages", "agent", "node_modules", "node-pty");
+	const rootPtyBase = join(ROOT, "node_modules", "node-pty");
 
-	// Fallback: root-level node_modules (hoisted installs / npm/yarn)
-	const rootNodeModules = join(ROOT, "node_modules", "node-pty", "build", "Release", "pty.node");
-	if (existsSync(rootNodeModules)) {
-		return rootNodeModules;
+	const candidates = [
+		// Compiled build
+		join(ptyBase, "build", "Release", "pty.node"),
+		// Prebuilt binary (node-pty v1.x ships prebuilds per platform)
+		join(ptyBase, "prebuilds", prebuildDir(), "pty.node"),
+		// Root-level fallback (hoisted installs)
+		join(rootPtyBase, "build", "Release", "pty.node"),
+		join(rootPtyBase, "prebuilds", prebuildDir(), "pty.node"),
+	];
+
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) {
+			return candidate;
+		}
 	}
 
 	throw new Error(
 		`[package-sea-agent] node-pty addon not found.\n` +
-			`  Checked:\n` +
-			`    ${agentNodeModules}\n` +
-			`    ${rootNodeModules}\n` +
+			`  Checked:\n${candidates.map((c) => `    ${c}`).join("\n")}\n` +
 			`  Run \`pnpm install\` to build native addons first.`,
 	);
 }
