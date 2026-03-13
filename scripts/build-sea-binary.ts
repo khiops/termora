@@ -48,7 +48,7 @@ const SENTINEL_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
  */
 function run(cmd: string, args: string[], label: string): void {
 	console.log(`[build-sea] ${label}: ${cmd} ${args.join(" ")}`);
-	const result = spawnSync(cmd, args, { stdio: "inherit", shell: false });
+	const result = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
 	if (result.error) {
 		throw new Error(`[build-sea] ${label} failed to start: ${result.error.message}`);
 	}
