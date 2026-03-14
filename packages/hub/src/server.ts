@@ -39,10 +39,23 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		logger: options?.logger ?? true,
 	});
 
+	// CORS headers — required for Tauri desktop where the webview origin
+	// (tauri://localhost) differs from the hub (http://localhost:4100).
+	server.addHook("onSend", async (_request: FastifyRequest, reply: FastifyReply) => {
+		reply.header("Access-Control-Allow-Origin", "*");
+		reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+		reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+	});
+
 	// Auth enforcement — applied before route matching
 	if (options?.authToken) {
 		const expectedToken = options.authToken;
 		server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
+			// CORS preflight — browsers send OPTIONS without credentials.
+			if (request.method === "OPTIONS") {
+				return reply.code(204).send();
+			}
+
 			// Parse pathname from the raw URL to avoid query-string or path-traversal bypasses.
 			const pathname = new URL(request.url, "http://localhost").pathname;
 
