@@ -147,8 +147,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
-!define MUI_WELCOMEPAGE_TITLE "Welcome to the Nexterm Setup Wizard"
-!define MUI_WELCOMEPAGE_TEXT "This wizard will install Nexterm on your computer.$\r$\n$\r$\nNexterm is a local-first session terminal platform with hub, agent, and desktop components.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TITLE "Bienvenue — Nexterm Custom Installer v2"
+!define MUI_WELCOMEPAGE_TEXT "Ce wizard va installer Nexterm sur votre ordinateur.$\r$\n$\r$\nSi vous lisez ce texte en francais, le template NSIS custom est bien utilise.$\r$\n$\r$\nCliquez sur Suivant pour continuer."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_WELCOME
 
@@ -781,6 +781,18 @@ Section Install
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL
   !endif
+
+  ; DEBUG — write install-time variables to install directory
+  FileOpen $R9 "$INSTDIR\nexterm-nsis-debug.txt" w
+  FileWrite $R9 "TEMPLATE=custom-v2$\r$\n"
+  FileWrite $R9 "INSTALLMODE=${INSTALLMODE}$\r$\n"
+  FileWrite $R9 "CMDLINE=$CMDLINE$\r$\n"
+  FileWrite $R9 "PassiveMode=$PassiveMode$\r$\n"
+  FileWrite $R9 "UpdateMode=$UpdateMode$\r$\n"
+  FileWrite $R9 "InstallHub=$InstallHub$\r$\n"
+  FileWrite $R9 "InstallAgent=$InstallAgent$\r$\n"
+  FileWrite $R9 "INSTDIR=$INSTDIR$\r$\n"
+  FileClose $R9
 
   ; Auto close this page for passive mode
   ${If} $PassiveMode = 1
