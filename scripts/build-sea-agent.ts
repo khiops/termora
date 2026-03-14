@@ -147,6 +147,30 @@ var __seaPtyExports;
   var _cacheDir = _path.join(_cacheBase, 'addons', _version);
   var _ptyPath  = _path.join(_cacheDir, 'pty.node');
 
+  // Extract winpty files first (Windows only) — pty.node depends on winpty.dll.
+  if (process.platform === 'win32') {
+    var _winptyAssets = ['winpty.dll', 'winpty-agent.exe'];
+    for (var _wi = 0; _wi < _winptyAssets.length; _wi++) {
+      try {
+        var _wName = _winptyAssets[_wi];
+        var _wBlob = _sea.getRawAsset(_wName);
+        var _wData = Buffer.from(_wBlob);
+        var _wPath = _path.join(_cacheDir, _wName);
+        var _wWrite = true;
+        if (_fs.existsSync(_wPath)) {
+          try { if (_fs.statSync(_wPath).size === _wData.byteLength) _wWrite = false; }
+          catch (_) {}
+        }
+        if (_wWrite) {
+          _fs.mkdirSync(_cacheDir, { recursive: true });
+          _fs.writeFileSync(_wPath, _wData, { mode: 0o755 });
+        }
+      } catch (err) {
+        process.stderr.write('[nexterm-agent] warn: winpty asset ' + _winptyAssets[_wi] + ': ' + err + '\\n');
+      }
+    }
+  }
+
   // Extract pty.node from SEA asset blob (idempotent: skip if same size).
   try {
     var _blob = _sea.getRawAsset('pty.node');
