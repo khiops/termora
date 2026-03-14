@@ -237,6 +237,6 @@ jobs:
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.deb
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.AppImage
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.msi
-            packages/clients/desktop/src-tauri/target/release/bundle/**/*.nsis
+            packages/clients/desktop/src-tauri/target/release/bundle/nsis/*.exe
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.dmg
           retention-days: 7
