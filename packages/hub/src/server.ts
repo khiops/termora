@@ -1,3 +1,4 @@
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -39,22 +40,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		logger: options?.logger ?? true,
 	});
 
-	// CORS headers — required for Tauri desktop where the webview origin
-	// (tauri://localhost) differs from the hub (http://localhost:4100).
-	server.addHook("onSend", async (_request: FastifyRequest, reply: FastifyReply) => {
-		reply.header("Access-Control-Allow-Origin", "*");
-		reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-		reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+	// CORS — required for Tauri desktop (webview origin differs from hub)
+	// and for remote hub access from web clients on other domains.
+	await server.register(cors, {
+		origin: true,
+		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+		allowedHeaders: ["Content-Type", "Authorization"],
+		credentials: true,
 	});
 
 	// Auth enforcement — applied before route matching
 	if (options?.authToken) {
 		const expectedToken = options.authToken;
 		server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
-			// CORS preflight — browsers send OPTIONS without credentials.
-			if (request.method === "OPTIONS") {
-				return reply.code(204).send();
-			}
+			// CORS preflight is handled by @fastify/cors — skip auth.
+			if (request.method === "OPTIONS") return;
 
 			// Parse pathname from the raw URL to avoid query-string or path-traversal bypasses.
 			const pathname = new URL(request.url, "http://localhost").pathname;

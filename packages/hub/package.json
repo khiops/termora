@@ -11,7 +11,10 @@
 		"node": ">=20"
 	},
 	"type": "module",
-	"files": ["dist", "src/storage/migrations"],
+	"files": [
+		"dist",
+		"src/storage/migrations"
+	],
 	"exports": {
 		".": "./dist/index.js",
 		"./cli": "./dist/cli.js"
@@ -22,22 +25,23 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
-		"@nexterm/shared": "workspace:*",
+		"@fastify/cors": "^11.2.0",
+		"@fastify/multipart": "catalog:",
+		"@fastify/static": "catalog:",
+		"@fastify/websocket": "catalog:",
+		"@iarna/toml": "catalog:",
 		"@msgpack/msgpack": "catalog:",
+		"@nexterm/shared": "workspace:*",
+		"@rainbowatcher/toml-edit-js": "catalog:",
 		"better-sqlite3": "catalog:",
 		"fastify": "catalog:",
-		"@fastify/websocket": "catalog:",
-		"@fastify/static": "catalog:",
-		"@fastify/multipart": "catalog:",
-		"ssh2": "catalog:",
-		"@iarna/toml": "catalog:",
-		"@rainbowatcher/toml-edit-js": "catalog:"
+		"ssh2": "catalog:"
 	},
 	"devDependencies": {
-		"tsx": "catalog:",
-		"typescript": "catalog:",
-		"@types/node": "catalog:",
 		"@types/better-sqlite3": "catalog:",
-		"@types/ssh2": "catalog:"
+		"@types/node": "catalog:",
+		"@types/ssh2": "catalog:",
+		"tsx": "catalog:",
+		"typescript": "catalog:"
 	}
 }
