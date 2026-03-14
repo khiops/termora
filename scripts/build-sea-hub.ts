@@ -338,6 +338,9 @@ export const buildOptions: BuildOptions = {
 			SEA_BOOTSTRAP_BANNER,
 		].join("\n"),
 	},
+	footer: {
+		js: "// SEA auto-invoke: cli.ts exports main() but does not self-invoke.\nmain(process.argv.slice(2)).catch(function(e) { console.error(e); process.exit(1); });",
+	},
 	plugins: [
 		migrationsEmbedPlugin(),
 		tomlEditShimPlugin(),
