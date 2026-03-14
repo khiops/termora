@@ -147,6 +147,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
+!error "NEXTERM_TEMPLATE_CANARY: This proves the custom template is compiled by NSIS"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to the Nexterm Setup Wizard"
 !define MUI_WELCOMEPAGE_TEXT "This wizard will install Nexterm on your computer.$\r$\n$\r$\nNexterm is a local-first session terminal platform with hub, agent, and desktop components.$\r$\n$\r$\nClick Next to continue."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
