@@ -23,3 +23,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["blocking"], default-features = false }
 dirs = "6"
+
+[profile.release]
+# Thin LTO: ~90% of fat LTO quality, much faster linking
+lto = "thin"
+# Strip debug symbols — smaller binary, faster link
+strip = true
+# Default codegen-units (16) for faster parallel compilation
+# codegen-units = 1 would be smaller but 3-4x slower to compile
