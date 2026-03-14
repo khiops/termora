@@ -240,6 +240,24 @@ jobs:
           SCCACHE_GHA_ENABLED: ${{ steps.sccache.outputs.ok == 'true' && 'true' || 'false' }}
         run: pnpm -F @nexterm/desktop exec tauri build
 
+      - name: Dump rendered NSIS template (debug)
+        if: matrix.target_os == 'windows'
+        shell: bash
+        run: |
+          NSI=$(find packages/clients/desktop/src-tauri/target -name "installer.nsi" -path "*/nsis/*" 2>/dev/null | head -1)
+          if [ -n "$NSI" ]; then
+            echo "=== RENDERED installer.nsi (first 100 lines) ==="
+            head -100 "$NSI"
+            echo "=== .onInit section ==="
+            grep -n -A30 "Function .onInit" "$NSI" | head -40
+            echo "=== INSTALLMODE value ==="
+            grep "INSTALLMODE" "$NSI" | head -5
+            echo "=== Page declarations ==="
+            grep -n "^Page\|MUI_PAGE\|MULTIUSER_PAGE" "$NSI" | head -20
+          else
+            echo "installer.nsi not found in target/"
+          fi
+
       - name: Upload Tauri installer artifacts
         uses: actions/upload-artifact@v4
         with:
