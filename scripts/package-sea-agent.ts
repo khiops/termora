@@ -60,7 +60,9 @@ function locatePtyNode(): string {
 	);
 }
 
-/** Locate winpty DLL and agent from node-pty's build output (Windows only). */
+/** Locate winpty DLL and agent from node-pty (Windows only).
+ *  Searches both build/Release/ and prebuilds/win32-x64/ since
+ *  node-pty v1.x ships prebuilt binaries per platform. */
 function locateWinptyFiles(): { dll?: string; agent?: string } {
 	if (process.platform !== "win32") return {};
 
@@ -70,11 +72,14 @@ function locateWinptyFiles(): { dll?: string; agent?: string } {
 	const result: { dll?: string; agent?: string } = {};
 
 	for (const base of [ptyBase, rootPtyBase]) {
-		const dllPath = join(base, "build", "Release", "winpty.dll");
-		if (!result.dll && existsSync(dllPath)) result.dll = dllPath;
+		const candidates = [join(base, "build", "Release"), join(base, "prebuilds", prebuildDir())];
+		for (const dir of candidates) {
+			const dllPath = join(dir, "winpty.dll");
+			if (!result.dll && existsSync(dllPath)) result.dll = dllPath;
 
-		const agentPath = join(base, "build", "Release", "winpty-agent.exe");
-		if (!result.agent && existsSync(agentPath)) result.agent = agentPath;
+			const agentPath = join(dir, "winpty-agent.exe");
+			if (!result.agent && existsSync(agentPath)) result.agent = agentPath;
+		}
 	}
 
 	return result;
