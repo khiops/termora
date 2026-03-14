@@ -17,8 +17,12 @@ import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
-/** Names of .node assets embedded in the SEA binary. */
-const SEA_ADDON_ASSETS: readonly string[] = ["pty.node"] as const;
+/** Names of .node/.dll assets embedded in the SEA binary. */
+const SEA_ADDON_ASSETS: readonly string[] = [
+	// winpty files must be extracted BEFORE pty.node (it depends on them)
+	...(process.platform === "win32" ? ["winpty.dll", "winpty-agent.exe"] : []),
+	"pty.node",
+] as const;
 
 /** Detect whether we are running inside a Node SEA binary. */
 export function detectSea(): boolean {
@@ -145,15 +149,31 @@ export function initSeaAddons(): void {
 
 	for (const assetName of SEA_ADDON_ASSETS) {
 		try {
-			loadNativeAddon(assetName, cacheDir, seaMod);
+			if (assetName.endsWith(".node")) {
+				loadNativeAddon(assetName, cacheDir, seaMod);
+			} else {
+				// DLLs and executables: just extract to cache dir (no dlopen).
+				// Windows finds them automatically when they are co-located with
+				// the .node file that depends on them.
+				const blob = seaMod.getRawAsset(assetName);
+				const data = Buffer.from(blob);
+				extractAddonToDir(assetName, cacheDir, data);
+			}
 		} catch (err) {
-			// Extraction or dlopen failure is fatal — the agent cannot function
-			// without PTY support. Let the process crash with a clear message.
 			const msg = err instanceof Error ? err.message : String(err);
+			if (assetName === "pty.node") {
+				// Extraction or dlopen failure is fatal — the agent cannot
+				// function without PTY support.
+				process.stderr.write(
+					`[nexterm-agent] fatal: failed to load SEA addon '${assetName}': ${msg}\n`,
+				);
+				process.exit(1);
+			}
+			// winpty.dll / winpty-agent.exe: warn but continue.
+			// On non-Windows builds the assets won't be embedded — this is expected.
 			process.stderr.write(
-				`[nexterm-agent] fatal: failed to load SEA addon '${assetName}': ${msg}\n`,
+				`[nexterm-agent] warn: SEA addon '${assetName}' not available: ${msg}\n`,
 			);
-			process.exit(1);
 		}
 	}
 }

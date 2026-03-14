@@ -60,6 +60,26 @@ function locatePtyNode(): string {
 	);
 }
 
+/** Locate winpty DLL and agent from node-pty's build output (Windows only). */
+function locateWinptyFiles(): { dll?: string; agent?: string } {
+	if (process.platform !== "win32") return {};
+
+	const ptyBase = join(ROOT, "packages", "agent", "node_modules", "node-pty");
+	const rootPtyBase = join(ROOT, "node_modules", "node-pty");
+
+	const result: { dll?: string; agent?: string } = {};
+
+	for (const base of [ptyBase, rootPtyBase]) {
+		const dllPath = join(base, "build", "Release", "winpty.dll");
+		if (!result.dll && existsSync(dllPath)) result.dll = dllPath;
+
+		const agentPath = join(base, "build", "Release", "winpty-agent.exe");
+		if (!result.agent && existsSync(agentPath)) result.agent = agentPath;
+	}
+
+	return result;
+}
+
 /** Read the agent package version from its package.json. */
 function readAgentVersion(): string {
 	const pkgPath = join(ROOT, "packages", "agent", "package.json");
@@ -93,9 +113,22 @@ async function main(): Promise<void> {
 
 	const ptyNodePath = locatePtyNode();
 	const version = readAgentVersion();
+	const winpty = locateWinptyFiles();
 
 	console.log(`[package-sea-agent] node-pty addon: ${ptyNodePath}`);
 	console.log(`[package-sea-agent] agent version: ${version}`);
+
+	const nativeAddons: Record<string, string> = {
+		"pty.node": ptyNodePath,
+	};
+	if (winpty.dll) {
+		nativeAddons["winpty.dll"] = winpty.dll;
+		console.log(`[package-sea-agent] winpty.dll: ${winpty.dll}`);
+	}
+	if (winpty.agent) {
+		nativeAddons["winpty-agent.exe"] = winpty.agent;
+		console.log(`[package-sea-agent] winpty-agent.exe: ${winpty.agent}`);
+	}
 
 	const outputBinary = join(ROOT, "dist", "sea", `nexterm-agent${EXE_EXT}`);
 
@@ -110,9 +143,7 @@ async function main(): Promise<void> {
 		entryScript: join(ROOT, "dist", "sea", "nexterm-agent.cjs"),
 		outputBinary,
 		name: "nexterm-agent",
-		nativeAddons: {
-			"pty.node": ptyNodePath,
-		},
+		nativeAddons,
 		extraAssets: {
 			VERSION: versionFilePath,
 		},
