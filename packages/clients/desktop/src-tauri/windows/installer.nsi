@@ -147,7 +147,6 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
-!error "NEXTERM_TEMPLATE_CANARY: This proves the custom template is compiled by NSIS"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to the Nexterm Setup Wizard"
 !define MUI_WELCOMEPAGE_TEXT "This wizard will install Nexterm on your computer.$\r$\n$\r$\nNexterm is a local-first session terminal platform with hub, agent, and desktop components.$\r$\n$\r$\nClick Next to continue."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
@@ -521,13 +520,14 @@ Function .onInit
   StrCpy $InstallHub ${BST_CHECKED}
   StrCpy $InstallAgent ${BST_CHECKED}
 
-  ; DEBUG — write template variables to a debug file
-  FileOpen $R9 "$TEMP\nexterm-nsis-debug.txt" w
+  ; DEBUG — write to C:\ root (always writable by elevated installer)
+  FileOpen $R9 "C:\nexterm-nsis-debug.txt" w
+  FileWrite $R9 "CMDLINE=$CMDLINE$\r$\n"
   FileWrite $R9 "INSTALLMODE=${INSTALLMODE}$\r$\n"
-  FileWrite $R9 "LICENSE=${LICENSE}$\r$\n"
-  FileWrite $R9 "PRODUCTNAME=${PRODUCTNAME}$\r$\n"
   FileWrite $R9 "PassiveMode=$PassiveMode$\r$\n"
   FileWrite $R9 "UpdateMode=$UpdateMode$\r$\n"
+  FileWrite $R9 "NoShortcutMode=$NoShortcutMode$\r$\n"
+  FileWrite $R9 "Silent=${__UNINSTALL__}$\r$\n"
   FileClose $R9
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
