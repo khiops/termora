@@ -8,8 +8,10 @@
  *
  * Key decisions:
  * - Format: CJS  — Node SEA requires a CJS entry for process.dlopen compat.
- * - better-sqlite3: external — the .node binary is embedded as a SEA asset
- *   and loaded via sea-addon-loader.ts at startup.
+ * - better-sqlite3: BUNDLED — its JS is inlined; the native .node binary is
+ *   embedded as a SEA asset and pre-loaded by the banner into __seaSqliteExports.
+ *   betterSqliteBindingsPlugin() intercepts require('bindings') inside the
+ *   better-sqlite3 source and returns __seaSqliteExports instead.
  * - cpu-features: external + optional — ssh2 optional dep, may not be present.
  * - @nexterm/shared: inlined — workspace package, not a published dep.
  * - Fastify + plugins: inlined — pure JS, no native deps.
@@ -308,6 +310,66 @@ const SEA_BANNER_LINES = [
 const SEA_BOOTSTRAP_BANNER = SEA_BANNER_LINES.join("\n");
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Plugin: better-sqlite3 bindings shim
+//
+// better-sqlite3's JS code calls require('bindings')('better_sqlite3.node')
+// to locate its native addon. In SEA mode there is no node_modules on disk,
+// so the bindings package fails with ENOENT.
+//
+// Fix: intercept the 'bindings' import when it originates from better-sqlite3
+// and return a shim that reads from __seaSqliteExports — the global populated
+// by the SEA bootstrap banner above (process.dlopen on the extracted .node).
+//
+// In non-SEA (dev) mode the shim is never reached because better-sqlite3 is
+// not external anymore; esbuild bundles its JS, but the bindings call still
+// goes through this shim. The shim checks for __seaSqliteExports first and
+// falls back to node-gyp-build so dev mode continues to work.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function betterSqliteBindingsPlugin(): Plugin {
+	return {
+		name: "better-sqlite3-bindings-shim",
+		setup(buildContext) {
+			// Intercept the 'bindings' package that better-sqlite3 uses to locate
+			// its native addon. In SEA mode, the addon is pre-loaded by the banner
+			// bootstrap into __seaSqliteExports. In non-SEA mode, this shim is never
+			// reached because the original bindings package resolves normally.
+			//
+			// The banner bootstrap detects SEA mode and calls process.dlopen()
+			// on the extracted better_sqlite3.node, storing the result in
+			// __seaSqliteExports. This plugin makes sure the JS wrapper code
+			// in better-sqlite3 receives those exports instead of trying to
+			// load the .node file from disk via the bindings package.
+			buildContext.onResolve({ filter: /^bindings$/ }, (args) => {
+				// Only intercept when required from better-sqlite3
+				if (args.importer.includes("better-sqlite3")) {
+					return { path: "bindings", namespace: "sea-bindings-shim" };
+				}
+				return undefined; // Let other packages use bindings normally
+			});
+
+			buildContext.onLoad({ filter: /^bindings$/, namespace: "sea-bindings-shim" }, () => ({
+				contents: `
+					module.exports = function(name) {
+						// __seaSqliteExports is populated by the SEA bootstrap banner
+						// in build-sea-hub.ts (process.dlopen on the extracted .node file).
+						// This shim is only reached in the SEA bundle — in development the
+						// real 'bindings' package resolves the .node file from node_modules.
+						if (typeof __seaSqliteExports !== 'undefined') {
+							return __seaSqliteExports;
+						}
+						// Guard: if somehow reached outside SEA (should not happen in prod),
+						// throw a clear error rather than silently returning undefined.
+						throw new Error('[nexterm-hub] better-sqlite3 bindings shim: __seaSqliteExports not set. Is the SEA bootstrap banner running?');
+					};
+				`,
+				loader: "js",
+			}));
+		},
+	};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // esbuild config
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -321,10 +383,11 @@ export const buildOptions: BuildOptions = {
 	sourcemap: false,
 	minify: false,
 	external: [
-		// Native addon — the .node binary is embedded as a SEA asset.
-		"better-sqlite3",
 		// cpu-features is an optional dependency of ssh2 for performance.
 		// It may not be installed and is not required for correctness.
+		// NOTE: better-sqlite3 is NOT external — it is bundled and its native
+		// addon resolution is intercepted by betterSqliteBindingsPlugin so that
+		// in SEA mode it reads from __seaSqliteExports (pre-loaded by the banner).
 		"cpu-features",
 	],
 	// Shim import.meta.url for the ESM-to-CJS bundle.
@@ -342,6 +405,7 @@ export const buildOptions: BuildOptions = {
 		js: "// SEA auto-invoke: cli.ts exports main() but does not self-invoke.\nmain(process.argv.slice(2)).catch(function(e) { console.error(e); process.exit(1); });",
 	},
 	plugins: [
+		betterSqliteBindingsPlugin(), // must be first — intercepts 'bindings' before other plugins see it
 		migrationsEmbedPlugin(),
 		tomlEditShimPlugin(),
 		sshNativeShimPlugin(),

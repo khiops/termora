@@ -50,14 +50,29 @@ describe("esbuild bundle produces valid CJS", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// Test 2: better-sqlite3 is external (not inlined)
+// Test 2: better-sqlite3 is bundled (not external) with bindings shim
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("bundle does not include better-sqlite3 inline", () => {
-	it("better-sqlite3 is external — require call present", () => {
+describe("better-sqlite3 is bundled with bindings shim", () => {
+	it("better-sqlite3 is NOT external — no require('better-sqlite3') in bundle", () => {
 		const content = readFileSync(OUT_FILE, "utf8");
-		// When external, esbuild emits require("better-sqlite3") in the bundle.
-		expect(content).toContain('require("better-sqlite3")');
+		// When bundled (not external), esbuild inlines the JS source.
+		// An external require("better-sqlite3") call must NOT appear.
+		expect(content).not.toContain('require("better-sqlite3")');
+	});
+
+	it("better-sqlite3 JS internals appear in the bundle", () => {
+		const content = readFileSync(OUT_FILE, "utf8");
+		// When bundled, better-sqlite3 identifiers appear inline.
+		// "Database" is the main export class from better-sqlite3.
+		expect(content).toMatch(/better.sqlite3|better_sqlite3/i);
+	});
+
+	it("bindings shim references __seaSqliteExports", () => {
+		const content = readFileSync(OUT_FILE, "utf8");
+		// The betterSqliteBindingsPlugin shim must be present in the bundle,
+		// routing native addon resolution to the SEA-pre-loaded exports.
+		expect(content).toContain("__seaSqliteExports");
 	});
 
 	it("better_sqlite3.node is not embedded as a binary blob", () => {
