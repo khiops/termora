@@ -43,7 +43,31 @@ import { edit, initSync } from "@rainbowatcher/toml-edit-js";
 import type { MetaDAL } from "./storage/meta.js";
 
 // Initialize toml-edit-js WASM (sync — called once at module load)
-initSync();
+// In SEA mode the WASM file is not on disk — load it from the embedded asset.
+// In normal (dev) mode, fall through to the no-arg initSync() which resolves
+// the file from node_modules via the URL embedded in index.js.
+function _loadTomlWasm(): void {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const sea = require("node:sea") as {
+			isSea?: () => boolean;
+			getRawAsset?: (name: string) => ArrayBuffer;
+		};
+		if (typeof sea.isSea === "function" && sea.isSea() && typeof sea.getRawAsset === "function") {
+			const wasmBuffer = sea.getRawAsset("toml_edit.wasm");
+			initSync(new WebAssembly.Module(wasmBuffer));
+			return;
+		}
+	} catch {
+		// node:sea not available (older Node build) — fall through
+	}
+	// Dev / non-SEA path: initSync() with no args loads the WASM file from
+	// node_modules relative to index.js using a preloaded URL stub.
+	// The esbuild tomlEditShimPlugin stubs out the .wasm import so the bundle
+	// remains loadable; the actual WASM bytes come from the SEA asset above.
+	initSync();
+}
+_loadTomlWasm();
 
 // ─── GC configuration ──────────────────────────────────────────────────────────
 

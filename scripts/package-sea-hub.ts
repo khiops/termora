@@ -61,6 +61,46 @@ export function resolveContentType(filePath: string): string {
 export const KNOWN_EXTENSIONS = Object.keys(CONTENT_TYPES);
 
 /**
+ * Locate the toml-edit-js WASM file from the hub's node_modules.
+ * Falls back to root-level node_modules for hoisted installs.
+ */
+export function locateTomlWasm(): string {
+	// Primary: hub package symlink (pnpm virtual store)
+	const hubNodeModules = join(
+		ROOT,
+		"packages",
+		"hub",
+		"node_modules",
+		"@rainbowatcher",
+		"toml-edit-js",
+		"index_bg.wasm",
+	);
+	if (existsSync(hubNodeModules)) {
+		return hubNodeModules;
+	}
+
+	// Fallback: root-level node_modules (hoisted installs / npm/yarn)
+	const rootNodeModules = join(
+		ROOT,
+		"node_modules",
+		"@rainbowatcher",
+		"toml-edit-js",
+		"index_bg.wasm",
+	);
+	if (existsSync(rootNodeModules)) {
+		return rootNodeModules;
+	}
+
+	throw new Error(
+		`[package-sea-hub] toml-edit-js WASM not found.\n` +
+			`  Checked:\n` +
+			`    ${hubNodeModules}\n` +
+			`    ${rootNodeModules}\n` +
+			`  Run \`pnpm install\` first.`,
+	);
+}
+
+/**
  * Locate the better-sqlite3 native addon from the hub's node_modules.
  * Falls back to root-level node_modules for hoisted installs.
  */
@@ -247,9 +287,11 @@ async function main(): Promise<void> {
 	console.log("[package-sea-hub] step 5/5: SEA binary packaging");
 
 	const betterSqlite3Path = locateBetterSqlite3();
+	const tomlWasmPath = locateTomlWasm();
 	const version = readHubVersion();
 
 	console.log(`[package-sea-hub] better-sqlite3 addon: ${betterSqlite3Path}`);
+	console.log(`[package-sea-hub] toml-edit WASM:        ${tomlWasmPath}`);
 	console.log(`[package-sea-hub] hub version: ${version}`);
 
 	const outputBinary = join(ROOT, "dist", "sea", `nexterm-hub${EXE_EXT}`);
@@ -268,6 +310,7 @@ async function main(): Promise<void> {
 		extraAssets: {
 			VERSION: versionFilePath,
 			"static-manifest.json": staticManifestPath,
+			"toml_edit.wasm": tomlWasmPath,
 		},
 		useCodeCache: true,
 		disableExperimentalSEAWarning: true,
