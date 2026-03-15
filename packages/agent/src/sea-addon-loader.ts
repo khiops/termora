@@ -147,12 +147,7 @@ export function initSeaAddons(): void {
 
 	const cacheDir = getAddonCacheDir(version);
 
-	process.stderr.write(
-		`[nexterm-agent] SEA addons to extract: ${JSON.stringify([...SEA_ADDON_ASSETS])} (platform=${process.platform})\n`,
-	);
-
 	for (const assetName of SEA_ADDON_ASSETS) {
-		process.stderr.write(`[nexterm-agent] extracting SEA addon: ${assetName}\n`);
 		try {
 			if (assetName.endsWith(".node")) {
 				loadNativeAddon(assetName, cacheDir, seaMod);
