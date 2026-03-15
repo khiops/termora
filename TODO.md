@@ -2,11 +2,28 @@
 
 ## Recently Completed
 
-(Archived → docs/historic/done-2026-03.md)
+- [x] ✅ [Desktop] Auto-auth flow: invoke `get_hub_auth_token` before token gate in App.vue (2026-03-13)
+- [x] ✅ [Desktop] TitleBar z-index above PairingScreen overlay (2026-03-13)
+- [x] ✅ [Desktop] Fix sidecar path: `nexterm-hub` not `binaries/nexterm-hub` (2026-03-13)
+- [x] ✅ [Desktop] Custom NSIS installer: license, per-user/global, component selection (Hub/Agent) (2026-03-13)
+- [x] ✅ [CI] Fix artifact glob: upload NSIS `.exe` not `.nsis` (was uploading only MSI) (2026-03-14)
+- [x] ✅ [Desktop] Hub sidecar: pass `start` arg (was exiting immediately with code 0) (2026-03-14)
+- [x] ✅ [Desktop] Hub sidecar logging to `hub.log` (stdout/stderr/exit capture) (2026-03-14)
+- [x] ✅ [Web] Absolute URLs for Tauri: `hubBaseUrl()` / `hubWsUrl()` utility (15 files) (2026-03-14)
+- [x] ✅ [Hub] SEA: invoke `main()` via esbuild footer (cli.ts exported but never self-called) (2026-03-14)
+- [x] ✅ [Hub] SEA: embed toml-edit WASM as asset (`getRawAsset` + `initSync`) (2026-03-14)
+- [x] ✅ [Hub] SEA: bundle better-sqlite3 JS + shim `bindings` → `__seaSqliteExports` (2026-03-14)
+- [x] ✅ [Agent] SEA: extract winpty.dll + winpty-agent.exe BEFORE pty.node dlopen (2026-03-14)
+- [x] ✅ [Hub] CORS: `@fastify/cors` for Tauri cross-origin + remote hub support (2026-03-15)
+- [x] ✅ [Desktop] Dynamic hub port: detect existing hub via runtime.json, `get_hub_port` invoke (2026-03-15)
+- [x] ✅ [Test] SEA E2E tests: skip outside CI (`process.env.CI` gate) (2026-03-13)
+- [x] ✅ [CI] Add `workflow_dispatch` trigger for manual reruns (2026-03-14)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json before enabling auto-update in production — Priority: M (from /review F-006)
+- [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
+- [ ] 🔧 [Hub] `initSync()` deprecation warning — pass `{ module }` object to toml-edit-js — Priority: L
 - [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — same pattern as wallpapers — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M (from UX-09 spec, P2)
