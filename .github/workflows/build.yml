@@ -59,23 +59,7 @@ jobs:
     runs-on: ${{ matrix.runner_labels }}
 
     steps:
-      # Use PowerShell checkout on Windows to avoid Cygwin fork issues
-      # (Avast/EDR DLL injection breaks Git for Windows sh.exe fork)
-      - name: Checkout (Windows)
-        if: matrix.target_os == 'windows'
-        shell: pwsh
-        run: |
-          if (Test-Path .git) { git fetch origin ${{ github.sha }} --depth=1 }
-          else {
-            git init
-            git remote add origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
-            git fetch origin ${{ github.sha }} --depth=1
-          }
-          git checkout --force ${{ github.sha }}
-
-      - name: Checkout (Linux)
-        if: matrix.target_os != 'windows'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -148,22 +132,9 @@ jobs:
     name: Build Tauri Desktop
     needs: build-sea
     runs-on: [self-hosted, Windows, X64]
-    defaults:
-      run:
-        shell: pwsh
 
     steps:
-      # PowerShell checkout — avoids Cygwin fork issues with Avast/EDR
-      - name: Checkout
-        shell: pwsh
-        run: |
-          if (Test-Path .git) { git fetch origin ${{ github.sha }} --depth=1 }
-          else {
-            git init
-            git remote add origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
-            git fetch origin ${{ github.sha }} --depth=1
-          }
-          git checkout --force ${{ github.sha }}
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -175,19 +146,9 @@ jobs:
           cache: "pnpm"
 
       - name: Install Rust
-        run: |
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          if (Get-Command rustup -ErrorAction SilentlyContinue) {
-            rustup update stable
-            rustup default stable
-            rustup target add x86_64-pc-windows-msvc
-          } else {
-            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
-            .\rustup-init.exe -y --default-toolchain stable --target x86_64-pc-windows-msvc
-            Remove-Item rustup-init.exe
-            $env:Path += ";$env:USERPROFILE\.cargo\bin"
-          }
-          rustc --version
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
