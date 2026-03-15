@@ -7,7 +7,9 @@ jobs:
   # Build the web UI once (architecture-independent)
   build-web:
     name: Build Web UI
-    runs-on: ubuntu-latest
+    # Use windows-latest as fallback — ubuntu runners have periodic outages.
+    # This job is ~30s so the 2x Windows cost multiplier is negligible.
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
