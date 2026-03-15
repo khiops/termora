@@ -297,7 +297,7 @@ import { useWindowTitle } from "./composables/useWindowTitle.js";
 import { useTabTitle } from "./composables/useTabTitle.js";
 import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
 import { useAutoSwitch } from "./composables/useAutoSwitch.js";
-import { hubBaseUrl } from "./utils/hub-url.js";
+import { hubBaseUrl, initHubPort } from "./utils/hub-url.js";
 import HostRail from "./components/HostRail.vue";
 import ChannelSidebar from "./components/ChannelSidebar.vue";
 import TabBar from "./components/TabBar.vue";
@@ -635,6 +635,14 @@ onMounted(async () => {
 
 	// Load fonts before terminals are created (no auth needed)
 	await configStore.loadFonts();
+
+	// In Tauri desktop, resolve the hub port BEFORE any API calls so that
+	// hubBaseUrl() / hubWsUrl() use the correct port (zero_conf may pick != 4100).
+	try {
+		await initHubPort();
+	} catch {
+		// Not in Tauri context — ignore
+	}
 
 	// In Tauri desktop, fetch the hub auth token via invoke BEFORE the
 	// token check — connect() is gated by token !== null, so the invoke

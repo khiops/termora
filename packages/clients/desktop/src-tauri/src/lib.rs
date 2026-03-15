@@ -1,7 +1,11 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicU16, Ordering};
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+
+/// Stores the resolved hub port after startup (default 4100).
+static HUB_PORT: AtomicU16 = AtomicU16::new(4100);
 
 /// Resolves the hub config directory and reads the auth token from auth.json.
 /// Returns `Some(token)` only if the token is a valid 64-char lowercase hex string.
@@ -34,6 +38,45 @@ fn read_hub_auth_token() -> Option<String> {
     if valid { Some(token) } else { None }
 }
 
+/// Resolves the nexterm state directory:
+/// - Linux/macOS: $XDG_STATE_HOME/nexterm or ~/.local/state/nexterm
+/// - Windows: %LOCALAPPDATA%\nexterm
+fn get_state_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("nexterm"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("XDG_STATE_HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
+            .map(|p| p.join("nexterm"))
+    }
+}
+
+/// Reads the hub port from runtime.json in the state dir.
+fn read_runtime_port() -> Option<u16> {
+    let state_dir = get_state_dir()?;
+    let runtime_path = state_dir.join("runtime.json");
+    let contents = std::fs::read_to_string(&runtime_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    parsed.get("port")?.as_u64().map(|p| p as u16)
+}
+
+/// Checks whether a hub is alive by probing its /api/health endpoint.
+fn is_hub_alive(port: u16) -> bool {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap();
+    matches!(
+        client.get(format!("http://localhost:{}/api/health", port)).send(),
+        Ok(resp) if resp.status().is_success()
+    )
+}
+
 
 #[tauri::command]
 fn get_hub_auth_token() -> Option<String> {
@@ -43,6 +86,12 @@ fn get_hub_auth_token() -> Option<String> {
         None => eprintln!("[nexterm] auto-auth: no valid token in auth.json"),
     }
     result
+}
+
+/// Returns the resolved hub port (set at startup, cached in HUB_PORT).
+#[tauri::command]
+fn get_hub_port() -> u16 {
+    HUB_PORT.load(Ordering::Relaxed)
 }
 
 
@@ -75,74 +124,95 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         use tauri_plugin_shell::ShellExt;
 
-        let sidecar = app.shell().sidecar("nexterm-hub").unwrap()
-            .args(["start"]);
-        let (mut rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
+        // Check if an existing hub is already running (e.g. another instance or WSL hub).
+        let mut hub_port: u16 = 4100;
+        let mut need_spawn = true;
 
-        // Store the child handle so it stays alive for the app's lifetime
-        // (dropping it would kill the sidecar)
-        app.manage(_child);
+        if let Some(port) = read_runtime_port() {
+            if is_hub_alive(port) {
+                eprintln!("[nexterm] found existing hub on port {}", port);
+                hub_port = port;
+                need_spawn = false;
+            }
+        }
 
-        // Capture sidecar stdout/stderr to a log file
-        let log_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("nexterm");
-        let _ = std::fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join("hub.log");
+        if need_spawn {
+            let sidecar = app.shell().sidecar("nexterm-hub").unwrap()
+                .args(["start"]);
+            let (mut rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
 
-        tauri::async_runtime::spawn(async move {
-            let mut file = match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                Ok(f) => f,
-                Err(_) => return,
-            };
+            // Store the child handle so it stays alive for the app's lifetime
+            // (dropping it would kill the sidecar)
+            app.manage(_child);
 
-            use tauri_plugin_shell::process::CommandEvent;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(line) => {
-                        let _ = writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
+            // Capture sidecar stdout/stderr to a log file
+            let log_dir = dirs::data_local_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("nexterm");
+            let _ = std::fs::create_dir_all(&log_dir);
+            let log_path = log_dir.join("hub.log");
+
+            tauri::async_runtime::spawn(async move {
+                let mut file = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                {
+                    Ok(f) => f,
+                    Err(_) => return,
+                };
+
+                use tauri_plugin_shell::process::CommandEvent;
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(line) => {
+                            let _ = writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
+                        }
+                        CommandEvent::Stderr(line) => {
+                            let _ = writeln!(file, "[hub:stderr] {}", String::from_utf8_lossy(&line));
+                        }
+                        CommandEvent::Terminated(payload) => {
+                            let _ = writeln!(file, "[hub:exit] code={:?} signal={:?}", payload.code, payload.signal);
+                            break;
+                        }
+                        CommandEvent::Error(err) => {
+                            let _ = writeln!(file, "[hub:error] {}", err);
+                        }
+                        _ => {}
                     }
-                    CommandEvent::Stderr(line) => {
-                        let _ = writeln!(file, "[hub:stderr] {}", String::from_utf8_lossy(&line));
-                    }
-                    CommandEvent::Terminated(payload) => {
-                        let _ = writeln!(file, "[hub:exit] code={:?} signal={:?}", payload.code, payload.signal);
+                }
+            });
+
+            // Wait for hub to be ready (poll /api/health)
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build()
+                .unwrap();
+
+            let mut ready = false;
+            for _ in 0..30 {
+                // 30 attempts × 500ms = 15s max wait
+                match client.get(format!("http://localhost:{}/api/health", hub_port)).send() {
+                    Ok(resp) if resp.status().is_success() => {
+                        ready = true;
                         break;
                     }
-                    CommandEvent::Error(err) => {
-                        let _ = writeln!(file, "[hub:error] {}", err);
-                    }
-                    _ => {}
+                    _ => std::thread::sleep(std::time::Duration::from_millis(500)),
                 }
             }
-        });
 
-        // Wait for hub to be ready (poll /api/health)
-        let url = format!("http://localhost:{}/api/health", 4100);
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
-
-        let mut ready = false;
-        for _ in 0..30 {
-            // 30 attempts × 500ms = 15s max wait
-            match client.get(&url).send() {
-                Ok(resp) if resp.status().is_success() => {
-                    ready = true;
-                    break;
+            if !ready {
+                eprintln!("Hub sidecar did not become ready within 15 seconds");
+            } else {
+                // Read actual port from runtime.json (hub may have used zero_conf)
+                if let Some(port) = read_runtime_port() {
+                    hub_port = port;
                 }
-                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
             }
         }
 
-        if !ready {
-            eprintln!("Hub sidecar did not become ready within 15 seconds");
-        }
+        HUB_PORT.store(hub_port, Ordering::Relaxed);
+        eprintln!("[nexterm] hub port resolved to {}", hub_port);
     }
 
     // Show the main window (hidden by default in config)
@@ -159,7 +229,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![get_hub_auth_token])
+        .invoke_handler(tauri::generate_handler![get_hub_auth_token, get_hub_port])
         .setup(setup_app)
         .run(tauri::generate_context!())
         .expect("error while running nexterm");
