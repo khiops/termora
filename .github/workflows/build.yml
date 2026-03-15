@@ -59,7 +59,23 @@ jobs:
     runs-on: ${{ matrix.runner_labels }}
 
     steps:
-      - uses: actions/checkout@v4
+      # Use PowerShell checkout on Windows to avoid Cygwin fork issues
+      # (Avast/EDR DLL injection breaks Git for Windows sh.exe fork)
+      - name: Checkout (Windows)
+        if: matrix.target_os == 'windows'
+        shell: pwsh
+        run: |
+          if (Test-Path .git) { git fetch origin ${{ github.sha }} --depth=1 }
+          else {
+            git init
+            git remote add origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
+            git fetch origin ${{ github.sha }} --depth=1
+          }
+          git checkout --force ${{ github.sha }}
+
+      - name: Checkout (Linux)
+        if: matrix.target_os != 'windows'
+        uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -134,7 +150,17 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
 
     steps:
-      - uses: actions/checkout@v4
+      # PowerShell checkout — avoids Cygwin fork issues with Avast/EDR
+      - name: Checkout
+        shell: pwsh
+        run: |
+          if (Test-Path .git) { git fetch origin ${{ github.sha }} --depth=1 }
+          else {
+            git init
+            git remote add origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
+            git fetch origin ${{ github.sha }} --depth=1
+          }
+          git checkout --force ${{ github.sha }}
 
       - uses: pnpm/action-setup@v4
         with:
