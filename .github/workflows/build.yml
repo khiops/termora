@@ -148,6 +148,9 @@ jobs:
     name: Build Tauri Desktop
     needs: build-sea
     runs-on: [self-hosted, Windows, X64]
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       # PowerShell checkout — avoids Cygwin fork issues with Avast/EDR
@@ -172,9 +175,19 @@ jobs:
           cache: "pnpm"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+        run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          if (Get-Command rustup -ErrorAction SilentlyContinue) {
+            rustup update stable
+            rustup default stable
+            rustup target add x86_64-pc-windows-msvc
+          } else {
+            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
+            .\rustup-init.exe -y --default-toolchain stable --target x86_64-pc-windows-msvc
+            Remove-Item rustup-init.exe
+            $env:Path += ";$env:USERPROFILE\.cargo\bin"
+          }
+          rustc --version
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
