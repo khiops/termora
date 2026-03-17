@@ -157,6 +157,9 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
