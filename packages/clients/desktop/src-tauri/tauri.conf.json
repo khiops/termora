@@ -57,7 +57,7 @@
 	},
 	"plugins": {
 		"updater": {
-			"endpoints": ["https://github.com/niceda/nexterm/releases/latest/download/latest.json"],
+			"endpoints": ["https://github.com/khiops/nexterm/releases/latest/download/latest.json"],
 			"dialog": true,
 			"pubkey": ""
 		},

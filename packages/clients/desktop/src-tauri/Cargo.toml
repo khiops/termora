@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Nexterm desktop app (Tauri v2)"
 authors = ["Nexterm contributors"]
 license = "MIT"
-repository = "https://github.com/nexterm/nexterm"
+repository = "https://github.com/khiops/nexterm"
 edition = "2021"
 rust-version = "1.77.2"
 

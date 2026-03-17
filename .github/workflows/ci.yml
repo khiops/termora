@@ -8,13 +8,5 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Quick smoke test — if this passes, the org can run workflows
-  smoke:
-    name: Smoke Test
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "GitHub Actions works in khiops org"
-
   build:
-    needs: smoke
     uses: ./.github/workflows/build.yml
