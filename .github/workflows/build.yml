@@ -7,7 +7,7 @@ jobs:
   # Build the web UI once (architecture-independent)
   build-web:
     name: Build Web UI
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
       - uses: actions/checkout@v4
@@ -49,9 +49,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target_os: linux
-            target_arch: x64
-            runner_labels: [self-hosted, Linux, X64]
+          # Linux SEA disabled — no self-hosted Linux runner currently
+          # - target_os: linux
+          #   target_arch: x64
+          #   runner_labels: [self-hosted, Linux, X64]
           - target_os: windows
             target_arch: x64
             runner_labels: [self-hosted, Windows, X64]
