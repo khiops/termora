@@ -1,5 +1,5 @@
 /**
- * open-browser.ts — Block 5.7
+ * open-browser.ts
  *
  * Cross-platform helper to open a URL in the default browser.
  * Uses child_process.execFile with a hardcoded binary path so the URL

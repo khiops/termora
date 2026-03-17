@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * embed-web.js — Block 5.7
+ * embed-web.js
  *
  * Copies the web client's build output (packages/clients/web/dist/)
  * into packages/hub/static/ so that the hub can serve it as static files.

@@ -1,5 +1,5 @@
 /**
- * open-browser.spec.ts — Block 5.7
+ * open-browser.spec.ts
  *
  * Tests for buildOpenArgs (platform-specific browser open command builder)
  * and openBrowser (fire-and-forget execFile wrapper).

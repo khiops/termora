@@ -861,7 +861,7 @@ describe("SessionManager", () => {
 		expect(updatedHost?.discoveredShells).toBeUndefined();
 	});
 
-	// ─── Block 3.4: ATTACH with Snapshot Restore ────────────────────────────
+	// ─── ATTACH with Snapshot Restore ────────────────────────────
 
 	it("handleAttach on live channel (first attach after SPAWN): ATTACH_OK with no snapshot", async () => {
 		const received: ProtocolMessage[] = [];
@@ -1088,7 +1088,7 @@ describe("SessionManager", () => {
 		expect(errMsg.code).toBe("CHANNEL_DEAD");
 	});
 
-	// ─── Dead channel respawn (Block 3) ─────────────────────────────────────
+	// ─── Dead channel respawn ─────────────────────────────────────
 
 	it("handleAttach on dead channel respawns when agent is active", async () => {
 		// First, spawn a normal channel to establish local host + session + agent
@@ -1333,7 +1333,7 @@ describe("SessionManager", () => {
 		expect(channel).toBeUndefined();
 	});
 
-	// ─── Warm restart (Block 4) ───────────────────────────────────────────────
+	// ─── Warm restart ───────────────────────────────────────────────
 
 	describe("startup() warm restart", () => {
 		afterEach(() => {
@@ -2286,7 +2286,7 @@ describe("SessionManager — _resolveDisplayTitle", () => {
 	});
 });
 
-describe("SessionManager — Block 2: title broadcast wiring", () => {
+describe("SessionManager — title broadcast wiring", () => {
 	let sm: SessionManager;
 	let dbManager: ReturnType<typeof openTestDatabases>;
 

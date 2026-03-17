@@ -1,5 +1,5 @@
 /**
- * session-manager-onboarding.spec.ts — Block 5.7
+ * session-manager-onboarding.spec.ts
  *
  * Tests first-run onboarding: ensureLocalHost creates the "local" host
  * when meta.db is empty, and is idempotent on subsequent calls.

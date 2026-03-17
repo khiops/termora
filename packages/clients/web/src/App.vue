@@ -891,7 +891,7 @@ function onHostSaved(_host: Host): void {
 
 /**
  * Handle right-click on a host badge in the rail.
- * Stores position + hostId for the context menu component (Block 6).
+ * Stores position + hostId for the context menu component.
  */
 function onHostContextMenu(payload: {
 	hostId: string;

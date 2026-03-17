@@ -19,7 +19,7 @@
  * - Sourcemaps: disabled — SEA doesn't support source-mapped stack traces.
  * - Minify: disabled — easier debugging, size is not critical.
  * - Migrations: embedded inline — SQL files bundled as strings via plugin.
- * - Static web UI: embedded at SEA packaging step (Block 5), not here.
+ * - Static web UI: embedded at SEA packaging step, not here.
  *
  * Prerequisites:
  *   Run `pnpm build:embed` BEFORE building the hub SEA bundle if you want

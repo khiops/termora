@@ -1,5 +1,5 @@
 /**
- * nexterm CLI — Block 5.6
+ * nexterm CLI
  *
  * Parses process.argv and dispatches to hub commands.
  * No heavy deps — manual argv parsing only.

@@ -3,7 +3,7 @@
  *
  * Generic Node.js Single Executable Application (SEA) binary builder.
  *
- * Reusable by both agent (Block 2) and hub (Block 5).
+ * Reusable by both agent and hub.
  *
  * Workflow:
  *   1. Write a temp sea-config.json next to the entry script.
