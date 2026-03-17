@@ -21,8 +21,8 @@ jobs:
           node-version: "22"
           cache: "pnpm"
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Install dependencies (skip native addon compilation)
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build shared package
         run: pnpm -F @nexterm/shared build
