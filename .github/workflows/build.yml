@@ -7,7 +7,7 @@ jobs:
   # Build the web UI once (architecture-independent)
   build-web:
     name: Build Web UI
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +21,8 @@ jobs:
           node-version: "22"
           cache: "pnpm"
 
-      - name: Install dependencies (skip native addon compilation)
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
         run: pnpm -F @nexterm/shared build
@@ -51,7 +51,7 @@ jobs:
         include:
           - target_os: linux
             target_arch: x64
-            runner: [self-hosted, Linux, X64]
+            runner: ubuntu-latest
           - target_os: windows
             target_arch: x64
             runner: windows-latest
@@ -60,11 +60,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install native build tools (Linux)
-        if: matrix.target_os == 'linux'
-        run: |
-          apt-get update && apt-get install -y python3 make g++ 2>/dev/null || sudo apt-get update && sudo apt-get install -y python3 make g++
 
       - uses: pnpm/action-setup@v4
         with:
