@@ -21,6 +21,22 @@
 
 ## Tier 1 — Next Sprint (UX + DX)
 
+### Audit P0 (before going public)
+- [ ] 🐛 [Hub] CORS: restrict `origin: true` to explicit allowlist (AUD-001) — Priority: H
+- [ ] 🐛 [Hub] SSH host key verification: implement TOFU with persistence (AUD-002) — Priority: H
+- [ ] 🐛 [Hub] Validate custom_command field — length + path checks (AUD-012) — Priority: H
+- [ ] 💡 [Root] Create README.md (AUD-003) — Priority: H
+
+### Audit P1
+- [ ] 🔧 [Docs] Update PROTOCOL.md — add missing WS messages + REST routes (AUD-006) — Priority: M
+- [ ] 🔧 [Docs] Update SPEC.md entity model — Host, Channel, LaunchProfile fields (AUD-007) — Priority: M
+- [ ] 🔧 [Shared] Extract sea-addon-loader.ts to @nexterm/shared (AUD-008) — Priority: M
+- [ ] 🔧 [Hub] Fix error format in pair.ts + wallpapers.ts — use { error: { code, message } } (AUD-009) — Priority: M
+- [ ] 🔧 [Hub] Extract elevated-spawn flow — deduplicate handleSpawn/restartChannel (AUD-010) — Priority: M
+- [ ] 🔧 [Hub] Extract profile patch logic — deduplicate host/channel profile PATCH (AUD-011) — Priority: M
+- [ ] 🔧 [Shared] Move FontFile interface to @nexterm/shared (AUD-022) — Priority: L
+
+### Other
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
 - [ ] 🔧 [Hub] `initSync()` deprecation warning — pass `{ module }` object to toml-edit-js — Priority: L
