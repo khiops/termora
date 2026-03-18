@@ -69,6 +69,10 @@ function createMockSshServer(
 ): Promise<{ server: SshServer; port: number }> {
 	return new Promise((resolve) => {
 		const server = new Server({ hostKeys: [HOST_KEY] }, (client) => {
+			// Suppress connection-level errors (e.g. KEY_EXCHANGE_FAILED when the
+			// SSH client abruptly disconnects after rejecting the host key).
+			client.on("error", () => {});
+
 			client.on("authentication", (ctx) => {
 				if (opts.rejectAuth) {
 					ctx.reject(["publickey"]);
@@ -87,6 +91,10 @@ function createMockSshServer(
 				});
 			});
 		});
+
+		// Suppress unhandled server-side errors (e.g. KEY_EXCHANGE_FAILED when
+		// the client abruptly disconnects after hostVerifier returns false).
+		server.on("error", () => {});
 
 		server.listen(0, "127.0.0.1", () => {
 			const addr = server.address() as { port: number };

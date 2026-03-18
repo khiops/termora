@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import type { FontFamily, FontFile } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 
 /** Supported font file extensions */
@@ -26,17 +27,6 @@ const WEIGHT_MAP: Record<string, { weight: number; style: string }> = {
 	extrabolditalic: { weight: 800, style: "italic" },
 	blackitalic: { weight: 900, style: "italic" },
 };
-
-interface FontFile {
-	style: string;
-	weight: number;
-	url: string;
-}
-
-interface FontFamily {
-	family: string;
-	files: FontFile[];
-}
 
 /**
  * Read the font family name from a TTF/OTF file's OpenType name table.

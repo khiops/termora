@@ -190,3 +190,14 @@ export interface TestConnectionResult {
 	serverVersion?: string;
 	error?: string;
 }
+
+export interface FontFile {
+	style: string;
+	weight: number;
+	url: string;
+}
+
+export interface FontFamily {
+	family: string;
+	files: FontFile[];
+}

@@ -10,13 +10,13 @@
 - [ ] 💡 [Root] Create README.md (AUD-003) — Priority: H
 
 ### Audit P1
-- [ ] 🔧 [Docs] Update PROTOCOL.md — add missing WS messages + REST routes (AUD-006) — Priority: M
-- [ ] 🔧 [Docs] Update SPEC.md entity model — Host, Channel, LaunchProfile fields (AUD-007) — Priority: M
-- [ ] 🔧 [Shared] Extract sea-addon-loader.ts to @nexterm/shared (AUD-008) — Priority: M
+- [x] ✅ [Docs] Update PROTOCOL.md — add missing WS messages + REST routes (AUD-006) (2026-03-18)
+- [x] ✅ [Docs] Update SPEC.md entity model — Host, Channel, LaunchProfile fields (AUD-007) (2026-03-18)
+- [x] ✅ [Shared] Extract sea-addon-loader.ts to @nexterm/shared (AUD-008) (2026-03-18)
 - [ ] 🔧 [Hub] Fix error format in pair.ts + wallpapers.ts — use { error: { code, message } } (AUD-009) — Priority: M
-- [ ] 🔧 [Hub] Extract elevated-spawn flow — deduplicate handleSpawn/restartChannel (AUD-010) — Priority: M
-- [ ] 🔧 [Hub] Extract profile patch logic — deduplicate host/channel profile PATCH (AUD-011) — Priority: M
-- [ ] 🔧 [Shared] Move FontFile interface to @nexterm/shared (AUD-022) — Priority: L
+- [x] ✅ [Hub] Extract elevated-spawn flow — deduplicate handleSpawn/restartChannel (AUD-010) (2026-03-18)
+- [x] ✅ [Hub] Extract profile patch logic — deduplicate host/channel profile PATCH (AUD-011) (2026-03-18)
+- [x] ✅ [Shared] Move FontFile + FontFamily interfaces to @nexterm/shared (AUD-022) (2026-03-18)
 
 ### Audit P2 (SRP decomposition + cleanup)
 - [ ] 🔧 [Hub] Decompose SessionManager (2344 lines, 50+ methods) into sub-managers (AUD-014) — Priority: L

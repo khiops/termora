@@ -48,8 +48,7 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 		const active = metaDal.countActivePairingCodes();
 		if (active >= 3) {
 			return reply.code(429).send({
-				error: "RATE_LIMIT",
-				message: "Too many active pairing codes",
+				error: { code: "RATE_LIMIT", message: "Too many active pairing codes" },
 			});
 		}
 
@@ -80,8 +79,7 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 		async (request: FastifyRequest<{ Body: VerifyBody }>, reply: FastifyReply) => {
 			if (!checkVerifyRateLimit()) {
 				return reply.code(429).send({
-					error: "RATE_LIMIT",
-					message: "Too many verification attempts",
+					error: { code: "RATE_LIMIT", message: "Too many verification attempts" },
 				});
 			}
 
@@ -89,8 +87,7 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 
 			if (typeof code !== "string" || !/^\d{6}$/.test(code)) {
 				return reply.code(400).send({
-					error: "INVALID_FORMAT",
-					message: "Code must be 6 digits",
+					error: { code: "INVALID_FORMAT", message: "Code must be 6 digits" },
 				});
 			}
 
@@ -98,23 +95,20 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 
 			if (!row) {
 				return reply.code(404).send({
-					error: "CODE_NOT_FOUND",
-					message: "Unknown pairing code",
+					error: { code: "CODE_NOT_FOUND", message: "Unknown pairing code" },
 				});
 			}
 
 			if (row.used !== 0) {
 				return reply.code(409).send({
-					error: "CODE_USED",
-					message: "Code already redeemed",
+					error: { code: "CODE_USED", message: "Code already redeemed" },
 				});
 			}
 
 			const now = new Date().toISOString();
 			if (row.expires_at < now) {
 				return reply.code(410).send({
-					error: "CODE_EXPIRED",
-					message: "Code has expired",
+					error: { code: "CODE_EXPIRED", message: "Code has expired" },
 				});
 			}
 

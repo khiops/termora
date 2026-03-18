@@ -140,6 +140,25 @@ function validateAndClampVisualProfile(vp: Record<string, unknown>): string | nu
 	return null;
 }
 
+
+/** Validate profile_json: parse if string, check visualProfile colors.
+ * Returns an error message string on failure, or null on success. */
+function validateProfileJson(profileJson: string | object | undefined): string | null {
+	if (profileJson === undefined) return null;
+	let profileObj: Record<string, unknown>;
+	try {
+		profileObj = typeof profileJson === "string" ? JSON.parse(profileJson) : (profileJson as Record<string, unknown>);
+	} catch {
+		return "Invalid profile_json format";
+	}
+	if (profileObj?.visualProfile) {
+		const colorError = validateAndClampVisualProfile(profileObj.visualProfile as Record<string, unknown>);
+		if (colorError) return colorError;
+	}
+	return null;
+}
+
+
 /**
  * Infer the OS of a host for launch profile filtering.
  *
@@ -201,26 +220,11 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 		}
 
 		// Validate visual profile colors in profile_json (INV-09)
-		if (body.profile_json !== undefined) {
-			try {
-				const profileObj =
-					typeof body.profile_json === "string" ? JSON.parse(body.profile_json) : body.profile_json;
-				if (profileObj?.visualProfile) {
-					const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
-					if (colorError) {
-						return reply.code(400).send({
-							error: { code: "VALIDATION_ERROR", message: colorError },
-						});
-					}
-				}
-			} catch {
-				return reply.code(400).send({
-					error: {
-						code: "VALIDATION_ERROR",
-						message: "Invalid profile_json format",
-					},
-				});
-			}
+		const profileJsonError = validateProfileJson(body.profile_json);
+		if (profileJsonError) {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: profileJsonError },
+			});
 		}
 
 		// Duplicate label check
@@ -318,28 +322,11 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			}
 
 			// Validate visual profile colors (INV-09)
-			if (body.profile_json !== undefined) {
-				try {
-					const profileObj =
-						typeof body.profile_json === "string"
-							? JSON.parse(body.profile_json)
-							: body.profile_json;
-					if (profileObj?.visualProfile) {
-						const colorError = validateAndClampVisualProfile(profileObj.visualProfile);
-						if (colorError) {
-							return reply.code(400).send({
-								error: { code: "VALIDATION_ERROR", message: colorError },
-							});
-						}
-					}
-				} catch {
-					return reply.code(400).send({
-						error: {
-							code: "VALIDATION_ERROR",
-							message: "Invalid profile_json format",
-						},
-					});
-				}
+			const profileJsonError = validateProfileJson(body.profile_json);
+			if (profileJsonError) {
+				return reply.code(400).send({
+					error: { code: "VALIDATION_ERROR", message: profileJsonError },
+				});
 			}
 
 			// Validate label if provided

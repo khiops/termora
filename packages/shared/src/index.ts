@@ -15,3 +15,4 @@ export * from "./theme.js";
 export * from "./appearance.js";
 export * from "./themes/index.js";
 export * from "./var-expansion.js";
+export * from "./sea-addon-loader.js";

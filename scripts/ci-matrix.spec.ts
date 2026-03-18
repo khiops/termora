@@ -142,10 +142,9 @@ function parseWorkflowYaml(content: string): Record<string, unknown> {
 }
 
 // ── Expected platform matrix ───────────────────────────────────────────────
-// macOS targets are currently commented out in build.yml
+// Only platforms with available runners — linux-arm64 and macOS deferred (no runner / quota)
 const EXPECTED_PLATFORMS: Array<{ target_os: string; target_arch: string }> = [
 	{ target_os: "linux", target_arch: "x64" },
-	{ target_os: "linux", target_arch: "arm64" },
 	{ target_os: "windows", target_arch: "x64" },
 ];
 

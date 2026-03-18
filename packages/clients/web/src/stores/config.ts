@@ -1,6 +1,8 @@
 import {
 	type ChannelsConfig,
 	DEFAULT_PROFILE,
+	type FontFamily,
+	type FontFile,
 	type NotificationConfig,
 	type PanesConfig,
 	type SearchConfig,
@@ -13,17 +15,6 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "./auth.js";
-
-interface FontFile {
-	style: string;
-	weight: number;
-	url: string;
-}
-
-interface FontFamily {
-	family: string;
-	files: FontFile[];
-}
 
 /**
  * Inject @font-face rules into the document head so the browser

@@ -112,8 +112,8 @@ describe("POST /api/pair", () => {
 			headers: authHeader(),
 		});
 		expect(res.statusCode).toBe(429);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("RATE_LIMIT");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("RATE_LIMIT");
 	});
 });
 
@@ -163,8 +163,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: 123456 },
 		});
 		expect(res.statusCode).toBe(400);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("INVALID_FORMAT");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_FORMAT");
 	});
 
 	it("returns 400 for code with wrong length", async () => {
@@ -174,8 +174,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: "12345" },
 		});
 		expect(res.statusCode).toBe(400);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("INVALID_FORMAT");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_FORMAT");
 	});
 
 	it("returns 400 for code with non-digit characters", async () => {
@@ -185,8 +185,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: "12345a" },
 		});
 		expect(res.statusCode).toBe(400);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("INVALID_FORMAT");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("INVALID_FORMAT");
 	});
 
 	it("returns 404 for unknown code", async () => {
@@ -196,8 +196,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: "000000" },
 		});
 		expect(res.statusCode).toBe(404);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("CODE_NOT_FOUND");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("CODE_NOT_FOUND");
 	});
 
 	it("returns 409 for already-used code", async () => {
@@ -222,8 +222,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code },
 		});
 		expect(res.statusCode).toBe(409);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("CODE_USED");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("CODE_USED");
 	});
 
 	it("returns 410 for an expired code", async () => {
@@ -245,8 +245,8 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: "777777" },
 		});
 		expect(res.statusCode).toBe(410);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("CODE_EXPIRED");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("CODE_EXPIRED");
 	});
 
 	it("returns 429 after 10 verify attempts within 60 s", async () => {
@@ -268,7 +268,7 @@ describe("POST /api/pair/verify", () => {
 			payload: { code: "000000" },
 		});
 		expect(res.statusCode).toBe(429);
-		const body = res.json<{ error: string }>();
-		expect(body.error).toBe("RATE_LIMIT");
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("RATE_LIMIT");
 	});
 });

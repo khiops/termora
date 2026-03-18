@@ -238,8 +238,23 @@ export class SshAgent extends AgentConnection {
 					resolve({ hello: msg, keyVerification });
 				};
 
-				client.once("error", (err) => {
-					rejectOnce(err);
+				// Use `on` (not `once`) so subsequent ssh2 error events (e.g.
+				// KEY_EXCHANGE_FAILED / { code: 3 } emitted after hostVerifier rejection)
+				// are also handled and don't become unhandled EventEmitter throws.
+				// rejectOnce is idempotent — only the first call wins.
+				client.on("error", (err) => {
+					// ssh2 may emit a plain object (e.g. { code: 3 }) rather than an Error
+					// instance when hostVerifier returns false. Normalise to a proper Error
+					// so callers (and vitest .rejects.toThrow()) always receive an Error.
+					if (keyVerification.mismatch) {
+						rejectOnce(
+							new Error(
+								`Host key mismatch: expected ${storedFingerprint}, got ${keyVerification.capturedFingerprint}`,
+							),
+						);
+						return;
+					}
+					rejectOnce(err instanceof Error ? err : new Error(String(err)));
 				});
 
 				client.on("close", () => {

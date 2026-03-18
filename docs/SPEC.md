@@ -242,50 +242,102 @@ Vue 3 SPA built with Vite. Served by hub in production, dev server in developmen
 
 ```
 Host (permanent config)
- ├── id: ULID
+ ├── id: string (ULID)
  ├── type: 'local' | 'ssh'
  ├── label: string (unique)
- ├── sshConfig: { host, port, username, authMethod, keyPath? }
- ├── icon: { type: 'auto'|'emoji'|'image', value?: string }
- ├── color: string (hex, auto from label hash if null)
- ├── profile: TerminalProfile (layer 3 overrides)
+ ├── sshHost?: string
+ ├── sshPort?: number
+ ├── sshAuth?: 'agent' | 'key' | 'password'
+ ├── sshKeyPath?: string
+ ├── sshConfigHost?: string | null     // ssh_config Host alias
+ ├── sshUser?: string | null           // ssh_config User override
+ ├── sshFingerprint?: string | null    // SHA256:<base64> of trusted host key
+ ├── iconType: 'auto' | 'emoji' | 'image'
+ ├── iconValue?: string
+ ├── color?: string                    // hex #rrggbb, auto from label hash if null
+ ├── profileJson?: string              // JSON-encoded TerminalProfile (layer 3 overrides)
  ├── trustRemoteHints: 'apply' | 'ask' | 'ignore'
- ├── defaultShell: string?
- ├── defaultCwd: string?
- ├── channelGroups: ChannelGroup[]
- └── sessions: Session[] (runtime)
+ ├── defaultShell?: string
+ ├── defaultCwd?: string
+ ├── elevationMethod?: 'sudo'|'doas'|'pkexec'|'gsudo'|'custom' | null
+ ├── customCommand?: string | null     // used when elevationMethod = 'custom'
+ ├── hostGroup?: string | null         // display group name
+ ├── hostGroupId?: string | null       // FK → HostGroup (future)
+ ├── sortOrder: number
+ ├── keepAliveSeconds: number          // SSH keep-alive interval (0 = disabled)
+ ├── historyRetentionDays: number      // spool.db GC policy per host
+ ├── discoveredShells?: string[]       // shells found on remote at last connect
+ ├── discoveredShellsAt?: string       // ISO 8601 — when shells were last probed
+ ├── os: 'linux' | 'darwin' | 'windows' | null    // null = auto-detect on first connect
+ ├── arch: 'x64' | 'arm64' | null                 // null = auto-detect on first connect
+ ├── createdAt: string                 // ISO 8601
+ └── updatedAt: string
 
 ChannelGroup (organizational, per host)
- ├── id: ULID
+ ├── id: string (ULID)
  ├── hostId: FK → Host
  ├── name: string
  ├── sortOrder: number
- └── collapsed: boolean
+ ├── collapsed: boolean
+ └── createdAt: string                 // ISO 8601
 
 Session (runtime, tied to connection)
- ├── id: ULID
+ ├── id: string (ULID)
  ├── hostId: FK → Host
  ├── status: 'starting' | 'active' | 'detached' | 'disconnected' | 'closed'
- ├── sshPid: number? (for remote)
- └── channels: Channel[]
+ ├── createdAt: string                 // ISO 8601
+ └── updatedAt: string
 
 Channel (PTY instance)
- ├── id: ULID
+ ├── id: string (ULID)
  ├── sessionId: FK → Session
- ├── groupId: FK → ChannelGroup?
- ├── title: string (user-editable, default: shell name)
+ ├── groupId?: FK → ChannelGroup
+ ├── title?: string                    // user-editable label
  ├── shell: string
- ├── cwd: string
- ├── env: Record<string, string>
+ ├── args?: string[]
+ ├── cwd?: string
+ ├── envJson?: string                  // JSON-encoded Record<string, string>
  ├── cols: number
  ├── rows: number
  ├── status: 'born' | 'live' | 'orphan' | 'dead'
- └── profile: TerminalProfile? (layer 4 overrides)
+ ├── exitCode?: number
+ ├── profileJson?: string              // JSON-encoded TerminalProfile (layer 4 overrides)
+ ├── isWelcome?: boolean               // hub-created welcome channel flag
+ ├── icon?: string                     // emoji or icon name
+ ├── directProcess?: boolean           // true = process mode (no shell wrapper)
+ ├── dynamicTitle?: string             // title set by escape sequence (OSC 0/2)
+ ├── processTitle?: string             // process name reported by agent
+ ├── displayTitle?: string             // computed: dynamicTitle ?? processTitle ?? title
+ ├── launchProfileId?: string          // FK → LaunchProfile used to create channel
+ ├── elevated?: boolean                // was launched with elevation
+ ├── elevationMethod?: string          // elevation method used at spawn time
+ ├── createdAt: string                 // ISO 8601
+ └── updatedAt: string
+
+LaunchProfile (reusable spawn template)
+ ├── id: string (ULID)
+ ├── name: string
+ ├── shell: string
+ ├── args?: string[]
+ ├── cwd?: string
+ ├── env?: Record<string, string>
+ ├── mode: 'shell' | 'process'
+ ├── elevated: boolean
+ ├── supportedOs: 'linux' | 'darwin' | 'windows' | 'any'
+ ├── iconType: 'auto' | 'emoji' | 'image'
+ ├── iconValue?: string
+ ├── color?: string
+ ├── profileOverrides?: Partial<TerminalProfile>
+ ├── sortOrder: number
+ ├── createdAt: string                 // ISO 8601
+ └── updatedAt: string
 
 Workspace (layout persistence)
- ├── id: ULID
+ ├── id: string (ULID)
  ├── name: string (unique)
- └── layout: TabLayout (tree of tabs/panes/channels)
+ ├── layoutJson: string                // JSON-encoded TabLayout
+ ├── createdAt: string                 // ISO 8601
+ └── updatedAt: string
 
 CacheIndex (per channel, hub-side)
  ├── channelId: FK → Channel

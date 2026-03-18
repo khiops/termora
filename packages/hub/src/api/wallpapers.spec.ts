@@ -162,7 +162,7 @@ describe("Wallpaper endpoints", () => {
 				payload,
 			});
 			expect(res.statusCode).toBe(400);
-			expect(res.json().error).toBe("UNSUPPORTED_TYPE");
+			expect(res.json().error.code).toBe("UNSUPPORTED_TYPE");
 		});
 
 		it("should reject upload without auth", async () => {
@@ -252,7 +252,7 @@ describe("Wallpaper endpoints", () => {
 				headers: authHeader(),
 			});
 			expect(res.statusCode).toBe(404);
-			expect(res.json().error).toBe("NOT_FOUND");
+			expect(res.json().error.code).toBe("NOT_FOUND");
 		});
 
 		it("should reject delete without auth", async () => {
@@ -271,7 +271,7 @@ describe("Wallpaper endpoints", () => {
 			});
 			// Fastify URL-decodes route params — sanitizeFilename rejects traversal → 400
 			expect(res.statusCode).toBe(400);
-			expect(res.json().error).toBe("INVALID_FILENAME");
+			expect(res.json().error.code).toBe("INVALID_FILENAME");
 		});
 	});
 });

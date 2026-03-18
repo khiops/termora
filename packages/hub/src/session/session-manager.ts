@@ -27,7 +27,7 @@ import type {
 	UiSpawnMessage,
 	UiSpawnOkMessage,
 } from "@nexterm/shared";
-import type { AgentConfig, ChannelStatus, SessionStatus } from "@nexterm/shared";
+import type { AgentConfig, ChannelStatus, ElevationMethod, SessionStatus } from "@nexterm/shared";
 import {
 	DEFAULT_AGENT_CONFIG,
 	DEFAULT_CHANNEL_NAME,
@@ -720,31 +720,18 @@ export class SessionManager {
 		// ── Elevated spawn: two-step flow (passwordless first, prompt on demand) ──
 		if (resolvedElevated) {
 			// Resolve elevation method from config cascade
-			const method = this._configResolver
+			const rawMethod = this._configResolver
 				? this._configResolver.resolveElevationMethod(host.elevationMethod)
 				: process.platform === "win32"
 					? "gsudo"
 					: "sudo";
-			const customCommand =
-				method === "custom" && this._configResolver
-					? this._configResolver.resolveCustomCommand(host.customCommand)
-					: undefined;
-
-			// Defensive: validate custom_command before including in spawn message (AUD-012)
-			if (customCommand !== undefined) {
-				try {
-					validateCustomCommand(customCommand);
-				} catch (err) {
-					const e = err as { code: string; message: string };
-					const errorMsg: ErrorMessage = {
-						type: "ERROR",
-						code: "INVALID_CUSTOM_COMMAND",
-						message: e.message,
-					};
-					client.send(errorMsg);
-					return null;
-				}
+			// Resolve + validate custom command (AUD-012)
+			const elevCfg = this._resolveElevationConfig(host.customCommand, rawMethod);
+			if ("validationError" in elevCfg) {
+				client.send(elevCfg.validationError);
+				return null;
 			}
+			const { method, customCommand } = elevCfg;
 
 			const agentSpawn: AgentSpawnMessage = {
 				...baseSpawnMsg,
@@ -1148,13 +1135,21 @@ export class SessionManager {
 
 		// ── Elevated restart: mirror the two-step flow from handleSpawn ──────
 		if (channel.elevated && channel.elevationMethod) {
-			const method = channel.elevationMethod;
+			const method = channel.elevationMethod as ElevationMethod;
 
-			// Resolve custom command if needed
-			const customCommand =
-				method === "custom" && this._configResolver
-					? this._configResolver.resolveCustomCommand(this.metaDal.getHost(hostId)?.customCommand)
-					: undefined;
+			// Resolve + validate custom command (AUD-012)
+			const elevCfg = this._resolveElevationConfig(
+				this.metaDal.getHost(hostId)?.customCommand,
+				method,
+			);
+			if ("validationError" in elevCfg) {
+				// No client context here — log and fall through to non-elevated spawn
+				console.warn(
+					`[session-manager] restartChannel: invalid custom command for hostId=${hostId}: ${elevCfg.validationError.message}`,
+				);
+				return false;
+			}
+			const { customCommand } = elevCfg;
 
 			const baseElevatedSpawn: AgentSpawnMessage = {
 				type: "SPAWN",
@@ -1515,6 +1510,42 @@ export class SessionManager {
 	}
 
 	// ─── Private helpers ────────────────────────────────────────────────────
+
+
+
+	/**
+	 * Resolve elevation method + custom command for a spawn.
+	 * Validates the custom command if present (AUD-012).
+	 * Returns a validationError field when the custom command is invalid —
+	 * the caller must send it to the client and abort the spawn.
+	 */
+	private _resolveElevationConfig(
+		hostCustomCommand: string | null | undefined,
+		method: ElevationMethod,
+	): { method: ElevationMethod; customCommand: string | undefined } | { validationError: ErrorMessage } {
+		const customCommand =
+			method === "custom" && this._configResolver
+				? this._configResolver.resolveCustomCommand(hostCustomCommand)
+				: undefined;
+
+		if (customCommand !== undefined) {
+			try {
+				validateCustomCommand(customCommand);
+			} catch (err) {
+				const e = err as { code: string; message: string };
+				return {
+					validationError: {
+						type: "ERROR",
+						code: "INVALID_CUSTOM_COMMAND",
+						message: e.message,
+					},
+				};
+			}
+		}
+
+		return { method, customCommand };
+	}
+
 
 	private async _resolveHostId(requestedId?: string): Promise<string> {
 		if (!requestedId || requestedId === "local") {

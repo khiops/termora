@@ -2,7 +2,7 @@
 
 > Version: 1 (MVP)
 > Status: draft
-> Last updated: 2026-03-02
+> Last updated: 2026-03-18
 
 ## 1. Framing
 
@@ -255,7 +255,53 @@ Interval: 15s. 3 consecutive misses (45s) → agent unresponsive.
 }
 ```
 
-### 3.12 AGENT_CHANNEL_STATE / CHANNEL_STATE_END (Daemon Reconnect)
+### 3.12 TITLE_CHANGE (Agent → Hub)
+
+Terminal title changed via OSC 0/2 escape sequence. Hub relays to all attached UI clients.
+
+```typescript
+{
+  type: "TITLE_CHANGE",
+  channel_id: string,
+  title: string,          // sanitized by agent
+  display_title?: string  // formatted version (e.g. with host prefix)
+}
+```
+
+### 3.13 PROCESS_TITLE (Agent → Hub)
+
+Foreground process name changed (polled from PTY PID). Hub relays to all attached UI clients.
+
+```typescript
+{
+  type: "PROCESS_TITLE",
+  channel_id: string,
+  title: string,
+  display_title?: string
+}
+```
+
+### 3.14 BELL (Agent → Hub)
+
+Terminal bell character (`\x07`) received. Hub relays to all attached UI clients.
+
+```typescript
+{ type: "BELL", channel_id: string }
+```
+
+### 3.15 NOTIFICATION (Agent → Hub)
+
+OSC 9 desktop notification request. Hub relays to all attached UI clients.
+
+```typescript
+{
+  type: "NOTIFICATION",
+  channel_id: string,
+  message: string
+}
+```
+
+### 3.16 AGENT_CHANNEL_STATE / CHANNEL_STATE_END (Daemon Reconnect)
 
 Sent by the agent to the hub immediately after HELLO when reconnecting to a daemon that has existing channels. The agent enumerates all known channels (alive and dead), then signals the end of enumeration.
 
@@ -370,7 +416,29 @@ Hub broadcasts RESIZE to other attached clients.
 { type: "WRITE_LOCK",     channel_id: string, holder: string | null }
 ```
 
-### 4.6 State Notifications
+### 4.6 STATE_SYNC (Hub → UI)
+
+Sent immediately after `AUTH_OK`. Full snapshot of all active sessions and channels so the UI can hydrate without polling.
+
+```typescript
+{
+  type: "STATE_SYNC",
+  sessions: Array<{
+    session_id: string,
+    host_id: string,
+    status: "starting" | "active" | "detached" | "disconnected" | "closed"
+  }>,
+  channels: Array<{
+    channel_id: string,
+    session_id: string,
+    status: "born" | "live" | "orphan" | "dead",
+    exit_code?: number,
+    display_title?: string
+  }>
+}
+```
+
+### 4.7 State Notifications
 
 ```typescript
 {
@@ -389,7 +457,7 @@ Hub broadcasts RESIZE to other attached clients.
 }
 ```
 
-### 4.7 PING / PONG
+### 4.8 PING / PONG
 
 ```typescript
 { type: "PING" }
@@ -398,26 +466,93 @@ Hub broadcasts RESIZE to other attached clients.
 
 Interval: 30s. 2 misses (60s) → client disconnected.
 
-### 4.8 HOST_VERIFY (SSH Fingerprint)
+### 4.9 HOST_VERIFY (SSH Fingerprint)
 
 ```typescript
-// Hub → UI (unknown host fingerprint)
+// Hub → UI (unknown host key, or key mismatch warning)
 {
   type: "HOST_VERIFY",
   host_id: string,
   fingerprint: string,         // "sha256:XXXXXXXXXXXX"
-  algorithm: string            // "ssh-ed25519", "ssh-rsa"
+  algorithm: string,           // "ssh-ed25519", "ssh-rsa"
+  old_fingerprint?: string,    // set when stored key differs — MITM warning
+  prompt_id?: string           // correlation ID; must be echoed in response for mismatch prompts
 }
 
 // UI → Hub (user decision)
 {
   type: "HOST_VERIFY_RESPONSE",
   host_id: string,
-  action: "trust_permanent" | "trust_once" | "reject"
+  action: "trust_permanent" | "trust_once" | "reject",
+  prompt_id?: string           // must match HOST_VERIFY.prompt_id when responding to a mismatch
 }
 ```
 
-### 4.9 ERROR
+### 4.10 AUTH_PROMPT / AUTH_PROMPT_RESPONSE (SSH Credentials)
+
+Used when the hub needs to obtain a secret from the user interactively during SSH connection (password auth, key passphrase, or elevation prompt).
+
+```typescript
+// Hub → UI
+{
+  type: "AUTH_PROMPT",
+  host_id: string,
+  prompt_type: "password" | "passphrase" | "elevation",
+  message: string    // human-readable prompt text (e.g. "Enter password for user@host")
+}
+
+// UI → Hub
+{
+  type: "AUTH_PROMPT_RESPONSE",
+  host_id: string,
+  secret: string | null    // null = user cancelled
+}
+```
+
+**Security note:** The secret is never persisted — it is used once for the SSH handshake then discarded.
+
+### 4.11 TEST_CONNECT (SSH Connectivity Test)
+
+Allows the UI to test SSH connectivity for a host without creating a full session. The hub may send `AUTH_PROMPT` messages during the test if credentials are needed.
+
+```typescript
+// UI → Hub
+{
+  type: "TEST_CONNECT",
+  host_id: string,       // real host ID for saved hosts, client-generated temp ID for unsaved
+  hostname: string,
+  port: number,
+  ssh_auth: "agent" | "key" | "password",
+  ssh_key_path?: string,
+  ssh_user?: string
+}
+
+// Hub → UI (success)
+{ type: "TEST_CONNECT_OK", host_id: string }
+
+// Hub → UI (failure)
+{ type: "TEST_CONNECT_FAIL", host_id: string, message: string }
+```
+
+### 4.12 Terminal Event Relay (Hub → UI)
+
+These messages originate from the agent (see §3.12–3.15, above) and are relayed by the hub to all UI clients attached to the affected channel.
+
+```typescript
+// Terminal title changed (OSC 0/2)
+{ type: "TITLE_CHANGE",   channel_id: string, title: string, display_title?: string }
+
+// Foreground process name changed
+{ type: "PROCESS_TITLE",  channel_id: string, title: string, display_title?: string }
+
+// Terminal bell (\x07)
+{ type: "BELL",           channel_id: string }
+
+// OSC 9 desktop notification
+{ type: "NOTIFICATION",   channel_id: string, message: string }
+```
+
+### 4.13 ERROR
 
 ```typescript
 { type: "ERROR", code: string, message: string, channel_id?: string }
@@ -527,57 +662,180 @@ Auth: `Authorization: Bearer <token>` (except `/health`).
 
 ### Endpoints
 
-| Method | Path | Body | Response |
+Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthenticated.
+
+#### Health
+
+| Method | Path | Auth | Response |
 |--------|------|------|----------|
-| GET | `/health` | — | `{ status, uptime, sessions, channels, clients, spool_bytes }` |
-| GET | `/hosts` | — | `Host[]` |
-| POST | `/hosts` | CreateHost | `Host` |
-| GET | `/hosts/:id` | — | `Host` |
-| PUT | `/hosts/:id` | UpdateHost | `Host` |
-| DELETE | `/hosts/:id` | — | 204 |
-| POST | `/hosts/:id/test` | — | `{ ok, message?, agent_installed }` |
-| GET | `/sessions` | — | `Session[]` (query: `?host_id=X`) |
-| GET | `/sessions/:id` | — | `Session` (includes channels) |
-| DELETE | `/sessions/:id` | — | 204 (close) |
-| GET | `/channels` | — | `Channel[]` (query: `?host_id=X`) |
-| GET | `/channels/:id` | — | `Channel` |
-| GET | `/hosts/:id/groups` | — | `ChannelGroup[]` |
-| POST | `/hosts/:id/groups` | CreateGroup | `ChannelGroup` |
-| PUT | `/groups/:id` | UpdateGroup | `ChannelGroup` |
-| DELETE | `/groups/:id` | — | 204 |
-| GET | `/workspaces` | — | `Workspace[]` |
-| POST | `/workspaces` | CreateWS | `Workspace` |
-| PUT | `/workspaces/:id` | UpdateWS | `Workspace` |
-| DELETE | `/workspaces/:id` | — | 204 |
-| GET | `/config` | — | ResolvedConfig (merged) |
-| GET | `/config/raw` | — | `{ toml: string }` |
-| PUT | `/config/raw` | `{ toml }` | 204 |
-| POST | `/pair` | — | `{ code, expires_at }` |
-| POST | `/pair/verify` | `{ code }` | `{ token }` |
+| GET | `/api/health` | ○ | `{ status, version, uptime }` |
+
+#### Hosts
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/hosts` | ● | `Host[]` |
+| POST | `/api/hosts` | ● | CreateHost → `Host` (201) |
+| PUT | `/api/hosts/reorder` | ● | `{ group_id, host_ids }` → 204 |
+| GET | `/api/hosts/:id` | ● | `Host` |
+| PUT | `/api/hosts/:id` | ● | UpdateHost → `Host` (partial update, deep merge) |
+| DELETE | `/api/hosts/:id` | ● | 204 |
+| POST | `/api/hosts/:id/duplicate` | ● | → `Host` (201) |
+| PUT | `/api/hosts/:id/welcome` | ● | `{ channel_id }` → 200 |
+| DELETE | `/api/hosts/:id/welcome` | ● | 204 |
+| GET | `/api/hosts/:id/profiles` | ● | `LaunchProfile[]` (query: `?os=linux\|darwin\|windows`) |
+| PUT | `/api/hosts/:id/profiles/:profileId` | ● | `{ override_type, sort_order? }` → 204 |
+| DELETE | `/api/hosts/:id/profiles/:profileId` | ● | 204 |
+
+#### SSH Config Import
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/ssh-config` | ● | `{ entries, has_include }` — parses `~/.ssh/config` |
+| POST | `/api/hosts/import` | ● | `{ entries: SshConfigImport[] }` → `Host[]` (201) |
+
+#### Sessions
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/sessions` | ● | `Session[]` (query: `?host_id=X`) |
+| GET | `/api/sessions/:id` | ● | `Session` (includes channels) |
+| DELETE | `/api/sessions/:id` | ● | 204 (close) |
+
+#### Channels
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/channels` | ● | `Channel[]` (query: `?host_id=X`) |
+| GET | `/api/channels/:id` | ● | `Channel` |
+| PATCH | `/api/channels/:id` | ● | Partial update (e.g. title) → `Channel` |
+| POST | `/api/channels/:id/restart` | ● | Restart dead channel → 200 |
+| DELETE | `/api/channels/:id` | ● | 204 |
+| POST | `/api/channels/purge-dead` | ● | Remove all dead channels → `{ count }` |
+
+#### Channel Groups (tab groups)
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/groups` | ● | `Group[]` |
+| POST | `/api/groups` | ● | CreateGroup → `Group` (201) |
+| PUT | `/api/groups/reorder` | ● | `{ group_ids }` → 204 |
+| PATCH | `/api/groups/:id` | ● | UpdateGroup → `Group` |
+| DELETE | `/api/groups/:id` | ● | 204 |
+
+#### Host Groups
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/host-groups` | ● | `HostGroup[]` |
+| POST | `/api/host-groups` | ● | CreateHostGroup → `HostGroup` (201) |
+| PUT | `/api/host-groups/reorder` | ● | `{ group_ids }` → 204 |
+| PUT | `/api/host-groups/:id` | ● | UpdateHostGroup → `HostGroup` |
+| DELETE | `/api/host-groups/:id` | ● | 204 |
+
+#### Launch Profiles
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/launch-profiles` | ● | `LaunchProfile[]` |
+| POST | `/api/launch-profiles` | ● | CreateLaunchProfile → `LaunchProfile` (201) |
+| POST | `/api/launch-profiles/reorder` | ● | `{ profile_ids }` → 204 |
+| GET | `/api/launch-profiles/:id` | ● | `LaunchProfile` |
+| PUT | `/api/launch-profiles/:id` | ● | UpdateLaunchProfile → `LaunchProfile` |
+| DELETE | `/api/launch-profiles/:id` | ● | 204 |
+
+#### Configuration
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/config/defaults` | ● | Layer 1 built-in defaults |
+| GET | `/api/config/ui` | ● | UI behavioral config |
+| GET | `/api/config/resolved` | ● | Merged config (query: `?host_id=X&channel_id=Y&session_id=Z`) |
+| GET | `/api/config/cascade` | ● | Full 4-layer cascade (query: `?host_id=X&channel_id=Y`) |
+| PUT | `/api/config/global` | ● | `{ terminal: {...} }` → `{ ok }` |
+| PUT | `/api/config/ui` | ● | `{ <section>: { <key>: value } }` → `{ ok }` |
+| PUT | `/api/config/appearance` | ● | `{ theme?, autoSwitch?, ... }` → `{ ok }` |
+| GET | `/api/config/elevation` | ● | Current elevation config |
+| PUT | `/api/config/elevation` | ● | `{ methodLinux?, methodDarwin?, ... }` → `{ ok }` |
+| GET | `/api/hosts/:id/profile` | ● | `{ profile: object }` — raw host Layer 3 profile |
+| PATCH | `/api/hosts/:id/profile` | ● | `{ profile: object }` — merge into host Layer 3 profile |
+| GET | `/api/channels/:id/profile` | ● | `{ profile: object }` — raw channel Layer 4 profile |
+| PATCH | `/api/channels/:id/profile` | ● | `{ profile: object }` — merge into channel Layer 4 profile |
+
+#### Fonts
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/fonts` | ○ | `FontFamily[]` — scans system + user font dirs |
+
+#### Themes
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/themes` | ● | `Theme[]` (built-in + user) |
+| GET | `/api/themes/:name` | ● | `Theme` |
+| POST | `/api/themes` | ● | CreateTheme → `Theme` (201) |
+| PUT | `/api/themes/:name` | ● | UpdateTheme → `Theme` |
+| DELETE | `/api/themes/:name` | ● | 204 |
+
+#### Wallpapers
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/wallpapers` | ○ | `WallpaperFile[]` — user wallpapers |
+| POST | `/api/wallpapers` | ● | multipart upload → `{ filename }` (201) |
+| DELETE | `/api/wallpapers/:filename` | ● | 204 |
+
+#### Pairing
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| POST | `/api/pair` | ● | — → `{ code, expires_at }` (201); max 3 active codes |
+| POST | `/api/pair/verify` | ○ | `{ code }` → `{ token }` |
+
+#### Static Assets (served by @fastify/static)
+
+| Prefix | Source | Notes |
+|--------|--------|-------|
+| `/public/fonts/` | `~/.config/nexterm/fonts/` | User custom fonts (unauthenticated) |
+| `/public/sounds/` | `~/.config/nexterm/sounds/` | User custom bell sounds (unauthenticated) |
+| `/public/wallpapers/` | `~/.config/nexterm/wallpapers/` | User wallpapers (unauthenticated) |
+| `/` (fallback) | `static/` dir or SEA blob | Web UI bundle (unauthenticated) |
 
 ### Request/Response Body Schemas
 
 **CreateHost:**
 ```typescript
 {
-  type: 'local' | 'ssh',       // required
-  label: string,                // required, 1-64 chars, alphanumeric + dash/underscore, unique
-  ssh_host?: string,            // required if type=ssh, "user@hostname" or "user@ip"
-  ssh_port?: number,            // default 22, range 1-65535
+  type: 'local' | 'ssh',             // required
+  label: string,                      // required, 1-64 chars, alphanumeric + dot/dash/underscore, unique
+  ssh_host?: string,                  // required if type=ssh, "hostname" or "ip"
+  ssh_port?: number,                  // default 22, range 1-65535
+  ssh_user?: string,                  // SSH username
   ssh_auth?: 'agent' | 'key' | 'password',  // required if type=ssh
-  ssh_key_path?: string,        // required if ssh_auth=key
+  ssh_key_path?: string,              // required if ssh_auth=key
+  ssh_config_host?: string,           // Host alias from ~/.ssh/config
   icon_type?: 'auto' | 'emoji' | 'image',   // default 'auto'
-  icon_value?: string,          // emoji char or image path
-  color?: string,               // hex "#rrggbb" or null for auto
+  icon_value?: string,                // emoji char or image path
+  color?: string,                     // hex "#rrggbb" or null for auto
   default_shell?: string,
   default_cwd?: string,
-  trust_remote_hints?: 'apply' | 'ask' | 'ignore'  // default 'apply'
+  trust_remote_hints?: 'apply' | 'ask' | 'ignore',  // default 'apply'
+  host_group?: string,                // group name (legacy)
+  host_group_id?: string,             // host group ID
+  keep_alive_seconds?: number,        // SSH keepalive interval
+  history_retention_days?: number,    // spool retention
+  profile_json?: string | object,     // host-level terminal profile (Layer 3)
+  elevation_method?: string,          // e.g. "sudo", "doas", "pkexec", "gsudo"
+  custom_command?: string,            // custom SSH/connect command template
+  os?: 'linux' | 'darwin' | 'windows' | null,
+  arch?: 'x64' | 'arm64' | null
 }
 ```
 
 **UpdateHost:** Same fields as CreateHost, all optional (partial update, deep merge).
 
-**CreateGroup:**
+**CreateGroup:** (tab channel groups)
 ```typescript
 {
   name: string,                 // required, 1-64 chars
@@ -594,13 +852,40 @@ Auth: `Authorization: Bearer <token>` (except `/health`).
 }
 ```
 
-**CreateWorkspace:**
+**CreateHostGroup:**
+```typescript
+{
+  name: string,                 // required, 1-64 chars
+  sort_order?: number
+}
+```
+
+**UpdateHostGroup:**
+```typescript
+{
+  name?: string,
+  sort_order?: number,
+  collapsed?: boolean
+}
+```
+
+**CreateLaunchProfile:**
 ```typescript
 {
   name: string,                 // required, 1-64 chars, unique
-  layout_json: TabLayout        // required (see SPEC.md § 4 TabLayout)
+  shell?: string,               // shell binary path
+  args?: string[],              // shell arguments
+  cwd?: string,                 // working directory
+  env?: Record<string, string>, // environment variables (values masked in responses)
+  description?: string,
+  color?: string,               // hex "#rrggbb"
+  icon?: string,                // emoji
+  os_filter?: 'linux' | 'darwin' | 'windows' | null,
+  sort_order?: number
 }
 ```
+
+**UpdateLaunchProfile:** Same fields as CreateLaunchProfile, all optional.
 
 **Error responses:**
 ```typescript

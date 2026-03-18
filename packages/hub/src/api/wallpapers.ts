@@ -38,16 +38,20 @@ export function registerWallpaperRoutes(server: FastifyInstance, configDir: stri
 	server.post("/api/wallpapers", async (request: FastifyRequest, reply: FastifyReply) => {
 		const file = await request.file();
 		if (!file) {
-			return reply.code(400).send({ error: "NO_FILE", message: "No file uploaded" });
+			return reply.code(400).send({ error: { code: "NO_FILE", message: "No file uploaded" } });
 		}
 
 		const sanitized = sanitizeFilename(file.filename);
 		if (!sanitized) {
-			return reply.code(400).send({ error: "INVALID_FILENAME", message: "Invalid filename" });
+			return reply
+				.code(400)
+				.send({ error: { code: "INVALID_FILENAME", message: "Invalid filename" } });
 		}
 
 		if (!isValidExtension(sanitized)) {
-			return reply.code(400).send({ error: "UNSUPPORTED_TYPE", message: "Unsupported file type" });
+			return reply
+				.code(400)
+				.send({ error: { code: "UNSUPPORTED_TYPE", message: "Unsupported file type" } });
 		}
 
 		const buffer = await file.toBuffer();
@@ -55,7 +59,9 @@ export function registerWallpaperRoutes(server: FastifyInstance, configDir: stri
 
 		// Directory containment check
 		if (!resolve(target).startsWith(resolve(wallpapersDir))) {
-			return reply.code(400).send({ error: "INVALID_PATH", message: "Invalid filename" });
+			return reply
+				.code(400)
+				.send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
 		}
 
 		await writeFile(target, buffer);
@@ -68,21 +74,27 @@ export function registerWallpaperRoutes(server: FastifyInstance, configDir: stri
 		async (request, reply) => {
 			const sanitized = sanitizeFilename(request.params.filename);
 			if (!sanitized) {
-				return reply.code(400).send({ error: "INVALID_FILENAME", message: "Invalid filename" });
+				return reply
+					.code(400)
+					.send({ error: { code: "INVALID_FILENAME", message: "Invalid filename" } });
 			}
 
 			const target = join(wallpapersDir, sanitized);
 
 			// Directory containment check
 			if (!resolve(target).startsWith(resolve(wallpapersDir))) {
-				return reply.code(400).send({ error: "INVALID_PATH", message: "Invalid filename" });
+				return reply
+					.code(400)
+					.send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
 			}
 
 			try {
 				await unlink(target);
 			} catch (err: unknown) {
 				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-					return reply.code(404).send({ error: "NOT_FOUND", message: "Wallpaper not found" });
+					return reply
+						.code(404)
+						.send({ error: { code: "NOT_FOUND", message: "Wallpaper not found" } });
 				}
 				throw err;
 			}
