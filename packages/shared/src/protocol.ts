@@ -382,6 +382,10 @@ export interface HostVerifyMessage {
 	hostId: string;
 	fingerprint: string;
 	algorithm: string;
+	/** Set when the stored fingerprint differs from the server's current key (MITM warning). */
+	oldFingerprint?: string;
+	/** Correlation ID — must be echoed in HOST_VERIFY_RESPONSE for mismatch prompts. */
+	promptId?: string;
 }
 
 /** UI → Hub: user decision on unknown fingerprint */
@@ -389,6 +393,8 @@ export interface HostVerifyResponseMessage {
 	type: "HOST_VERIFY_RESPONSE";
 	hostId: string;
 	action: "trust_permanent" | "trust_once" | "reject";
+	/** Must match the promptId from HostVerifyMessage when responding to a mismatch prompt. */
+	promptId?: string;
 }
 
 /** Hub → UI: request a secret from the user during SSH connection */

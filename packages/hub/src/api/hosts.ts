@@ -1,4 +1,9 @@
-import { ELEVATION_METHODS_ALL, type Host, toSnakeCase } from "@nexterm/shared";
+import {
+	ELEVATION_METHODS_ALL,
+	type Host,
+	toSnakeCase,
+	validateCustomCommand,
+} from "@nexterm/shared";
 import type { SshConfigImport } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import type { ParseResult } from "../ssh/ssh-config-parser.js";
@@ -183,6 +188,16 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 			return reply
 				.code(400)
 				.send({ error: { code: "VALIDATION_ERROR", message: validationError } });
+		}
+
+		// Validate custom_command if provided (AUD-012)
+		if (body.custom_command != null) {
+			try {
+				validateCustomCommand(body.custom_command);
+			} catch (err) {
+				const e = err as { code: string; message: string };
+				return reply.code(400).send({ error: { code: e.code, message: e.message } });
+			}
 		}
 
 		// Validate visual profile colors in profile_json (INV-09)
@@ -392,7 +407,18 @@ export function registerHostRoutes(server: FastifyInstance, metaDal: MetaDAL): v
 				}
 				updateInput.elevationMethod = body.elevation_method;
 			}
-			if (body.custom_command !== undefined) updateInput.customCommand = body.custom_command;
+			if (body.custom_command !== undefined) {
+				// Validate custom_command if non-null (AUD-012)
+				if (body.custom_command != null) {
+					try {
+						validateCustomCommand(body.custom_command);
+					} catch (err) {
+						const e = err as { code: string; message: string };
+						return reply.code(400).send({ error: { code: e.code, message: e.message } });
+					}
+				}
+				updateInput.customCommand = body.custom_command;
+			}
 			if (body.os !== undefined) {
 				if (body.os !== null && !["linux", "darwin", "windows"].includes(body.os)) {
 					return reply.code(400).send({

@@ -17,7 +17,13 @@ import { registerThemeRoutes } from "./api/themes.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { validateToken } from "./auth.js";
 import { getConfigDir } from "./cli.js";
-import { ConfigResolver, loadGcConfig } from "./config.js";
+import {
+	ConfigResolver,
+	corsOriginsToRegexps,
+	loadCorsOrigins,
+	loadGcConfig,
+	matchCorsOrigin,
+} from "./config.js";
 import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
@@ -33,6 +39,7 @@ export interface ServerOptions {
 	dbManager?: DatabaseManager; // when provided, WS routes are registered
 	authToken?: string; // when provided, Bearer auth is enforced on all routes except /api/health
 	configDir?: string; // override config directory (defaults to getConfigDir())
+	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -42,8 +49,19 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)
 	// and for remote hub access from web clients on other domains.
+	// Origins are validated against an allowlist from config.toml [server] cors_origins.
+	const configDir = options?.configDir ?? getConfigDir();
+	const corsPatterns =
+		options?.corsOrigins !== undefined ? options.corsOrigins : loadCorsOrigins(configDir);
+	const compiledCorsRegexps = corsOriginsToRegexps(corsPatterns);
+
 	await server.register(cors, {
-		origin: true,
+		origin: (origin, cb) => {
+			// No origin header (same-origin or non-browser): deny CORS headers
+			if (!origin) return cb(null, false);
+			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
+			cb(null, matched);
+		},
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 		allowedHeaders: ["Content-Type", "Authorization"],
 		credentials: true,
@@ -116,7 +134,6 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await server.register(websocket);
 
 		// Load config from config.toml before creating SessionManager
-		const configDir = options.configDir ?? getConfigDir();
 		const gcConfig = loadGcConfig(configDir);
 
 		// Build configResolver before SessionManager so it can be injected for title resolution

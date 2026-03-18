@@ -402,3 +402,14 @@ export const ELEVATION_CONFIG_KEYS = [
 	"customCommandDarwin",
 	"customCommandWindows",
 ] as const;
+
+// ─── Server configuration ────────────────────────────────────────────────────
+
+/** Server-level configuration (from [server] in config.toml). */
+export interface ServerConfig {
+	/**
+	 * Allowed CORS origins (glob patterns, * matches port numbers).
+	 * Defaults to localhost + 127.0.0.1 + Tauri origins.
+	 */
+	corsOrigins?: string[];
+}

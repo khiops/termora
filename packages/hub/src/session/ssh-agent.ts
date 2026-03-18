@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
@@ -10,6 +11,17 @@ import { deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
+
+/**
+ * Result of SSH host key verification, populated by the hostVerifier closure
+ * before the Promise resolves/rejects so callers can act on it.
+ */
+export interface HostKeyVerification {
+	/** SHA256:<base64> fingerprint seen during this connect attempt. */
+	capturedFingerprint: string;
+	/** True when the server presented a key that differs from the stored fingerprint. */
+	mismatch: boolean;
+}
 
 /** Callback to prompt the user for a secret (password or key passphrase). */
 export type AuthPromptFn = (
@@ -134,6 +146,11 @@ export class SshAgent extends AgentConnection {
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
 	private readonly sendQueue = new SendQueue("ssh-agent");
+	/**
+	 * Populated by the hostVerifier closure during a connect attempt.
+	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
+	 */
+	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
 
 	constructor(
 		private readonly host: Host,
@@ -147,8 +164,14 @@ export class SshAgent extends AgentConnection {
 	 * Connect to the remote host over SSH, exec `nexterm-agent --stdio`,
 	 * and wait for the HELLO handshake.
 	 * Rejects if HELLO is not received within 5 seconds.
+	 *
+	 * @param storedFingerprint - The trusted fingerprint from the DB (null = first connect / TOFU).
+	 *   When provided and the server key doesn't match, the connection is rejected and
+	 *   the returned HostKeyVerification will have `mismatch: true`.
 	 */
-	async start(): Promise<HelloMessage> {
+	async start(
+		storedFingerprint?: string | null,
+	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
 		if (!this.host.sshHost) {
 			throw new Error("Host has no sshHost configured");
 		}
@@ -169,109 +192,124 @@ export class SshAgent extends AgentConnection {
 			this.host.id,
 		);
 
-		// Accept all host keys for now, log the fingerprint for auditing.
-		// Known-hosts verification is a planned hardening step (see docs/SECURITY.md).
+		// TOFU host key verification.
+		// The verifier populates this object synchronously before the connect attempt resolves.
+		// Also synced to this.lastKeyVerification so callers can inspect it after rejection.
+		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
+		this.lastKeyVerification = keyVerification;
+
 		connectConfig.hostVerifier = ((key: Buffer) => {
-			const fingerprint = key
-				.toString("hex")
-				.replace(/(.{2})/g, "$1:")
-				.slice(0, -1);
-			console.log(`[ssh-agent] Accepting host key fingerprint: ${fingerprint}`);
-			return true;
+			const hash = createHash("sha256").update(key).digest("base64");
+			const fingerprint = `SHA256:${hash}`;
+			keyVerification.capturedFingerprint = fingerprint;
+
+			if (!storedFingerprint) {
+				// TOFU: first connect — accept and let the caller persist the fingerprint.
+				return true;
+			}
+			if (storedFingerprint === fingerprint) {
+				// Known host, fingerprint matches — accept.
+				return true;
+			}
+			// Fingerprint changed — reject so the caller can prompt the user.
+			keyVerification.mismatch = true;
+			return false;
 		}) as SyncHostVerifier;
 
-		return new Promise<HelloMessage>((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				this.cleanup();
-				reject(new Error("Agent HELLO timeout"));
-			}, HELLO_TIMEOUT_MS);
+		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>(
+			(resolve, reject) => {
+				const timeout = setTimeout(() => {
+					this.cleanup();
+					reject(new Error("Agent HELLO timeout"));
+				}, HELLO_TIMEOUT_MS);
 
-			let resolved = false;
-			const rejectOnce = (err: Error): void => {
-				if (resolved) return;
-				resolved = true;
-				clearTimeout(timeout);
-				reject(err);
-			};
-
-			const resolveOnce = (msg: HelloMessage): void => {
-				if (resolved) return;
-				resolved = true;
-				clearTimeout(timeout);
-				resolve(msg);
-			};
-
-			client.once("error", (err) => {
-				rejectOnce(err);
-			});
-
-			client.on("close", () => {
-				this.client = null;
-				this.channelOpen = false;
-				this.emit("close", undefined);
-			});
-
-			client.on("ready", () => {
-				// Attach stream handler — called after deploy (or immediately if no deploy needed).
-				const runAgent = (agentPath: string): void => {
-					// ssh2 Client — sends command over encrypted SSH channel to remote host
-					client.exec(agentPath, (err, stream) => {
-						if (err) {
-							rejectOnce(err);
-							return;
-						}
-
-						this.channel = stream;
-						this.channelOpen = true;
-
-						stream.on("data", (data: Buffer) => {
-							this.handleData(data);
-						});
-
-						stream.on("close", () => {
-							this.sendQueue.clear();
-							this.channel = null;
-							this.channelOpen = false;
-							client.end();
-						});
-
-						stream.on("error", (streamErr: Error) => {
-							this.emit("error", streamErr);
-						});
-
-						this.sendQueue.attach(stream);
-
-						// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
-						this.once("ready", (msg: HelloMessage) => {
-							resolveOnce(msg);
-						});
-					});
+				let resolved = false;
+				const rejectOnce = (err: Error): void => {
+					if (resolved) return;
+					resolved = true;
+					clearTimeout(timeout);
+					reject(err);
 				};
 
-				if (this.deployOptions) {
-					// Auto-deploy is best-effort: if it fails, we still try to run the agent
-					// (the user may have installed it manually in a non-standard path).
-					deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
-						.then((result) => {
-							// Notify caller if new OS/arch info was detected (either via deploy or detection)
-							if (result.os && result.arch) {
-								this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
-							}
-							runAgent(result.remotePath);
-						})
-						.catch((deployErr: unknown) => {
-							console.warn(
-								`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
-							);
-							runAgent("nexterm-agent --stdio");
-						});
-				} else {
-					runAgent("nexterm-agent --stdio");
-				}
-			});
+				const resolveOnce = (msg: HelloMessage): void => {
+					if (resolved) return;
+					resolved = true;
+					clearTimeout(timeout);
+					resolve({ hello: msg, keyVerification });
+				};
 
-			client.connect(connectConfig);
-		});
+				client.once("error", (err) => {
+					rejectOnce(err);
+				});
+
+				client.on("close", () => {
+					this.client = null;
+					this.channelOpen = false;
+					this.emit("close", undefined);
+				});
+
+				client.on("ready", () => {
+					// Attach stream handler — called after deploy (or immediately if no deploy needed).
+					const runAgent = (agentPath: string): void => {
+						// ssh2 Client — sends command over encrypted SSH channel to remote host
+						client.exec(agentPath, (err, stream) => {
+							if (err) {
+								rejectOnce(err);
+								return;
+							}
+
+							this.channel = stream;
+							this.channelOpen = true;
+
+							stream.on("data", (data: Buffer) => {
+								this.handleData(data);
+							});
+
+							stream.on("close", () => {
+								this.sendQueue.clear();
+								this.channel = null;
+								this.channelOpen = false;
+								client.end();
+							});
+
+							stream.on("error", (streamErr: Error) => {
+								this.emit("error", streamErr);
+							});
+
+							this.sendQueue.attach(stream);
+
+							// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
+							this.once("ready", (msg: HelloMessage) => {
+								resolveOnce(msg);
+							});
+						});
+					};
+
+					if (this.deployOptions) {
+						// Auto-deploy is best-effort: if it fails, we still try to run the agent
+						// (the user may have installed it manually in a non-standard path).
+						deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
+							.then((result) => {
+								// Notify caller if new OS/arch info was detected (either via deploy or detection)
+								if (result.os && result.arch) {
+									this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
+								}
+								runAgent(result.remotePath);
+							})
+							.catch((deployErr: unknown) => {
+								console.warn(
+									`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
+								);
+								runAgent("nexterm-agent --stdio");
+							});
+					} else {
+						runAgent("nexterm-agent --stdio");
+					}
+				});
+
+				client.connect(connectConfig);
+			},
+		);
 	}
 
 	/** Send a protocol message to the remote agent via the SSH channel stdin (with backpressure). */

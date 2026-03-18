@@ -103,3 +103,90 @@ describe("Hub Server — Bearer auth", () => {
 		expect(response.statusCode).toBe(404);
 	});
 });
+
+describe("Hub Server — CORS allowlist", () => {
+	let server: FastifyInstance;
+
+	afterEach(async () => {
+		if (server) await server.close();
+	});
+
+	it("allowed origin (localhost:5173) gets Access-Control-Allow-Origin header", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://localhost:5173" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+	});
+
+	it("disallowed origin (http://evil.com) gets no CORS allow header", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://evil.com" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("subdomain bypass blocked (http://localhost.evil.com:5173)", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://localhost.evil.com:5173" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("default config allows Tauri origin (tauri://localhost)", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "tauri://localhost" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBe("tauri://localhost");
+	});
+
+	it("default config allows http://tauri.localhost", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://tauri.localhost" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBe("http://tauri.localhost");
+	});
+
+	it("empty allowlist rejects all origins", async () => {
+		server = await createServer({ logger: false, corsOrigins: [] });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://localhost:5173" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("missing origin header results in no CORS allow header", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+		});
+		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("127.0.0.1 origin is allowed by default", async () => {
+		server = await createServer({ logger: false });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://127.0.0.1:4100" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:4100");
+	});
+});

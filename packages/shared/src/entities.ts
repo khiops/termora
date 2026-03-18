@@ -61,6 +61,8 @@ export interface Host {
 	os: HostOs | null;
 	/** CPU architecture (null = auto-detect on first connect) */
 	arch: HostArch | null;
+	/** SHA256:<base64> fingerprint of the trusted SSH host key (null = not yet seen) */
+	sshFingerprint?: string | null;
 	createdAt: string; // ISO 8601
 	updatedAt: string;
 }

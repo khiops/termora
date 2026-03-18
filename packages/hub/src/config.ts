@@ -21,6 +21,7 @@ import {
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	deepMerge,
+	validateCustomCommand,
 } from "@nexterm/shared";
 import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@nexterm/shared";
 import { DEFAULT_LAYOUT_CONFIG } from "@nexterm/shared";
@@ -117,6 +118,23 @@ export function loadGcConfig(configDir: string): GcConfig {
 		return extractGcConfig(TOML.parse(content));
 	} catch {
 		return { ...DEFAULT_GC_CONFIG };
+	}
+}
+
+/**
+ * Standalone loader: parse the [server] cors_origins from config.toml.
+ * Returns DEFAULT_CORS_ORIGINS if the file is missing, malformed, or has no entry.
+ * Used by server.ts to compile CORS regexps before any route registration.
+ */
+export function loadCorsOrigins(configDir: string): string[] {
+	const configPath = join(configDir, "config.toml");
+	if (!existsSync(configPath)) return [...DEFAULT_CORS_ORIGINS];
+
+	try {
+		const content = readFileSync(configPath, "utf8");
+		return extractCorsConfig(TOML.parse(content)) ?? [...DEFAULT_CORS_ORIGINS];
+	} catch {
+		return [...DEFAULT_CORS_ORIGINS];
 	}
 }
 
@@ -472,16 +490,97 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 		result.methodWindows = raw.method_windows as ElevationMethod;
 	}
 	if (typeof raw.custom_command_linux === "string" && raw.custom_command_linux.length > 0) {
-		result.customCommandLinux = raw.custom_command_linux;
+		try {
+			validateCustomCommand(raw.custom_command_linux);
+			result.customCommandLinux = raw.custom_command_linux;
+		} catch {
+			console.warn(
+				`[config] elevation.custom_command_linux is invalid — ignoring: "${raw.custom_command_linux}"`,
+			);
+		}
 	}
 	if (typeof raw.custom_command_darwin === "string" && raw.custom_command_darwin.length > 0) {
-		result.customCommandDarwin = raw.custom_command_darwin;
+		try {
+			validateCustomCommand(raw.custom_command_darwin);
+			result.customCommandDarwin = raw.custom_command_darwin;
+		} catch {
+			console.warn(
+				`[config] elevation.custom_command_darwin is invalid — ignoring: "${raw.custom_command_darwin}"`,
+			);
+		}
 	}
 	if (typeof raw.custom_command_windows === "string" && raw.custom_command_windows.length > 0) {
-		result.customCommandWindows = raw.custom_command_windows;
+		try {
+			validateCustomCommand(raw.custom_command_windows);
+			result.customCommandWindows = raw.custom_command_windows;
+		} catch {
+			console.warn(
+				`[config] elevation.custom_command_windows is invalid — ignoring: "${raw.custom_command_windows}"`,
+			);
+		}
 	}
 
 	return result;
+}
+
+// ─── CORS configuration ──────────────────────────────────────────────────────
+
+/**
+ * Default allowed CORS origins.
+ * Patterns may contain `*` to match port numbers (e.g. `http://localhost:*`).
+ */
+export const DEFAULT_CORS_ORIGINS: string[] = [
+	"http://localhost:*",
+	"https://localhost:*",
+	"http://127.0.0.1:*",
+	"https://127.0.0.1:*",
+	"tauri://localhost",
+	"http://tauri.localhost",
+];
+
+/**
+ * Convert an array of origin patterns into compiled RegExp objects.
+ *
+ * Rules:
+ * - All regex-special characters are escaped, EXCEPT `*`
+ * - `*` is replaced with `\\d+` (matches a sequence of digits — port numbers)
+ * - Anchored with `^...$` for strict matching
+ *
+ * Security: `localhost:*` must NOT match `localhost.evil.com:8080`.
+ * This is guaranteed because we only replace bare `*` (i.e. digit sequences),
+ * and the surrounding characters (`:` before `*`, end-of-string or nothing after)
+ * are preserved literally in the escaped pattern.
+ */
+export function corsOriginsToRegexps(patterns: string[]): RegExp[] {
+	return patterns.map((pattern) => {
+		// Escape all regex special chars except '*'
+		const escaped = pattern.replace(/[$()+.?[\\\]^{|}]/g, "\\$&");
+		// Replace '*' with '\d+' — only matches numeric port sequences
+		const withPort = escaped.replace(/\*/g, "\\d+");
+		return new RegExp(`^${withPort}$`);
+	});
+}
+
+/**
+ * Test whether an origin string matches any of the compiled regexp patterns.
+ */
+export function matchCorsOrigin(origin: string, regexps: RegExp[]): boolean {
+	return regexps.some((re) => re.test(origin));
+}
+
+/**
+ * Extract the CORS origins list from a parsed TOML map's [server] section.
+ * Returns undefined if the section or key is absent (caller uses the default).
+ */
+export function extractCorsConfig(parsed: TOML.JsonMap): string[] | undefined {
+	const section = parsed.server;
+	if (section == null || typeof section !== "object") return undefined;
+	const raw = section as Record<string, unknown>;
+
+	if (Array.isArray(raw.cors_origins) && raw.cors_origins.every((v) => typeof v === "string")) {
+		return raw.cors_origins as string[];
+	}
+	return undefined;
 }
 
 // ─── ConfigResolver ──────────────────────────────────────────────────────────
@@ -493,6 +592,7 @@ export class ConfigResolver {
 	private _uiConfig: UiConfig = { ...DEFAULT_UI_CONFIG };
 	private _appearance: AppearanceConfig = { ...DEFAULT_APPEARANCE };
 	private _elevation: ElevationConfig = { ...DEFAULT_ELEVATION_CONFIG };
+	private _corsOrigins: string[] = [...DEFAULT_CORS_ORIGINS];
 	private _configDir: string | null = null;
 
 	constructor(private metaDal: MetaDAL) {}
@@ -515,6 +615,11 @@ export class ConfigResolver {
 	/** Returns the resolved elevation configuration (defaults merged with [elevation] from config.toml). */
 	get elevationConfig(): ElevationConfig {
 		return this._elevation;
+	}
+
+	/** Returns the resolved CORS origin patterns (defaults or [server] cors_origins from config.toml). */
+	get corsOrigins(): string[] {
+		return this._corsOrigins;
 	}
 
 	/**
@@ -564,6 +669,14 @@ export class ConfigResolver {
 		// ── [elevation] section ────────────────────────────────────────────
 		const elevationOverrides = extractElevationConfig(parsed);
 		this._elevation = { ...DEFAULT_ELEVATION_CONFIG, ...elevationOverrides };
+
+		// ── [server] cors_origins ───────────────────────────────────────────
+		const corsOverride = extractCorsConfig(parsed);
+		if (corsOverride !== undefined) {
+			this._corsOrigins = corsOverride;
+		} else {
+			this._corsOrigins = [...DEFAULT_CORS_ORIGINS];
+		}
 	}
 
 	/** Returns the Layer 2 terminal overrides from config.toml. */

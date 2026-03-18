@@ -89,6 +89,7 @@ class MockSshAgent {
 	private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
 	private _connected = true;
 
+	lastKeyVerification = { capturedFingerprint: "SHA256:mockfp", mismatch: false };
 	start = vi.fn().mockResolvedValue(undefined);
 	send = vi.fn((msg: ProtocolMessage) => {
 		if (msg.type === "SPAWN") {

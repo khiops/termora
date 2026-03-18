@@ -156,7 +156,7 @@ describe("SshAgent", () => {
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			const hello = await agent.start();
+			const { hello } = await agent.start();
 
 			expect(hello.type).toBe("HELLO");
 			expect(hello.version).toBe(1);
@@ -343,7 +343,7 @@ describe("SshAgent — auth prompting", () => {
 			const agent = new SshAgent(makeHost(port, { sshKeyPath: ENCRYPTED_KEY_PATH }), promptAuth);
 			agents.push(agent);
 
-			const hello = await agent.start();
+			const { hello } = await agent.start();
 			expect(hello.type).toBe("HELLO");
 			expect(promptAuth).toHaveBeenCalledOnce();
 			expect(promptAuth).toHaveBeenCalledWith(
@@ -404,7 +404,7 @@ describe("SshAgent — auth prompting", () => {
 			const agent = new SshAgent(makeHost(port, { sshAuth: "password" }), promptAuth);
 			agents.push(agent);
 
-			const hello = await agent.start();
+			const { hello } = await agent.start();
 			expect(hello.type).toBe("HELLO");
 			expect(promptAuth).toHaveBeenCalledOnce();
 			expect(promptAuth).toHaveBeenCalledWith(
@@ -448,6 +448,120 @@ describe("SshAgent — auth prompting", () => {
 			await expect(agent.start()).rejects.toThrow(
 				"password auth not yet supported without promptAuth callback",
 			);
+		},
+		TEST_TIMEOUT,
+	);
+});
+
+describe("SshAgent — TOFU host key verification", () => {
+	let agents: SshAgent[] = [];
+	let servers: SshServer[] = [];
+
+	afterEach(async () => {
+		for (const agent of agents) {
+			try {
+				agent.close();
+			} catch {
+				// already closed
+			}
+		}
+		agents = [];
+		await Promise.all(
+			servers.map(
+				(srv) =>
+					new Promise<void>((resolve) => {
+						srv.close(() => resolve());
+					}),
+			),
+		);
+		servers = [];
+	});
+
+	it(
+		"TOFU: accepts unknown fingerprint on first connect and captures it",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const agent = new SshAgent(makeHost(port));
+			agents.push(agent);
+
+			// null = no stored fingerprint (TOFU first connect)
+			const { keyVerification } = await agent.start(null);
+
+			expect(keyVerification.mismatch).toBe(false);
+			expect(keyVerification.capturedFingerprint).toMatch(/^SHA256:/);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"matching fingerprint: accepts when stored fingerprint equals server key",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			// First connect to capture the actual fingerprint
+			const agent1 = new SshAgent(makeHost(port));
+			agents.push(agent1);
+			const { keyVerification: kv1 } = await agent1.start(null);
+			const capturedFingerprint = kv1.capturedFingerprint;
+			agent1.close();
+			agents = agents.filter((a) => a !== agent1);
+
+			// Second connect with the trusted fingerprint — should match without mismatch
+			const agent2 = new SshAgent(makeHost(port));
+			agents.push(agent2);
+			const { keyVerification: kv2 } = await agent2.start(capturedFingerprint);
+
+			expect(kv2.mismatch).toBe(false);
+			expect(kv2.capturedFingerprint).toBe(capturedFingerprint);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"mismatch: rejects and sets mismatch flag when stored fingerprint differs",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			// A clearly different stored fingerprint to simulate a changed host key
+			const wrongFingerprint = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+			const agent = new SshAgent(makeHost(port));
+			agents.push(agent);
+
+			await expect(agent.start(wrongFingerprint)).rejects.toThrow();
+
+			expect(agent.lastKeyVerification.mismatch).toBe(true);
+			expect(agent.lastKeyVerification.capturedFingerprint).toMatch(/^SHA256:/);
+			expect(agent.lastKeyVerification.capturedFingerprint).not.toBe(wrongFingerprint);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"fingerprint format: capturedFingerprint is SHA256:<base64>",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const agent = new SshAgent(makeHost(port));
+			agents.push(agent);
+
+			const { keyVerification } = await agent.start(null);
+
+			// SHA256: prefix followed by base64 (standard chars + padding)
+			expect(keyVerification.capturedFingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]+=*$/);
 		},
 		TEST_TIMEOUT,
 	);

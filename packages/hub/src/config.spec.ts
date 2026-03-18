@@ -1859,18 +1859,18 @@ describe("extractElevationConfig", () => {
 				method_linux: "doas",
 				method_darwin: "sudo",
 				method_windows: "custom",
-				custom_command_linux: "my-elev-linux",
-				custom_command_darwin: "my-elev-mac",
-				custom_command_windows: "my-elev-win",
+				custom_command_linux: "/usr/local/bin/my-elev-linux",
+				custom_command_darwin: "/usr/local/bin/my-elev-mac",
+				custom_command_windows: "C:\\tools\\my-elev-win.exe",
 			},
 		} as unknown as import("@iarna/toml").JsonMap;
 		const result = extractElevationConfig(parsed);
 		expect(result.methodLinux).toBe("doas");
 		expect(result.methodDarwin).toBe("sudo");
 		expect(result.methodWindows).toBe("custom");
-		expect(result.customCommandLinux).toBe("my-elev-linux");
-		expect(result.customCommandDarwin).toBe("my-elev-mac");
-		expect(result.customCommandWindows).toBe("my-elev-win");
+		expect(result.customCommandLinux).toBe("/usr/local/bin/my-elev-linux");
+		expect(result.customCommandDarwin).toBe("/usr/local/bin/my-elev-mac");
+		expect(result.customCommandWindows).toBe("C:\\tools\\my-elev-win.exe");
 	});
 });
 

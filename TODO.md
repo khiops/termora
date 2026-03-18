@@ -2,29 +2,11 @@
 
 ## Recently Completed
 
-- [x] ✅ [Desktop] Auto-auth flow: invoke `get_hub_auth_token` before token gate in App.vue (2026-03-13)
-- [x] ✅ [Desktop] TitleBar z-index above PairingScreen overlay (2026-03-13)
-- [x] ✅ [Desktop] Fix sidecar path: `nexterm-hub` not `binaries/nexterm-hub` (2026-03-13)
-- [x] ✅ [Desktop] Custom NSIS installer: license, per-user/global, component selection (Hub/Agent) (2026-03-13)
-- [x] ✅ [CI] Fix artifact glob: upload NSIS `.exe` not `.nsis` (was uploading only MSI) (2026-03-14)
-- [x] ✅ [Desktop] Hub sidecar: pass `start` arg (was exiting immediately with code 0) (2026-03-14)
-- [x] ✅ [Desktop] Hub sidecar logging to `hub.log` (stdout/stderr/exit capture) (2026-03-14)
-- [x] ✅ [Web] Absolute URLs for Tauri: `hubBaseUrl()` / `hubWsUrl()` utility (15 files) (2026-03-14)
-- [x] ✅ [Hub] SEA: invoke `main()` via esbuild footer (cli.ts exported but never self-called) (2026-03-14)
-- [x] ✅ [Hub] SEA: embed toml-edit WASM as asset (`getRawAsset` + `initSync`) (2026-03-14)
-- [x] ✅ [Hub] SEA: bundle better-sqlite3 JS + shim `bindings` → `__seaSqliteExports` (2026-03-14)
-- [x] ✅ [Agent] SEA: extract winpty.dll + winpty-agent.exe BEFORE pty.node dlopen (2026-03-14)
-- [x] ✅ [Hub] CORS: `@fastify/cors` for Tauri cross-origin + remote hub support (2026-03-15)
-- [x] ✅ [Desktop] Dynamic hub port: detect existing hub via runtime.json, `get_hub_port` invoke (2026-03-15)
-- [x] ✅ [Test] SEA E2E tests: skip outside CI (`process.env.CI` gate) (2026-03-13)
-- [x] ✅ [CI] Add `workflow_dispatch` trigger for manual reruns (2026-03-14)
+(Archived → docs/historic/done-2026-03.md)
 
 ## Tier 1 — Next Sprint (UX + DX)
 
 ### Audit P0 (before going public)
-- [ ] 🐛 [Hub] CORS: restrict `origin: true` to explicit allowlist (AUD-001) — Priority: H
-- [ ] 🐛 [Hub] SSH host key verification: implement TOFU with persistence (AUD-002) — Priority: H
-- [ ] 🐛 [Hub] Validate custom_command field — length + path checks (AUD-012) — Priority: H
 - [ ] 💡 [Root] Create README.md (AUD-003) — Priority: H
 
 ### Audit P1
@@ -64,6 +46,10 @@
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L
+- [ ] 🔧 [Hub] SSH TOFU: trust_once not distinct from trust_permanent — both persist fingerprint (review F-001) — Priority: L
+- [ ] 🔧 [Web] SSH host-verify: expose "Trust Once" button in HostKeyWarning.vue (review F-001) — Priority: L
+- [ ] 🔧 [Hub] SessionManager: flip `if (agent != null)` guard to positive form for readability (review F-003) — Priority: L
+- [ ] 💡 [Docs] CORS: document that tauri://localhost custom port needs manual cors_origins entry (review F-004) — Priority: L
 
 ## Tier 2 — Quick Wins (batchable)
 

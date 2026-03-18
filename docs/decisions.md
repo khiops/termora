@@ -4,6 +4,20 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## AUD-P0-SEC — P0 Security Audit Fixes: CORS allowlist, SSH TOFU, custom_command validation (2026-03-18)
+
+- CORS: configurable origin allowlist via [server] cors_origins in config.toml, wildcard port matching
+- CORS default: localhost + 127.0.0.1 any port + tauri://localhost + http://tauri.localhost
+- CORS: strict ^...$ regex anchoring to prevent subdomain bypass
+- custom_command: character ALLOWLIST [a-zA-Z0-9/\\._ :-], ASCII-only, absolute path
+- custom_command: binary path only (no args), agent uses spawn with shell:false
+- SSH TOFU: auto-accept first connect, reject+prompt on mismatch (30s timeout)
+- SSH fingerprint: SHA256:<base64> format (OpenSSH compatible), self-hash raw key buffer
+- SSH mismatch: HOST_VERIFY with promptId ULID + HOST_VERIFY_RESPONSE, pendingHostVerify Map
+- SSH mismatch detection: explicit verificationState flag (lastKeyVerification.mismatch), not error text
+- Bug fix: agent guard was `agent !== sshAgent` (wrong on first connect when agent=undefined); fixed to `agent != null`
+- Review finding F-001 deferred: trust_once/trust_permanent both persist fingerprint (UI only exposes trust_permanent)
+
 ## PKG — Full Packaging Pipeline: SEA Binaries + CI + Auto-Deploy + Tauri (2026-03-13)
 
 - Two separate SEA binaries: nexterm-agent (node-pty) + nexterm-hub (better-sqlite3)

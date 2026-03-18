@@ -7,6 +7,9 @@
 		<!-- Auth-prompt dialog — SSH password / passphrase, rendered via Teleport -->
 		<AuthPromptDialog />
 
+		<!-- Host key warning dialog — SSH host key mismatch (TOFU), rendered via Teleport -->
+		<HostKeyWarning />
+
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
@@ -306,6 +309,7 @@ import PairingCodeGenerator from "./components/PairingCodeGenerator.vue";
 import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import AuthPromptDialog from "./components/AuthPromptDialog.vue";
+import HostKeyWarning from "./components/HostKeyWarning.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import SettingsPanel from "./components/settings/SettingsPanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";

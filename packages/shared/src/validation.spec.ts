@@ -6,6 +6,7 @@ import {
 	isValidEnv,
 	isValidInputData,
 	isValidUlid,
+	validateCustomCommand,
 } from "./validation.js";
 
 describe("isValidUlid", () => {
@@ -208,5 +209,123 @@ describe("isValidEnv", () => {
 	it("accepts values at exactly 8192 characters", () => {
 		const value = "V".repeat(8192);
 		expect(isValidEnv({ KEY: value })).toBe(true);
+	});
+});
+
+describe("validateCustomCommand", () => {
+	// ── Valid cases ────────────────────────────────────────────────────────────
+
+	it("accepts /usr/bin/sudo", () => {
+		expect(() => validateCustomCommand("/usr/bin/sudo")).not.toThrow();
+	});
+
+	it("accepts /usr/local/bin/doas", () => {
+		expect(() => validateCustomCommand("/usr/local/bin/doas")).not.toThrow();
+	});
+
+	it("accepts Windows path C:\\Windows\\System32\\gsudo.exe", () => {
+		expect(() => validateCustomCommand("C:\\Windows\\System32\\gsudo.exe")).not.toThrow();
+	});
+
+	it("accepts Windows path with spaces C:\\Program Files\\gsudo\\gsudo.exe", () => {
+		expect(() => validateCustomCommand("C:\\Program Files\\gsudo\\gsudo.exe")).not.toThrow();
+	});
+
+	// ── Invalid characters ─────────────────────────────────────────────────────
+
+	it("rejects semicolon in path", () => {
+		expect(() => validateCustomCommand("/usr/bin/sudo;rm -rf /")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("invalid characters") }),
+		);
+	});
+
+	it("rejects pipe in path", () => {
+		expect(() => validateCustomCommand("/usr/bin/sudo|cat /etc/passwd")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("invalid characters") }),
+		);
+	});
+
+	it("rejects dollar sign in path", () => {
+		expect(() => validateCustomCommand("/usr/bin/$sudo")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("invalid characters") }),
+		);
+	});
+
+	// ── ASCII-only ─────────────────────────────────────────────────────────────
+
+	it("rejects non-ASCII characters", () => {
+		expect(() => validateCustomCommand("/usr/bin/südo")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("ASCII characters") }),
+		);
+	});
+
+	// ── Absolute path ──────────────────────────────────────────────────────────
+
+	it("rejects relative path 'sudo'", () => {
+		expect(() => validateCustomCommand("sudo")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("absolute path") }),
+		);
+	});
+
+	it("rejects relative path './sudo'", () => {
+		expect(() => validateCustomCommand("./sudo")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("absolute path") }),
+		);
+	});
+
+	// ── Path traversal ─────────────────────────────────────────────────────────
+
+	it("rejects path traversal /usr/bin/../../../etc/shadow", () => {
+		expect(() => validateCustomCommand("/usr/bin/../../../etc/shadow")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("path traversal") }),
+		);
+	});
+
+	it("rejects path ending with /..", () => {
+		expect(() => validateCustomCommand("/usr/bin/..")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("path traversal") }),
+		);
+	});
+
+	it("rejects Windows path traversal C:\\foo\\..\\..\\Windows\\System32\\cmd.exe", () => {
+		expect(() => validateCustomCommand("C:\\foo\\..\\..\\Windows\\System32\\cmd.exe")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("path traversal") }),
+		);
+	});
+
+	// ── Empty / length ─────────────────────────────────────────────────────────
+
+	it("rejects empty string", () => {
+		expect(() => validateCustomCommand("")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("empty") }),
+		);
+	});
+
+	it("rejects string exceeding 4096 characters", () => {
+		const longPath = `/${"a".repeat(4096)}`;
+		expect(() => validateCustomCommand(longPath)).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("maximum length") }),
+		);
+	});
+
+	it("accepts string at exactly 4096 characters", () => {
+		const path = `/${"a".repeat(4095)}`;
+		expect(() => validateCustomCommand(path)).not.toThrow();
+	});
+
+	// ── Null bytes ─────────────────────────────────────────────────────────────
+
+	it("rejects null bytes", () => {
+		expect(() => validateCustomCommand("/usr/bin/sudo\0evil")).toThrow(
+			expect.objectContaining({ message: expect.stringContaining("invalid characters") }),
+		);
+	});
+
+	// ── Error code ────────────────────────────────────────────────────────────
+
+	it("throws structured error with code INVALID_CUSTOM_COMMAND", () => {
+		expect(() => validateCustomCommand("sudo")).toThrow(
+			expect.objectContaining({ code: "INVALID_CUSTOM_COMMAND" }),
+		);
 	});
 });

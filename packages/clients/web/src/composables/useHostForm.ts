@@ -1,10 +1,10 @@
 import type { Host, SshConfigEntry } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import { computed, ref, watch } from "vue";
-import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "../stores/auth.js";
 import { useHostsStore } from "../stores/hosts.js";
 import { resolveEmojiShortcode } from "../utils/emoji-shortcodes.js";
+import { hubBaseUrl } from "../utils/hub-url.js";
 import { getInitials } from "./useHostIcon.js";
 
 export interface HostFormData {

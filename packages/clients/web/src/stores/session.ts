@@ -9,6 +9,7 @@ import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
+import { useHostVerifyStore } from "./host-verify.js";
 import { useHostsStore } from "./hosts.js";
 import { useNotificationStore } from "./notifications.js";
 import { useWriteLockStore } from "./writelock.js";
@@ -65,6 +66,24 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("AUTH_PROMPT", (msg) => {
 			if (msg.type === "AUTH_PROMPT") {
 				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
+			}
+		});
+
+		// Register host-verify (key-mismatch) message routing
+		const hostVerifyStore = useHostVerifyStore();
+		hostVerifyStore.setWsClient(wsClient);
+		wsClient.on("HOST_VERIFY", (msg) => {
+			if (msg.type === "HOST_VERIFY" && msg.promptId && msg.oldFingerprint) {
+				// Only surface the dialog for mismatch prompts (has promptId + oldFingerprint)
+				const hostname = msg.hostId; // best-effort; hub doesn't send hostname yet
+				hostVerifyStore.handleHostVerify(
+					msg.hostId,
+					hostname,
+					msg.fingerprint,
+					msg.algorithm,
+					msg.oldFingerprint,
+					msg.promptId,
+				);
 			}
 		});
 

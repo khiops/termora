@@ -96,6 +96,7 @@ interface HostRow {
 	custom_command: string | null;
 	os: string | null;
 	arch: string | null;
+	ssh_fingerprint: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -191,6 +192,8 @@ function rowToHost(row: HostRow): Host {
 	if (row.discovered_shells_at != null) host.discoveredShellsAt = row.discovered_shells_at;
 	if (row.elevation_method != null) host.elevationMethod = row.elevation_method as ElevationMethod;
 	if (row.custom_command != null) host.customCommand = row.custom_command;
+	// ssh_fingerprint is always set (null = not yet seen)
+	host.sshFingerprint = row.ssh_fingerprint;
 	return host;
 }
 
@@ -488,6 +491,22 @@ export class MetaDAL {
 		this.db
 			.prepare("UPDATE hosts SET os = ?, arch = ?, updated_at = ? WHERE id = ?")
 			.run(os, arch, now, id);
+	}
+
+	/** Return the stored SSH host key fingerprint for a host, or null if never seen. */
+	getHostFingerprint(hostId: string): string | null {
+		const row = this.db.prepare("SELECT ssh_fingerprint FROM hosts WHERE id = ?").get(hostId) as
+			| { ssh_fingerprint: string | null }
+			| undefined;
+		return row?.ssh_fingerprint ?? null;
+	}
+
+	/** Persist a trusted SSH host key fingerprint (SHA256:<base64>) for a host. */
+	updateHostFingerprint(hostId: string, fingerprint: string): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE hosts SET ssh_fingerprint = ?, updated_at = ? WHERE id = ?")
+			.run(fingerprint, now, hostId);
 	}
 
 	deleteHost(id: string): boolean {

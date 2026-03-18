@@ -15,6 +15,7 @@ import type {
 	ChannelStateMessage,
 	DestroyMessage,
 	ErrorMessage,
+	HostVerifyMessage,
 	InputMessage,
 	OutputMessage,
 	ProtocolMessage,
@@ -33,6 +34,7 @@ import {
 	generateId,
 	getSocketPath,
 	resolveChannelDisplayName,
+	validateCustomCommand,
 } from "@nexterm/shared";
 import { Client as SshClient } from "ssh2";
 import type { ConfigResolver, GcConfig } from "../config.js";
@@ -46,7 +48,12 @@ import { NextermAgent } from "./nexterm-agent.js";
 import { OutputChunker } from "./output-chunker.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
-import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
+import {
+	type AuthPromptFn,
+	type HostKeyVerification,
+	SshAgent,
+	buildSshConnectConfig,
+} from "./ssh-agent.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
 const ATTACH_TIMEOUT_MS = 5_000;
@@ -158,8 +165,21 @@ export class SessionManager {
 	private elevationCache = new Map<string, { secret: string; expiresAt: number }>();
 	/** TTL for cached elevation secrets (ms). */
 	private static readonly ELEVATION_CACHE_TTL_MS = 900_000; // 15 minutes
+	/** Timeout for waiting on a HOST_VERIFY_RESPONSE from the UI (ms). */
+	private static readonly HOST_KEY_MISMATCH_TIMEOUT_MS = 30_000;
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	private agentCapabilities = new Map<string, string[]>();
+	/**
+	 * promptId → pending host-key-mismatch resolution.
+	 * Populated when a mismatch is detected; resolved when HOST_VERIFY_RESPONSE arrives.
+	 */
+	private pendingHostVerify = new Map<
+		string,
+		{
+			resolve: (accepted: boolean) => void;
+			timer: ReturnType<typeof setTimeout>;
+		}
+	>();
 
 	/**
 	 * Optional callback to resolve the current write-lock holder for a channel.
@@ -536,24 +556,82 @@ export class SessionManager {
 			if (host.type === "ssh") {
 				const promptAuth = this._buildPromptAuth(client);
 				const sshAgent = new SshAgent(host, promptAuth);
+
+				// TOFU: load the stored fingerprint so the verifier can check it
+				const storedFingerprint = this.metaDal.getHostFingerprint(hostId);
+
 				// Connect and wait for HELLO — session transitions to 'active' on success
 				try {
-					await sshAgent.start();
+					await sshAgent.start(storedFingerprint);
 				} catch (err) {
-					// Session failed to start — close it
-					this._updateSessionStatus(hostId, session.id, "closed");
-					const errorMsg: ErrorMessage = {
-						type: "ERROR",
-						code: "SSH_CONNECT_FAILED",
-						message: err instanceof Error ? err.message : "SSH connection failed",
-					};
-					client.send(errorMsg);
-					return null;
+					// sshAgent.lastKeyVerification is always populated by the hostVerifier closure,
+					// even when start() rejects (the verifier runs synchronously before the error event).
+					const kv = sshAgent.lastKeyVerification;
+					if (kv.mismatch) {
+						// Host key changed — ask the user before failing
+						const accepted = await this._promptHostKeyMismatch(
+							client,
+							hostId,
+							host.sshHost ?? host.label,
+							storedFingerprint ?? "",
+							kv.capturedFingerprint,
+						);
+						if (accepted) {
+							// User accepted the new key — persist it and retry the connection
+							this.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
+							const retryAgent = new SshAgent(host, promptAuth);
+							try {
+								await retryAgent.start(kv.capturedFingerprint);
+							} catch (retryErr) {
+								this._updateSessionStatus(hostId, session.id, "closed");
+								client.send({
+									type: "ERROR",
+									code: "SSH_CONNECT_FAILED",
+									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+								} satisfies ErrorMessage);
+								return null;
+							}
+							this._updateSessionStatus(hostId, session.id, "active");
+							this._wireAgentEvents(hostId, session.id, retryAgent);
+							this.agents.set(hostId, retryAgent);
+							agent = retryAgent;
+						} else {
+							// User rejected — fail the session
+							this._updateSessionStatus(hostId, session.id, "closed");
+							client.send({
+								type: "ERROR",
+								code: "SSH_HOST_KEY_REJECTED",
+								message: "SSH host key rejected by user",
+							} satisfies ErrorMessage);
+							return null;
+						}
+					} else {
+						// Generic SSH connect failure
+						this._updateSessionStatus(hostId, session.id, "closed");
+						client.send({
+							type: "ERROR",
+							code: "SSH_CONNECT_FAILED",
+							message: err instanceof Error ? err.message : "SSH connection failed",
+						} satisfies ErrorMessage);
+						return null;
+					}
 				}
-				this._updateSessionStatus(hostId, session.id, "active");
-				this._wireAgentEvents(hostId, session.id, sshAgent);
-				this.agents.set(hostId, sshAgent);
-				agent = sshAgent;
+
+				// Reached when first attempt succeeded (no mismatch) or mismatch retry succeeded.
+				// agent is set (retryAgent) when the mismatch-accept branch already wired it; for a clean first connect, wire now.
+				if (agent != null) {
+					// mismatch + accept branch already wired retryAgent — agent = retryAgent, nothing more to do here.
+				} else {
+					// TOFU: persist fingerprint on first successful connect (no stored key previously)
+					const kv = sshAgent.lastKeyVerification;
+					if (kv.capturedFingerprint && !storedFingerprint) {
+						this.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
+					}
+					this._updateSessionStatus(hostId, session.id, "active");
+					this._wireAgentEvents(hostId, session.id, sshAgent);
+					this.agents.set(hostId, sshAgent);
+					agent = sshAgent;
+				}
 			} else {
 				// Local: try daemon first, fall back to child-process agent
 				try {
@@ -651,6 +729,22 @@ export class SessionManager {
 				method === "custom" && this._configResolver
 					? this._configResolver.resolveCustomCommand(host.customCommand)
 					: undefined;
+
+			// Defensive: validate custom_command before including in spawn message (AUD-012)
+			if (customCommand !== undefined) {
+				try {
+					validateCustomCommand(customCommand);
+				} catch (err) {
+					const e = err as { code: string; message: string };
+					const errorMsg: ErrorMessage = {
+						type: "ERROR",
+						code: "INVALID_CUSTOM_COMMAND",
+						message: e.message,
+					};
+					client.send(errorMsg);
+					return null;
+				}
+			}
 
 			const agentSpawn: AgentSpawnMessage = {
 				...baseSpawnMsg,
@@ -1672,7 +1766,8 @@ export class SessionManager {
 
 			try {
 				const sshAgent = new SshAgent(host);
-				await sshAgent.start();
+				const storedFp = this.metaDal.getHostFingerprint(hostId);
+				await sshAgent.start(storedFp);
 				this._updateSessionStatus(hostId, sessionId, "active");
 				this._wireAgentEvents(hostId, sessionId, sshAgent);
 				this.agents.set(hostId, sshAgent);
@@ -2230,6 +2325,56 @@ export class SessionManager {
 				this.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
 			});
 		};
+	}
+
+	/**
+	 * Send HOST_VERIFY to the client with mismatch details and wait (30 s timeout)
+	 * for HOST_VERIFY_RESPONSE. Returns true if the user accepted the new key.
+	 */
+	private async _promptHostKeyMismatch(
+		client: WsClient,
+		hostId: string,
+		hostname: string,
+		oldFingerprint: string,
+		newFingerprint: string,
+	): Promise<boolean> {
+		const promptId = generateId();
+		const verifyMsg: HostVerifyMessage = {
+			type: "HOST_VERIFY",
+			hostId,
+			fingerprint: newFingerprint,
+			algorithm: "SHA256",
+			oldFingerprint,
+			promptId,
+		};
+		client.send(verifyMsg);
+
+		return new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingHostVerify.delete(promptId);
+				console.warn(
+					`[session-manager] HOST_VERIFY timeout for host ${hostId} (${hostname}) — rejecting`,
+				);
+				resolve(false);
+			}, SessionManager.HOST_KEY_MISMATCH_TIMEOUT_MS);
+
+			this.pendingHostVerify.set(promptId, { resolve, timer });
+		});
+	}
+
+	/**
+	 * Resolve a pending host-key-mismatch prompt.
+	 * Called by WsHandler when HOST_VERIFY_RESPONSE arrives from the UI.
+	 */
+	handleHostVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
+	): void {
+		const pending = this.pendingHostVerify.get(promptId);
+		if (!pending) return;
+		clearTimeout(pending.timer);
+		this.pendingHostVerify.delete(promptId);
+		pending.resolve(action !== "reject");
 	}
 
 	/**

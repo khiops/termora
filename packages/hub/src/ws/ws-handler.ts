@@ -3,6 +3,7 @@ import type {
 	AuthPromptResponseMessage,
 	DetachMessage,
 	ErrorMessage,
+	HostVerifyResponseMessage,
 	InputMessage,
 	ProtocolMessage,
 	ResizeMessage,
@@ -306,6 +307,27 @@ export async function registerWsRoutes(
 						break;
 					}
 					sessionManager.handleAuthPromptResponse(clientId, apr.hostId, apr.secret);
+					break;
+				}
+				case "HOST_VERIFY_RESPONSE": {
+					const hvr = msg as HostVerifyResponseMessage;
+					if (!hvr.promptId || typeof hvr.promptId !== "string" || hvr.promptId.length > 128) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "Invalid promptId",
+						});
+						break;
+					}
+					if (!["trust_permanent", "trust_once", "reject"].includes(hvr.action)) {
+						client.send({
+							type: "ERROR",
+							code: "INVALID_INPUT",
+							message: "Invalid action",
+						});
+						break;
+					}
+					sessionManager.handleHostVerifyResponse(hvr.promptId, hvr.action);
 					break;
 				}
 				case "TEST_CONNECT": {
