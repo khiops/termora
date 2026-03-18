@@ -7,13 +7,13 @@
 ## Tier 1 — Next Sprint (UX + DX)
 
 ### Audit P0 (before going public)
-- [ ] 💡 [Root] Create README.md (AUD-003) — Priority: H
+- [x] ✅ [Root] Create README.md (AUD-003) (2026-03-18)
 
 ### Audit P1
 - [x] ✅ [Docs] Update PROTOCOL.md — add missing WS messages + REST routes (AUD-006) (2026-03-18)
 - [x] ✅ [Docs] Update SPEC.md entity model — Host, Channel, LaunchProfile fields (AUD-007) (2026-03-18)
 - [x] ✅ [Shared] Extract sea-addon-loader.ts to @nexterm/shared (AUD-008) (2026-03-18)
-- [ ] 🔧 [Hub] Fix error format in pair.ts + wallpapers.ts — use { error: { code, message } } (AUD-009) — Priority: M
+- [x] ✅ [Hub] Fix error format in pair.ts + wallpapers.ts — { error: { code, message } } (AUD-009) (2026-03-18)
 - [x] ✅ [Hub] Extract elevated-spawn flow — deduplicate handleSpawn/restartChannel (AUD-010) (2026-03-18)
 - [x] ✅ [Hub] Extract profile patch logic — deduplicate host/channel profile PATCH (AUD-011) (2026-03-18)
 - [x] ✅ [Shared] Move FontFile + FontFamily interfaces to @nexterm/shared (AUD-022) (2026-03-18)
