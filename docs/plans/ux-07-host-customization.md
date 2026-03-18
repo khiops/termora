@@ -468,7 +468,7 @@ Tint implementation: CSS ::after pseudo-element on .terminal-pane with will-chan
 - [ ] Border renders (subtle/strong) with correct colors
 - [ ] Tint renders with opacity slider and live preview
 - [ ] Combined visual profile renders correctly with split panes
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

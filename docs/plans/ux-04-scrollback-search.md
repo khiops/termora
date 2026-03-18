@@ -520,7 +520,7 @@ Scenario: SC-18 -- Overlay position configuration
 - [ ] Multi-pane scope searches across splits
 - [ ] Scrollbar markers show match positions
 - [ ] Search history persists in localStorage
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

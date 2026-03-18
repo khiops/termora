@@ -450,7 +450,7 @@ Scenario: SC-15 -- Channel sidebar shows dynamic title
 - [ ] Title survives WebSocket reconnect
 - [ ] HTML/control chars stripped (XSS-safe)
 - [ ] Window title updates with configurable format
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

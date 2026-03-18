@@ -705,7 +705,7 @@ Scenario: SC-32 Hub rate-limits bell forwarding
 - [ ] Sound plays on bell (system/custom/mute modes)
 - [ ] Unread lines bar works in all 3 scroll modes
 - [ ] Badge clear rules verified for all trigger conditions
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

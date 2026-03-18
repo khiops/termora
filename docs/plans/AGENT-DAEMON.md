@@ -23,7 +23,7 @@ doc-meta:
 | Blocks | 7 |
 | BDD scenarios | 21 |
 | Risk level | MEDIUM |
-| Hardening | /adversarial 5/5, /llm 2 LLMs |
+| Hardening | Security review: 5/5 scenarios, 2 LLM audits |
 
 ## 1. Problem Statement
 
@@ -699,4 +699,4 @@ Scenario: SC-21 Buffered output flushed with backpressure
 - [ ] Lint/typecheck pass
 - [ ] E2E: hub restart with running agent preserves channels
 - [ ] Documentation updated (SPEC.md, PROTOCOL.md, SECURITY.md)
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)

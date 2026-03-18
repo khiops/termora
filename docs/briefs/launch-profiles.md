@@ -286,5 +286,5 @@ Profiles are searchable via the existing command palette (Cmd+K):
 
 ## Next Steps
 
-→ Run `/spec` with this brief to generate executable specification
-→ Then `/workflow` for implementation planning
+→ Generate executable specification from this brief
+→ Then create implementation plan

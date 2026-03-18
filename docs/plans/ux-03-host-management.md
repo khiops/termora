@@ -644,7 +644,7 @@ Scenario: SC-30 Invalid group name rejected
 - [ ] Add/Edit/Delete host flows work end-to-end
 - [ ] SSH config import (single + batch) works
 - [ ] DnD reorder persists across reload
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

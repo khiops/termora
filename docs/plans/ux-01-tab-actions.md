@@ -543,7 +543,7 @@ Scenario: SC-21 -- Tab DnD reorder
 - [ ] Cross-tab DnD works for same-host tabs
 - [ ] Welcome tab auto-opens and survives Close All
 - [ ] Direct process channels show exit overlay
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

@@ -670,4 +670,4 @@ SC-19b (word boundary), SC-05b (auth field clear — covered by INV-13)
 - [ ] `pnpm -F @nexterm/web build` succeeds (vue-tsc)
 - [ ] Manual smoke test: Cmd+K, fuzzy search, prefix filters, quick connect,
   modal tabs, host preview, rail subtitles
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)

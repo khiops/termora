@@ -629,7 +629,7 @@ Scenario: SC-17 — Auto-switch disabled by default
 - [ ] Zero hardcoded color literals in web package component styles
 - [ ] All 9 bundled themes render correctly (visual check)
 - [ ] Theme switch is instant (<16ms for CSS + xterm update)
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 
 ## 10. Dependencies & Integration Notes
 

@@ -912,7 +912,7 @@ Scenario: SC-36 Env values masked in API response
 | SC-35 | | | x | |
 | SC-36 | | | | x |
 
-**Totals:** 20 nominal, 14 edge, 4 error, 7 security = 39 scenarios (8 from /adversarial, 3 from elevation rewrite)
+**Totals:** 20 nominal, 14 edge, 4 error, 7 security = 39 scenarios (8 security hardening, 3 from elevation rewrite)
 
 ## 6. Implementation Plan
 
@@ -1142,5 +1142,5 @@ Scenario: SC-36 Env values masked in API response
 - [ ] `pnpm build` succeeds
 - [ ] Migration 009 applies cleanly on existing databases
 - [ ] Legacy defaultShell deprecation logged (not deleted)
-- [ ] `/review` clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
 - [ ] Documentation updated (SPEC.md §4 entity model, PROTOCOL.md §3.1 HELLO, STORAGE.md §3 schema)

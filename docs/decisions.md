@@ -463,7 +463,7 @@ Decisions archived from workflow — newest first.
 
 - Plan-provided mode: specs in docs/
 - Continuous mode: no pauses between stages
-- Model routing: Sonnet implements, Opus reviews, Haiku tests
+
 - HostRail: djb2 hash → HSL palette, 48px column
 - ChannelSidebar: groups in localStorage, drag not needed for MVP
 - PaneLayout: recursive split tree, localStorage persistence

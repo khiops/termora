@@ -70,7 +70,7 @@ Auth bypass in `server.ts` hook for `GET /api/wallpapers` (same as `/api/fonts`)
 
 **Dependency**: Add `@fastify/multipart` to hub `package.json` (via `catalog:`).
 
-#### Security hardening (from /adversarial)
+#### Security hardening
 
 - **Path traversal**: `path.basename(filename)`, reject if contains `..`, `/`, or `\`.
   On DELETE, resolve path and verify it's within the wallpapers directory.
@@ -195,7 +195,7 @@ When any terminal had wallpaper="old.jpg"
 Then the wallpaper div shows no image (file 404 = transparent bg)
 ```
 
-### SC-8: Path traversal prevention (from /adversarial)
+### SC-8: Path traversal prevention
 ```
 When I POST /api/wallpapers with filename "../../etc/passwd"
 Then the server sanitizes to "passwd" and rejects (no valid extension)
@@ -203,7 +203,7 @@ When I DELETE /api/wallpapers/..%2F..%2Fetc%2Fpasswd
 Then the server returns 400 "Invalid filename"
 ```
 
-### SC-9: Blur/dim without wallpaper (from /adversarial)
+### SC-9: Blur/dim without wallpaper
 ```
 Given wallpaper is "" (no wallpaper set)
 When wallpaperBlur is 10 and wallpaperDim is 50
@@ -260,6 +260,6 @@ Then no wallpaper divs are rendered (blur/dim ignored without image)
 
 - Multi-user wallpaper namespacing (single-user today, add when multi-user lands)
 - Rate limiting on upload endpoint (will be global, not per-endpoint)
-- Magic-number/MIME validation beyond extension check (from /llm review)
-- Disk quota enforcement for wallpapers directory (from /llm review)
-- Image bomb detection (pixel dimension limits) (from /llm review)
+- Magic-number/MIME validation beyond extension check
+- Disk quota enforcement for wallpapers directory
+- Image bomb detection (pixel dimension limits)

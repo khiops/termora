@@ -15,7 +15,7 @@ Sessions survive client disconnects, SSH drops, and device switches.
 | `docs/PROTOCOL.md` | MessagePack framing, all message types, REST API schemas | When touching protocol/API |
 | `docs/STORAGE.md` | SQLite schemas, chunking, GC, migrations | When touching DB/storage |
 | `docs/SECURITY.md` | Threat model, auth, SSH security, input validation | When touching auth/SSH/validation |
-| `docs/MVP_ROADMAP.md` | 6 milestones, ~30 blocks, exit criteria, dependencies | For /workflow planning |
+| `docs/MVP_ROADMAP.md` | 6 milestones, ~30 blocks, exit criteria, dependencies | For implementation planning |
 | `docs/IDEATION_BRIEF.md` | Original ideation with rationale for all decisions | When questioning "why" |
 
 ## Stack
@@ -106,87 +106,6 @@ pnpm -F @nexterm/web dev  # Dev single package
 - Types: feat, fix, refactor, docs, test, chore
 - Scopes: shared, agent, hub, web, desktop, root
 - Branch: `main` for trunk, `feat/xxx` for features
-
-## Workflow Execution Strategy
-
-This project uses `/workflow` in **plan-provided mode** — specs are pre-written in `docs/`.
-The orchestrator model is irrelevant (Opus, Sonnet, or any future model). What matters is delegation.
-
-### Model Routing (MANDATORY — no discretion)
-
-The orchestrator (main session) NEVER writes code, runs tests, or explores files directly. It delegates ALL work to subagents with explicit model assignments:
-
-| Task | Model | How | Why |
-|------|-------|-----|-----|
-| **Code implementation** (write blocks, fix findings) | **Sonnet** | `Task(general-purpose, sonnet)` | Excellent at spec-guided implementation, cost-efficient |
-| **Code review** | **Opus** | `Task(senior-code-reviewer, opus)` | Deep analysis, security, catches what Sonnet misses |
-| **Tests, lint, build** | **Haiku** | `Task(Bash, haiku)` | Mechanical execution, cheapest |
-| **File exploration, codebase search** | **Haiku** | `Task(Explore, haiku)` | Read-only, no judgment needed |
-| **Git push, PR, merge** | **Haiku** | `Task(Bash, haiku)` | Mechanical git operations |
-
-The orchestrator itself: reads specs, formulates delegation prompts, routes results, updates state.
-Sonnet produces the code, Opus challenges it — best ROI for the Opus premium.
-
-### Judgment vs Mechanical (BLOCKING)
-
-Ad-hoc `Task()` prompts must match the task's cognitive demand to the right model.
-
-| Task asks to... | Type | Model |
-|-----------------|------|-------|
-| Find, list, search, count | Mechanical | **haiku** |
-| Run, execute, build, test | Mechanical | **haiku** |
-| Summarize, extract, condense | Mechanical | **haiku** |
-| **Evaluate, assess, audit** | **Judgment** | **sonnet min.** |
-| **Compare, classify, decide** | **Judgment** | **sonnet min.** |
-| **Flag violations, rate quality** | **Judgment** | **sonnet min.** |
-| **Recommend, prioritize** | **Judgment** | **sonnet min.** |
-
-Litmus test: if the prompt says "verify", "check compliance", "is this correct" → judgment → sonnet.
-
-### Block Implementation Pattern
-
-For each implementation block, the orchestrator MUST delegate like this:
-
-```
-1. Read MVP_ROADMAP.md block description + exit criteria
-2. Read relevant spec sections (SPEC.md, PROTOCOL.md, etc.)
-3. Formulate detailed prompt with:
-   - Block description + exit criteria
-   - Relevant spec excerpts (copy the sections, don't say "read file X")
-   - Files to create/modify (from SPEC.md § 8.2 directory layout)
-   - Test requirements
-4. Task(general-purpose, sonnet, "Implement block N.M: [description]... [full context]")
-5. Sonnet writes code + tests
-6. Task(Bash, haiku, "cd ~/dev/nexterm && pnpm test && pnpm lint")
-7. If tests fail → Task(general-purpose, sonnet, "Fix: [error output]")
-8. Loop until green
-9. Update .workflow-state.json + TODO.md
-```
-
-### What the Orchestrator Does NOT Do
-
-- **NEVER** write implementation code directly (always delegate to Sonnet)
-- **NEVER** run tests directly (always delegate to Haiku)
-- **NEVER** explore codebase directly (delegate to subagent — haiku for mechanical, sonnet for judgment)
-- **NEVER** make architectural decisions — if an ambiguity arises that specs don't cover, STOP and ask the user
-
-### What the Orchestrator DOES Do
-
-- Read and update `.workflow-state.json`
-- Read and update `TODO.md`
-- Formulate delegation prompts with full context (specs + block details)
-- Route results between stages (implement → test → review → fix → finalize)
-- Track progress, announce checkpoints
-
-### Review Pattern
-
-After all blocks in a milestone are complete:
-
-```
-Task(senior-code-reviewer, opus, "Review all code changes for milestone MN.
-  Check against: docs/SPEC.md, docs/PROTOCOL.md, docs/STORAGE.md, docs/SECURITY.md.
-  Focus: architecture compliance, security (OWASP), test coverage, naming conventions.")
-```
 
 ## Architecture Quick Reference
 

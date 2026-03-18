@@ -136,21 +136,21 @@ interface CascadeResponse {
 
 **Note on Layer 3.5 (Agent Hints):** Agent visual hints (from HELLO message) are ephemeral and per-session. They are NOT exposed in the Settings Panel UI — they're applied transparently by ConfigResolver.resolve() at runtime. The Settings Panel shows layers 1-4 only.
 
-#### PATCH Semantics (from /llm review)
+#### PATCH Semantics
 
 All profile PATCH endpoints use **merge-patch** semantics (existing deepMerge behavior):
 - Partial payloads are merged into existing data (other keys preserved)
 - Setting a key to `null` **removes** that override (reverts to parent inheritance)
 - This is the mechanism for "reset to parent" — PATCH with `{ key: null }`
 
-#### camelCase ↔ snake_case (from /llm review)
+#### camelCase ↔ snake_case
 
 config.toml uses snake_case (`font_family`), TypeScript uses camelCase (`fontFamily`).
 - **Read path:** ConfigResolver.loadFromFile() already converts snake_case → camelCase
 - **Write path:** PUT /api/config/global must convert camelCase → snake_case before TOML stringify
 - Use the existing `toSnakeCase`/`toCamelCase` utilities in shared package
 
-#### Theme Source Clarification (from /llm review, updated D14/D15)
+#### Theme Source Clarification (updated D14/D15)
 
 Two distinct theme storage locations serve different purposes:
 - `config.toml [appearance]` → global theme selection + autoSwitch + opacity/scrollbar (was appearance.json — absorbed by D14)
@@ -169,11 +169,11 @@ Two distinct theme storage locations serve different purposes:
 Same pattern for `PUT /api/config/ui` (writes `tabs.*`, `panes.*`, `search.*`, `startup.*`, `title.*` keys).
 Same pattern for appearance settings (writes `appearance.*`, `appearance.auto_switch.*`, `appearance.opacity.*`, `appearance.scrollbar.*` keys).
 
-**Comment-preserving write approach** (D13, supersedes /adversarial C-01): Use `@rainbowatcher/toml-edit-js` for writes — `edit(tomlString, 'dotted.key', value)` performs surgical modification preserving all comments and formatting (303 KB WASM, wraps Rust `toml_edit` crate). Keep `@iarna/toml` for parsing (read path). If config.toml doesn't exist, create it.
+**Comment-preserving write approach** (D13): Use `@rainbowatcher/toml-edit-js` for writes — `edit(tomlString, 'dotted.key', value)` performs surgical modification preserving all comments and formatting (303 KB WASM, wraps Rust `toml_edit` crate). Keep `@iarna/toml` for parsing (read path). If config.toml doesn't exist, create it.
 
-**Input validation** (from /adversarial C-08): PUT /api/config/global must whitelist known TerminalProfile keys (fontFamily, fontSize, theme, cursorStyle, scrollback, bellSound, scrollbarMarkers). Reject unknown keys with 400 Bad Request. Same validation for PUT /api/config/ui with known UiConfig keys.
+**Input validation**: PUT /api/config/global must whitelist known TerminalProfile keys (fontFamily, fontSize, theme, cursorStyle, scrollback, bellSound, scrollbarMarkers). Reject unknown keys with 400 Bad Request. Same validation for PUT /api/config/ui with known UiConfig keys.
 
-**Debounce** (from /adversarial C-05): Client-side debounce 500ms on all setting mutations before API call. Optimistic UI update is immediate; API call is batched.
+**Debounce**: Client-side debounce 500ms on all setting mutations before API call. Optimistic UI update is immediate; API call is batched.
 
 ### 4.4 Store Design
 
@@ -195,7 +195,7 @@ async function resetSetting(scope: Scope, path: string): Promise<void>;
 async function loadCascade(hostId?: string, channelId?: string): Promise<void>;
 ```
 
-### 4.5 Settings Schema (data-driven categories, from /adversarial C-13)
+### 4.5 Settings Schema (data-driven categories)
 
 Instead of per-category components with repetitive SettingRow lists, define a `settingsSchema` registry:
 
@@ -396,7 +396,7 @@ Scenario: SC-16 Settings panel not rendered before auth
   And the settings panel cannot be opened
 ```
 
-### Scenario Group: Edge Cases (from /adversarial)
+### Scenario Group: Edge Cases
 
 ```gherkin
 @priority:medium @type:edge
@@ -549,7 +549,7 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 - [ ] Terminal global-only fields (title settings) hidden on Host/Channel tabs
 - [ ] UiConfig categories (Tabs, Panes, Search, Startup) only visible on Global tab
 - [ ] Changes persist via appropriate API (PUT /api/config/global or /ui, PATCH host/channel profile)
-- [ ] Debounce 500ms on all mutations (from /adversarial C-05)
+- [ ] Debounce 500ms on all mutations
 
 **Acceptance criteria covered:** SC-10, SC-11
 
@@ -630,4 +630,4 @@ Scenario: SC-20 Unknown keys rejected by PUT /api/config/global
 - [ ] Old AppearancePanel fully removed
 - [ ] config.toml write-back preserves all comments and formatting (toml-edit-js — D13)
 - [ ] appearance.json eliminated — all appearance config in config.toml [appearance] (D14)
-- [ ] /review clean (no blocking findings)
+- [ ] Code review clean (no blocking findings)
