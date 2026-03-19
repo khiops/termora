@@ -583,6 +583,49 @@ export function extractCorsConfig(parsed: TOML.JsonMap): string[] | undefined {
 	return undefined;
 }
 
+// ─── Auth config ─────────────────────────────────────────────────────────────
+
+export interface AuthConfig {
+	/** Days until a pairing-created token expires (sliding window). 0 = never. */
+	tokenTtlDays: number;
+}
+
+export const DEFAULT_AUTH_CONFIG: AuthConfig = {
+	tokenTtlDays: 90,
+};
+
+/**
+ * Extract AuthConfig from a parsed TOML map's [auth] section.
+ * Returns defaults if the section is absent or malformed.
+ */
+export function extractAuthConfig(parsed: TOML.JsonMap): AuthConfig {
+	const config: AuthConfig = { ...DEFAULT_AUTH_CONFIG };
+	const section = parsed.auth;
+	if (section != null && typeof section === "object") {
+		const raw = section as Record<string, unknown>;
+		if (typeof raw.token_ttl_days === "number") {
+			config.tokenTtlDays = Math.max(0, raw.token_ttl_days);
+		}
+	}
+	return config;
+}
+
+/**
+ * Standalone loader: parse the [auth] section from config.toml and return an AuthConfig.
+ * Returns defaults if the file is missing, malformed, or has no [auth] section.
+ */
+export function loadAuthConfig(configDir: string): AuthConfig {
+	const configPath = join(configDir, "config.toml");
+	if (!existsSync(configPath)) return { ...DEFAULT_AUTH_CONFIG };
+
+	try {
+		const content = readFileSync(configPath, "utf8");
+		return extractAuthConfig(TOML.parse(content));
+	} catch {
+		return { ...DEFAULT_AUTH_CONFIG };
+	}
+}
+
 // ─── ConfigResolver ──────────────────────────────────────────────────────────
 
 export class ConfigResolver {

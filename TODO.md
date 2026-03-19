@@ -26,12 +26,12 @@
 - [x] ✅ [Hub] Split registerWsRoutes (348 lines) — extract per-message-type handlers (AUD-018) (2026-03-19)
 - [ ] 🔧 [Web] Extract _doConnect WS message routing into separate handlers (AUD-019) — Priority: L
 - [x] ✅ [Shared] Fix circular import config.ts ↔ entities.ts (AUD-021) (2026-03-19)
-- [ ] 🔧 [Hub] Add pagination to list API endpoints (AUD-023) — Priority: L
+- [x] ✅ [Hub] Add pagination to list API endpoints (AUD-023) (2026-03-19)
 - [x] ✅ [Hub] Remove version + uptime from unauthenticated /api/health (AUD-025) (2026-03-19)
-- [ ] 🔧 [Hub] Auth token expiry + revocation mechanism (AUD-005) — Priority: M
+- [x] ✅ [Hub] Auth token expiry + revocation mechanism (AUD-005) (2026-03-19)
 
 ### Audit P3
-- [ ] 💡 [Web] Fix circular store dependency session→channels→hosts→notifications (AUD-020) — Priority: L
+- [x] ✅ [Web] Fix circular store dependency session→channels→hosts→notifications — safe by design, all cross-store calls lazy (AUD-020) (2026-03-19)
 - [x] ✅ [Hub] Verb-in-URL cleanup: reorder/purge/import endpoints (AUD-024) (2026-03-19)
 
 ### Other

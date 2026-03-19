@@ -45,7 +45,12 @@ let server: FastifyInstance;
 beforeEach(async () => {
 	resetVerifyRateLimit();
 	dbs = openTestDatabases();
-	server = await createServer({ logger: false, dbManager: dbs, authToken: TEST_TOKEN });
+	server = await createServer({
+		logger: false,
+		dbManager: dbs,
+		authToken: TEST_TOKEN,
+		authConfig: { tokenTtlDays: 90 },
+	});
 });
 
 afterEach(async () => {
@@ -120,7 +125,7 @@ describe("POST /api/pair", () => {
 // ─── POST /api/pair/verify ────────────────────────────────────────────────────
 
 describe("POST /api/pair/verify", () => {
-	it("returns the auth token for a valid code", async () => {
+	it("returns a new token (64-char hex) for a valid code", async () => {
 		const createRes = await server.inject({
 			method: "POST",
 			url: "/api/pair",
@@ -135,7 +140,9 @@ describe("POST /api/pair/verify", () => {
 		});
 		expect(res.statusCode).toBe(200);
 		const body = res.json<{ token: string }>();
-		expect(body.token).toBe(TEST_TOKEN);
+		// A new unique token is issued — not the primary admin token
+		expect(body.token).toMatch(/^[0-9a-f]{64}$/);
+		expect(body.token).not.toBe(TEST_TOKEN);
 	});
 
 	it("requires no auth header (unauthenticated endpoint)", async () => {

@@ -14,16 +14,19 @@ import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
+import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
-import { validateToken } from "./auth.js";
+import { touchToken, upsertPrimaryToken, validateToken, validateTokenRecord } from "./auth.js";
 import { getConfigDir } from "./cli.js";
 import {
 	ConfigResolver,
 	corsOriginsToRegexps,
+	loadAuthConfig,
 	loadCorsOrigins,
 	loadGcConfig,
 	matchCorsOrigin,
 } from "./config.js";
+import type { AuthConfig } from "./config.js";
 import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
 import type { DatabaseManager } from "./storage/db.js";
@@ -38,6 +41,7 @@ export interface ServerOptions {
 	logger?: boolean; // default: true
 	dbManager?: DatabaseManager; // when provided, WS routes are registered
 	authToken?: string; // when provided, Bearer auth is enforced on all routes except /api/health
+	authConfig?: AuthConfig; // override auth config (bypasses config.toml, useful for tests)
 	configDir?: string; // override config directory (defaults to getConfigDir())
 	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
 }
@@ -69,7 +73,18 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 	// Auth enforcement — applied before route matching
 	if (options?.authToken) {
-		const expectedToken = options.authToken;
+		const primaryToken = options.authToken;
+		const db = options.dbManager?.meta ?? null;
+		const resolvedAuthConfig =
+			options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+		const ttlDays = resolvedAuthConfig.tokenTtlDays;
+
+		// When a DB is available, seed the primary token record so all validation
+		// goes through the DB path (expiry + revocation checks).
+		if (db) {
+			upsertPrimaryToken(db, primaryToken);
+		}
+
 		server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
 			// CORS preflight is handled by @fastify/cors — skip auth.
 			if (request.method === "OPTIONS") return;
@@ -109,21 +124,36 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 				});
 			}
 
-			if (!validateToken(token, expectedToken)) {
-				server.log.warn({ url: pathname }, "auth: invalid token");
-				return reply.code(401).send({
-					error: "AUTH_INVALID",
-					message: "Invalid token",
-				});
+			if (db) {
+				// DB-backed validation: checks expiry and revocation status
+				const record = validateTokenRecord(db, token);
+				if (!record) {
+					server.log.warn({ url: pathname }, "auth: invalid, expired, or revoked token");
+					return reply.code(401).send({
+						error: "AUTH_INVALID",
+						message: "Invalid, expired, or revoked token",
+					});
+				}
+				// Sliding-window expiry refresh + last_used_at update (best-effort, non-blocking)
+				touchToken(db, record.id, ttlDays);
+				server.log.debug({ url: pathname, tokenId: record.id }, "auth: accepted");
+			} else {
+				// Fallback: direct constant-time comparison (no DB — test/minimal mode)
+				if (!validateToken(token, primaryToken)) {
+					server.log.warn({ url: pathname }, "auth: invalid token");
+					return reply.code(401).send({
+						error: "AUTH_INVALID",
+						message: "Invalid token",
+					});
+				}
+				server.log.debug({ url: pathname }, "auth: accepted");
 			}
-
-			server.log.debug({ url: pathname }, "auth: accepted");
 		});
 	}
 
 	// Health endpoint
 	server.get("/api/health", async () => {
-		return { status: "ok", version: "0.1.0", uptime: process.uptime() };
+		return { status: "ok" };
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided
@@ -173,7 +203,14 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await themeManager.init();
 		registerThemeRoutes(server, themeManager);
 		if (options.authToken) {
-			registerPairRoutes(server, { authToken: options.authToken, metaDal });
+			const resolvedAuthConfig =
+				options.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+			registerPairRoutes(server, {
+				authConfig: resolvedAuthConfig,
+				db: options.dbManager.meta,
+				metaDal,
+			});
+			registerTokenRoutes(server, { db: options.dbManager.meta });
 		}
 		await registerUserFonts(server, configDir);
 		await registerUserSounds(server, configDir);

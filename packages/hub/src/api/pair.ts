@@ -1,12 +1,18 @@
 import { randomInt } from "node:crypto";
+import type Database from "better-sqlite3";
 import { generateId } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { createToken } from "../auth.js";
+import type { AuthConfig } from "../config.js";
 import type { MetaDAL } from "../storage/meta.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface PairRouteOptions {
-	authToken: string;
+	/** The auth config (for token TTL). */
+	authConfig: AuthConfig;
+	/** The meta DB — used to create a token record on successful pairing. */
+	db: Database.Database;
 	metaDal: MetaDAL;
 }
 
@@ -41,7 +47,7 @@ export function resetVerifyRateLimit(): void {
 // ─── Route registration ───────────────────────────────────────────────────────
 
 export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptions): void {
-	const { authToken, metaDal } = opts;
+	const { authConfig, db, metaDal } = opts;
 
 	// POST /api/pair — authenticated, generates a one-time pairing code
 	server.post("/api/pair", async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -73,7 +79,7 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 		}
 	});
 
-	// POST /api/pair/verify — unauthenticated, exchanges code for token
+	// POST /api/pair/verify — unauthenticated, exchanges code for a new token
 	server.post<{ Body: VerifyBody }>(
 		"/api/pair/verify",
 		async (request: FastifyRequest<{ Body: VerifyBody }>, reply: FastifyReply) => {
@@ -115,7 +121,19 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 			const clientIp = request.ip ?? "unknown";
 			metaDal.markPairingCodeUsed(row.id, now, clientIp);
 
-			return reply.code(200).send({ token: authToken });
+			// Create a new token in the DB — distinct from the primary token.
+			// The TTL applies from this moment. ttlDays=0 means no expiry.
+			const tokenExpiresAt =
+				authConfig.tokenTtlDays > 0
+					? new Date(Date.now() + authConfig.tokenTtlDays * 86_400_000).toISOString()
+					: null;
+
+			const { token } = createToken(db, {
+				label: `Paired from ${clientIp}`,
+				expiresAt: tokenExpiresAt,
+			});
+
+			return reply.code(200).send({ token });
 		},
 	);
 }
