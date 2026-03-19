@@ -6,33 +6,9 @@
 
 ## Tier 1 — Next Sprint (UX + DX)
 
-### Audit P0 (before going public)
-- [x] ✅ [Root] Create README.md (AUD-003) (2026-03-18)
+### Audit P0-P3
 
-### Audit P1
-- [x] ✅ [Docs] Update PROTOCOL.md — add missing WS messages + REST routes (AUD-006) (2026-03-18)
-- [x] ✅ [Docs] Update SPEC.md entity model — Host, Channel, LaunchProfile fields (AUD-007) (2026-03-18)
-- [x] ✅ [Shared] Extract sea-addon-loader.ts to @nexterm/shared (AUD-008) (2026-03-18)
-- [x] ✅ [Hub] Fix error format in pair.ts + wallpapers.ts — { error: { code, message } } (AUD-009) (2026-03-18)
-- [x] ✅ [Hub] Extract elevated-spawn flow — deduplicate handleSpawn/restartChannel (AUD-010) (2026-03-18)
-- [x] ✅ [Hub] Extract profile patch logic — deduplicate host/channel profile PATCH (AUD-011) (2026-03-18)
-- [x] ✅ [Shared] Move FontFile + FontFamily interfaces to @nexterm/shared (AUD-022) (2026-03-18)
-
-### Audit P2 (SRP decomposition + cleanup)
-- [x] ✅ [Hub] Decompose SessionManager (2344→735 lines) into 5 sub-managers (AUD-014) (2026-03-19)
-- [x] ✅ [Hub] Split MetaDAL (1116→416 lines) into 7 domain-specific DALs (AUD-015) (2026-03-19)
-- [x] ✅ [Web] Split useLayout composable (793→130 lines) into useTabManager + usePaneTree (AUD-016) (2026-03-19)
-- [x] ✅ [Hub] Split registerHostRoutes (501 lines) into sub-route files (AUD-017) (2026-03-19)
-- [x] ✅ [Hub] Split registerWsRoutes (348 lines) — extract per-message-type handlers (AUD-018) (2026-03-19)
-- [x] ✅ [Web] Extract _doConnect WS message routing into separate handlers (AUD-019) (2026-03-19)
-- [x] ✅ [Shared] Fix circular import config.ts ↔ entities.ts (AUD-021) (2026-03-19)
-- [x] ✅ [Hub] Add pagination to list API endpoints (AUD-023) (2026-03-19)
-- [x] ✅ [Hub] Remove version + uptime from unauthenticated /api/health (AUD-025) (2026-03-19)
-- [x] ✅ [Hub] Auth token expiry + revocation mechanism (AUD-005) (2026-03-19)
-
-### Audit P3
-- [x] ✅ [Web] Fix circular store dependency session→channels→hosts→notifications — safe by design, all cross-store calls lazy (AUD-020) (2026-03-19)
-- [x] ✅ [Hub] Verb-in-URL cleanup: reorder/purge/import endpoints (AUD-024) (2026-03-19)
+(All 25 items completed — archived → docs/historic/done-2026-03.md)
 
 ### Other
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
