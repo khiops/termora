@@ -178,10 +178,22 @@ jobs:
       - name: Build web UI
         run: pnpm -F @nexterm/web build
 
+      - name: Disable beforeBuildCommand for CI
+        shell: bash
+        run: |
+          # In CI, shared+web are already built and sidecars placed by previous steps.
+          # Override beforeBuildCommand to skip prepare-desktop.sh (which rebuilds everything).
+          node -e "
+            const fs = require('fs');
+            const p = 'packages/clients/desktop/src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.build.beforeBuildCommand = '';
+            fs.writeFileSync(p, JSON.stringify(c, null, '\t') + '\n');
+          "
+
       - name: Build Tauri app
-        env:
-          TAURI_CONFIG: '{"build":{"beforeBuildCommand":""}}'
-        run: pnpm -F @nexterm/desktop exec tauri build
+        shell: bash
+        run: cd packages/clients/desktop && pnpm exec tauri build
 
       - name: Upload Tauri installer artifacts
         uses: actions/upload-artifact@v4
