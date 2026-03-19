@@ -1,10 +1,38 @@
 import { existsSync } from "node:fs";
 import type { ProtocolMessage } from "@nexterm/shared";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { LocalAgent, resolveAgentPath } from "./local-agent.js";
+import { LocalAgent, isAgentBinary, resolveAgentPath } from "./local-agent.js";
 
 const AGENT_PATH = resolveAgentPath();
 const TEST_TIMEOUT = 10_000;
+
+describe("isAgentBinary", () => {
+	it("returns false for .js paths", () => {
+		expect(isAgentBinary("/some/path/agent/dist/main.js")).toBe(false);
+		expect(isAgentBinary("agent.js")).toBe(false);
+	});
+
+	it("returns true for binary paths without .js extension", () => {
+		expect(isAgentBinary("/usr/local/bin/nexterm-agent")).toBe(true);
+		expect(isAgentBinary("/some/path/nexterm-agent.exe")).toBe(true);
+		expect(isAgentBinary("nexterm-agent")).toBe(true);
+	});
+});
+
+describe("resolveAgentPath", () => {
+	it("returns a non-empty string", () => {
+		const p = resolveAgentPath();
+		expect(typeof p).toBe("string");
+		expect(p.length).toBeGreaterThan(0);
+	});
+
+	it("returns the dev JS path when not in SEA mode", () => {
+		// In the test environment we are never in SEA mode, so the dev fallback applies
+		const p = resolveAgentPath();
+		expect(p.endsWith(".js")).toBe(true);
+		expect(p).toContain("agent");
+	});
+});
 
 /** Collect the next N messages of the given type(s) from the agent. */
 function collectMessages(

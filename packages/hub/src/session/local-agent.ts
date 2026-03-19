@@ -2,23 +2,42 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
+import { detectSea } from "@nexterm/shared/dist/sea-addon-loader.js";
+import { resolveAgentBinaryPath } from "../sea-agent-resolver.js";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
 
 /**
- * Resolve the path to the compiled agent entry point.
+ * Resolve the path to the agent entry point or binary.
  *
- * Layout (relative to this file at packages/hub/src/session/):
- *   ../../../agent/dist/main.js
+ * In SEA mode: looks for a co-located nexterm-agent binary next to the hub
+ * executable. Falls back to PATH resolution via resolveAgentBinaryPath().
  *
- * In development the agent must be built first (`pnpm build` or
- * `pnpm -F @nexterm/agent build`).
+ * In dev mode: returns the compiled JS entry point at
+ *   ../../../agent/dist/main.js  (relative to this file)
+ *
+ * The returned path is a self-contained executable when running in SEA mode,
+ * or a JS module path when running in dev mode.
  */
 export function resolveAgentPath(): string {
+	// In SEA mode, look for co-located agent binary
+	if (detectSea()) {
+		const seaPath = resolveAgentBinaryPath();
+		if (seaPath) return seaPath;
+	}
+	// Dev mode fallback
 	const __dirname = dirname(fileURLToPath(import.meta.url));
 	return join(__dirname, "../../../agent/dist/main.js");
+}
+
+/**
+ * Returns true if the given agent path is a self-contained executable
+ * (i.e. a SEA binary) rather than a JS module file.
+ */
+export function isAgentBinary(agentPath: string): boolean {
+	return !agentPath.endsWith(".js");
 }
 
 /**
@@ -43,9 +62,16 @@ export class LocalAgent extends AgentConnection {
 	/**
 	 * Spawn the agent process and wait for the HELLO handshake.
 	 * Rejects with an error if HELLO is not received within 5 seconds.
+	 *
+	 * SEA mode: the agent path is a self-contained executable — spawn directly.
+	 * Dev mode: the agent path is a JS file — spawn via node.
 	 */
 	async start(): Promise<void> {
-		this.process = spawn(process.execPath, [this.agentPath, "--stdio"], {
+		const [cmd, args] = isAgentBinary(this.agentPath)
+			? [this.agentPath, ["--stdio"]]
+			: [process.execPath, [this.agentPath, "--stdio"]];
+
+		this.process = spawn(cmd, args, {
 			stdio: ["pipe", "pipe", "inherit"], // stdin=pipe, stdout=pipe, stderr=inherit (logs)
 		});
 

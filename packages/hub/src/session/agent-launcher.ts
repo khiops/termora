@@ -6,7 +6,7 @@ import {
 	type AgentConfig,
 	probeSocket,
 } from "@nexterm/shared";
-import { resolveAgentPath } from "./local-agent.js";
+import { isAgentBinary, resolveAgentPath } from "./local-agent.js";
 import { NextermAgent } from "./nexterm-agent.js";
 
 /**
@@ -62,10 +62,12 @@ export async function connectOrLaunch(
 /**
  * Spawn the agent as a detached daemon process.
  * The process is unref'd so the hub can exit without waiting for it.
+ *
+ * SEA mode: the agent path is a self-contained executable — spawn directly.
+ * Dev mode: the agent path is a JS file — spawn via node.
  */
 function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig): void {
-	const args = [
-		agentPath,
+	const daemonArgs = [
 		"--daemon",
 		"--socket",
 		socketPath,
@@ -75,7 +77,11 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		String(config.bufferGlobal),
 	];
 
-	const child = spawn(process.execPath, args, {
+	const [cmd, args] = isAgentBinary(agentPath)
+		? [agentPath, daemonArgs]
+		: [process.execPath, [agentPath, ...daemonArgs]];
+
+	const child = spawn(cmd, args, {
 		detached: true,
 		stdio: "ignore",
 	});

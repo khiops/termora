@@ -233,4 +233,40 @@ describe("connectOrLaunch", () => {
 			TEST_TIMEOUT,
 		);
 	});
+
+	describe("Given SEA binary path (no .js extension)", () => {
+		it(
+			"spawns the binary directly as the executable (not via node)",
+			async () => {
+				let capturedArgs: unknown[] = [];
+
+				mockSpawnImpl = (...args: unknown[]) => {
+					capturedArgs = args;
+					setTimeout(async () => {
+						daemon = await createMockDaemon(socketPath);
+					}, 150);
+					return { unref: vi.fn(), pid: 12345 };
+				};
+
+				// Create a fake SEA binary (no .js extension)
+				const seaBinary = path.join(tmpDir, "nexterm-agent");
+				await writeFile(seaBinary, "#!/bin/sh\n");
+
+				agent = await connectOrLaunch(socketPath, config, seaBinary);
+
+				expect(agent).toBeDefined();
+				expect(agent.connected).toBe(true);
+
+				// SEA binary must be the executable, not wrapped in node
+				expect(capturedArgs[0]).toBe(seaBinary);
+				const cliArgs = capturedArgs[1] as string[];
+				// The binary path must NOT appear in the args list — it is the command
+				expect(cliArgs).not.toContain(seaBinary);
+				expect(cliArgs).toContain("--daemon");
+				expect(cliArgs).toContain("--socket");
+				expect(cliArgs).toContain(socketPath);
+			},
+			TEST_TIMEOUT,
+		);
+	});
 });
