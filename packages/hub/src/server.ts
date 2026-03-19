@@ -189,7 +189,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		}
 		await sessionManager.startup();
 
-		await registerWsRoutes(server, sessionManager, options.authToken);
+		await registerWsRoutes(
+			server,
+			sessionManager,
+			options.authToken,
+			options.authToken ? (options.dbManager.meta ?? null) : null,
+			options.authToken
+				? (options.authConfig ?? loadAuthConfig(configDir)).tokenTtlDays
+				: undefined,
+		);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
 		registerLaunchProfileRoutes(server, metaDal);

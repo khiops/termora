@@ -16,8 +16,9 @@ import type {
 	WriteReleaseMessage,
 } from "@nexterm/shared";
 import { decodeMessage, encodeMessage, generateId } from "@nexterm/shared";
+import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import { validateToken } from "../auth.js";
+import { touchToken, validateToken, validateTokenRecord } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
 import {
@@ -42,6 +43,8 @@ export async function registerWsRoutes(
 	server: FastifyInstance,
 	sessionManager: SessionManager,
 	authToken?: string,
+	db?: Database | null,
+	ttlDays?: number,
 ): Promise<void> {
 	// Registry: clientId → send function.
 	// WriteLockManager needs to send to arbitrary clients (not just those on a given
@@ -111,8 +114,20 @@ export async function registerWsRoutes(
 				}
 
 				const authMsg = msg as AuthMessage;
-				if (!validateToken(authMsg.token, authToken as string)) {
-					server.log.warn({ clientId }, "ws-auth: invalid token");
+				let tokenAccepted = false;
+				if (db) {
+					// DB-backed validation: checks expiry and revocation status
+					const record = validateTokenRecord(db, authMsg.token);
+					if (record) {
+						touchToken(db, record.id, ttlDays ?? 90);
+						tokenAccepted = true;
+					}
+				} else {
+					// Fallback: constant-time comparison (no DB — test/minimal mode)
+					tokenAccepted = validateToken(authMsg.token, authToken as string);
+				}
+				if (!tokenAccepted) {
+					server.log.warn({ clientId }, "ws-auth: invalid, expired, or revoked token");
 					client.send({ type: "AUTH_FAIL", message: "Invalid token" });
 					socket.close();
 					return;

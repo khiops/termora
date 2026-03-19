@@ -50,6 +50,7 @@
 - [ ] 🔧 [Web] SSH host-verify: expose "Trust Once" button in HostKeyWarning.vue (review F-001) — Priority: L
 - [ ] 🔧 [Hub] SessionManager: flip `if (agent != null)` guard to positive form for readability (review F-003) — Priority: L
 - [ ] 💡 [Docs] CORS: document that tauri://localhost custom port needs manual cors_origins entry (review F-004) — Priority: L
+- [ ] 🔧 [Hub] SSH reconnect: pass auth callback to SshAgent during reconnect (review F-005) — Priority: M
 
 ## Tier 2 — Quick Wins (batchable)
 

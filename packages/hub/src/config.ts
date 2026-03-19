@@ -553,8 +553,8 @@ export const DEFAULT_CORS_ORIGINS: string[] = [
  */
 export function corsOriginsToRegexps(patterns: string[]): RegExp[] {
 	return patterns.map((pattern) => {
-		// Escape all regex special chars except '*'
-		const escaped = pattern.replace(/[$()+.?[\\\]^{|}]/g, "\\$&");
+		// Escape all regex special chars except '*' (includes '-' for char-class safety)
+		const escaped = pattern.replace(/[$()+.?[\\\]^{|}\-]/g, "\\$&");
 		// Replace '*' with '\d+' — only matches numeric port sequences
 		const withPort = escaped.replace(/\*/g, "\\d+");
 		return new RegExp(`^${withPort}$`);

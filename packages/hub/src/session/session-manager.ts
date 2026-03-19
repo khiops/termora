@@ -310,8 +310,11 @@ export class SessionManager {
 				}
 
 				if (agent != null) {
-					// mismatch + accept branch already wired retryAgent
+					// Mismatch-and-accept path: retryAgent was already wired above with the
+					// trusted fingerprint; nothing more to do here.
 				} else {
+					// TOFU (Trust On First Use): if we just connected for the first time and
+					// have no stored fingerprint yet, persist the server's key automatically.
 					const kv = sshAgent.lastKeyVerification;
 					if (kv.capturedFingerprint && !storedFingerprint) {
 						this.ctx.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
