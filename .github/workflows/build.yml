@@ -54,7 +54,7 @@ jobs:
             runner: ubuntu-latest
           - target_os: windows
             target_arch: x64
-            runner: [self-hosted, Windows, X64]
+            runner: windows-latest
 
     runs-on: ${{ matrix.runner }}
 
@@ -131,7 +131,7 @@ jobs:
   build-tauri:
     name: Build Tauri Desktop
     needs: build-sea
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
