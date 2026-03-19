@@ -165,20 +165,26 @@ export function registerLaunchProfileRoutes(server: FastifyInstance, metaDal: Me
 		return profiles.map(profileToWire);
 	});
 
-	// POST /api/launch-profiles/reorder — MUST be before /:id
-	server.post<{ Body: { ids: string[] } }>(
-		"/api/launch-profiles/reorder",
-		async (request, reply) => {
-			const { ids } = request.body;
-			if (!Array.isArray(ids)) {
-				return reply.code(400).send({
-					error: { code: "VALIDATION_ERROR", message: "ids must be an array" },
-				});
-			}
-			metaDal.reorderLaunchProfiles(ids);
-			return reply.code(204).send();
-		},
-	);
+	// PUT /api/launch-profiles/order — reorder launch profiles
+	// Alias: POST /api/launch-profiles/reorder (kept for backward compatibility)
+	// MUST be before /:id to avoid param collision.
+	const reorderHandler = async (
+		request: { body: { ids: string[] } },
+		reply: { code: (n: number) => { send: (v: unknown) => unknown } },
+	) => {
+		const { ids } = request.body;
+		if (!Array.isArray(ids)) {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: "ids must be an array" },
+			});
+		}
+		metaDal.reorderLaunchProfiles(ids);
+		return reply.code(204).send(null);
+	};
+
+	server.put<{ Body: { ids: string[] } }>("/api/launch-profiles/order", reorderHandler);
+	// Backward-compat alias — original method was POST
+	server.post<{ Body: { ids: string[] } }>("/api/launch-profiles/reorder", reorderHandler);
 
 	// POST /api/launch-profiles
 	server.post<{ Body: CreateLaunchProfileBody }>("/api/launch-profiles", async (request, reply) => {

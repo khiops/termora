@@ -676,7 +676,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 |--------|------|------|--------------|
 | GET | `/api/hosts` | ● | `Host[]` |
 | POST | `/api/hosts` | ● | CreateHost → `Host` (201) |
-| PUT | `/api/hosts/reorder` | ● | `{ group_id, host_ids }` → 204 |
+| PUT | `/api/hosts/order` | ● | `{ group_id, host_ids }` → 204 (alias: `/api/hosts/reorder`) |
 | GET | `/api/hosts/:id` | ● | `Host` |
 | PUT | `/api/hosts/:id` | ● | UpdateHost → `Host` (partial update, deep merge) |
 | DELETE | `/api/hosts/:id` | ● | 204 |
@@ -711,7 +711,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 | PATCH | `/api/channels/:id` | ● | Partial update (e.g. title) → `Channel` |
 | POST | `/api/channels/:id/restart` | ● | Restart dead channel → 200 |
 | DELETE | `/api/channels/:id` | ● | 204 |
-| POST | `/api/channels/purge-dead` | ● | Remove all dead channels → `{ count }` |
+| DELETE | `/api/channels/dead` | ● | Remove all dead channels → `{ purged }` (alias: `POST /api/channels/purge-dead`) |
 
 #### Channel Groups (tab groups)
 
@@ -719,7 +719,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 |--------|------|------|--------------|
 | GET | `/api/groups` | ● | `Group[]` |
 | POST | `/api/groups` | ● | CreateGroup → `Group` (201) |
-| PUT | `/api/groups/reorder` | ● | `{ group_ids }` → 204 |
+| PUT | `/api/groups/order` | ● | `{ group_ids }` → 204 (alias: `/api/groups/reorder`) |
 | PATCH | `/api/groups/:id` | ● | UpdateGroup → `Group` |
 | DELETE | `/api/groups/:id` | ● | 204 |
 
@@ -729,7 +729,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 |--------|------|------|--------------|
 | GET | `/api/host-groups` | ● | `HostGroup[]` |
 | POST | `/api/host-groups` | ● | CreateHostGroup → `HostGroup` (201) |
-| PUT | `/api/host-groups/reorder` | ● | `{ group_ids }` → 204 |
+| PUT | `/api/host-groups/order` | ● | `{ group_ids }` → 204 (alias: `/api/host-groups/reorder`) |
 | PUT | `/api/host-groups/:id` | ● | UpdateHostGroup → `HostGroup` |
 | DELETE | `/api/host-groups/:id` | ● | 204 |
 
@@ -739,7 +739,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 |--------|------|------|--------------|
 | GET | `/api/launch-profiles` | ● | `LaunchProfile[]` |
 | POST | `/api/launch-profiles` | ● | CreateLaunchProfile → `LaunchProfile` (201) |
-| POST | `/api/launch-profiles/reorder` | ● | `{ profile_ids }` → 204 |
+| PUT | `/api/launch-profiles/order` | ● | `{ ids }` → 204 (alias: `POST /api/launch-profiles/reorder`) |
 | GET | `/api/launch-profiles/:id` | ● | `LaunchProfile` |
 | PUT | `/api/launch-profiles/:id` | ● | UpdateLaunchProfile → `LaunchProfile` |
 | DELETE | `/api/launch-profiles/:id` | ● | 204 |

@@ -62,56 +62,60 @@ export function registerGroupRoutes(server: FastifyInstance, metaDal: MetaDAL): 
 		},
 	);
 
-	// PUT /api/groups/reorder — registered BEFORE /:id to avoid param collision
-	server.put<{ Body: { host_id: string; group_ids: string[] } }>(
-		"/api/groups/reorder",
-		{
-			schema: {
-				body: {
-					type: "object",
-					required: ["host_id", "group_ids"],
-					properties: {
-						host_id: { type: "string" },
-						group_ids: { type: "array", items: { type: "string" } },
+	// PUT /api/groups/order — reorder channel groups for a host
+	// Alias: PUT /api/groups/reorder (kept for backward compatibility)
+	// MUST be registered BEFORE /:id to avoid param collision.
+	for (const url of ["/api/groups/order", "/api/groups/reorder"]) {
+		server.put<{ Body: { host_id: string; group_ids: string[] } }>(
+			url,
+			{
+				schema: {
+					body: {
+						type: "object",
+						required: ["host_id", "group_ids"],
+						properties: {
+							host_id: { type: "string" },
+							group_ids: { type: "array", items: { type: "string" } },
+						},
+						additionalProperties: false,
 					},
-					additionalProperties: false,
 				},
 			},
-		},
-		async (request, reply) => {
-			const { host_id, group_ids } = request.body;
+			async (request, reply) => {
+				const { host_id, group_ids } = request.body;
 
-			if (!isValidUlid(host_id)) {
-				return reply.code(400).send({
-					error: { code: "VALIDATION_ERROR", message: "host_id must be a valid ULID" },
-				});
-			}
+				if (!isValidUlid(host_id)) {
+					return reply.code(400).send({
+						error: { code: "VALIDATION_ERROR", message: "host_id must be a valid ULID" },
+					});
+				}
 
-			for (const id of group_ids) {
-				if (!isValidUlid(id)) {
+				for (const id of group_ids) {
+					if (!isValidUlid(id)) {
+						return reply.code(400).send({
+							error: {
+								code: "VALIDATION_ERROR",
+								message: `group_ids contains invalid ULID: ${id}`,
+							},
+						});
+					}
+				}
+
+				try {
+					metaDal.reorderGroups(host_id, group_ids);
+				} catch {
 					return reply.code(400).send({
 						error: {
 							code: "VALIDATION_ERROR",
-							message: `group_ids contains invalid ULID: ${id}`,
+							message: "One or more group IDs do not belong to the given host",
 						},
 					});
 				}
-			}
 
-			try {
-				metaDal.reorderGroups(host_id, group_ids);
-			} catch {
-				return reply.code(400).send({
-					error: {
-						code: "VALIDATION_ERROR",
-						message: "One or more group IDs do not belong to the given host",
-					},
-				});
-			}
-
-			return reply.code(200).send({ ok: true });
-		},
-	);
+				return reply.code(200).send({ ok: true });
+			},
+		);
+	}
 
 	// PATCH /api/groups/:id
 	server.patch<{ Params: { id: string }; Body: { name: string } }>(

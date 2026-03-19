@@ -630,7 +630,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		groups.value = reordered;
 
 		try {
-			const res = await fetch(`${hubBaseUrl()}/api/groups/reorder`, {
+			const res = await fetch(`${hubBaseUrl()}/api/groups/order`, {
 				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
@@ -638,7 +638,7 @@ export const useChannelsStore = defineStore("channels", () => {
 				},
 				body: JSON.stringify({ host_id: hostId, group_ids: groupIds }),
 			});
-			if (!res.ok) throw new Error(`PUT /api/groups/reorder failed: ${res.status}`);
+			if (!res.ok) throw new Error(`PUT /api/groups/order failed: ${res.status}`);
 		} catch {
 			// Rollback on failure
 			groups.value = prevGroups;
@@ -879,10 +879,14 @@ export const useChannelsStore = defineStore("channels", () => {
 	 * Bulk purge all dead channels for the active host.
 	 * Returns the number of channels purged.
 	 */
+	/**
+	 * Bulk purge all dead channels for the active host.
+	 * Returns the number of channels purged.
+	 */
 	async function purgeDeadChannels(): Promise<number> {
 		if (authStore.token === null || activeHostId.value === null) return 0;
-		const res = await fetch(`${hubBaseUrl()}/api/channels/purge-dead`, {
-			method: "POST",
+		const res = await fetch(`${hubBaseUrl()}/api/channels/dead`, {
+			method: "DELETE",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
 				"Content-Type": "application/json",

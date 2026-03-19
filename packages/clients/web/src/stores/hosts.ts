@@ -126,7 +126,7 @@ export const useHostsStore = defineStore("hosts", () => {
 	}
 
 	async function reorderHosts(groupId: string | null, hostIds: string[]): Promise<void> {
-		await fetch(`${hubBaseUrl()}/api/hosts/reorder`, {
+		await fetch(`${hubBaseUrl()}/api/hosts/order`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
@@ -284,7 +284,7 @@ export const useHostsStore = defineStore("hosts", () => {
 		}
 		hostGroups.value = reordered;
 
-		const res = await fetch(`${hubBaseUrl()}/api/host-groups/reorder`, {
+		const res = await fetch(`${hubBaseUrl()}/api/host-groups/order`, {
 			method: "PUT",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,

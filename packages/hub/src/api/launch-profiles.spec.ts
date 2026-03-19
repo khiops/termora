@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
-import { resolveHostOs } from "./hosts.js";
+import { resolveHostOs } from "./host-profiles.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -403,17 +403,17 @@ describe("DELETE /api/launch-profiles/:id", () => {
 	});
 });
 
-// ─── POST /api/launch-profiles/reorder ────────────────────────────────────────
+// ─── PUT /api/launch-profiles/order ───────────────────────────────────────────
 
-describe("POST /api/launch-profiles/reorder", () => {
+describe("PUT /api/launch-profiles/order", () => {
 	it("reorders profiles and returns 204", async () => {
 		const a = await createProfile({ name: "A", sort_order: 0 });
 		const b = await createProfile({ name: "B", sort_order: 1 });
 		const c = await createProfile({ name: "C", sort_order: 2 });
 
 		const res = await server.inject({
-			method: "POST",
-			url: "/api/launch-profiles/reorder",
+			method: "PUT",
+			url: "/api/launch-profiles/order",
 			payload: { ids: [c.id, a.id, b.id] },
 		});
 		expect(res.statusCode).toBe(204);
@@ -428,8 +428,8 @@ describe("POST /api/launch-profiles/reorder", () => {
 
 	it("returns 400 for non-array ids", async () => {
 		const res = await server.inject({
-			method: "POST",
-			url: "/api/launch-profiles/reorder",
+			method: "PUT",
+			url: "/api/launch-profiles/order",
 			payload: { ids: "not-an-array" },
 		});
 		expect(res.statusCode).toBe(400);
@@ -438,8 +438,8 @@ describe("POST /api/launch-profiles/reorder", () => {
 	it("handles unknown IDs without error (SC-32)", async () => {
 		const a = await createProfile({ name: "A" });
 		const res = await server.inject({
-			method: "POST",
-			url: "/api/launch-profiles/reorder",
+			method: "PUT",
+			url: "/api/launch-profiles/order",
 			payload: { ids: ["unknown-id", a.id] },
 		});
 		expect(res.statusCode).toBe(204);

@@ -35,31 +35,36 @@ export function registerChannelRoutes(
 		},
 	);
 
-	// POST /api/channels/purge-dead — bulk delete all dead channels (optionally scoped to a host)
-	// MUST be registered before /:id routes to avoid "purge-dead" matching as a channel ID param.
-	server.post<{ Body: { host_id?: string } }>(
-		"/api/channels/purge-dead",
-		async (request, reply) => {
-			const { host_id } = request.body ?? {};
+	// DELETE /api/channels/dead — bulk delete all dead channels (optionally scoped to a host)
+	// Alias: POST /api/channels/purge-dead (kept for backward compatibility)
+	// MUST be registered before /:id routes to avoid matching as a channel ID param.
+	const purgeDeadHandler = async (
+		request: { body?: { host_id?: string } },
+		reply: { code: (n: number) => { send: (v: unknown) => unknown } },
+	) => {
+		const { host_id } = request.body ?? {};
 
-			let deadChannelIds: string[];
-			if (host_id) {
-				const sessions = metaDal.listSessions(host_id);
-				const allChannels = sessions.flatMap((s) => metaDal.listChannels(s.id));
-				deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
-			} else {
-				const allChannels = metaDal.listChannels();
-				deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
-			}
+		let deadChannelIds: string[];
+		if (host_id) {
+			const sessions = metaDal.listSessions(host_id);
+			const allChannels = sessions.flatMap((s) => metaDal.listChannels(s.id));
+			deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
+		} else {
+			const allChannels = metaDal.listChannels();
+			deadChannelIds = allChannels.filter((c) => c.status === "dead").map((c) => c.id);
+		}
 
-			for (const id of deadChannelIds) {
-				spoolDal.deleteChunksForChannel(id);
-				metaDal.deleteChannel(id);
-			}
+		for (const id of deadChannelIds) {
+			spoolDal.deleteChunksForChannel(id);
+			metaDal.deleteChannel(id);
+		}
 
-			return reply.code(200).send({ ok: true, purged: deadChannelIds.length });
-		},
-	);
+		return reply.code(200).send({ ok: true, purged: deadChannelIds.length });
+	};
+
+	server.delete<{ Body: { host_id?: string } }>("/api/channels/dead", purgeDeadHandler);
+	// Backward-compat alias — original method was POST
+	server.post<{ Body: { host_id?: string } }>("/api/channels/purge-dead", purgeDeadHandler);
 
 	// GET /api/channels/:id
 	server.get<{ Params: { id: string } }>("/api/channels/:id", async (request, reply) => {

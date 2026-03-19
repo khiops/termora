@@ -104,15 +104,15 @@ export const useProfilesStore = defineStore("profiles", () => {
 
 	async function reorderProfiles(ids: string[]): Promise<void> {
 		if (authStore.token === null) return;
-		const res = await fetch(`${hubBaseUrl()}/api/launch-profiles/reorder`, {
-			method: "POST",
+		const res = await fetch(`${hubBaseUrl()}/api/launch-profiles/order`, {
+			method: "PUT",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token}`,
 			},
 			body: JSON.stringify({ ids }),
 		});
-		if (!res.ok) throw new Error(`POST /api/launch-profiles/reorder failed: ${res.status}`);
+		if (!res.ok) throw new Error(`PUT /api/launch-profiles/order failed: ${res.status}`);
 	}
 
 	// -------------------------------------------------------------------------

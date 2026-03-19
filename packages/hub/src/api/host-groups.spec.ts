@@ -323,7 +323,7 @@ describe("PUT /api/host-groups/reorder", () => {
 		// Reorder: Gamma, Alpha, Beta
 		const reorderRes = await server.inject({
 			method: "PUT",
-			url: "/api/host-groups/reorder",
+			url: "/api/host-groups/order",
 			payload: { group_ids: [gamma.id, alpha.id, beta.id] },
 		});
 		expect(reorderRes.statusCode).toBe(200);
@@ -338,7 +338,7 @@ describe("PUT /api/host-groups/reorder", () => {
 	it("returns 400 when group_ids is missing", async () => {
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/host-groups/reorder",
+			url: "/api/host-groups/order",
 			payload: {},
 		});
 		expect(res.statusCode).toBe(400);
@@ -349,7 +349,7 @@ describe("PUT /api/host-groups/reorder", () => {
 	it("returns 400 when group_ids is an empty array", async () => {
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/host-groups/reorder",
+			url: "/api/host-groups/order",
 			payload: { group_ids: [] },
 		});
 		expect(res.statusCode).toBe(400);
@@ -446,7 +446,7 @@ describe("PUT /api/hosts/reorder", () => {
 
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/hosts/reorder",
+			url: "/api/hosts/order",
 			payload: { group_id: null, host_ids: [host.id] },
 		});
 		expect(res.statusCode).toBe(204);
@@ -455,7 +455,7 @@ describe("PUT /api/hosts/reorder", () => {
 	it("returns 400 when host_ids is empty", async () => {
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/hosts/reorder",
+			url: "/api/hosts/order",
 			payload: { group_id: null, host_ids: [] },
 		});
 		expect(res.statusCode).toBe(400);

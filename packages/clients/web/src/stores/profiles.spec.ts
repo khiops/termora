@@ -365,7 +365,7 @@ describe("useProfilesStore — HTTP method correctness (F-003)", () => {
 		);
 	});
 
-	it("reorderProfiles uses POST (not PUT)", async () => {
+	it("reorderProfiles uses PUT /api/launch-profiles/order", async () => {
 		mockFetch.mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve(null),
@@ -375,8 +375,8 @@ describe("useProfilesStore — HTTP method correctness (F-003)", () => {
 		await store.reorderProfiles(["p1", "p2"]);
 
 		const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
-		expect(url).toBe("/api/launch-profiles/reorder");
-		expect(options.method).toBe("POST");
+		expect(url).toBe("/api/launch-profiles/order");
+		expect(options.method).toBe("PUT");
 	});
 });
 

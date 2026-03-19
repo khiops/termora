@@ -998,7 +998,7 @@ describe("PUT /api/groups/reorder", () => {
 	it("returns 400 with invalid host_id ULID", async () => {
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/groups/reorder",
+			url: "/api/groups/order",
 			payload: { host_id: "not-a-ulid", group_ids: [] },
 		});
 		expect(res.statusCode).toBe(400);
@@ -1009,7 +1009,7 @@ describe("PUT /api/groups/reorder", () => {
 	it("returns 400 when a group_id is not a valid ULID", async () => {
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/groups/reorder",
+			url: "/api/groups/order",
 			payload: { host_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", group_ids: ["not-a-ulid"] },
 		});
 		expect(res.statusCode).toBe(400);
@@ -1042,7 +1042,7 @@ describe("PUT /api/groups/reorder", () => {
 
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/groups/reorder",
+			url: "/api/groups/order",
 			payload: { host_id: hostB.id, group_ids: [grp.id] },
 		});
 		expect(res.statusCode).toBe(400);
@@ -1080,7 +1080,7 @@ describe("PUT /api/groups/reorder", () => {
 		// Reorder: Gamma, Alpha, Beta
 		const reorderRes = await server.inject({
 			method: "PUT",
-			url: "/api/groups/reorder",
+			url: "/api/groups/order",
 			payload: { host_id: host.id, group_ids: [g3.id, g1.id, g2.id] },
 		});
 		expect(reorderRes.statusCode).toBe(200);
@@ -1106,7 +1106,7 @@ describe("PUT /api/groups/reorder", () => {
 
 		const res = await server.inject({
 			method: "PUT",
-			url: "/api/groups/reorder",
+			url: "/api/groups/order",
 			payload: { host_id: host.id, group_ids: [] },
 		});
 		expect(res.statusCode).toBe(200);
@@ -1561,9 +1561,9 @@ describe("PATCH /api/channels/:id/profile — key validation", () => {
 	});
 });
 
-// ─── POST /api/hosts/import — sshAuth set from identityFile ──────────────────
+// ─── POST /api/hosts/import — sshAuth set from identityFile (kept as-is) ─────
 
-describe("POST /api/hosts/import — sshAuth inferred from identityFile", () => {
+describe("POST /api/hosts/import — sshAuth inferred from identityFile (kept as-is)", () => {
 	it("sets sshAuth to 'key' when identityFile is present in SSH config entry", async () => {
 		const { readSshConfig } = await import("../ssh/ssh-config-parser.js");
 		vi.mocked(readSshConfig).mockReturnValueOnce({

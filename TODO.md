@@ -23,16 +23,16 @@
 - [ ] 🔧 [Hub] Split MetaDAL (1116 lines, 57 methods) into domain-specific DALs (AUD-015) — Priority: L
 - [ ] 🔧 [Web] Split useLayout composable (793 lines) into useTabManager + usePaneTree (AUD-016) — Priority: L
 - [ ] 🔧 [Hub] Split registerHostRoutes (501 lines) into sub-route files (AUD-017) — Priority: L
-- [ ] 🔧 [Hub] Split registerWsRoutes (348 lines) — extract per-message-type handlers (AUD-018) — Priority: L
+- [x] ✅ [Hub] Split registerWsRoutes (348 lines) — extract per-message-type handlers (AUD-018) (2026-03-19)
 - [ ] 🔧 [Web] Extract _doConnect WS message routing into separate handlers (AUD-019) — Priority: L
-- [ ] 🔧 [Shared] Fix circular import config.ts ↔ entities.ts (AUD-021) — Priority: L
+- [x] ✅ [Shared] Fix circular import config.ts ↔ entities.ts (AUD-021) (2026-03-19)
 - [ ] 🔧 [Hub] Add pagination to list API endpoints (AUD-023) — Priority: L
-- [ ] 🔧 [Hub] Remove version + uptime from unauthenticated /api/health (AUD-025) — Priority: L
+- [x] ✅ [Hub] Remove version + uptime from unauthenticated /api/health (AUD-025) (2026-03-19)
 - [ ] 🔧 [Hub] Auth token expiry + revocation mechanism (AUD-005) — Priority: M
 
 ### Audit P3
 - [ ] 💡 [Web] Fix circular store dependency session→channels→hosts→notifications (AUD-020) — Priority: L
-- [ ] 💡 [Hub] Verb-in-URL cleanup: reorder/purge/import endpoints (AUD-024) — Priority: L
+- [x] ✅ [Hub] Verb-in-URL cleanup: reorder/purge/import endpoints (AUD-024) (2026-03-19)
 
 ### Other
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M

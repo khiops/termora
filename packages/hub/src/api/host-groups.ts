@@ -52,25 +52,29 @@ export function registerHostGroupRoutes(server: FastifyInstance, metaDal: MetaDA
 		},
 	);
 
-	// PUT /api/host-groups/reorder — BEFORE /:id to avoid param collision
-	server.put<{ Body: { group_ids: string[] } }>(
-		"/api/host-groups/reorder",
-		async (request, reply) => {
-			const { group_ids } = request.body;
+	// PUT /api/host-groups/order — reorder host groups
+	// Alias: PUT /api/host-groups/reorder (kept for backward compatibility)
+	// MUST be registered BEFORE /:id to avoid param collision.
+	for (const url of ["/api/host-groups/order", "/api/host-groups/reorder"]) {
+		server.put<{ Body: { group_ids: string[] } }>(
+			url,
+			async (request, reply) => {
+				const { group_ids } = request.body;
 
-			if (!Array.isArray(group_ids) || group_ids.length === 0) {
-				return reply.code(400).send({
-					error: {
-						code: "VALIDATION_ERROR",
-						message: "group_ids must be a non-empty array",
-					},
-				});
-			}
+				if (!Array.isArray(group_ids) || group_ids.length === 0) {
+					return reply.code(400).send({
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "group_ids must be a non-empty array",
+						},
+					});
+				}
 
-			metaDal.reorderHostGroups(group_ids);
-			return reply.code(200).send({ ok: true });
-		},
-	);
+				metaDal.reorderHostGroups(group_ids);
+				return reply.code(200).send({ ok: true });
+			},
+		);
+	}
 
 	// PUT /api/host-groups/:id
 	server.put<{ Params: { id: string }; Body: { name?: string; color?: string | null } }>(
