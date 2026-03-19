@@ -1,67 +1,46 @@
+/**
+ * SessionManager — coordinator for hub session management.
+ *
+ * Owns all runtime state (sessions, channels, agents, clients maps) via a
+ * SharedSessionContext and delegates work to four focused sub-managers:
+ *
+ *   StateBroadcaster        — WS state sync, title management, rate-limiting
+ *   ChannelLifecycleManager — spawn, restart, destroy, respawn, spool
+ *   SshConnectionManager    — auth prompts, host-key verify, reconnect, test-connect
+ *   AgentConnectionManager  — agent wiring, daemon attach, warm restart, startup
+ *
+ * The public API of SessionManager is unchanged — all callers (ws-handler, REST routes)
+ * continue to talk to SessionManager exclusively.
+ */
+
 import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
-	AgentBellMessage,
-	AgentChannelStateMessage,
-	AgentNotificationMessage,
-	AgentProcessTitleMessage,
-	AgentSnapshotResMessage,
-	AgentSpawnErrMessage,
 	AgentSpawnMessage,
-	AgentSpawnOkMessage,
-	AgentTitleChangeMessage,
-	AuthPromptMessage,
-	ChannelExitMessage,
-	ChannelStateMessage,
-	DestroyMessage,
 	ErrorMessage,
-	HostVerifyMessage,
 	InputMessage,
-	OutputMessage,
 	ProtocolMessage,
 	ResizeMessage,
-	SessionStateMessage,
 	StateSyncMessage,
 	TestConnectMessage,
 	UiAttachOkMessage,
 	UiSpawnMessage,
-	UiSpawnOkMessage,
 } from "@nexterm/shared";
-import type { AgentConfig, ChannelStatus, ElevationMethod, SessionStatus } from "@nexterm/shared";
-import {
-	DEFAULT_AGENT_CONFIG,
-	DEFAULT_CHANNEL_NAME,
-	generateId,
-	getSocketPath,
-	resolveChannelDisplayName,
-	validateCustomCommand,
-} from "@nexterm/shared";
-import { Client as SshClient } from "ssh2";
+import type { AgentConfig, ElevationMethod } from "@nexterm/shared";
+import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ConfigResolver, GcConfig } from "../config.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
-import type { AgentConnection } from "./agent-connection.js";
-import { connectOrLaunch } from "./agent-launcher.js";
-import { LocalAgent, resolveAgentPath } from "./local-agent.js";
-import { NextermAgent } from "./nexterm-agent.js";
+import { AgentConnectionManager } from "./agent-connection-manager.js";
+import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import { OutputChunker } from "./output-chunker.js";
+import type { SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
-import {
-	type AuthPromptFn,
-	type HostKeyVerification,
-	SshAgent,
-	buildSshConnectConfig,
-} from "./ssh-agent.js";
-
-const SPAWN_TIMEOUT_MS = 10_000;
-const ATTACH_TIMEOUT_MS = 5_000;
-const TITLE_DEBOUNCE_MS = 100;
-
-/** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
-const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
-const RECONNECT_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
+import { SshAgent } from "./ssh-agent.js";
+import { SshConnectionManager } from "./ssh-connection-manager.js";
+import { StateBroadcaster } from "./state-broadcaster.js";
 
 export interface WsClient {
 	id: string;
@@ -69,127 +48,20 @@ export interface WsClient {
 	attachedChannels: Set<string>;
 }
 
-interface ChannelState {
-	sessionId: string;
-	hostId: string;
-	status: ChannelStatus;
-	/** clientId set — empty when orphan */
-	clients: Set<string>;
-	shell: string;
-	args?: string[];
-	cwd?: string;
-	cols: number;
-	rows: number;
-	directProcess?: boolean;
-	dynamicTitle: string | null;
-	processTitle: string | null;
-	displayTitle: string;
-}
-
-interface SessionState {
-	id: string;
-	hostId: string;
-	status: SessionStatus;
-}
-
-/** Options for SessionManager._sendSpawnAndWait */
-interface SendSpawnOpts {
-	agent: AgentConnection;
-	spawnMsg: AgentSpawnMessage;
-	clientId: string;
-	hostId: string;
-	session: { id: string };
-	client: WsClient;
-	resolvedShell: string;
-	resolvedArgs: string[];
-	resolvedCwd: string;
-	resolvedDirectProcess: boolean;
-	resolvedLaunchProfileId: string | undefined;
-	cols: number;
-	rows: number;
-	suppressClientError?: boolean;
-	resolvedElevated?: boolean;
-	resolvedElevationMethod?: string;
-}
+const ATTACH_TIMEOUT_MS = 5_000;
 
 export class SessionManager {
-	/** hostId → AgentConnection */
-	private agents = new Map<string, AgentConnection>();
-	/** Spool DAL for snapshot chunk storage */
-	private spoolDal: SpoolDAL;
-	/** hostId → SessionState */
-	private sessions = new Map<string, SessionState>();
-	/** channelId → ChannelState */
-	private channels = new Map<string, ChannelState>();
-	/** clientId → WsClient */
-	private clients = new Map<string, WsClient>();
-	/** hostId → pending reconnect timer */
-	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	/** Crash-loop tracking for local agent restarts: hostId → { count, windowStart } */
-	private restartTracking = new Map<string, { count: number; windowStart: number }>();
-	/** requestId (or keyed token like "attach:<channelId>") → callback for pending agent responses */
-	private pendingRequests = new Map<string, (msg: ProtocolMessage) => void>();
-	/** hostId → pending auth prompt resolve + timeout */
-	private pendingAuthPrompts = new Map<
-		string,
-		{
-			resolve: (secret: string | null) => void;
-			timer: ReturnType<typeof setTimeout> | null;
-			clientId: string;
-		}
-	>();
-	private metaDal: MetaDAL;
-	/** Agent daemon configuration (socket path, buffer caps) */
-	private agentConfig: AgentConfig;
-	/** Config resolver — used for title resolution */
-	private _configResolver: ConfigResolver | null = null;
+	// ─── Shared runtime state ─────────────────────────────────────────────────
+	private readonly ctx: SharedSessionContext;
 
-	/** Snapshot scheduler — tracks idle/forced/detach triggers per channel */
-	private scheduler: SnapshotScheduler;
-	/** Output chunker — buffers OUTPUT data and flushes to spool.db */
-	private chunker: OutputChunker;
-	/** Spool GC — periodically deletes old chunks and runs incremental vacuum */
-	private gc: SpoolGarbageCollector;
-	/** channelId → pending title debounce timer for DB writes */
-	private titleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	/** channelId → pending process title debounce timer for DB writes */
-	private processTitleDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
-	private bellTimestamps = new Map<string, number[]>();
-	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
-	private notificationTimestamps = new Map<string, number[]>();
-	/**
-	 * hostId → cached elevation secret + expiry (TTL 15 min).
-	 * Secrets are never persisted — this cache lives only in process memory.
-	 */
-	private elevationCache = new Map<string, { secret: string; expiresAt: number }>();
-	/** TTL for cached elevation secrets (ms). */
-	private static readonly ELEVATION_CACHE_TTL_MS = 900_000; // 15 minutes
-	/** Timeout for waiting on a HOST_VERIFY_RESPONSE from the UI (ms). */
-	private static readonly HOST_KEY_MISMATCH_TIMEOUT_MS = 30_000;
-	/** hostId → capabilities string[] reported in the agent HELLO message */
-	private agentCapabilities = new Map<string, string[]>();
-	/**
-	 * promptId → pending host-key-mismatch resolution.
-	 * Populated when a mismatch is detected; resolved when HOST_VERIFY_RESPONSE arrives.
-	 */
-	private pendingHostVerify = new Map<
-		string,
-		{
-			resolve: (accepted: boolean) => void;
-			timer: ReturnType<typeof setTimeout>;
-		}
-	>();
+	// ─── Sub-managers ─────────────────────────────────────────────────────────
+	private readonly broadcaster: StateBroadcaster;
+	private readonly lifecycle: ChannelLifecycleManager;
+	private readonly sshMgr: SshConnectionManager;
+	private readonly agentMgr: AgentConnectionManager;
 
-	/**
-	 * Optional callback to resolve the current write-lock holder for a channel.
-	 * Injected by ws-handler.ts after WriteLockManager is created.
-	 */
-	private _getWriteLockHolder: ((channelId: string) => string | null) | null = null;
-
-	setGetWriteLockHolder(fn: (channelId: string) => string | null): void {
-		this._getWriteLockHolder = fn;
-	}
+	// ─── Spool GC (owned by coordinator) ─────────────────────────────────────
+	private readonly gc: SpoolGarbageCollector;
 
 	constructor(
 		private dbManager: DatabaseManager,
@@ -197,346 +69,176 @@ export class SessionManager {
 		agentConfig?: AgentConfig,
 		configResolver?: ConfigResolver,
 	) {
-		this.metaDal = new MetaDAL(dbManager.meta);
-		this.spoolDal = new SpoolDAL(dbManager.spool);
-		this.agentConfig = agentConfig ?? { ...DEFAULT_AGENT_CONFIG };
-		this._configResolver = configResolver ?? null;
-		this.scheduler = new SnapshotScheduler((channelId) => {
-			// Find the agent for this channel via the channel's hostId
-			const ch = this.channels.get(channelId);
-			return ch ? this.agents.get(ch.hostId) : undefined;
+		const metaDal = new MetaDAL(dbManager.meta);
+		const spoolDal = new SpoolDAL(dbManager.spool);
+		const resolvedAgentConfig: AgentConfig = agentConfig ?? { ...DEFAULT_AGENT_CONFIG };
+
+		const scheduler = new SnapshotScheduler((channelId) => {
+			const ch = ctx.channels.get(channelId);
+			return ch ? ctx.agents.get(ch.hostId) : undefined;
 		});
-		this.chunker = new OutputChunker(this.spoolDal);
-		this.gc = new SpoolGarbageCollector(this.spoolDal, this.metaDal, gcConfig);
+		const chunker = new OutputChunker(spoolDal);
+
+		// Build the shared context — all sub-managers share these Maps
+		const ctx: SharedSessionContext = {
+			agents: new Map(),
+			sessions: new Map(),
+			channels: new Map(),
+			clients: new Map(),
+			reconnectTimers: new Map(),
+			restartTracking: new Map(),
+			pendingRequests: new Map(),
+			pendingAuthPrompts: new Map(),
+			pendingHostVerify: new Map(),
+			bellTimestamps: new Map(),
+			notificationTimestamps: new Map(),
+			elevationCache: new Map(),
+			agentCapabilities: new Map(),
+			titleDebounceTimers: new Map(),
+			processTitleDebounceTimers: new Map(),
+			getWriteLockHolder: null,
+			metaDal,
+			spoolDal,
+			scheduler,
+			chunker,
+			agentConfig: resolvedAgentConfig,
+			configResolver: configResolver ?? null,
+		};
+		this.ctx = ctx;
+
+		this.broadcaster = new StateBroadcaster(ctx);
+		this.lifecycle = new ChannelLifecycleManager(ctx, this.broadcaster);
+		this.agentMgr = new AgentConnectionManager(ctx, this.broadcaster, this.lifecycle);
+		this.sshMgr = new SshConnectionManager(ctx, this.broadcaster, this.lifecycle, this.agentMgr);
+		// Break the circular reference: AgentConnectionManager needs SshConnectionManager
+		this.agentMgr.sshMgr = this.sshMgr;
+
+		this.gc = new SpoolGarbageCollector(spoolDal, metaDal, gcConfig);
 		this.gc.start();
 	}
 
-	/**
-	 * Ensure the built-in "local" host exists in meta.db.
-	 * Idempotent — creates on first call, returns existing id thereafter.
-	 */
+	// ─── Lifecycle ────────────────────────────────────────────────────────────
+
+	setGetWriteLockHolder(fn: (channelId: string) => string | null): void {
+		this.ctx.getWriteLockHolder = fn;
+	}
+
 	async ensureLocalHost(): Promise<string> {
-		const existing = this.metaDal.getHostByLabel("local");
-		if (existing) return existing.id;
-		const host = this.metaDal.createHost({ type: "local", label: "local" });
-		return host.id;
+		return this.agentMgr.ensureLocalHost();
 	}
 
-	/**
-	 * On hub start, restore sessions that were alive before the previous shutdown.
-	 * Local hosts get a warm restart (respawn agent + PTYs under same channel IDs).
-	 * SSH hosts get their channels marked orphan (future: schedule reconnect).
-	 * If no alive channels exist, this is a no-op (fresh start).
-	 */
 	async startup(): Promise<void> {
-		const alive = this.metaDal.listAliveChannelsWithHost();
-		if (alive.length === 0) return;
-
-		// Group by hostId
-		const byHost = new Map<string, typeof alive>();
-		for (const ch of alive) {
-			const group = byHost.get(ch.hostId) ?? [];
-			group.push(ch);
-			byHost.set(ch.hostId, group);
-		}
-
-		for (const [hostId, channels] of byHost) {
-			const first = channels[0];
-			if (!first) continue;
-			const hostType = first.hostType;
-			// Find the non-closed session for this host
-			const sessions = this.metaDal.listSessions(hostId);
-			const session = sessions.find((s) => s.status !== "closed");
-			if (!session) {
-				// No active session — mark channels dead
-				for (const ch of channels) {
-					this.metaDal.updateChannelStatus(ch.id, "dead");
-				}
-				continue;
-			}
-
-			// Mark session disconnected (agent is gone after hub restart)
-			this.metaDal.markHostSessionDisconnected(hostId);
-			this.sessions.set(hostId, {
-				id: session.id,
-				hostId,
-				status: "disconnected",
-			});
-
-			// Mark channels orphan + restore in-memory state
-			this.metaDal.markHostChannelsOrphan(hostId);
-			for (const ch of channels) {
-				this.channels.set(ch.id, {
-					sessionId: session.id,
-					hostId,
-					status: "orphan",
-					clients: new Set(),
-					shell: ch.shell,
-					...(ch.args.length > 0 && { args: ch.args }),
-					cols: ch.cols,
-					rows: ch.rows,
-					...(ch.cwd !== null && { cwd: ch.cwd }),
-					...(ch.directProcess && { directProcess: true }),
-					dynamicTitle: null,
-					processTitle: null,
-					displayTitle: DEFAULT_CHANNEL_NAME,
-				});
-			}
-
-			if (hostType === "local") {
-				try {
-					await this._connectDaemonAgent(hostId, session.id);
-				} catch {
-					// Daemon connect failed — fall back to warm restart
-					await this._warmRestartLocal(hostId, session.id);
-				}
-			}
-			// SSH: channels stay orphan — future enhancement could schedule reconnect
-		}
+		return this.agentMgr.startup();
 	}
 
-	/** Expose MetaDAL for REST API route handlers. */
+	async shutdown(): Promise<void> {
+		for (const timer of this.ctx.reconnectTimers.values()) clearTimeout(timer);
+		this.ctx.reconnectTimers.clear();
+		for (const timer of this.ctx.titleDebounceTimers.values()) clearTimeout(timer);
+		this.ctx.titleDebounceTimers.clear();
+		for (const timer of this.ctx.processTitleDebounceTimers.values()) clearTimeout(timer);
+		this.ctx.processTitleDebounceTimers.clear();
+		for (const [hostId, pending] of this.ctx.pendingAuthPrompts) {
+			if (pending.timer !== null) clearTimeout(pending.timer);
+			this.ctx.pendingAuthPrompts.delete(hostId);
+			pending.resolve(null);
+		}
+		this.ctx.pendingAuthPrompts.clear();
+		this.ctx.elevationCache.clear();
+		this.ctx.agentCapabilities.clear();
+		this.ctx.scheduler.shutdown();
+		this.ctx.chunker.shutdown();
+		this.gc.stop();
+		for (const agent of this.ctx.agents.values()) agent.close();
+		this.ctx.agents.clear();
+		this.ctx.clients.clear();
+		this.ctx.channels.clear();
+		this.ctx.sessions.clear();
+	}
+
+	// ─── DAL accessors ────────────────────────────────────────────────────────
+
 	getMetaDal(): MetaDAL {
-		return this.metaDal;
+		return this.ctx.metaDal;
 	}
 
-	/** Expose SpoolDAL for REST API route handlers that need to purge chunks. */
 	getSpoolDal(): SpoolDAL {
-		return this.spoolDal;
+		return this.ctx.spoolDal;
 	}
 
-	/**
-	 * Returns all WsClient instances currently attached to a channel.
-	 * Used by WriteLockManager's broadcastToChannel callback.
-	 */
-	getClientsForChannel(channelId: string): WsClient[] {
-		const channel = this.channels.get(channelId);
-		if (!channel) return [];
-		const result: WsClient[] = [];
-		for (const clientId of channel.clients) {
-			const client = this.clients.get(clientId);
-			if (client) result.push(client);
-		}
-		return result;
-	}
+	// ─── Client registry ──────────────────────────────────────────────────────
 
 	addClient(client: WsClient): void {
-		this.clients.set(client.id, client);
-	}
-
-	/** Build a STATE_SYNC payload with all current session and channel states. */
-	getStateSnapshot(): StateSyncMessage {
-		const sessions: StateSyncMessage["sessions"] = [];
-		for (const [hostId, state] of this.sessions) {
-			if (state.status !== "closed") {
-				sessions.push({ sessionId: state.id, hostId, status: state.status });
-			}
-		}
-		const channels: StateSyncMessage["channels"] = [];
-		for (const [channelId, ch] of this.channels) {
-			if (ch.status !== "dead") {
-				channels.push({
-					channelId,
-					sessionId: ch.sessionId,
-					status: ch.status,
-					displayTitle: ch.displayTitle,
-				});
-			}
-		}
-		return { type: "STATE_SYNC", sessions, channels };
-	}
-
-	/**
-	 * Called by the REST PATCH /api/channels/:id route when a channel is renamed
-	 * (custom title set via F2). Recomputes displayTitle and broadcasts a
-	 * TITLE_CHANGE-like update to all connected UI clients.
-	 */
-	notifyChannelRenamed(channelId: string): void {
-		const channel = this.channels.get(channelId);
-		if (!channel) return; // Channel not active in memory — nothing to broadcast
-
-		const displayTitle = this._resolveDisplayTitle(channelId);
-		const msg = {
-			type: "TITLE_CHANGE" as const,
-			channelId,
-			title: channel.dynamicTitle ?? "",
-			displayTitle,
-		};
-		this._broadcastToChannel(channelId, msg);
-	}
-
-	/**
-	 * Re-resolves displayTitle for every active channel and broadcasts a
-	 * TITLE_CHANGE message to each channel's UI clients.
-	 *
-	 * Called when the global title config (source, staticTitle, etc.) changes
-	 * via PUT /api/config/ui so that all open tabs immediately reflect the
-	 * new title format without requiring a reconnect.
-	 */
-	broadcastDisplayTitles(): void {
-		for (const [channelId, channel] of this.channels) {
-			const displayTitle = this._resolveDisplayTitle(channelId);
-			const msg = {
-				type: "TITLE_CHANGE" as const,
-				channelId,
-				title: channel.dynamicTitle ?? "",
-				displayTitle,
-			};
-			this._broadcastToChannel(channelId, msg);
-		}
+		this.broadcaster.addClient(client);
 	}
 
 	removeClient(clientId: string): void {
-		const client = this.clients.get(clientId);
-		if (!client) return;
-		// Copy set to avoid mutating while iterating
-		for (const channelId of [...client.attachedChannels]) {
-			this._detachClient(clientId, channelId);
-		}
-		// Cancel any pending auth prompts initiated by this client
-		for (const [hostId, pending] of this.pendingAuthPrompts) {
-			if (pending.clientId === clientId) {
-				if (pending.timer !== null) clearTimeout(pending.timer);
-				this.pendingAuthPrompts.delete(hostId);
-				pending.resolve(null);
+		this.broadcaster.removeClient(clientId);
+	}
+
+	getClientsForChannel(channelId: string): WsClient[] {
+		return this.broadcaster.getClientsForChannel(channelId);
+	}
+
+	// ─── State broadcast ──────────────────────────────────────────────────────
+
+	getStateSnapshot(): StateSyncMessage {
+		return this.broadcaster.getStateSnapshot();
+	}
+
+	notifyChannelRenamed(channelId: string): void {
+		this.broadcaster.notifyChannelRenamed(channelId);
+	}
+
+	broadcastDisplayTitles(): void {
+		this.broadcaster.broadcastDisplayTitles();
+	}
+
+	resolveDisplayTitle(channelId: string): string {
+		return this.broadcaster.resolveDisplayTitle(channelId);
+	}
+
+	// ─── Channel operations ───────────────────────────────────────────────────
+
+	destroyChannel(channelId: string): boolean {
+		return this.lifecycle.destroyChannel(channelId);
+	}
+
+	async restartChannel(channelId: string, requestingClientId?: string): Promise<boolean> {
+		return this.lifecycle.restartChannel(channelId, requestingClientId);
+	}
+
+	async closeSession(sessionId: string): Promise<void> {
+		let hostId: string | undefined;
+		for (const [hId, state] of this.ctx.sessions.entries()) {
+			if (state.id === sessionId) {
+				hostId = hId;
+				break;
 			}
 		}
-		this.clients.delete(clientId);
+
+		if (!hostId) {
+			this.ctx.metaDal.updateSessionStatus(sessionId, "closed");
+			return;
+		}
+
+		const agent = this.ctx.agents.get(hostId);
+		if (agent) {
+			agent.close();
+			this.ctx.agents.delete(hostId);
+		}
+
+		this.lifecycle.closeSession(hostId, sessionId);
 	}
 
-	/**
-	 * Handle a SPAWN message from a UI client.
-	 * For local hosts: always active (local agent starts immediately).
-	 * For SSH hosts: session starts as 'starting', transitions to 'active' on HELLO.
-	 */
-	/**
-	 * Send a SPAWN message to an agent and wait for SPAWN_OK or SPAWN_ERR.
-	 * On SPAWN_OK: creates the channel in DB and memory, notifies all clients, returns channelId.
-	 * On SPAWN_ERR: sends ERROR to client (unless suppressClientError=true), returns null errCode.
-	 */
-	private async _sendSpawnAndWait(
-		opts: SendSpawnOpts,
-	): Promise<{ channelId: string | null; errCode: string | null }> {
-		const {
-			agent,
-			spawnMsg,
-			clientId,
-			hostId,
-			session,
-			client,
-			resolvedShell,
-			resolvedArgs,
-			resolvedCwd,
-			resolvedDirectProcess,
-			resolvedLaunchProfileId,
-			cols,
-			rows,
-			suppressClientError = false,
-			resolvedElevated = false,
-			resolvedElevationMethod = undefined,
-		} = opts;
-		agent.send(spawnMsg);
-
-		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pendingRequests.delete(spawnMsg.requestId);
-				reject(new Error("Agent SPAWN timeout"));
-			}, SPAWN_TIMEOUT_MS);
-
-			this.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				if (incoming.type === "SPAWN_OK") {
-					const spawnOk = incoming as AgentSpawnOkMessage;
-					clearTimeout(timer);
-					this.pendingRequests.delete(spawnMsg.requestId);
-
-					const { channelId } = spawnOk;
-
-					// Persist channel as 'born' then immediately 'live' (first client attaches).
-					// title is null (no custom title) — the UI falls back to dynamicTitle
-					// then DEFAULT_CHANNEL_NAME. Setting title = "Terminal" here would
-					// prevent dynamic titles (OSC 0/2) from ever showing.
-					this.metaDal.createChannel({
-						id: channelId,
-						sessionId: session.id,
-						status: "born",
-						shell: resolvedShell,
-						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-						cwd: resolvedCwd,
-						cols,
-						rows,
-						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
-						...(resolvedLaunchProfileId !== undefined && {
-							launchProfileId: resolvedLaunchProfileId,
-						}),
-						...(resolvedElevated && { elevated: true }),
-						...(resolvedElevationMethod !== undefined && {
-							elevationMethod: resolvedElevationMethod,
-						}),
-					});
-
-					this.channels.set(channelId, {
-						sessionId: session.id,
-						hostId,
-						status: "live",
-						clients: new Set([clientId]),
-						shell: resolvedShell,
-						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-						cwd: resolvedCwd,
-						cols,
-						rows,
-						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
-						dynamicTitle: null,
-						processTitle: null,
-						displayTitle: DEFAULT_CHANNEL_NAME,
-					});
-					this.metaDal.updateChannelStatus(channelId, "live");
-					this.scheduler.trackChannel(channelId);
-					this.chunker.trackChannel(channelId);
-					client.attachedChannels.add(channelId);
-
-					// Notify all clients of the channel state change
-					const channelStateMsg: ChannelStateMessage = {
-						type: "CHANNEL_STATE",
-						channelId,
-						sessionId: session.id,
-						status: "live",
-					};
-					this._broadcastToAllClients(channelStateMsg);
-
-					const response: UiSpawnOkMessage = {
-						type: "SPAWN_OK",
-						channelId,
-						hostId,
-						sessionId: session.id,
-					};
-					client.send(response);
-					resolve({ channelId, errCode: null });
-				} else if (incoming.type === "SPAWN_ERR") {
-					const spawnErr = incoming as AgentSpawnErrMessage;
-					clearTimeout(timer);
-					this.pendingRequests.delete(spawnMsg.requestId);
-
-					if (!suppressClientError) {
-						const errorMsg: ErrorMessage = {
-							type: "ERROR",
-							code: spawnErr.code,
-							message: spawnErr.message,
-						};
-						client.send(errorMsg);
-					}
-					resolve({ channelId: null, errCode: spawnErr.code });
-				}
-			});
-		});
-	}
+	// ─── WS message handlers ──────────────────────────────────────────────────
 
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
-		const client = this.clients.get(clientId);
+		const client = this.ctx.clients.get(clientId);
 		if (!client) return null;
 
-		// Resolve host: if hostId is "local" or missing, use the local host
-		const hostId = await this._resolveHostId(msg.hostId);
-		const host = this.metaDal.getHost(hostId);
+		const hostId = await this.agentMgr.resolveHostId(msg.hostId);
+		const host = this.ctx.metaDal.getHost(hostId);
 		if (!host) {
 			const errorMsg: ErrorMessage = {
 				type: "ERROR",
@@ -547,29 +249,22 @@ export class SessionManager {
 			return null;
 		}
 
-		// Get or create session for this host
-		const session = await this._getOrCreateSession(hostId, host.type === "ssh");
+		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
 
-		// Get or create agent for this host
-		let agent = this.agents.get(hostId);
+		let agent = this.ctx.agents.get(hostId);
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
-				const promptAuth = this._buildPromptAuth(client);
+				const promptAuth = this.sshMgr.buildPromptAuth(client);
 				const sshAgent = new SshAgent(host, promptAuth);
 
-				// TOFU: load the stored fingerprint so the verifier can check it
-				const storedFingerprint = this.metaDal.getHostFingerprint(hostId);
+				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
 
-				// Connect and wait for HELLO — session transitions to 'active' on success
 				try {
 					await sshAgent.start(storedFingerprint);
 				} catch (err) {
-					// sshAgent.lastKeyVerification is always populated by the hostVerifier closure,
-					// even when start() rejects (the verifier runs synchronously before the error event).
 					const kv = sshAgent.lastKeyVerification;
 					if (kv.mismatch) {
-						// Host key changed — ask the user before failing
-						const accepted = await this._promptHostKeyMismatch(
+						const accepted = await this.sshMgr.promptHostKeyMismatch(
 							client,
 							hostId,
 							host.sshHost ?? host.label,
@@ -577,13 +272,12 @@ export class SessionManager {
 							kv.capturedFingerprint,
 						);
 						if (accepted) {
-							// User accepted the new key — persist it and retry the connection
-							this.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
+							this.ctx.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
 							const retryAgent = new SshAgent(host, promptAuth);
 							try {
 								await retryAgent.start(kv.capturedFingerprint);
 							} catch (retryErr) {
-								this._updateSessionStatus(hostId, session.id, "closed");
+								this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 								client.send({
 									type: "ERROR",
 									code: "SSH_CONNECT_FAILED",
@@ -591,13 +285,12 @@ export class SessionManager {
 								} satisfies ErrorMessage);
 								return null;
 							}
-							this._updateSessionStatus(hostId, session.id, "active");
-							this._wireAgentEvents(hostId, session.id, retryAgent);
-							this.agents.set(hostId, retryAgent);
+							this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+							this.agentMgr.wireAgentEvents(hostId, session.id, retryAgent);
+							this.ctx.agents.set(hostId, retryAgent);
 							agent = retryAgent;
 						} else {
-							// User rejected — fail the session
-							this._updateSessionStatus(hostId, session.id, "closed");
+							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 							client.send({
 								type: "ERROR",
 								code: "SSH_HOST_KEY_REJECTED",
@@ -606,8 +299,7 @@ export class SessionManager {
 							return null;
 						}
 					} else {
-						// Generic SSH connect failure
-						this._updateSessionStatus(hostId, session.id, "closed");
+						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 						client.send({
 							type: "ERROR",
 							code: "SSH_CONNECT_FAILED",
@@ -617,32 +309,29 @@ export class SessionManager {
 					}
 				}
 
-				// Reached when first attempt succeeded (no mismatch) or mismatch retry succeeded.
-				// agent is set (retryAgent) when the mismatch-accept branch already wired it; for a clean first connect, wire now.
 				if (agent != null) {
-					// mismatch + accept branch already wired retryAgent — agent = retryAgent, nothing more to do here.
+					// mismatch + accept branch already wired retryAgent
 				} else {
-					// TOFU: persist fingerprint on first successful connect (no stored key previously)
 					const kv = sshAgent.lastKeyVerification;
 					if (kv.capturedFingerprint && !storedFingerprint) {
-						this.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
+						this.ctx.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
 					}
-					this._updateSessionStatus(hostId, session.id, "active");
-					this._wireAgentEvents(hostId, session.id, sshAgent);
-					this.agents.set(hostId, sshAgent);
+					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+					this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
+					this.ctx.agents.set(hostId, sshAgent);
 					agent = sshAgent;
 				}
 			} else {
-				// Local: try daemon first, fall back to child-process agent
 				try {
-					agent = await this._connectDaemonAgent(hostId, session.id);
+					agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
 				} catch {
+					const { LocalAgent, resolveAgentPath } = await import("./local-agent.js");
 					const la = new LocalAgent(resolveAgentPath());
 					await la.start();
-					this._wireAgentEvents(hostId, session.id, la);
-					this.agents.set(hostId, la);
+					this.agentMgr.wireAgentEvents(hostId, session.id, la);
+					this.ctx.agents.set(hostId, la);
 					agent = la;
-					this._updateSessionStatus(hostId, session.id, "active");
+					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
 				}
 			}
 		}
@@ -651,10 +340,7 @@ export class SessionManager {
 		const cols = msg.cols ?? 80;
 		const rows = msg.rows ?? 24;
 
-		// ── Launch profile resolution (seed pattern) ─────────────────────────
-		// If launchProfileId is provided, look up the profile and use its fields
-		// as spawn parameters. Profile data is seeded at spawn time — updating
-		// the profile later does NOT affect already-running channels.
+		// ── Launch profile resolution ─────────────────────────────────────────
 		let resolvedShell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
 		let resolvedArgs = msg.args ?? [];
 		let resolvedCwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
@@ -664,27 +350,20 @@ export class SessionManager {
 		let resolvedLaunchProfileId: string | undefined;
 
 		if (msg.launchProfileId) {
-			const profile = this.metaDal.getLaunchProfile(msg.launchProfileId);
+			const profile = this.ctx.metaDal.getLaunchProfile(msg.launchProfileId);
 			if (profile) {
-				// SC-17: UI fields win when explicitly provided — profile fills only unset fields
 				resolvedShell = msg.shell ?? profile.shell;
 				resolvedArgs = msg.args ?? profile.args ?? [];
 				resolvedCwd = msg.cwd ?? profile.cwd ?? resolvedCwd;
-				// Merge: profile env as base, UI env wins on conflict
 				resolvedEnv = { ...(profile.env ?? {}), ...(msg.env ?? {}) };
 				resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
-				// UI-level elevated flag can override the profile's setting
 				resolvedElevated = msg.elevated ?? profile.elevated;
 				resolvedLaunchProfileId = profile.id;
 			}
 		}
 
-		// ── Elevation: Windows-SSH rejection + capability check ─────────────
+		// ── Elevation checks ──────────────────────────────────────────────────
 		if (resolvedElevated) {
-			// ERR-04: Windows SSH elevation not supported in MVP.
-			// We check host.type === 'ssh' — if the remote OS is Windows (or unknown)
-			// we cannot forward a UAC prompt, so we strip the elevation flag.
-			// (gsudo Windows-local works fine; only SSH is blocked here.)
 			if (host.type === "ssh") {
 				console.warn(
 					`[session-manager] ERR-04: elevation not supported over SSH (hostId=${hostId}). Spawning without elevation.`,
@@ -694,8 +373,7 @@ export class SessionManager {
 		}
 
 		if (resolvedElevated) {
-			// ERR-05: agent must support launch-profiles capability.
-			const caps = this.agentCapabilities.get(hostId) ?? [];
+			const caps = this.ctx.agentCapabilities.get(hostId) ?? [];
 			if (!caps.includes("launch-profiles")) {
 				console.warn(
 					`[session-manager] ERR-05: agent for hostId=${hostId} does not advertise 'launch-profiles' capability. Spawning without elevation.`,
@@ -704,7 +382,7 @@ export class SessionManager {
 			}
 		}
 
-		// ── Build base spawn message ─────────────────────────────────────────
+		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
@@ -717,15 +395,13 @@ export class SessionManager {
 			...(resolvedDirectProcess && { directProcess: true }),
 		};
 
-		// ── Elevated spawn: two-step flow (passwordless first, prompt on demand) ──
+		// ── Elevated spawn ────────────────────────────────────────────────────
 		if (resolvedElevated) {
-			// Resolve elevation method from config cascade
-			const rawMethod = this._configResolver
-				? this._configResolver.resolveElevationMethod(host.elevationMethod)
+			const rawMethod = this.ctx.configResolver
+				? this.ctx.configResolver.resolveElevationMethod(host.elevationMethod)
 				: process.platform === "win32"
 					? "gsudo"
 					: "sudo";
-			// Resolve + validate custom command (AUD-012)
 			const elevCfg = this._resolveElevationConfig(host.customCommand, rawMethod);
 			if ("validationError" in elevCfg) {
 				client.send(elevCfg.validationError);
@@ -740,13 +416,11 @@ export class SessionManager {
 				...(customCommand !== undefined && { customCommand }),
 			};
 
-			// Check elevation secret cache first
-			const cached = this.elevationCache.get(hostId);
+			const cached = this.ctx.elevationCache.get(hostId);
 			if (cached && cached.expiresAt > Date.now()) {
-				// Cache hit — send with secret (no prompt needed)
 				agentSpawn.elevationSecret = cached.secret;
 				return (
-					await this._sendSpawnAndWait({
+					await this.lifecycle.sendSpawnAndWait({
 						agent,
 						spawnMsg: agentSpawn,
 						clientId,
@@ -768,7 +442,7 @@ export class SessionManager {
 			}
 
 			// Cache miss — try passwordless first
-			const firstResult = await this._sendSpawnAndWait({
+			const firstResult = await this.lifecycle.sendSpawnAndWait({
 				agent,
 				spawnMsg: agentSpawn,
 				clientId,
@@ -788,12 +462,11 @@ export class SessionManager {
 			});
 
 			if (firstResult.channelId !== null || firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED") {
-				// Passwordless succeeded, or a non-password error occurred (already sent to client)
 				return firstResult.channelId;
 			}
 
-			// Passwordless failed with ELEVATION_PASSWORD_REQUIRED — prompt user
-			const promptFn = this._buildPromptAuth(client);
+			// Passwordless failed — prompt user
+			const promptFn = this.sshMgr.buildPromptAuth(client);
 			const hostname = host.sshHost ?? host.label ?? hostId;
 			const secret = await promptFn(
 				hostId,
@@ -801,7 +474,6 @@ export class SessionManager {
 				`Enter password for elevated shell on ${hostname}`,
 			);
 			if (secret === null) {
-				// ERR-10: user cancelled elevation prompt — abort spawn.
 				client.send({
 					type: "ERROR",
 					code: "ELEVATION_CANCELLED",
@@ -810,10 +482,9 @@ export class SessionManager {
 				return null;
 			}
 
-			// Cache the secret and retry with it
-			this.elevationCache.set(hostId, {
+			this.ctx.elevationCache.set(hostId, {
 				secret,
-				expiresAt: Date.now() + SessionManager.ELEVATION_CACHE_TTL_MS,
+				expiresAt: Date.now() + 900_000,
 			});
 
 			const retrySpawn: AgentSpawnMessage = {
@@ -822,7 +493,7 @@ export class SessionManager {
 				elevationSecret: secret,
 			};
 			return (
-				await this._sendSpawnAndWait({
+				await this.lifecycle.sendSpawnAndWait({
 					agent,
 					spawnMsg: retrySpawn,
 					clientId,
@@ -843,9 +514,9 @@ export class SessionManager {
 			).channelId;
 		}
 
-		// ── Non-elevated spawn ───────────────────────────────────────────────
+		// ── Non-elevated spawn ─────────────────────────────────────────────────
 		return (
-			await this._sendSpawnAndWait({
+			await this.lifecycle.sendSpawnAndWait({
 				agent,
 				spawnMsg: baseSpawnMsg,
 				clientId,
@@ -864,18 +535,15 @@ export class SessionManager {
 	}
 
 	async handleAttach(clientId: string, channelId: string): Promise<boolean> {
-		const client = this.clients.get(clientId);
+		const client = this.ctx.clients.get(clientId);
 		if (!client) return false;
 
-		const channel = this.channels.get(channelId);
+		const channel = this.ctx.channels.get(channelId);
 		if (!channel) {
-			// Channel not in memory — check DB for dead/not-found
-			const dbChannel = this.metaDal.getChannel(channelId);
+			const dbChannel = this.ctx.metaDal.getChannel(channelId);
 			if (dbChannel?.status === "dead") {
-				// Dead channel — attempt transparent respawn under the same ID
-				const respawned = await this._respawnDeadChannel(channelId, client, clientId);
+				const respawned = await this.lifecycle.respawnDeadChannel(channelId, client, clientId);
 				if (respawned) return true;
-				// Respawn failed — fall through to error
 			}
 			const code = dbChannel?.status === "dead" ? "CHANNEL_DEAD" : "CHANNEL_NOT_FOUND";
 			const errorMsg: ErrorMessage = {
@@ -891,26 +559,16 @@ export class SessionManager {
 		channel.clients.add(clientId);
 		client.attachedChannels.add(channelId);
 
-		// orphan → live on first reattach
 		if (wasOrphan) {
-			this._updateChannelStatus(channelId, channel.sessionId, "live");
+			this.broadcaster.updateChannelStatus(channelId, channel.sessionId, "live");
 		}
 
-		const agent = this.agents.get(channel.hostId);
+		const agent = this.ctx.agents.get(channel.hostId);
 
-		// handleAttach is only called for RE-attaches (tab switch, reconnect,
-		// sidebar click). The initial attach after SPAWN goes through
-		// handleSpawn + attachChannel. So every call here needs a snapshot.
-		//
-		// Case 1: agent connected — request fresh snapshot via ATTACH
-		// Case 2: agent disconnected — serve cached snapshot from spool.db
-
-		// Look up dynamic_title and process_title from DB once — used in all ATTACH_OK responses
-		const dbChannelForTitle = this.metaDal.getChannel(channelId);
+		const dbChannelForTitle = this.ctx.metaDal.getChannel(channelId);
 		const dynamicTitle = dbChannelForTitle?.dynamicTitle;
 		const processTitle = dbChannelForTitle?.processTitle;
 
-		// Backfill in-memory state from DB if not yet populated (e.g. on first attach after hub restart)
 		if (dynamicTitle !== undefined && channel.dynamicTitle === null) {
 			channel.dynamicTitle = dynamicTitle;
 		}
@@ -918,18 +576,16 @@ export class SessionManager {
 			channel.processTitle = processTitle;
 		}
 
-		// Resolve displayTitle using current in-memory state (now backfilled from DB)
-		const displayTitle = this._resolveDisplayTitle(channelId);
+		const displayTitle = this.broadcaster.resolveDisplayTitle(channelId);
 
 		if (!agent?.connected) {
-			// Agent disconnected — serve cached snapshot from spool.db
-			const { snapshot, tail } = this._buildAttachPayload(channelId);
+			const { snapshot, tail } = this.lifecycle.buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
 				type: "ATTACH_OK",
 				channelId,
 				snapshot,
 				tail,
-				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				writeLockHolder: this.ctx.getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
 				...(processTitle !== undefined && { processTitle }),
@@ -939,7 +595,6 @@ export class SessionManager {
 			return true;
 		}
 
-		// Agent connected — request fresh snapshot via ATTACH
 		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
 		agent.send(agentAttach);
 
@@ -947,29 +602,27 @@ export class SessionManager {
 		try {
 			const agentResponse = await new Promise<AgentAttachOkMessage>((resolve, reject) => {
 				const timer = setTimeout(() => {
-					this.pendingRequests.delete(pendingKey);
+					this.ctx.pendingRequests.delete(pendingKey);
 					reject(new Error("Agent ATTACH timeout"));
 				}, ATTACH_TIMEOUT_MS);
 
-				this.pendingRequests.set(pendingKey, (incoming: ProtocolMessage) => {
+				this.ctx.pendingRequests.set(pendingKey, (incoming: ProtocolMessage) => {
 					if (incoming.type === "ATTACH_OK") {
 						const attachOkMsg = incoming as AgentAttachOkMessage;
 						clearTimeout(timer);
-						this.pendingRequests.delete(pendingKey);
+						this.ctx.pendingRequests.delete(pendingKey);
 						resolve(attachOkMsg);
 					} else if (incoming.type === "ERROR") {
 						clearTimeout(timer);
-						this.pendingRequests.delete(pendingKey);
+						this.ctx.pendingRequests.delete(pendingKey);
 						reject(new Error("Agent ATTACH error"));
 					}
 				});
 			});
 
-			// Store the fresh snapshot in spool.db (flush + seq coordination)
-			this._storeSnapshot(channelId, agentResponse.snapshot, agentResponse.lastSeq);
+			this.lifecycle.storeSnapshot(channelId, agentResponse.snapshot, agentResponse.lastSeq);
 
-			// Tail = output chunks after the snapshot's lastSeq
-			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
+			const tailChunks = this.ctx.spoolDal.getChunksByChannel(channelId, {
 				kind: "output",
 				afterSeq: agentResponse.lastSeq,
 			});
@@ -980,7 +633,7 @@ export class SessionManager {
 				channelId,
 				snapshot: agentResponse.snapshot,
 				tail,
-				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				writeLockHolder: this.ctx.getWriteLockHolder?.(channelId) ?? null,
 				cached: false,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
 				...(processTitle !== undefined && { processTitle }),
@@ -988,14 +641,13 @@ export class SessionManager {
 			};
 			client.send(attachOk);
 		} catch {
-			// Agent ATTACH failed — fall back to cached snapshot
-			const { snapshot, tail } = this._buildAttachPayload(channelId);
+			const { snapshot, tail } = this.lifecycle.buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
 				type: "ATTACH_OK",
 				channelId,
 				snapshot,
 				tail,
-				writeLockHolder: this._getWriteLockHolder?.(channelId) ?? null,
+				writeLockHolder: this.ctx.getWriteLockHolder?.(channelId) ?? null,
 				cached: true,
 				...(dynamicTitle !== undefined && { dynamicTitle }),
 				...(processTitle !== undefined && { processTitle }),
@@ -1007,525 +659,118 @@ export class SessionManager {
 	}
 
 	handleDetach(clientId: string, channelId: string): void {
-		this._detachClient(clientId, channelId);
+		this.broadcaster.detachClient(clientId, channelId);
 	}
 
 	handleInput(clientId: string, channelId: string, data: Uint8Array): void {
-		const channel = this.channels.get(channelId);
+		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
-		const agent = this.agents.get(channel.hostId);
+		const agent = this.ctx.agents.get(channel.hostId);
 		if (!agent) return;
 		const inputMsg: InputMessage = { type: "INPUT", channelId, data };
 		agent.send(inputMsg);
 	}
 
 	handleResize(clientId: string, channelId: string, cols: number, rows: number): void {
-		const channel = this.channels.get(channelId);
+		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
-		const agent = this.agents.get(channel.hostId);
+		const agent = this.ctx.agents.get(channel.hostId);
 		if (!agent) return;
 		const resizeMsg: ResizeMessage = { type: "RESIZE", channelId, cols, rows };
 		agent.send(resizeMsg);
-		// Persist last-known dimensions for warm restart
 		channel.cols = cols;
 		channel.rows = rows;
-		this.metaDal.updateChannelDimensions(channelId, cols, rows);
+		this.ctx.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
-	/**
-	 * Resolve a pending auth prompt for a host.
-	 * Called by WsHandler when AUTH_PROMPT_RESPONSE arrives from the client.
-	 */
 	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
-		const pending = this.pendingAuthPrompts.get(hostId);
-		if (!pending) return;
-		if (pending.timer !== null) clearTimeout(pending.timer);
-		this.pendingAuthPrompts.delete(hostId);
-		pending.resolve(secret);
+		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret);
 	}
 
-	/**
-	 * Explicitly close a session by its ID. Called by the REST DELETE /api/sessions/:id endpoint.
-	 * Marks all channels dead, transitions session to 'closed', and closes the agent connection.
-	 */
-	async closeSession(sessionId: string): Promise<void> {
-		// Find which host owns this session
-		let hostId: string | undefined;
-		for (const [hId, state] of this.sessions.entries()) {
-			if (state.id === sessionId) {
-				hostId = hId;
-				break;
-			}
-		}
-
-		if (!hostId) {
-			// Session not in memory — still clean up DB state via metaDal
-			this.metaDal.updateSessionStatus(sessionId, "closed");
-			return;
-		}
-
-		// Close the agent connection for this host
-		const agent = this.agents.get(hostId);
-		if (agent) {
-			agent.close();
-			this.agents.delete(hostId);
-		}
-
-		this._closeSession(hostId, sessionId);
-	}
-
-	/**
-	 * Destroy a single channel: send DESTROY to the agent, mark dead in DB,
-	 * untrack from scheduler/chunker, and remove from in-memory map.
-	 * Returns true if the channel was found and destroyed.
-	 */
-	destroyChannel(channelId: string): boolean {
-		const ch = this.channels.get(channelId);
-		if (!ch) return false;
-
-		// Send DESTROY to the agent (if connected)
-		const agent = this.agents.get(ch.hostId);
-		if (agent?.connected) {
-			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
-		}
-
-		// Mark dead in DB + broadcast CHANNEL_STATE to clients
-		this._updateChannelStatus(channelId, ch.sessionId, "dead");
-
-		// Untrack from scheduler and chunker
-		this.scheduler.untrackChannel(channelId);
-		this.chunker.untrackChannel(channelId);
-
-		// Remove from in-memory map
-		this.channels.delete(channelId);
-
-		return true;
-	}
-
-	/**
-	 * Restart a channel: destroy the current PTY and respawn with the same config.
-	 * Used by POST /api/channels/:id/restart. Returns true on success.
-	 */
-	async restartChannel(channelId: string, requestingClientId?: string): Promise<boolean> {
-		// Load latest config from DB (may have been updated via PATCH)
-		const info = this.metaDal.getChannelWithHost(channelId);
-		if (!info) return false;
-
-		const { channel, hostId } = info;
-		const ch = this.channels.get(channelId);
-
-		// Kill existing PTY if alive
-		const agent = this.agents.get(hostId);
-		if (agent?.connected && ch && ch.status !== "dead") {
-			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
-		}
-
-		// Find active or detached session
-		const sessionEntry = this.sessions.get(hostId);
-		if (!sessionEntry || (sessionEntry.status !== "active" && sessionEntry.status !== "detached"))
-			return false;
-		if (!agent?.connected) return false;
-
-		// Build SPAWN from DB config
-		const shell = channel.shell ?? process.env.SHELL ?? "/bin/sh";
-		const args = channel.args ?? [];
-		const cwd = channel.cwd ?? process.env.HOME ?? "/";
-		const cols = channel.cols;
-		const rows = channel.rows;
-
-		// ── Elevated restart: mirror the two-step flow from handleSpawn ──────
-		if (channel.elevated && channel.elevationMethod) {
-			const method = channel.elevationMethod as ElevationMethod;
-
-			// Resolve + validate custom command (AUD-012)
-			const elevCfg = this._resolveElevationConfig(
-				this.metaDal.getHost(hostId)?.customCommand,
-				method,
-			);
-			if ("validationError" in elevCfg) {
-				// No client context here — log and fall through to non-elevated spawn
-				console.warn(
-					`[session-manager] restartChannel: invalid custom command for hostId=${hostId}: ${elevCfg.validationError.message}`,
-				);
-				return false;
-			}
-			const { customCommand } = elevCfg;
-
-			const baseElevatedSpawn: AgentSpawnMessage = {
-				type: "SPAWN",
-				requestId: generateId(),
-				channelId,
-				shell,
-				...(args.length > 0 && { args }),
-				cwd,
-				env: {},
-				cols,
-				rows,
-				elevated: true,
-				elevationMethod: method,
-				...(customCommand !== undefined && { customCommand }),
-			};
-
-			// Find a client to prompt — prefer the requesting client, fall back to any attached client
-			let promptClient: WsClient | undefined;
-			if (requestingClientId) {
-				promptClient = this.clients.get(requestingClientId);
-			}
-			if (!promptClient) {
-				// Pick the first attached client for this channel (or any connected client)
-				const attachedClientId =
-					ch?.clients && ch.clients.size > 0 ? [...ch.clients][0] : undefined;
-				promptClient = attachedClientId ? this.clients.get(attachedClientId) : undefined;
-			}
-			if (!promptClient) {
-				// No client available for prompting — try cache or passwordless only
-				const cached = this.elevationCache.get(hostId);
-				if (cached && cached.expiresAt > Date.now()) {
-					const spawnWithSecret: AgentSpawnMessage = {
-						...baseElevatedSpawn,
-						requestId: generateId(),
-						elevationSecret: cached.secret,
-					};
-					return await this._restartSendAndWait(
-						agent,
-						spawnWithSecret,
-						channelId,
-						hostId,
-						sessionEntry,
-						ch,
-						shell,
-						args,
-						cwd,
-						cols,
-						rows,
-						channel.directProcess,
-					);
-				}
-				// No cache, no client — attempt passwordless
-				return await this._restartSendAndWait(
-					agent,
-					baseElevatedSpawn,
-					channelId,
-					hostId,
-					sessionEntry,
-					ch,
-					shell,
-					args,
-					cwd,
-					cols,
-					rows,
-					channel.directProcess,
-				);
-			}
-
-			// Check elevation secret cache first
-			const cached = this.elevationCache.get(hostId);
-			if (cached && cached.expiresAt > Date.now()) {
-				const spawnWithSecret: AgentSpawnMessage = {
-					...baseElevatedSpawn,
-					requestId: generateId(),
-					elevationSecret: cached.secret,
-				};
-				return await this._restartSendAndWait(
-					agent,
-					spawnWithSecret,
-					channelId,
-					hostId,
-					sessionEntry,
-					ch,
-					shell,
-					args,
-					cwd,
-					cols,
-					rows,
-					channel.directProcess,
-				);
-			}
-
-			// Cache miss — try passwordless first
-			let firstErrCode: string | null = null;
-			agent.send(baseElevatedSpawn);
-			const firstOk = await new Promise<boolean>((resolve) => {
-				const timer = setTimeout(() => {
-					this.pendingRequests.delete(baseElevatedSpawn.requestId);
-					resolve(false);
-				}, SPAWN_TIMEOUT_MS);
-				this.pendingRequests.set(baseElevatedSpawn.requestId, (incoming: ProtocolMessage) => {
-					clearTimeout(timer);
-					this.pendingRequests.delete(baseElevatedSpawn.requestId);
-					if (incoming.type === "SPAWN_OK") {
-						resolve(true);
-					} else if (incoming.type === "SPAWN_ERR") {
-						firstErrCode = (incoming as AgentSpawnErrMessage).code;
-						resolve(false);
-					} else {
-						resolve(false);
-					}
-				});
-			});
-
-			if (firstOk) {
-				this._applyRestartState(
-					channelId,
-					hostId,
-					sessionEntry,
-					ch,
-					shell,
-					args,
-					cwd,
-					cols,
-					rows,
-					channel.directProcess,
-				);
-				return true;
-			}
-
-			if (firstErrCode !== "ELEVATION_PASSWORD_REQUIRED") {
-				// Non-password error — cannot recover without a new spawn
-				return false;
-			}
-
-			// Passwordless failed with ELEVATION_PASSWORD_REQUIRED — prompt user
-			const promptFn = this._buildPromptAuth(promptClient);
-			const host = this.metaDal.getHost(hostId);
-			const hostname = host?.sshHost ?? host?.label ?? hostId;
-			const secret = await promptFn(
-				hostId,
-				"elevation",
-				`Enter password for elevated shell on ${hostname}`,
-			);
-			if (secret === null) {
-				promptClient.send({
-					type: "ERROR",
-					code: "ELEVATION_CANCELLED",
-					message: "Elevation cancelled by user",
-				} as ErrorMessage);
-				return false;
-			}
-
-			// Cache the secret and retry
-			this.elevationCache.set(hostId, {
-				secret,
-				expiresAt: Date.now() + SessionManager.ELEVATION_CACHE_TTL_MS,
-			});
-
-			const retrySpawn: AgentSpawnMessage = {
-				...baseElevatedSpawn,
-				requestId: generateId(),
-				elevationSecret: secret,
-			};
-			return await this._restartSendAndWait(
-				agent,
-				retrySpawn,
-				channelId,
-				hostId,
-				sessionEntry,
-				ch,
-				shell,
-				args,
-				cwd,
-				cols,
-				rows,
-				channel.directProcess,
-			);
-		}
-
-		// ── Non-elevated restart ─────────────────────────────────────────────
-		const requestId = generateId();
-		agent.send({
-			type: "SPAWN",
-			requestId,
-			channelId,
-			shell,
-			...(args.length > 0 && { args }),
-			cwd,
-			env: {},
-			cols,
-			rows,
-		});
-
-		const ok = await new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingRequests.delete(requestId);
-				resolve(false);
-			}, SPAWN_TIMEOUT_MS);
-
-			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
-				clearTimeout(timer);
-				this.pendingRequests.delete(requestId);
-				resolve(incoming.type === "SPAWN_OK");
-			});
-		});
-
-		if (!ok) return false;
-
-		this._applyRestartState(
-			channelId,
-			hostId,
-			sessionEntry,
-			ch,
-			shell,
-			args,
-			cwd,
-			cols,
-			rows,
-			channel.directProcess,
-		);
-		return true;
-	}
-
-	/**
-	 * Send a SPAWN to the agent and wait for SPAWN_OK/SPAWN_ERR, then apply
-	 * restart state on success. Used by restartChannel's elevated path.
-	 */
-	private async _restartSendAndWait(
-		agent: AgentConnection,
-		spawnMsg: AgentSpawnMessage,
-		channelId: string,
-		hostId: string,
-		sessionEntry: { id: string; status: string },
-		ch: ChannelState | undefined,
-		shell: string,
-		args: string[],
-		cwd: string,
-		cols: number,
-		rows: number,
-		directProcess?: boolean,
-	): Promise<boolean> {
-		agent.send(spawnMsg);
-		const ok = await new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingRequests.delete(spawnMsg.requestId);
-				resolve(false);
-			}, SPAWN_TIMEOUT_MS);
-			this.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				clearTimeout(timer);
-				this.pendingRequests.delete(spawnMsg.requestId);
-				if (incoming.type === "SPAWN_OK") {
-					resolve(true);
-				} else if (incoming.type === "SPAWN_ERR") {
-					resolve(false);
-				} else {
-					resolve(false);
-				}
-			});
-		});
-		if (!ok) return false;
-		this._applyRestartState(
-			channelId,
-			hostId,
-			sessionEntry,
-			ch,
-			shell,
-			args,
-			cwd,
-			cols,
-			rows,
-			directProcess,
-		);
-		return true;
-	}
-
-	/**
-	 * Update in-memory + DB state after a successful restart SPAWN_OK.
-	 * Extracted to avoid duplication between elevated and non-elevated restart paths.
-	 */
-	private _applyRestartState(
-		channelId: string,
-		hostId: string,
-		sessionEntry: { id: string; status: string },
-		ch: ChannelState | undefined,
-		shell: string,
-		args: string[],
-		cwd: string,
-		cols: number,
-		rows: number,
-		directProcess?: boolean,
+	handleHostVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
 	): void {
-		this.metaDal.updateChannelStatus(channelId, "live");
-		this.channels.set(channelId, {
-			sessionId: sessionEntry.id,
+		this.sshMgr.handleHostVerifyResponse(promptId, action);
+	}
+
+	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
+		return this.sshMgr.handleTestConnect(clientId, msg);
+	}
+
+	// ─── Test-surface accessors (delegating to ctx / sub-managers) ───────────
+	// Tests access internal state via type-casts like:
+	//   (sm as unknown as { agents: Map<…> }).agents
+	// These getters make those casts resolve correctly without changing behaviour.
+
+	get agents(): SharedSessionContext["agents"] {
+		return this.ctx.agents;
+	}
+
+	get sessions(): SharedSessionContext["sessions"] {
+		return this.ctx.sessions;
+	}
+
+	get channels(): SharedSessionContext["channels"] {
+		return this.ctx.channels;
+	}
+
+	get restartTracking(): SharedSessionContext["restartTracking"] {
+		return this.ctx.restartTracking;
+	}
+
+	get pendingRequests(): SharedSessionContext["pendingRequests"] {
+		return this.ctx.pendingRequests;
+	}
+
+	get pendingAuthPrompts(): SharedSessionContext["pendingAuthPrompts"] {
+		return this.ctx.pendingAuthPrompts;
+	}
+
+	get agentCapabilities(): SharedSessionContext["agentCapabilities"] {
+		return this.ctx.agentCapabilities;
+	}
+
+	get elevationCache(): SharedSessionContext["elevationCache"] {
+		return this.ctx.elevationCache;
+	}
+
+	/** Proxy used by tests that call sm._resolveDisplayTitle(channelId) */
+	_resolveDisplayTitle(channelId: string): string {
+		return this.broadcaster.resolveDisplayTitle(channelId);
+	}
+
+	/** Proxy used by tests that call sm._spawnChannelsForHost(...) */
+	_spawnChannelsForHost(
+		hostId: string,
+		agent: unknown,
+		onOk: (id: string, ch: unknown) => void,
+		onErr: (id: string, ch: unknown) => void,
+	): Promise<void> {
+		return this.lifecycle.spawnChannelsForHost(
 			hostId,
-			status: "live",
-			clients: ch?.clients ?? new Set(),
-			shell,
-			...(args.length > 0 && { args }),
-			cwd,
-			cols,
-			rows,
-			...(directProcess && { directProcess: true }),
-			dynamicTitle: null,
-			processTitle: null,
-			displayTitle: DEFAULT_CHANNEL_NAME,
-		});
-		this.scheduler.trackChannel(channelId);
-		this.chunker.trackChannel(channelId);
-
-		const channelStateMsg: ChannelStateMessage = {
-			type: "CHANNEL_STATE",
-			channelId,
-			sessionId: sessionEntry.id,
-			status: "live",
-		};
-		this._broadcastToAllClients(channelStateMsg);
-
-		if (sessionEntry.status === "detached") {
-			this._updateSessionStatus(hostId, sessionEntry.id, "active");
-		}
+			agent as Parameters<typeof this.lifecycle.spawnChannelsForHost>[1],
+			onOk as Parameters<typeof this.lifecycle.spawnChannelsForHost>[2],
+			onErr as Parameters<typeof this.lifecycle.spawnChannelsForHost>[3],
+		);
 	}
 
-	async shutdown(): Promise<void> {
-		for (const timer of this.reconnectTimers.values()) {
-			clearTimeout(timer);
-		}
-		this.reconnectTimers.clear();
-		for (const timer of this.titleDebounceTimers.values()) {
-			clearTimeout(timer);
-		}
-		this.titleDebounceTimers.clear();
-		for (const timer of this.processTitleDebounceTimers.values()) {
-			clearTimeout(timer);
-		}
-		this.processTitleDebounceTimers.clear();
-		// Cancel all pending auth prompts on shutdown
-		for (const [hostId, pending] of this.pendingAuthPrompts) {
-			if (pending.timer !== null) clearTimeout(pending.timer);
-			this.pendingAuthPrompts.delete(hostId);
-			pending.resolve(null);
-		}
-		this.pendingAuthPrompts.clear();
-		// Clear elevation cache on shutdown — secrets must not outlive the process lifecycle.
-		this.elevationCache.clear();
-		this.agentCapabilities.clear();
-		this.scheduler.shutdown();
-		this.chunker.shutdown();
-		this.gc.stop();
-		for (const agent of this.agents.values()) {
-			agent.close();
-		}
-		this.agents.clear();
-		this.clients.clear();
-		this.channels.clear();
-		this.sessions.clear();
+	/** Proxy used by tests that call sm._warmRestartLocal(hostId, sessionId) */
+	_warmRestartLocal(hostId: string, sessionId: string): Promise<void> {
+		return this.agentMgr.warmRestartLocal(hostId, sessionId);
 	}
 
-	// ─── Private helpers ────────────────────────────────────────────────────
+	// ─── Internal: elevation config ───────────────────────────────────────────
 
-
-
-	/**
-	 * Resolve elevation method + custom command for a spawn.
-	 * Validates the custom command if present (AUD-012).
-	 * Returns a validationError field when the custom command is invalid —
-	 * the caller must send it to the client and abort the spawn.
-	 */
 	private _resolveElevationConfig(
 		hostCustomCommand: string | null | undefined,
 		method: ElevationMethod,
-	): { method: ElevationMethod; customCommand: string | undefined } | { validationError: ErrorMessage } {
+	):
+		| { method: ElevationMethod; customCommand: string | undefined }
+		| { validationError: ErrorMessage } {
 		const customCommand =
-			method === "custom" && this._configResolver
-				? this._configResolver.resolveCustomCommand(hostCustomCommand)
+			method === "custom" && this.ctx.configResolver
+				? this.ctx.configResolver.resolveCustomCommand(hostCustomCommand)
 				: undefined;
 
 		if (customCommand !== undefined) {
@@ -1544,976 +789,5 @@ export class SessionManager {
 		}
 
 		return { method, customCommand };
-	}
-
-
-	private async _resolveHostId(requestedId?: string): Promise<string> {
-		if (!requestedId || requestedId === "local") {
-			return this.ensureLocalHost();
-		}
-		return requestedId;
-	}
-
-	private async _getOrCreateSession(hostId: string, isSsh: boolean): Promise<SessionState> {
-		// Reuse existing session that is active or disconnected
-		const existing = this.sessions.get(hostId);
-		if (existing && (existing.status === "active" || existing.status === "disconnected")) {
-			return existing;
-		}
-
-		// Create a new session
-		const sessionId = generateId();
-		const initialStatus: SessionStatus = "starting";
-		this.metaDal.createSession({ id: sessionId, hostId, status: initialStatus });
-
-		const state: SessionState = { id: sessionId, hostId, status: initialStatus };
-		this.sessions.set(hostId, state);
-		return state;
-	}
-
-	private _updateSessionStatus(hostId: string, sessionId: string, status: SessionStatus): void {
-		const state = this.sessions.get(hostId);
-		if (state && state.id === sessionId) {
-			state.status = status;
-		}
-		this.metaDal.updateSessionStatus(sessionId, status);
-
-		const stateMsg: SessionStateMessage = {
-			type: "SESSION_STATE",
-			sessionId,
-			hostId,
-			status,
-		};
-		this._broadcastToAllClients(stateMsg);
-	}
-
-	private _updateChannelStatus(
-		channelId: string,
-		sessionId: string,
-		status: ChannelStatus,
-		exitCode?: number,
-	): void {
-		const ch = this.channels.get(channelId);
-		if (ch) {
-			ch.status = status;
-		}
-		this.metaDal.updateChannelStatus(channelId, status, exitCode);
-
-		const stateMsg: ChannelStateMessage = {
-			type: "CHANNEL_STATE",
-			channelId,
-			sessionId,
-			status,
-			...(exitCode !== undefined && { exitCode }),
-		};
-		// Broadcast to attached clients first; fall back to all clients for orphan/dead
-		// when the channel has no more clients (they just detached).
-		if (ch && ch.clients.size > 0) {
-			this._broadcastToChannel(channelId, stateMsg);
-		} else {
-			this._broadcastToAllClients(stateMsg);
-		}
-	}
-
-	private _detachClient(clientId: string, channelId: string): void {
-		const channel = this.channels.get(channelId);
-		if (channel) {
-			channel.clients.delete(clientId);
-			// live → orphan when last client detaches (and channel is still live)
-			if (channel.clients.size === 0 && channel.status === "live") {
-				this._updateChannelStatus(channelId, channel.sessionId, "orphan");
-				this.scheduler.onDetach(channelId);
-				this._checkSessionDetached(channel.hostId);
-			}
-		}
-		this.clients.get(clientId)?.attachedChannels.delete(channelId);
-	}
-
-	/** If all clients detached from all channels of a host, session → detached */
-	private _checkSessionDetached(hostId: string): void {
-		const session = this.sessions.get(hostId);
-		if (!session || session.status !== "active") return;
-
-		// Check if any channel for this session is still live
-		for (const ch of this.channels.values()) {
-			if (ch.hostId === hostId && ch.status === "live") return;
-		}
-
-		this._updateSessionStatus(hostId, session.id, "detached");
-	}
-
-	private _wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
-		agent.on("message", (msg: ProtocolMessage) => {
-			// Dispatch pending request responses (SPAWN_OK, SPAWN_ERR, etc.)
-			const rid = (msg as { requestId?: string }).requestId;
-			if (rid) {
-				const handler = this.pendingRequests.get(rid);
-				if (handler) {
-					handler(msg);
-					return;
-				}
-			}
-
-			// Dispatch pending attach responses (ATTACH_OK uses channelId, not requestId)
-			if (msg.type === "ATTACH_OK" || msg.type === "ERROR") {
-				const cid = (msg as { channelId?: string }).channelId;
-				if (cid) {
-					const handler = this.pendingRequests.get(`attach:${cid}`);
-					if (handler) {
-						handler(msg);
-						return;
-					}
-				}
-			}
-
-			if (msg.type === "HELLO") {
-				// Cache discovered shells reported by the agent.
-				const helloMsg = msg as import("@nexterm/shared").HelloMessage;
-				if (helloMsg.availableShells !== undefined) {
-					this.metaDal.updateHostDiscoveredShells(
-						hostId,
-						helloMsg.availableShells,
-						helloMsg.defaultShell,
-					);
-				}
-				// Cache agent capabilities for this host (used by elevation ERR-05 check).
-				if (Array.isArray(helloMsg.capabilities)) {
-					this.agentCapabilities.set(hostId, helloMsg.capabilities);
-				}
-			} else if (msg.type === "OUTPUT") {
-				const outputMsg = msg as OutputMessage;
-				// Broadcast to clients first (real-time, no delay)
-				this._broadcastToChannel(outputMsg.channelId, outputMsg);
-				// Then notify scheduler and chunker (persistence, async)
-				this.scheduler.onOutput(outputMsg.channelId);
-				this.chunker.onOutput(outputMsg.channelId, outputMsg.data);
-			} else if (msg.type === "SNAPSHOT_RES") {
-				const res = msg as AgentSnapshotResMessage;
-				this.scheduler.onSnapshotResponse(res.channelId);
-				this._storeSnapshot(res.channelId, res.snapshot, res.lastSeq);
-			} else if (msg.type === "CHANNEL_EXIT") {
-				const exitMsg = msg as ChannelExitMessage;
-				const channel = this.channels.get(exitMsg.channelId);
-				if (channel) {
-					this._updateChannelStatus(exitMsg.channelId, channel.sessionId, "dead", exitMsg.exitCode);
-				}
-				this.scheduler.untrackChannel(exitMsg.channelId);
-				this.chunker.untrackChannel(exitMsg.channelId);
-				this._clearTitleDebounce(exitMsg.channelId);
-				this._clearProcessTitleDebounce(exitMsg.channelId);
-			} else if (msg.type === "TITLE_CHANGE") {
-				const titleMsg = msg as AgentTitleChangeMessage;
-				this._handleTitleChange(titleMsg);
-			} else if (msg.type === "PROCESS_TITLE") {
-				const processTitleMsg = msg as AgentProcessTitleMessage;
-				this._handleProcessTitle(processTitleMsg);
-			} else if (msg.type === "BELL") {
-				const bellMsg = msg as AgentBellMessage;
-				if (this._rateLimitCheck(this.bellTimestamps, bellMsg.channelId, 10)) {
-					this._broadcastToChannel(bellMsg.channelId, bellMsg);
-				}
-			} else if (msg.type === "NOTIFICATION") {
-				const notifMsg = msg as AgentNotificationMessage;
-				if (this._rateLimitCheck(this.notificationTimestamps, notifMsg.channelId, 5)) {
-					this._broadcastToChannel(notifMsg.channelId, notifMsg);
-				}
-			}
-		});
-
-		// The HELLO may have fired before we registered the "message" handler
-		// (daemon flow: connectOrLaunch resolves on "ready", then _wireAgentEvents runs).
-		// Process the stored hello to extract shells + capabilities if missed.
-		if (agent.helloMessage) {
-			const helloMsg = agent.helloMessage;
-			if (helloMsg.availableShells !== undefined) {
-				this.metaDal.updateHostDiscoveredShells(
-					hostId,
-					helloMsg.availableShells,
-					helloMsg.defaultShell,
-				);
-			}
-			if (Array.isArray(helloMsg.capabilities)) {
-				this.agentCapabilities.set(hostId, helloMsg.capabilities);
-			}
-		}
-
-		agent.on("close", () => {
-			const session = this.sessions.get(hostId);
-			const host = this.metaDal.getHost(hostId);
-			this.agents.delete(hostId);
-			this.agentCapabilities.delete(hostId);
-
-			if (!session) return;
-
-			if (agent instanceof NextermAgent) {
-				// Daemon agent: attempt reconnect (daemon may still be alive)
-				this._updateSessionStatus(hostId, session.id, "disconnected");
-				this._reconnectDaemon(hostId, session.id).catch(() => {
-					this._closeSession(hostId, session.id);
-				});
-				return;
-			}
-
-			if (host?.type === "ssh") {
-				// SSH: attempt reconnect with exponential backoff
-				this._updateSessionStatus(hostId, session.id, "disconnected");
-				this._scheduleReconnect(hostId, session.id, 0, Date.now());
-			} else {
-				// Local: warm restart (respawn agent + PTYs)
-				this._warmRestartLocal(hostId, session.id).catch(() => {
-					this._closeSession(hostId, session.id);
-				});
-			}
-		});
-	}
-
-	private _scheduleReconnect(
-		hostId: string,
-		sessionId: string,
-		attemptIndex: number,
-		startTime: number,
-	): void {
-		const elapsed = Date.now() - startTime;
-		if (elapsed >= RECONNECT_TIMEOUT_MS) {
-			this._closeSession(hostId, sessionId);
-			return;
-		}
-
-		const delayMs =
-			RECONNECT_BACKOFF_MS[Math.min(attemptIndex, RECONNECT_BACKOFF_MS.length - 1)] ?? 30_000;
-
-		const timer = setTimeout(async () => {
-			this.reconnectTimers.delete(hostId);
-
-			// Check if session was explicitly closed in the meantime
-			const session = this.sessions.get(hostId);
-			if (!session || session.status === "closed") return;
-
-			const host = this.metaDal.getHost(hostId);
-			if (!host) {
-				this._closeSession(hostId, sessionId);
-				return;
-			}
-
-			try {
-				const sshAgent = new SshAgent(host);
-				const storedFp = this.metaDal.getHostFingerprint(hostId);
-				await sshAgent.start(storedFp);
-				this._updateSessionStatus(hostId, sessionId, "active");
-				this._wireAgentEvents(hostId, sessionId, sshAgent);
-				this.agents.set(hostId, sshAgent);
-
-				// Re-ATTACH all live/orphan channels for this session
-				this._reAttachChannels(hostId, sessionId, sshAgent);
-			} catch {
-				// Reconnect failed — try again
-				const nextElapsed = Date.now() - startTime;
-				if (nextElapsed >= RECONNECT_TIMEOUT_MS) {
-					this._closeSession(hostId, sessionId);
-				} else {
-					this._scheduleReconnect(hostId, sessionId, attemptIndex + 1, startTime);
-				}
-			}
-		}, delayMs);
-		this.reconnectTimers.set(hostId, timer);
-	}
-
-	private _reAttachChannels(hostId: string, sessionId: string, agent: AgentConnection): void {
-		this._spawnChannelsForHost(
-			hostId,
-			agent,
-			(channelId, ch) => {
-				if (ch.clients.size > 0) {
-					this._updateChannelStatus(channelId, sessionId, "live");
-				}
-				this.scheduler.trackChannel(channelId);
-				this.chunker.trackChannel(channelId);
-			},
-			(channelId, ch) => {
-				this._updateChannelStatus(channelId, ch.sessionId, "dead");
-			},
-		);
-	}
-
-	/**
-	 * Send SPAWN messages for every alive channel belonging to a host.
-	 * Extracted from _reAttachChannels and _warmRestartLocal to eliminate duplication.
-	 * The returned promise resolves once ALL SPAWN_OK/SPAWN_ERR responses (or timeouts) have fired.
-	 */
-	private _spawnChannelsForHost(
-		hostId: string,
-		agent: AgentConnection,
-		onSpawnOk: (channelId: string, ch: ChannelState) => void,
-		onSpawnErr: (channelId: string, ch: ChannelState) => void,
-	): Promise<void> {
-		let pending = 0;
-		let resolve: (() => void) | undefined;
-		const promise = new Promise<void>((r) => {
-			resolve = r;
-		});
-
-		const settle = (): void => {
-			pending--;
-			if (pending === 0) resolve?.();
-		};
-
-		for (const [channelId, ch] of this.channels.entries()) {
-			if (ch.hostId !== hostId || ch.status === "dead") continue;
-
-			pending++;
-			const requestId = generateId();
-			agent.send({
-				type: "SPAWN",
-				requestId,
-				channelId,
-				shell: ch.shell,
-				...(ch.args !== undefined && ch.args.length > 0 && { args: ch.args }),
-				cwd: ch.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/",
-				env: {},
-				cols: ch.cols,
-				rows: ch.rows,
-			});
-
-			const timeout = setTimeout(() => {
-				this.pendingRequests.delete(requestId);
-				console.warn(
-					`[session-manager] SPAWN timeout for channel ${channelId} (request ${requestId})`,
-				);
-				onSpawnErr(channelId, ch);
-				settle();
-			}, SPAWN_TIMEOUT_MS);
-
-			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
-				clearTimeout(timeout);
-				this.pendingRequests.delete(requestId);
-				if (incoming.type === "SPAWN_OK") {
-					onSpawnOk(channelId, ch);
-				} else {
-					onSpawnErr(channelId, ch);
-				}
-				settle();
-			});
-		}
-
-		// No channels to spawn — resolve immediately
-		if (pending === 0) resolve?.();
-
-		return promise;
-	}
-
-	private async _attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
-		const socketPath = getSocketPath(this.agentConfig.socketPath);
-		const agent = await connectOrLaunch(socketPath, this.agentConfig);
-
-		this._wireAgentEvents(hostId, sessionId, agent);
-
-		const states = await agent.waitForChannelState();
-		this._reconcileChannelState(hostId, states);
-
-		this.agents.set(hostId, agent);
-		this._updateSessionStatus(hostId, sessionId, "active");
-
-		return agent;
-	}
-
-	/**
-	 * Connect to (or launch) a local agent daemon.
-	 * Returns a NextermAgent that's ready to receive commands.
-	 * Performs channel state reconciliation after connecting.
-	 */
-	private async _connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
-		return this._attachDaemon(hostId, sessionId);
-	}
-
-	/**
-	 * Reconcile hub's channel tracking with agent's reported channel state.
-	 * Called after daemon connect/reconnect to sync which channels are alive/dead.
-	 */
-	private _reconcileChannelState(hostId: string, states: AgentChannelStateMessage[]): void {
-		const reportedIds = new Set(states.filter((s) => s.alive).map((s) => s.channelId));
-
-		for (const [channelId, channelState] of this.channels) {
-			if (channelState.hostId !== hostId) continue;
-
-			const session = this.sessions.get(hostId);
-			if (!session || channelState.sessionId !== session.id) continue;
-
-			if (reportedIds.has(channelId)) {
-				// Agent says alive — mark live if currently orphan
-				if (channelState.status === "orphan") {
-					this._updateChannelStatus(channelId, session.id, "live");
-				}
-			} else {
-				// Agent doesn't know about this channel — mark dead
-				if (channelState.status !== "dead") {
-					this._updateChannelStatus(channelId, session.id, "dead");
-				}
-			}
-		}
-	}
-
-	/**
-	 * Attempt to reconnect to a daemon agent after disconnect.
-	 * If the daemon is still running, reconnect. If not, connectOrLaunch will spawn a new one.
-	 */
-	private async _reconnectDaemon(hostId: string, sessionId: string): Promise<void> {
-		await this._attachDaemon(hostId, sessionId);
-	}
-
-	/**
-	 * Warm restart for local agent: respawn the agent process and re-create
-	 * PTYs under the SAME channel IDs so clients can reattach seamlessly.
-	 */
-	private async _warmRestartLocal(hostId: string, sessionId: string): Promise<void> {
-		// Crash-loop protection: max 3 restarts in 60s
-		const now = Date.now();
-		const tracking = this.restartTracking.get(hostId) ?? { count: 0, windowStart: now };
-		if (now - tracking.windowStart > 60_000) {
-			// Reset window
-			tracking.count = 0;
-			tracking.windowStart = now;
-		}
-		tracking.count++;
-		this.restartTracking.set(hostId, tracking);
-
-		if (tracking.count > 3) {
-			this._closeSession(hostId, sessionId);
-			return;
-		}
-
-		const agent = new LocalAgent(resolveAgentPath());
-		try {
-			await agent.start();
-		} catch {
-			this._closeSession(hostId, sessionId);
-			return;
-		}
-
-		this._wireAgentEvents(hostId, sessionId, agent);
-		this.agents.set(hostId, agent);
-		this._updateSessionStatus(hostId, sessionId, "active");
-
-		// Re-spawn PTYs for each orphan channel, using the SAME channel ID
-		await this._spawnChannelsForHost(
-			hostId,
-			agent,
-			(channelId) => {
-				this.scheduler.trackChannel(channelId);
-				this.chunker.trackChannel(channelId);
-			},
-			(channelId, ch) => {
-				this._updateChannelStatus(channelId, ch.sessionId, "dead");
-			},
-		);
-	}
-
-	/**
-	 * Attempt to transparently respawn a dead channel under the same ID.
-	 * Spawns a new PTY reusing deadChannelId, loads old spool snapshot,
-	 * and sends ATTACH_OK. Returns true on success, false if not possible.
-	 */
-	private async _respawnDeadChannel(
-		deadChannelId: string,
-		client: WsClient,
-		clientId: string,
-	): Promise<boolean> {
-		// 1. Look up dead channel in DB
-		const info = this.metaDal.getChannelWithHost(deadChannelId);
-		if (!info) return false;
-		const { channel: deadChannel, hostId } = info;
-
-		// 2. Find active session + agent
-		const sessionEntry = this.sessions.get(hostId);
-		if (!sessionEntry || sessionEntry.status !== "active") return false;
-		const agent = this.agents.get(hostId);
-		if (!agent?.connected) return false;
-
-		// 3. Send SPAWN to agent reusing the same channel ID
-		const requestId = generateId();
-		const shell = deadChannel.shell ?? process.env.SHELL ?? "/bin/sh";
-		const args = deadChannel.args ?? [];
-		const cwd = deadChannel.cwd ?? process.env.HOME ?? "/";
-		const cols = deadChannel.cols;
-		const rows = deadChannel.rows;
-		const agentSpawn: AgentSpawnMessage = {
-			type: "SPAWN",
-			requestId,
-			channelId: deadChannelId,
-			shell,
-			...(args.length > 0 && { args }),
-			cwd,
-			env: {},
-			cols,
-			rows,
-		};
-		agent.send(agentSpawn);
-
-		// 4. Wait for SPAWN_OK
-		const spawnOk = await new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingRequests.delete(requestId);
-				resolve(false);
-			}, SPAWN_TIMEOUT_MS);
-
-			this.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
-				if (incoming.type === "SPAWN_OK") {
-					clearTimeout(timer);
-					this.pendingRequests.delete(requestId);
-					resolve(true);
-				} else if (incoming.type === "SPAWN_ERR") {
-					clearTimeout(timer);
-					this.pendingRequests.delete(requestId);
-					resolve(false);
-				}
-			});
-		});
-
-		if (!spawnOk) return false;
-
-		// 5. Update existing channel — no new channel created, same ID reused
-		this.metaDal.updateChannelStatus(deadChannelId, "live");
-
-		this.channels.set(deadChannelId, {
-			sessionId: sessionEntry.id,
-			hostId,
-			status: "live",
-			clients: new Set([clientId]),
-			shell,
-			...(args.length > 0 && { args }),
-			cwd,
-			cols,
-			rows,
-			...(deadChannel.directProcess && { directProcess: true }),
-			dynamicTitle: null,
-			processTitle: null,
-			displayTitle: DEFAULT_CHANNEL_NAME,
-		});
-
-		this.scheduler.trackChannel(deadChannelId);
-		this.chunker.trackChannel(deadChannelId);
-		client.attachedChannels.add(deadChannelId);
-
-		// 6. Broadcast CHANNEL_STATE for the same channel ID
-		const channelStateMsg: ChannelStateMessage = {
-			type: "CHANNEL_STATE",
-			channelId: deadChannelId,
-			sessionId: sessionEntry.id,
-			status: "live",
-		};
-		this._broadcastToAllClients(channelStateMsg);
-
-		// 7. Load snapshot from spool (same channel ID — no change needed)
-		const { snapshot, tail } = this._buildAttachPayload(deadChannelId);
-
-		// 8. Send ATTACH_OK with same channel ID (no respawnedFrom needed)
-		// Note: dynamic_title is intentionally omitted here — fresh PTY has no title yet
-		const attachOk: UiAttachOkMessage = {
-			type: "ATTACH_OK",
-			channelId: deadChannelId,
-			snapshot,
-			tail,
-			writeLockHolder: this._getWriteLockHolder?.(deadChannelId) ?? null,
-			cached: false,
-		};
-		client.send(attachOk);
-
-		return true;
-	}
-
-	private _closeSession(hostId: string, sessionId: string): void {
-		// Cancel any pending reconnect timer for this host
-		const pendingTimer = this.reconnectTimers.get(hostId);
-		if (pendingTimer !== undefined) {
-			clearTimeout(pendingTimer);
-			this.reconnectTimers.delete(hostId);
-		}
-		// Mark all channels for this session as dead and stop tracking them
-		for (const [channelId, ch] of this.channels.entries()) {
-			if (ch.hostId !== hostId || ch.status === "dead") continue;
-			this._updateChannelStatus(channelId, sessionId, "dead");
-			this.scheduler.untrackChannel(channelId);
-			this.chunker.untrackChannel(channelId);
-		}
-		this._updateSessionStatus(hostId, sessionId, "closed");
-		this.sessions.delete(hostId);
-	}
-
-	/**
-	 * Handle TITLE_CHANGE from agent: debounce DB writes (100ms, last-write-wins)
-	 * and forward to connected UI clients immediately.
-	 */
-
-	/**
-	 * Resolve the display title for a channel using the configured title source.
-	 * Updates state.displayTitle in place and returns the resolved string.
-	 * Returns DEFAULT_CHANNEL_NAME if the channel is not tracked.
-	 */
-	/** Public accessor for REST API — resolves displayTitle for a channel. */
-	resolveDisplayTitle(channelId: string): string {
-		return this._resolveDisplayTitle(channelId);
-	}
-
-	private _resolveDisplayTitle(channelId: string): string {
-		const state = this.channels.get(channelId);
-		if (!state) return DEFAULT_CHANNEL_NAME;
-
-		const titleConfig = this._configResolver?.uiConfig.title ?? {};
-		const source = titleConfig.source ?? "dynamic";
-		const staticTitle = titleConfig.staticTitle ?? "";
-
-		// Custom title (F2 rename) from DB — always wins
-		const dbChannel = this.metaDal.getChannel(channelId);
-		const customTitle = dbChannel?.title ?? null;
-
-		const resolved = resolveChannelDisplayName(
-			{ title: customTitle, dynamicTitle: state.dynamicTitle, processTitle: state.processTitle },
-			source,
-			staticTitle,
-		);
-		state.displayTitle = resolved;
-		return resolved;
-	}
-
-	private _handleTitleChange(msg: AgentTitleChangeMessage): void {
-		const channel = this.channels.get(msg.channelId);
-		if (!channel) {
-			console.warn(`[session-manager] TITLE_CHANGE for unknown channel ${msg.channelId} — ignored`);
-			return;
-		}
-
-		// Update in-memory state before resolving displayTitle
-		channel.dynamicTitle = msg.title;
-
-		// Resolve displayTitle and broadcast enriched message to UI clients
-		const displayTitle = this._resolveDisplayTitle(msg.channelId);
-		this._broadcastToChannel(msg.channelId, { ...msg, displayTitle });
-
-		// Debounce DB writes
-		this._clearTitleDebounce(msg.channelId);
-		this.titleDebounceTimers.set(
-			msg.channelId,
-			setTimeout(() => {
-				this.titleDebounceTimers.delete(msg.channelId);
-				this.metaDal.updateDynamicTitle(msg.channelId, msg.title);
-			}, TITLE_DEBOUNCE_MS),
-		);
-	}
-
-	private _clearTitleDebounce(channelId: string): void {
-		const timer = this.titleDebounceTimers.get(channelId);
-		if (timer !== undefined) {
-			clearTimeout(timer);
-			this.titleDebounceTimers.delete(channelId);
-		}
-	}
-
-	private _clearProcessTitleDebounce(channelId: string): void {
-		const timer = this.processTitleDebounceTimers.get(channelId);
-		if (timer !== undefined) {
-			clearTimeout(timer);
-			this.processTitleDebounceTimers.delete(channelId);
-		}
-	}
-
-	/**
-	 * Handle PROCESS_TITLE from agent: debounce DB writes (100ms, last-write-wins)
-	 * and forward to connected UI clients immediately.
-	 */
-	private _handleProcessTitle(msg: AgentProcessTitleMessage): void {
-		const channel = this.channels.get(msg.channelId);
-		if (!channel) {
-			console.warn(
-				`[session-manager] PROCESS_TITLE for unknown channel ${msg.channelId} — ignored`,
-			);
-			return;
-		}
-
-		// Update in-memory state before resolving displayTitle
-		channel.processTitle = msg.title;
-
-		// Resolve displayTitle and broadcast enriched message to UI clients
-		const displayTitle = this._resolveDisplayTitle(msg.channelId);
-		this._broadcastToChannel(msg.channelId, { ...msg, displayTitle });
-
-		// Debounce DB writes
-		this._clearProcessTitleDebounce(msg.channelId);
-		this.processTitleDebounceTimers.set(
-			msg.channelId,
-			setTimeout(() => {
-				this.processTitleDebounceTimers.delete(msg.channelId);
-				this.metaDal.updateProcessTitle(msg.channelId, msg.title);
-			}, TITLE_DEBOUNCE_MS),
-		);
-	}
-
-	private _broadcastToChannel(channelId: string, msg: ProtocolMessage): void {
-		const channel = this.channels.get(channelId);
-		if (!channel) return;
-		for (const clientId of channel.clients) {
-			this.clients.get(clientId)?.send(msg);
-		}
-	}
-
-	private _broadcastToAllClients(msg: ProtocolMessage): void {
-		for (const client of this.clients.values()) {
-			client.send(msg);
-		}
-	}
-
-	/**
-	 * Sliding-window rate limiter: returns true if the event is allowed.
-	 * Keeps at most `maxPerSecond` timestamps within the last 1000ms per channel.
-	 */
-	private _rateLimitCheck(
-		store: Map<string, number[]>,
-		channelId: string,
-		maxPerSecond: number,
-	): boolean {
-		const now = Date.now();
-		const cutoff = now - 1000;
-		let timestamps = store.get(channelId);
-		if (!timestamps) {
-			timestamps = [];
-			store.set(channelId, timestamps);
-		}
-		// Evict entries older than 1 second
-		while (timestamps.length > 0 && (timestamps[0] ?? 0) < cutoff) {
-			timestamps.shift();
-		}
-		if (timestamps.length >= maxPerSecond) {
-			return false;
-		}
-		timestamps.push(now);
-		return true;
-	}
-
-	/**
-	 * Build the snapshot + tail payload for ATTACH_OK from spool.db.
-	 * Used by handleAttach (cached path, agent-error fallback) and _respawnDeadChannel.
-	 */
-	private _buildAttachPayload(channelId: string): {
-		snapshot: UiAttachOkMessage["snapshot"];
-		tail: Uint8Array[];
-	} {
-		let snapshot: UiAttachOkMessage["snapshot"] = null;
-		let tail: Uint8Array[] = [];
-
-		const snapshotChunk = this.spoolDal.getLatestSnapshot(channelId);
-		if (snapshotChunk) {
-			try {
-				snapshot = JSON.parse(
-					snapshotChunk.dataBlob.toString("utf8"),
-				) as UiAttachOkMessage["snapshot"];
-			} catch {
-				snapshot = null;
-			}
-			const tailChunks = this.spoolDal.getChunksByChannel(channelId, {
-				kind: "output",
-				afterSeq: snapshotChunk.seq,
-			});
-			tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
-		}
-
-		return { snapshot, tail };
-	}
-
-	/**
-	 * Persist a snapshot to spool.db with correct seq coordination.
-	 * Flushes the chunker first, computes next seq, inserts the snapshot,
-	 * bumps the chunker past it, and updates the cache index.
-	 * Returns the assigned chunkId.
-	 */
-	private _storeSnapshot(channelId: string, snapshot: unknown, agentLastSeq: number): string {
-		const snapshotJson = JSON.stringify(snapshot);
-		const dataBlob = Buffer.from(snapshotJson);
-		this.chunker.flush(channelId);
-		const maxSeq = this.spoolDal.getMaxSeq(channelId);
-		const snapshotSeq = Math.max(maxSeq, agentLastSeq) + 1;
-		const chunkId = this.spoolDal.insertChunk({
-			channelId,
-			seq: snapshotSeq,
-			kind: "snapshot",
-			dataBlob,
-			uncompressedLen: dataBlob.length,
-		});
-		this.chunker.bumpSeq(channelId, snapshotSeq + 1);
-		this.metaDal.updateCacheIndex(channelId, chunkId, snapshotSeq - 1);
-		return chunkId;
-	}
-
-	/**
-	 * Build an AuthPromptFn that sends AUTH_PROMPT to the given client and
-	 * registers the response in pendingAuthPrompts.
-	 * No server-side timeout — the client dismisses the dialog when ready.
-	 * Extracted to avoid duplicating this pattern in handleSpawn and handleTestConnect.
-	 */
-	private _buildPromptAuth(client: WsClient): AuthPromptFn {
-		return async (hostId, promptType, message) => {
-			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
-			client.send(promptMsg);
-			// No server-side timeout — the user dismisses the dialog when ready
-			return new Promise<string | null>((resolve) => {
-				this.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
-			});
-		};
-	}
-
-	/**
-	 * Send HOST_VERIFY to the client with mismatch details and wait (30 s timeout)
-	 * for HOST_VERIFY_RESPONSE. Returns true if the user accepted the new key.
-	 */
-	private async _promptHostKeyMismatch(
-		client: WsClient,
-		hostId: string,
-		hostname: string,
-		oldFingerprint: string,
-		newFingerprint: string,
-	): Promise<boolean> {
-		const promptId = generateId();
-		const verifyMsg: HostVerifyMessage = {
-			type: "HOST_VERIFY",
-			hostId,
-			fingerprint: newFingerprint,
-			algorithm: "SHA256",
-			oldFingerprint,
-			promptId,
-		};
-		client.send(verifyMsg);
-
-		return new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingHostVerify.delete(promptId);
-				console.warn(
-					`[session-manager] HOST_VERIFY timeout for host ${hostId} (${hostname}) — rejecting`,
-				);
-				resolve(false);
-			}, SessionManager.HOST_KEY_MISMATCH_TIMEOUT_MS);
-
-			this.pendingHostVerify.set(promptId, { resolve, timer });
-		});
-	}
-
-	/**
-	 * Resolve a pending host-key-mismatch prompt.
-	 * Called by WsHandler when HOST_VERIFY_RESPONSE arrives from the UI.
-	 */
-	handleHostVerifyResponse(
-		promptId: string,
-		action: "trust_permanent" | "trust_once" | "reject",
-	): void {
-		const pending = this.pendingHostVerify.get(promptId);
-		if (!pending) return;
-		clearTimeout(pending.timer);
-		this.pendingHostVerify.delete(promptId);
-		pending.resolve(action !== "reject");
-	}
-
-	/**
-	 * Handle a TEST_CONNECT message: lightweight SSH test with AUTH_PROMPT support.
-	 * Does NOT spawn an agent — just tests ssh2 connectivity (reach "ready" event).
-	 */
-	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
-		const client = this.clients.get(clientId);
-		if (!client) return;
-
-		const promptAuth = this._buildPromptAuth(client);
-
-		try {
-			const result = await this._testSshConnectivity(msg, promptAuth);
-			if (result.ok) {
-				client.send({ type: "TEST_CONNECT_OK", hostId: msg.hostId });
-			} else {
-				client.send({
-					type: "TEST_CONNECT_FAIL",
-					hostId: msg.hostId,
-					message: result.message ?? "Connection failed",
-				});
-			}
-		} catch (err) {
-			client.send({
-				type: "TEST_CONNECT_FAIL",
-				hostId: msg.hostId,
-				message: err instanceof Error ? err.message : "Connection test failed",
-			});
-		}
-	}
-
-	private async _testSshConnectivity(
-		msg: TestConnectMessage,
-		promptAuth: AuthPromptFn,
-	): Promise<{ ok: boolean; message?: string }> {
-		const sshClient = new SshClient();
-		const SSH_TEST_TIMEOUT_MS = 10_000;
-
-		const username = msg.sshUser ?? process.env.USER ?? "root";
-
-		// Build connect config using shared utility (throws on config errors or cancellation)
-		let connectConfig: Parameters<InstanceType<typeof SshClient>["connect"]>[0];
-		try {
-			connectConfig = await buildSshConnectConfig(
-				{ method: msg.sshAuth ?? "key", keyPath: msg.sshKeyPath },
-				msg.hostname,
-				msg.port,
-				username,
-				promptAuth,
-				msg.hostId,
-			);
-		} catch (err) {
-			return {
-				ok: false,
-				message: err instanceof Error ? err.message : "Authentication error",
-			};
-		}
-		connectConfig.readyTimeout = SSH_TEST_TIMEOUT_MS;
-
-		// Connect and wait for ready/error
-		return new Promise((resolve) => {
-			const timer = setTimeout(() => {
-				sshClient.destroy();
-				resolve({ ok: false, message: "Connection timed out" });
-			}, SSH_TEST_TIMEOUT_MS);
-
-			sshClient.on("ready", () => {
-				clearTimeout(timer);
-				sshClient.end();
-				resolve({ ok: true });
-			});
-
-			sshClient.on("error", (err: Error) => {
-				clearTimeout(timer);
-				const errMsg = err.message ?? "Unknown error";
-				const lower = errMsg.toLowerCase();
-				if (
-					errMsg.includes("ECONNREFUSED") ||
-					errMsg.includes("ETIMEDOUT") ||
-					errMsg.includes("EHOSTUNREACH") ||
-					errMsg.includes("ENOTFOUND")
-				) {
-					resolve({ ok: false, message: errMsg });
-				} else if (
-					lower.includes("authentication") ||
-					lower.includes("permission denied") ||
-					lower.includes("publickey") ||
-					lower.includes("keyboard-interactive") ||
-					lower.includes("all configured authentication methods failed")
-				) {
-					sshClient.end();
-					resolve({ ok: false, message: "Authentication failed" });
-				} else {
-					sshClient.end();
-					resolve({ ok: false, message: errMsg });
-				}
-			});
-
-			try {
-				sshClient.connect(connectConfig);
-			} catch (err) {
-				clearTimeout(timer);
-				resolve({
-					ok: false,
-					message: err instanceof Error ? err.message : "Connection failed",
-				});
-			}
-		});
 	}
 }
