@@ -16,6 +16,10 @@
 		".": {
 			"import": "./dist/index.js",
 			"types": "./dist/index.d.ts"
+		},
+		"./dist/sea-addon-loader.js": {
+			"import": "./dist/sea-addon-loader.js",
+			"types": "./dist/sea-addon-loader.d.ts"
 		}
 	},
 	"scripts": {

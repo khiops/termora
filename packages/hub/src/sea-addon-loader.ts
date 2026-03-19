@@ -17,7 +17,7 @@ import {
 	detectSea,
 	getAddonCacheDir,
 	loadNativeAddon,
-} from "@nexterm/shared";
+} from "@nexterm/shared/dist/sea-addon-loader.js";
 
 // Re-export shared helpers so existing callers/tests that import from this
 // file continue to work unchanged.
@@ -27,7 +27,7 @@ export {
 	extractAddonToDir,
 	getAddonCacheDir,
 	loadNativeAddon,
-} from "@nexterm/shared";
+} from "@nexterm/shared/dist/sea-addon-loader.js";
 
 /** Names of .node assets embedded in the hub SEA binary. */
 const SEA_ADDON_ASSETS: readonly string[] = ["better_sqlite3.node"] as const;
