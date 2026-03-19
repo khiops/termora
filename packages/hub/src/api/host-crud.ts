@@ -5,11 +5,30 @@ import type { CreateHostBody, UpdateHostBody } from "./hosts.js";
 import { validateCreateHost, validateProfileJson } from "./hosts.js";
 
 export function registerHostCrudRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
-	// GET /api/hosts
-	server.get("/api/hosts", async () => {
-		const hosts = metaDal.listHosts();
-		return toSnakeCase(hosts);
-	});
+	// GET /api/hosts?limit=N&offset=M
+	server.get<{ Querystring: { limit?: string; offset?: string } }>(
+		"/api/hosts",
+		async (request) => {
+			const rawLimit = request.query.limit;
+			const rawOffset = request.query.offset;
+			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+
+			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+				return { error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 1000" } };
+			}
+			if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+				return { error: { code: "VALIDATION_ERROR", message: "offset must be >= 0" } };
+			}
+
+			if (limit !== undefined) {
+				const total = metaDal.countHosts();
+				const data = metaDal.listHosts(limit, offset ?? 0);
+				return { data: toSnakeCase(data), total, limit, offset: offset ?? 0 };
+			}
+			return toSnakeCase(metaDal.listHosts());
+		},
+	);
 
 	// POST /api/hosts
 	server.post<{ Body: CreateHostBody }>("/api/hosts", async (request, reply) => {

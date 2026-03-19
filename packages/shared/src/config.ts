@@ -1,23 +1,9 @@
 // Config types and deep merge utility for nexterm config cascade
 import type { AppearanceConfig } from "./appearance.js";
-import type { ElevationMethod } from "./entities.js";
+import type { ElevationMethod, TerminalProfile } from "./entities.js";
 import { isPlainObject } from "./utils.js";
 
-export interface TerminalProfile {
-	fontFamily?: string;
-	fontSize?: number;
-	theme?: string;
-	themeOverrides?: Record<string, string>;
-	cursorStyle?: "block" | "underline" | "bar";
-	scrollback?: number;
-	bellSound?: boolean;
-	/** Show search match markers in the scrollbar overview ruler (default: true). */
-	scrollbarMarkers?: boolean;
-	wallpaper?: string;
-	wallpaperBlur?: number;
-	wallpaperDim?: number;
-	[key: string]: unknown;
-}
+export type { TerminalProfile };
 
 export interface PaneLayout {
 	direction: "horizontal" | "vertical";

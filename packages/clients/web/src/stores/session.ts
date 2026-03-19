@@ -60,144 +60,26 @@ export const useSessionStore = defineStore("session", () => {
 		writeLockStore.setWsClient(wsClient);
 		_registerWriteLockHandlers(writeLockStore);
 
-		// Register auth-prompt message routing
+		// Register per-domain message routing
 		const authPromptStore = useAuthPromptStore();
 		authPromptStore.setWsClient(wsClient);
-		wsClient.on("AUTH_PROMPT", (msg) => {
-			if (msg.type === "AUTH_PROMPT") {
-				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
-			}
-		});
+		_registerAuthPromptHandlers(authPromptStore);
 
-		// Register host-verify (key-mismatch) message routing
 		const hostVerifyStore = useHostVerifyStore();
 		hostVerifyStore.setWsClient(wsClient);
-		wsClient.on("HOST_VERIFY", (msg) => {
-			if (msg.type === "HOST_VERIFY" && msg.promptId && msg.oldFingerprint) {
-				// Only surface the dialog for mismatch prompts (has promptId + oldFingerprint)
-				const hostname = msg.hostId; // best-effort; hub doesn't send hostname yet
-				hostVerifyStore.handleHostVerify(
-					msg.hostId,
-					hostname,
-					msg.fingerprint,
-					msg.algorithm,
-					msg.oldFingerprint,
-					msg.promptId,
-				);
-			}
-		});
+		_registerHostVerifyHandlers(hostVerifyStore);
 
-		// Route SESSION_STATE messages to hosts store for rail status dots
 		const hostsStore = useHostsStore();
-		wsClient.on("SESSION_STATE", (msg) => {
-			if (msg.type === "SESSION_STATE") {
-				hostsStore.updateSessionStatus(msg.hostId, msg.status);
-			}
-		});
+		_registerSessionHandlers(hostsStore);
 
-		// Route CHANNEL_STATE messages to channels store for status dots
 		const channelsStore = useChannelsStore();
-		wsClient.on("CHANNEL_STATE", (msg) => {
-			if (msg.type === "CHANNEL_STATE") {
-				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
-			}
-		});
+		_registerChannelHandlers(channelsStore);
 
-		// Route TITLE_CHANGE messages to channels store for dynamic titles
-		wsClient.on("TITLE_CHANGE", (msg) => {
-			if (msg.type === "TITLE_CHANGE") {
-				channelsStore.setDynamicTitle(msg.channelId, msg.title);
-				if (msg.displayTitle) {
-					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
-				}
-			}
-		});
-
-		// Route PROCESS_TITLE messages to channels store for process titles
-		wsClient.on("PROCESS_TITLE", (msg) => {
-			if (msg.type === "PROCESS_TITLE") {
-				channelsStore.updateProcessTitle(msg.channelId, msg.title);
-				if (msg.displayTitle) {
-					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
-				}
-			}
-		});
-
-		// Route BELL messages: badge + sound + desktop notification
 		const notificationStore = useNotificationStore();
 		const configStore = useConfigStore();
-		wsClient.on("BELL", (msg) => {
-			if (msg.type === "BELL") {
-				const bellCfg =
-					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
-				// Play bell sound regardless of active/inactive tab
-				playBellSound({
-					sound: bellCfg.sound ?? DEFAULT_NOTIFICATION_CONFIG.bell.sound,
-					...(bellCfg.customSoundFile !== undefined && {
-						customSoundFile: bellCfg.customSoundFile,
-					}),
-				});
-				// Always show badge (brief flash on active tab, persistent on background)
-				notificationStore.incrementBellCount(msg.channelId);
-				if (msg.channelId === channelsStore.selectedChannelId) {
-					setTimeout(() => {
-						if (msg.channelId === channelsStore.selectedChannelId) {
-							notificationStore.clearBellAndActivity(msg.channelId);
-						}
-					}, 1000);
-				}
-				// Desktop notification when document is hidden
-				if (bellCfg.desktopNotification !== false && document.hidden) {
-					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
-					const name = ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
-					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
-				}
-			}
-		});
+		_registerNotificationHandlers(notificationStore, configStore, channelsStore);
 
-		// Route NOTIFICATION (OSC 9) messages: badge + desktop notification
-		wsClient.on("NOTIFICATION", (msg) => {
-			if (msg.type === "NOTIFICATION") {
-				const osc9Cfg =
-					configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
-				// Always show badge (brief flash on active tab, persistent on background)
-				notificationStore.incrementBellCount(msg.channelId);
-				if (msg.channelId === channelsStore.selectedChannelId) {
-					setTimeout(() => {
-						if (msg.channelId === channelsStore.selectedChannelId) {
-							notificationStore.clearBellAndActivity(msg.channelId);
-						}
-					}, 1000);
-				}
-				// Desktop notification when document is hidden
-				if (osc9Cfg.desktopNotification !== false && document.hidden) {
-					showSimpleNotification("Terminal Notification", msg.message, msg.channelId);
-				}
-			}
-		});
-
-		// Handle STATE_SYNC — full state snapshot sent after AUTH_OK
-		wsClient.on("STATE_SYNC", (msg) => {
-			if (msg.type === "STATE_SYNC") {
-				// Build sessionId → hostId lookup for channel-host mapping
-				const sessionHostMap = new Map<string, string>();
-				for (const s of msg.sessions) {
-					hostsStore.updateSessionStatus(s.hostId, s.status);
-					sessionHostMap.set(s.sessionId, s.hostId);
-				}
-				// Populate channelId → hostId map from STATE_SYNC data
-				for (const ch of msg.channels) {
-					const hostId = sessionHostMap.get(ch.sessionId);
-					if (hostId) {
-						channelsStore.registerChannelHost(ch.channelId, hostId);
-					}
-					if (ch.displayTitle) {
-						channelsStore.setDisplayTitle(ch.channelId, ch.displayTitle);
-					}
-				}
-				channelsStore.applyStateSync(msg.channels);
-			}
-		});
+		_registerStateSyncHandler(hostsStore, channelsStore);
 
 		// Authenticate immediately after connecting
 		await _authenticate();
@@ -301,6 +183,172 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("WRITE_DENY", (msg) => {
 			if (msg.type === "WRITE_DENY") {
 				writeLockStore.handleWriteDeny(msg.channelId);
+			}
+		});
+	}
+
+	/**
+	 * Wire up AUTH_PROMPT message handler to the auth-prompt store.
+	 */
+	function _registerAuthPromptHandlers(
+		authPromptStore: ReturnType<typeof useAuthPromptStore>,
+	): void {
+		wsClient.on("AUTH_PROMPT", (msg) => {
+			if (msg.type === "AUTH_PROMPT") {
+				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
+			}
+		});
+	}
+
+	/**
+	 * Wire up HOST_VERIFY message handler for SSH key-mismatch prompts.
+	 */
+	function _registerHostVerifyHandlers(
+		hostVerifyStore: ReturnType<typeof useHostVerifyStore>,
+	): void {
+		wsClient.on("HOST_VERIFY", (msg) => {
+			if (msg.type === "HOST_VERIFY" && msg.promptId && msg.oldFingerprint) {
+				// Only surface the dialog for mismatch prompts (has promptId + oldFingerprint)
+				const hostname = msg.hostId; // best-effort; hub doesn't send hostname yet
+				hostVerifyStore.handleHostVerify(
+					msg.hostId,
+					hostname,
+					msg.fingerprint,
+					msg.algorithm,
+					msg.oldFingerprint,
+					msg.promptId,
+				);
+			}
+		});
+	}
+
+	/**
+	 * Wire up SESSION_STATE messages to the hosts store for rail status dots.
+	 */
+	function _registerSessionHandlers(hostsStore: ReturnType<typeof useHostsStore>): void {
+		wsClient.on("SESSION_STATE", (msg) => {
+			if (msg.type === "SESSION_STATE") {
+				hostsStore.updateSessionStatus(msg.hostId, msg.status);
+			}
+		});
+	}
+
+	/**
+	 * Wire up CHANNEL_STATE, TITLE_CHANGE, and PROCESS_TITLE messages
+	 * to the channels store.
+	 */
+	function _registerChannelHandlers(channelsStore: ReturnType<typeof useChannelsStore>): void {
+		wsClient.on("CHANNEL_STATE", (msg) => {
+			if (msg.type === "CHANNEL_STATE") {
+				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
+			}
+		});
+
+		wsClient.on("TITLE_CHANGE", (msg) => {
+			if (msg.type === "TITLE_CHANGE") {
+				channelsStore.setDynamicTitle(msg.channelId, msg.title);
+				if (msg.displayTitle) {
+					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
+				}
+			}
+		});
+
+		wsClient.on("PROCESS_TITLE", (msg) => {
+			if (msg.type === "PROCESS_TITLE") {
+				channelsStore.updateProcessTitle(msg.channelId, msg.title);
+				if (msg.displayTitle) {
+					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
+				}
+			}
+		});
+	}
+
+	/**
+	 * Wire up BELL and NOTIFICATION messages:
+	 * badge counters, bell sound playback, and desktop notifications.
+	 */
+	function _registerNotificationHandlers(
+		notificationStore: ReturnType<typeof useNotificationStore>,
+		configStore: ReturnType<typeof useConfigStore>,
+		channelsStore: ReturnType<typeof useChannelsStore>,
+	): void {
+		wsClient.on("BELL", (msg) => {
+			if (msg.type === "BELL") {
+				const bellCfg =
+					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
+				// Play bell sound regardless of active/inactive tab
+				playBellSound({
+					sound: bellCfg.sound ?? DEFAULT_NOTIFICATION_CONFIG.bell.sound,
+					...(bellCfg.customSoundFile !== undefined && {
+						customSoundFile: bellCfg.customSoundFile,
+					}),
+				});
+				// Always show badge (brief flash on active tab, persistent on background)
+				notificationStore.incrementBellCount(msg.channelId);
+				if (msg.channelId === channelsStore.selectedChannelId) {
+					setTimeout(() => {
+						if (msg.channelId === channelsStore.selectedChannelId) {
+							notificationStore.clearBellAndActivity(msg.channelId);
+						}
+					}, 1000);
+				}
+				// Desktop notification when document is hidden
+				if (bellCfg.desktopNotification !== false && document.hidden) {
+					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
+					const name = ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
+					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
+				}
+			}
+		});
+
+		wsClient.on("NOTIFICATION", (msg) => {
+			if (msg.type === "NOTIFICATION") {
+				const osc9Cfg =
+					configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
+				// Always show badge (brief flash on active tab, persistent on background)
+				notificationStore.incrementBellCount(msg.channelId);
+				if (msg.channelId === channelsStore.selectedChannelId) {
+					setTimeout(() => {
+						if (msg.channelId === channelsStore.selectedChannelId) {
+							notificationStore.clearBellAndActivity(msg.channelId);
+						}
+					}, 1000);
+				}
+				// Desktop notification when document is hidden
+				if (osc9Cfg.desktopNotification !== false && document.hidden) {
+					showSimpleNotification("Terminal Notification", msg.message, msg.channelId);
+				}
+			}
+		});
+	}
+
+	/**
+	 * Wire up STATE_SYNC — full state snapshot sent after AUTH_OK.
+	 * Populates session status, channel-host mappings, and display titles.
+	 */
+	function _registerStateSyncHandler(
+		hostsStore: ReturnType<typeof useHostsStore>,
+		channelsStore: ReturnType<typeof useChannelsStore>,
+	): void {
+		wsClient.on("STATE_SYNC", (msg) => {
+			if (msg.type === "STATE_SYNC") {
+				// Build sessionId → hostId lookup for channel-host mapping
+				const sessionHostMap = new Map<string, string>();
+				for (const s of msg.sessions) {
+					hostsStore.updateSessionStatus(s.hostId, s.status);
+					sessionHostMap.set(s.sessionId, s.hostId);
+				}
+				// Populate channelId → hostId map from STATE_SYNC data
+				for (const ch of msg.channels) {
+					const hostId = sessionHostMap.get(ch.sessionId);
+					if (hostId) {
+						channelsStore.registerChannelHost(ch.channelId, hostId);
+					}
+					if (ch.displayTitle) {
+						channelsStore.setDisplayTitle(ch.channelId, ch.displayTitle);
+					}
+				}
+				channelsStore.applyStateSync(msg.channels);
 			}
 		});
 	}

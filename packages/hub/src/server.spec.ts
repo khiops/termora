@@ -23,8 +23,8 @@ describe("Hub Server", () => {
 		expect(response.statusCode).toBe(200);
 		const body = response.json();
 		expect(body.status).toBe("ok");
-		expect(body.version).toBe("0.1.0");
-		expect(typeof body.uptime).toBe("number");
+		expect(body.version).toBeUndefined();
+		expect(body.uptime).toBeUndefined();
 	});
 
 	it("GET /unknown returns 404", async () => {

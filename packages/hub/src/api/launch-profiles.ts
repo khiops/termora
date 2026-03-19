@@ -159,11 +159,32 @@ interface UpdateLaunchProfileBody {
 // ─── Route registration ──────────────────────────────────────────────────────
 
 export function registerLaunchProfileRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
-	// GET /api/launch-profiles
-	server.get("/api/launch-profiles", async () => {
-		const profiles = metaDal.listLaunchProfiles();
-		return profiles.map(profileToWire);
-	});
+	// GET /api/launch-profiles?limit=N&offset=M
+	server.get<{ Querystring: { limit?: string; offset?: string } }>(
+		"/api/launch-profiles",
+		async (request) => {
+			const rawLimit = request.query.limit;
+			const rawOffset = request.query.offset;
+			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+
+			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+				return {
+					error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 1000" },
+				};
+			}
+			if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+				return { error: { code: "VALIDATION_ERROR", message: "offset must be >= 0" } };
+			}
+
+			if (limit !== undefined) {
+				const total = metaDal.countLaunchProfiles();
+				const data = metaDal.listLaunchProfiles(limit, offset ?? 0).map(profileToWire);
+				return { data, total, limit, offset: offset ?? 0 };
+			}
+			return metaDal.listLaunchProfiles().map(profileToWire);
+		},
+	);
 
 	// PUT /api/launch-profiles/order — reorder launch profiles
 	// Alias: POST /api/launch-profiles/reorder (kept for backward compatibility)

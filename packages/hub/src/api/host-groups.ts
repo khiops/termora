@@ -16,11 +16,30 @@ function hostGroupToResponse(g: HostGroup) {
 }
 
 export function registerHostGroupRoutes(server: FastifyInstance, metaDal: MetaDAL): void {
-	// GET /api/host-groups
-	server.get("/api/host-groups", async () => {
-		const groups = metaDal.listHostGroupEntities();
-		return groups.map(hostGroupToResponse);
-	});
+	// GET /api/host-groups?limit=N&offset=M
+	server.get<{ Querystring: { limit?: string; offset?: string } }>(
+		"/api/host-groups",
+		async (request) => {
+			const rawLimit = request.query.limit;
+			const rawOffset = request.query.offset;
+			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+
+			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+				return { error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 1000" } };
+			}
+			if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+				return { error: { code: "VALIDATION_ERROR", message: "offset must be >= 0" } };
+			}
+
+			if (limit !== undefined) {
+				const total = metaDal.countHostGroupEntities();
+				const data = metaDal.listHostGroupEntities(limit, offset ?? 0).map(hostGroupToResponse);
+				return { data, total, limit, offset: offset ?? 0 };
+			}
+			return metaDal.listHostGroupEntities().map(hostGroupToResponse);
+		},
+	);
 
 	// POST /api/host-groups
 	server.post<{ Body: { name: string; color?: string | null } }>(

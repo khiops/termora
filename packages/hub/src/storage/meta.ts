@@ -422,17 +422,31 @@ export class MetaDAL {
 		return row ? rowToHost(row) : undefined;
 	}
 
-	listHosts(): Host[] {
-		const rows = this.db
-			.prepare(
-				`SELECT * FROM hosts ORDER BY
+	listHosts(limit?: number, offset?: number): Host[] {
+		const sql =
+			limit !== undefined
+				? `SELECT * FROM hosts ORDER BY
+				CASE WHEN type = 'local' THEN 0 ELSE 1 END,
+				COALESCE(host_group, '~') ASC,
+				sort_order ASC LIMIT ? OFFSET ?`
+				: `SELECT * FROM hosts ORDER BY
 				CASE WHEN type = 'local' THEN 0 ELSE 1 END,
 				COALESCE(host_group, '~') ASC, -- '~' sorts after all alphanumeric chars in ASCII, placing ungrouped hosts last
-				sort_order ASC`,
-			)
-			.all() as HostRow[];
+				sort_order ASC`;
+		const rows = (
+			limit !== undefined
+				? this.db.prepare(sql).all(limit, offset ?? 0)
+				: this.db.prepare(sql).all()
+		) as HostRow[];
 		return rows.map(rowToHost);
 	}
+
+
+	countHosts(): number {
+		const row = this.db.prepare("SELECT COUNT(*) AS n FROM hosts").get() as { n: number };
+		return row.n;
+	}
+
 
 	updateHost(id: string, input: Partial<CreateHostInput>): Host {
 		const now = new Date().toISOString();
@@ -598,12 +612,27 @@ export class MetaDAL {
 
 	// ─── Host Groups (first-class) ───────────────────────────────────────────
 
-	listHostGroupEntities(): HostGroup[] {
-		const rows = this.db
-			.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC")
-			.all() as HostGroupRow[];
+	listHostGroupEntities(limit?: number, offset?: number): HostGroup[] {
+		const rows = (
+			limit !== undefined
+				? this.db
+						.prepare(
+							"SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC LIMIT ? OFFSET ?",
+						)
+						.all(limit, offset ?? 0)
+				: this.db
+						.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC")
+						.all()
+		) as HostGroupRow[];
 		return rows.map(rowToHostGroup);
 	}
+
+
+	countHostGroupEntities(): number {
+		const row = this.db.prepare("SELECT COUNT(*) AS n FROM host_groups").get() as { n: number };
+		return row.n;
+	}
+
 
 	createHostGroup(name: string, color?: string | null): HostGroup {
 		const now = new Date().toISOString();
@@ -1293,12 +1322,29 @@ export class MetaDAL {
 		return row ? rowToLaunchProfile(row) : undefined;
 	}
 
-	listLaunchProfiles(): LaunchProfile[] {
-		const rows = this.db
-			.prepare("SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC")
-			.all() as LaunchProfileRow[];
+	listLaunchProfiles(limit?: number, offset?: number): LaunchProfile[] {
+		const rows = (
+			limit !== undefined
+				? this.db
+						.prepare(
+							"SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC LIMIT ? OFFSET ?",
+						)
+						.all(limit, offset ?? 0)
+				: this.db
+						.prepare("SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC")
+						.all()
+		) as LaunchProfileRow[];
 		return rows.map(rowToLaunchProfile);
 	}
+
+
+	countLaunchProfiles(): number {
+		const row = this.db
+			.prepare("SELECT COUNT(*) AS n FROM launch_profiles")
+			.get() as { n: number };
+		return row.n;
+	}
+
 
 	updateLaunchProfile(id: string, updates: Partial<LaunchProfile>): LaunchProfile | undefined {
 		const existing = this.getLaunchProfile(id);

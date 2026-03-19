@@ -1,7 +1,21 @@
 // In-memory TypeScript entity types for nexterm
 // These represent the domain model; DB types are defined in hub/storage
 
-import type { TerminalProfile } from "./config.js";
+export interface TerminalProfile {
+	fontFamily?: string;
+	fontSize?: number;
+	theme?: string;
+	themeOverrides?: Record<string, string>;
+	cursorStyle?: "block" | "underline" | "bar";
+	scrollback?: number;
+	bellSound?: boolean;
+	/** Show search match markers in the scrollbar overview ruler (default: true). */
+	scrollbarMarkers?: boolean;
+	wallpaper?: string;
+	wallpaperBlur?: number;
+	wallpaperDim?: number;
+	[key: string]: unknown;
+}
 
 export type SessionStatus = "starting" | "active" | "detached" | "disconnected" | "closed";
 export type ChannelStatus = "born" | "live" | "orphan" | "dead";
@@ -183,6 +197,15 @@ export interface HostLaunchProfileOverride {
 	overrideType: "pin" | "hide" | "default";
 	sortOrder?: number;
 }
+
+
+export interface PaginatedResponse<T> {
+	data: T[];
+	total: number;
+	limit: number;
+	offset: number;
+}
+
 
 export interface TestConnectionResult {
 	ok: boolean;

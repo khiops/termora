@@ -2,7 +2,6 @@ import type {
 	AuthMessage,
 	AuthPromptResponseMessage,
 	DetachMessage,
-	ErrorMessage,
 	HostVerifyResponseMessage,
 	InputMessage,
 	ProtocolMessage,
@@ -16,19 +15,28 @@ import type {
 	WriteGrantMessage,
 	WriteReleaseMessage,
 } from "@nexterm/shared";
-import {
-	decodeMessage,
-	encodeMessage,
-	generateId,
-	isValidDimensions,
-	isValidEnv,
-	isValidInputData,
-	isValidUlid,
-} from "@nexterm/shared";
+import { decodeMessage, encodeMessage, generateId } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import { validateToken } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
+import {
+	type WsHandlerContext,
+	handleAttach,
+	handleAuthPromptResponse,
+	handleDetach,
+	handleHostVerifyResponse,
+	handleInput,
+	handlePing,
+	handleResize,
+	handleSpawn,
+	handleTestConnect,
+	handleWriteClaim,
+	handleWriteDeny,
+	handleWriteForce,
+	handleWriteGrant,
+	handleWriteRelease,
+} from "./handlers/index.js";
 
 export async function registerWsRoutes(
 	server: FastifyInstance,
@@ -118,264 +126,57 @@ export async function registerWsRoutes(
 				return;
 			}
 
+			const ctx: WsHandlerContext = {
+				clientId,
+				client,
+				log: server.log,
+				sessionManager,
+				writeLockManager,
+			};
+
 			switch (msg.type) {
-				case "SPAWN": {
-					const spawnMsg = msg as UiSpawnMessage;
-					if (!isValidUlid(spawnMsg.hostId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
-						break;
-					}
-					if (spawnMsg.cols !== undefined || spawnMsg.rows !== undefined) {
-						if (!isValidDimensions(spawnMsg.cols, spawnMsg.rows)) {
-							client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid dimensions" });
-							break;
-						}
-					}
-					if (
-						spawnMsg.shell !== undefined &&
-						(typeof spawnMsg.shell !== "string" || spawnMsg.shell.length > 4096)
-					) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "shell must be a string ≤ 4096 chars",
-						});
-						break;
-					}
-					if (
-						spawnMsg.cwd !== undefined &&
-						(typeof spawnMsg.cwd !== "string" || spawnMsg.cwd.length > 4096)
-					) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "cwd must be a string ≤ 4096 chars",
-						});
-						break;
-					}
-					if (!isValidEnv(spawnMsg.env)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid env" });
-						break;
-					}
-					sessionManager
-						.handleSpawn(clientId, spawnMsg)
-						.then((channelId) => {
-							if (channelId) {
-								writeLockManager.attach(channelId, clientId);
-							}
-						})
-						.catch((err: unknown) => {
-							server.log.error({ err }, "SPAWN handling failed");
-						});
+				case "SPAWN":
+					handleSpawn(msg as UiSpawnMessage, ctx);
 					break;
-				}
-				case "ATTACH": {
-					const attachChannelId = (msg as UiAttachMessage).channelId;
-					if (!isValidUlid(attachChannelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					sessionManager
-						.handleAttach(clientId, attachChannelId)
-						.then((ok) => {
-							if (ok) {
-								writeLockManager.attach(attachChannelId, clientId);
-							}
-						})
-						.catch((err: unknown) => {
-							server.log.error({ err }, "ATTACH handling failed");
-						});
+				case "ATTACH":
+					handleAttach(msg as UiAttachMessage, ctx);
 					break;
-				}
-				case "DETACH": {
-					const detachChannelId = (msg as DetachMessage).channelId;
-					if (!isValidUlid(detachChannelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.detach(detachChannelId, clientId);
-					sessionManager.handleDetach(clientId, detachChannelId);
+				case "DETACH":
+					handleDetach(msg as DetachMessage, ctx);
 					break;
-				}
-				case "INPUT": {
-					const inputMsg = msg as InputMessage;
-					if (!isValidUlid(inputMsg.channelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					if (!isValidInputData(inputMsg.data)) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "Invalid or oversized input data",
-						});
-						break;
-					}
-					if (!writeLockManager.isHolder(inputMsg.channelId, clientId)) {
-						const errMsg: ErrorMessage = {
-							type: "ERROR",
-							code: "WRITE_LOCK_HELD",
-							message: "You do not hold the write lock",
-							channelId: inputMsg.channelId,
-						};
-						client.send(errMsg);
-						break;
-					}
-					sessionManager.handleInput(clientId, inputMsg.channelId, inputMsg.data);
+				case "INPUT":
+					handleInput(msg as InputMessage, ctx);
 					break;
-				}
-				case "RESIZE": {
-					const resizeMsg = msg as ResizeMessage;
-					if (!isValidUlid(resizeMsg.channelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					if (!isValidDimensions(resizeMsg.cols, resizeMsg.rows)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid dimensions" });
-						break;
-					}
-					sessionManager.handleResize(
-						clientId,
-						resizeMsg.channelId,
-						resizeMsg.cols,
-						resizeMsg.rows,
-					);
+				case "RESIZE":
+					handleResize(msg as ResizeMessage, ctx);
 					break;
-				}
-				case "WRITE_CLAIM": {
-					const claimChannelId = (msg as WriteClaimMessage).channelId;
-					if (!isValidUlid(claimChannelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.claim(claimChannelId, clientId);
+				case "WRITE_CLAIM":
+					handleWriteClaim(msg as WriteClaimMessage, ctx);
 					break;
-				}
-				case "WRITE_RELEASE": {
-					const releaseChannelId = (msg as WriteReleaseMessage).channelId;
-					if (!isValidUlid(releaseChannelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.release(releaseChannelId, clientId);
+				case "WRITE_RELEASE":
+					handleWriteRelease(msg as WriteReleaseMessage, ctx);
 					break;
-				}
-				case "WRITE_FORCE": {
-					const forceChannelId = (msg as WriteForceMessage).channelId;
-					if (!isValidUlid(forceChannelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.force(forceChannelId, clientId);
+				case "WRITE_FORCE":
+					handleWriteForce(msg as WriteForceMessage, ctx);
 					break;
-				}
-				case "WRITE_GRANT": {
-					const grantMsg = msg as WriteGrantMessage;
-					if (!isValidUlid(grantMsg.channelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.grant(grantMsg.channelId, clientId, grantMsg.toClientId);
+				case "WRITE_GRANT":
+					handleWriteGrant(msg as WriteGrantMessage, ctx);
 					break;
-				}
-				case "WRITE_DENY": {
-					// WriteDenyMessage shares the toClientId field shape with WriteGrantMessage
-					const denyMsg = msg as WriteDenyMessage;
-					if (!isValidUlid(denyMsg.channelId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid channelId" });
-						break;
-					}
-					writeLockManager.deny(denyMsg.channelId, clientId, denyMsg.toClientId);
+				case "WRITE_DENY":
+					handleWriteDeny(msg as WriteDenyMessage, ctx);
 					break;
-				}
-				case "PING": {
-					client.send({ type: "PONG" });
+				case "PING":
+					handlePing(msg, ctx);
 					break;
-				}
-				case "AUTH_PROMPT_RESPONSE": {
-					const apr = msg as AuthPromptResponseMessage;
-					if (!isValidUlid(apr.hostId)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
-						break;
-					}
-					if (apr.secret !== null && (typeof apr.secret !== "string" || apr.secret.length > 4096)) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "secret must be a string ≤ 4096 chars or null",
-						});
-						break;
-					}
-					sessionManager.handleAuthPromptResponse(clientId, apr.hostId, apr.secret);
+				case "AUTH_PROMPT_RESPONSE":
+					handleAuthPromptResponse(msg as AuthPromptResponseMessage, ctx);
 					break;
-				}
-				case "HOST_VERIFY_RESPONSE": {
-					const hvr = msg as HostVerifyResponseMessage;
-					if (!hvr.promptId || typeof hvr.promptId !== "string" || hvr.promptId.length > 128) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "Invalid promptId",
-						});
-						break;
-					}
-					if (!["trust_permanent", "trust_once", "reject"].includes(hvr.action)) {
-						client.send({
-							type: "ERROR",
-							code: "INVALID_INPUT",
-							message: "Invalid action",
-						});
-						break;
-					}
-					sessionManager.handleHostVerifyResponse(hvr.promptId, hvr.action);
+				case "HOST_VERIFY_RESPONSE":
+					handleHostVerifyResponse(msg as HostVerifyResponseMessage, ctx);
 					break;
-				}
-				case "TEST_CONNECT": {
-					const tcMsg = msg as TestConnectMessage;
-					// hostId: not necessarily a ULID (can be client-generated temp ID), must be non-empty ≤ 128 chars
-					if (
-						typeof tcMsg.hostId !== "string" ||
-						tcMsg.hostId.length === 0 ||
-						tcMsg.hostId.length > 128
-					) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostId" });
-						break;
-					}
-					if (
-						typeof tcMsg.hostname !== "string" ||
-						tcMsg.hostname.length === 0 ||
-						tcMsg.hostname.length > 4096
-					) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid hostname" });
-						break;
-					}
-					if (typeof tcMsg.port !== "number" || tcMsg.port < 1 || tcMsg.port > 65535) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid port" });
-						break;
-					}
-					if (!["agent", "key", "password"].includes(tcMsg.sshAuth)) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshAuth" });
-						break;
-					}
-					if (
-						tcMsg.sshKeyPath !== undefined &&
-						(typeof tcMsg.sshKeyPath !== "string" || tcMsg.sshKeyPath.length > 4096)
-					) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshKeyPath" });
-						break;
-					}
-					if (
-						tcMsg.sshUser !== undefined &&
-						(typeof tcMsg.sshUser !== "string" || tcMsg.sshUser.length > 256)
-					) {
-						client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid sshUser" });
-						break;
-					}
-					sessionManager.handleTestConnect(clientId, tcMsg).catch((err) => {
-						server.log.error({ err }, "TEST_CONNECT handling failed");
-					});
+				case "TEST_CONNECT":
+					handleTestConnect(msg as TestConnectMessage, ctx);
 					break;
-				}
 				default:
 					break;
 			}
