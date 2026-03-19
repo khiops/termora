@@ -21,7 +21,7 @@
 ### Audit P2 (SRP decomposition + cleanup)
 - [ ] 🔧 [Hub] Decompose SessionManager (2344 lines, 50+ methods) into sub-managers (AUD-014) — Priority: L
 - [ ] 🔧 [Hub] Split MetaDAL (1116 lines, 57 methods) into domain-specific DALs (AUD-015) — Priority: L
-- [ ] 🔧 [Web] Split useLayout composable (793 lines) into useTabManager + usePaneTree (AUD-016) — Priority: L
+- [x] ✅ [Web] Split useLayout composable (793 lines) into useTabManager + usePaneTree (AUD-016) (2026-03-19)
 - [ ] 🔧 [Hub] Split registerHostRoutes (501 lines) into sub-route files (AUD-017) — Priority: L
 - [x] ✅ [Hub] Split registerWsRoutes (348 lines) — extract per-message-type handlers (AUD-018) (2026-03-19)
 - [ ] 🔧 [Web] Extract _doConnect WS message routing into separate handlers (AUD-019) — Priority: L
