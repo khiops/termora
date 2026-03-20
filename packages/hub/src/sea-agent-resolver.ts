@@ -65,16 +65,19 @@ export function resolveAgentBinaryPath(): string | null {
 	// 1. Co-located with the hub binary
 	const hubDir = dirname(process.execPath);
 	const coLocated = join(hubDir, AGENT_BINARY_NAME);
+	console.log(`[sea-agent-resolver] checking co-located: ${coLocated}, exists: ${existsSync(coLocated)}`);
 	if (existsSync(coLocated)) {
 		return coLocated;
 	}
 
 	// 2. PATH
 	const fromPath = findInPath(AGENT_BINARY_NAME);
+	console.log(`[sea-agent-resolver] checking PATH: ${fromPath}`);
 	if (fromPath !== null) {
 		return fromPath;
 	}
 
+	console.log(`[sea-agent-resolver] agent binary not found (searched co-located=${coLocated} and PATH)`);
 	return null;
 }
 

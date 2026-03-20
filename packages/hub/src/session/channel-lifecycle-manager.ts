@@ -20,8 +20,8 @@ import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@nexter
 import type { ElevationMethod } from "@nexterm/shared";
 import type { AgentConnection } from "./agent-connection.js";
 import type { ChannelState, SharedSessionContext } from "./session-context.js";
-import type { StateBroadcaster } from "./state-broadcaster.js";
 import type { WsClient } from "./session-manager.js";
+import type { StateBroadcaster } from "./state-broadcaster.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
 
@@ -79,19 +79,30 @@ export class ChannelLifecycleManager {
 			resolvedElevated = false,
 			resolvedElevationMethod = undefined,
 		} = opts;
+		console.log(
+			`[channel-lifecycle] sendSpawnAndWait: entry — hostId=${hostId} requestId=${spawnMsg.requestId} shell=${spawnMsg.shell} agentConnected=${agent.connected}`,
+		);
 		agent.send(spawnMsg);
+		console.log(
+			`[channel-lifecycle] sendSpawnAndWait: SPAWN sent to agent, waiting for SPAWN_OK (timeout=${SPAWN_TIMEOUT_MS}ms)`,
+		);
 
 		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingRequests.delete(spawnMsg.requestId);
+				console.log(
+					`[channel-lifecycle] sendSpawnAndWait: TIMEOUT — no SPAWN_OK received within ${SPAWN_TIMEOUT_MS}ms for requestId=${spawnMsg.requestId}`,
+				);
 				reject(new Error("Agent SPAWN timeout"));
 			}, SPAWN_TIMEOUT_MS);
 
 			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
+				console.log(`[channel-lifecycle] sendSpawnAndWait: pendingRequest handler fired — incoming.type=${incoming.type} requestId=${spawnMsg.requestId}`);
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
+					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_OK received — channelId=${spawnOk.channelId}`);
 
 					const { channelId } = spawnOk;
 
@@ -154,6 +165,7 @@ export class ChannelLifecycleManager {
 					const spawnErr = incoming as import("@nexterm/shared").AgentSpawnErrMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
+					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_ERR received — code=${spawnErr.code} message=${spawnErr.message}`);
 
 					if (!suppressClientError) {
 						const errorMsg: ErrorMessage = {
@@ -351,7 +363,18 @@ export class ChannelLifecycleManager {
 			});
 
 			if (firstOk) {
-				this.applyRestartState(channelId, hostId, sessionEntry, ch, shell, args, cwd, cols, rows, channel.directProcess);
+				this.applyRestartState(
+					channelId,
+					hostId,
+					sessionEntry,
+					ch,
+					shell,
+					args,
+					cwd,
+					cols,
+					rows,
+					channel.directProcess,
+				);
 				return true;
 			}
 
@@ -432,7 +455,18 @@ export class ChannelLifecycleManager {
 
 		if (!ok) return false;
 
-		this.applyRestartState(channelId, hostId, sessionEntry, ch, shell, args, cwd, cols, rows, channel.directProcess);
+		this.applyRestartState(
+			channelId,
+			hostId,
+			sessionEntry,
+			ch,
+			shell,
+			args,
+			cwd,
+			cols,
+			rows,
+			channel.directProcess,
+		);
 		return true;
 	}
 
@@ -466,7 +500,18 @@ export class ChannelLifecycleManager {
 			});
 		});
 		if (!ok) return false;
-		this.applyRestartState(channelId, hostId, sessionEntry, ch, shell, args, cwd, cols, rows, directProcess);
+		this.applyRestartState(
+			channelId,
+			hostId,
+			sessionEntry,
+			ch,
+			shell,
+			args,
+			cwd,
+			cols,
+			rows,
+			directProcess,
+		);
 		return true;
 	}
 
@@ -772,10 +817,7 @@ export class ChannelLifecycleManager {
 
 	// ─── Reconcile ────────────────────────────────────────────────────────────
 
-	reconcileChannelState(
-		hostId: string,
-		states: AgentChannelStateMessage[],
-	): void {
+	reconcileChannelState(hostId: string, states: AgentChannelStateMessage[]): void {
 		const reportedIds = new Set(states.filter((s) => s.alive).map((s) => s.channelId));
 
 		for (const [channelId, channelState] of this.ctx.channels) {
@@ -801,7 +843,9 @@ export class ChannelLifecycleManager {
 	private _resolveElevationConfig(
 		hostCustomCommand: string | null | undefined,
 		method: ElevationMethod,
-	): { method: ElevationMethod; customCommand: string | undefined } | { validationError: ErrorMessage } {
+	):
+		| { method: ElevationMethod; customCommand: string | undefined }
+		| { validationError: ErrorMessage } {
 		const customCommand =
 			method === "custom" && this.ctx.configResolver
 				? this.ctx.configResolver.resolveCustomCommand(hostCustomCommand)
