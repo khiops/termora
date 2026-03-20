@@ -27,6 +27,7 @@
  *   SEA packaging step (build-sea-binary.ts) embeds the static file manifest.
  */
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -36,6 +37,25 @@ import { type BuildOptions, type Plugin, build } from "esbuild";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const HUB_ENTRY = join(ROOT, "packages", "hub", "src", "cli.ts");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build hash — injected as NEXTERM_BUILD_HASH so build-version.ts picks it up
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveBuildHash(): string {
+	const env = process.env.NEXTERM_BUILD_HASH;
+	if (env && env.length > 0) return env.slice(0, 7);
+	try {
+		return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+	} catch {
+		return "dev";
+	}
+}
+
+const SEA_BUILD_HASH = resolveBuildHash();
 const MIGRATIONS_BASE = join(ROOT, "packages", "hub", "src", "storage", "migrations");
 const OUT_DIR = join(ROOT, "dist", "sea");
 const OUT_FILE = join(OUT_DIR, "nexterm-hub.cjs");
@@ -391,8 +411,10 @@ export const buildOptions: BuildOptions = {
 		"cpu-features",
 	],
 	// Shim import.meta.url for the ESM-to-CJS bundle.
+	// Also inject the build hash so build-version.ts reads it from the env shim.
 	define: {
 		"import.meta.url": "__importMetaUrl",
+		"process.env.NEXTERM_BUILD_HASH": JSON.stringify(SEA_BUILD_HASH),
 	},
 	banner: {
 		js: [

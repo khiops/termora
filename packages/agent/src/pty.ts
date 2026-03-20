@@ -16,7 +16,7 @@ export interface SpawnOptions {
 	id?: string;
 	shell: string;
 	args?: string[];
-	cwd: string;
+	cwd?: string;
 	env: Record<string, string>;
 	cols: number;
 	rows: number;
@@ -33,7 +33,7 @@ export class PtyManager {
 			name: "xterm-256color",
 			cols: options.cols,
 			rows: options.rows,
-			cwd: options.cwd,
+			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 			env: { ...process.env, ...options.env } as Record<string, string>,
 			// SEA binaries: force winpty (conpty.node embedding not yet validated on Windows)
 			...(detectSea() ? { useConpty: false } : {}),

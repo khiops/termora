@@ -403,6 +403,12 @@ export function registerLaunchProfileRoutes(server: FastifyInstance, metaDal: Me
 
 	// DELETE /api/launch-profiles/:id
 	server.delete<{ Params: { id: string } }>("/api/launch-profiles/:id", async (request, reply) => {
+		const count = metaDal.countLaunchProfiles();
+		if (count === 1) {
+			return reply.code(400).send({
+				error: { code: "LAST_PROFILE", message: "Cannot delete the last launch profile" },
+			});
+		}
 		const deleted = metaDal.deleteLaunchProfile(request.params.id);
 		if (!deleted) {
 			return reply.code(404).send({

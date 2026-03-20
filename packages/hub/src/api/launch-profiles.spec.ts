@@ -379,7 +379,9 @@ describe("PUT /api/launch-profiles/:id", () => {
 
 describe("DELETE /api/launch-profiles/:id", () => {
 	it("deletes profile and returns 204", async () => {
-		const created = await createProfile();
+		// Need at least 2 profiles so the delete is not blocked as last profile
+		await createProfile({ name: "Keeper" });
+		const created = await createProfile({ name: "ToDelete" });
 		const res = await server.inject({
 			method: "DELETE",
 			url: `/api/launch-profiles/${created.id}`,
@@ -392,6 +394,16 @@ describe("DELETE /api/launch-profiles/:id", () => {
 			url: `/api/launch-profiles/${created.id}`,
 		});
 		expect(get.statusCode).toBe(404);
+	});
+
+	it("returns 400 LAST_PROFILE when deleting the only profile", async () => {
+		const created = await createProfile();
+		const res = await server.inject({
+			method: "DELETE",
+			url: `/api/launch-profiles/${created.id}`,
+		});
+		expect(res.statusCode).toBe(400);
+		expect(res.json<{ error: { code: string } }>().error.code).toBe("LAST_PROFILE");
 	});
 
 	it("returns 404 for unknown ID", async () => {

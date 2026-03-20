@@ -33,9 +33,9 @@ export interface SendSpawnOpts {
 	hostId: string;
 	session: { id: string };
 	client: WsClient;
-	resolvedShell: string;
+	resolvedShell: string | undefined;
 	resolvedArgs: string[];
-	resolvedCwd: string;
+	resolvedCwd: string | undefined;
 	resolvedDirectProcess: boolean;
 	resolvedLaunchProfileId: string | undefined;
 	cols: number;
@@ -99,9 +99,9 @@ export class ChannelLifecycleManager {
 						id: channelId,
 						sessionId: session.id,
 						status: "born",
-						shell: resolvedShell,
+						...(resolvedShell !== undefined ? { shell: resolvedShell } : {}),
 						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-						cwd: resolvedCwd,
+						...(resolvedCwd !== undefined ? { cwd: resolvedCwd } : {}),
 						cols,
 						rows,
 						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),
@@ -119,9 +119,9 @@ export class ChannelLifecycleManager {
 						hostId,
 						status: "live",
 						clients: new Set([clientId]),
-						shell: resolvedShell,
+						shell: resolvedShell ?? process.env.SHELL ?? "/bin/sh",
 						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-						cwd: resolvedCwd,
+						...(resolvedCwd !== undefined ? { cwd: resolvedCwd } : {}),
 						cols,
 						rows,
 						...(resolvedDirectProcess && { directProcess: resolvedDirectProcess }),

@@ -272,12 +272,14 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	const authToken = initAuth(configDir);
 	const dbManager = openDatabases(stateDir);
 
+	const { BUILD_HASH } = await import("./build-version.js");
+
 	const server = await createServer({ port, authToken, dbManager });
 	const address = await startServer(server, { port });
 
 	persistRuntime({ pid: process.pid, port, started_at: new Date().toISOString() });
 
-	console.log(`nexterm hub listening on ${address}`);
+	console.log(`nexterm hub listening on ${address} (build: ${BUILD_HASH})`);
 	console.log(`Config dir : ${configDir}`);
 	console.log(`State dir  : ${stateDir}`);
 

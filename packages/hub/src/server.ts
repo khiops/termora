@@ -17,6 +17,7 @@ import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { touchToken, upsertPrimaryToken, validateToken, validateTokenRecord } from "./auth.js";
+import { BUILD_HASH } from "./build-version.js";
 import { getConfigDir } from "./cli.js";
 import {
 	ConfigResolver,
@@ -153,9 +154,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		});
 	}
 
-	// Health endpoint
+	// Health endpoint — unauthenticated, always available for debugging
 	server.get("/api/health", async () => {
-		return { status: "ok" };
+		return { status: "ok", build: BUILD_HASH };
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided

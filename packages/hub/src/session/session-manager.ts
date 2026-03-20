@@ -351,12 +351,9 @@ export class SessionManager {
 		const rows = msg.rows ?? 24;
 
 		// ── Launch profile resolution ─────────────────────────────────────────
-		let resolvedShell =
-			msg.shell ??
-			process.env.SHELL ??
-			(process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh");
+		let resolvedShell = msg.shell ?? undefined;
 		let resolvedArgs = msg.args ?? [];
-		let resolvedCwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
+		let resolvedCwd = msg.cwd ?? undefined;
 		let resolvedEnv: Record<string, string> = msg.env ?? {};
 		let resolvedDirectProcess = msg.directProcess ?? false;
 		let resolvedElevated = msg.elevated ?? false;
@@ -372,6 +369,17 @@ export class SessionManager {
 				resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
 				resolvedElevated = msg.elevated ?? profile.elevated;
 				resolvedLaunchProfileId = profile.id;
+			}
+		}
+
+		// ── First-profile fallback: if no shell resolved yet, use sort_order=0 profile ──
+		if (resolvedShell === undefined) {
+			const firstProfile = this.ctx.metaDal.listLaunchProfiles(1)[0];
+			if (firstProfile !== undefined) {
+				resolvedShell = firstProfile.shell;
+				if (resolvedArgs.length === 0 && firstProfile.args) {
+					resolvedArgs = firstProfile.args;
+				}
 			}
 		}
 
@@ -399,9 +407,9 @@ export class SessionManager {
 		const baseSpawnMsg: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
-			shell: resolvedShell,
+			...(resolvedShell !== undefined ? { shell: resolvedShell } : {}),
 			...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-			cwd: resolvedCwd,
+			...(resolvedCwd !== undefined ? { cwd: resolvedCwd } : {}),
 			env: resolvedEnv,
 			cols,
 			rows,

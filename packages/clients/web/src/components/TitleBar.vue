@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 
+const BUILD_HASH: string = import.meta.env.VITE_BUILD_HASH ?? "dev";
+
 const isTauri = ref(false);
 const isMaximized = ref(false);
 
@@ -54,6 +56,7 @@ onUnmounted(() => {
 				<text x="570" y="600" font-family="monospace" font-weight="bold" font-size="260" fill="#a0e8af">_</text>
 			</svg>
 			<span class="titlebar-title">Nexterm</span>
+			<span class="titlebar-build">{{ BUILD_HASH }}</span>
 		</div>
 
 		<!-- Buttons: separate from drag region, no interference -->
@@ -114,6 +117,14 @@ onUnmounted(() => {
 .titlebar-title {
 	font-size: 12px;
 	font-weight: 500;
+}
+
+.titlebar-build {
+	font-size: 10px;
+	font-family: monospace;
+	color: var(--nt-fg-muted, #888);
+	opacity: 0.55;
+	letter-spacing: 0.02em;
 }
 
 .titlebar-buttons {

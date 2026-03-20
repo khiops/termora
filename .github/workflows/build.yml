@@ -29,6 +29,8 @@ jobs:
 
       - name: Build web UI
         run: pnpm -F @nexterm/web build
+        env:
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
 
       - name: Embed web UI into hub static/
         run: node scripts/embed-web.js
@@ -87,6 +89,8 @@ jobs:
 
       - name: Build and package hub SEA
         run: pnpm run package:sea-hub
+        env:
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
 
       - name: Rename agent binary (Unix)
         if: matrix.target_os != 'windows'
@@ -177,6 +181,8 @@ jobs:
 
       - name: Build web UI
         run: pnpm -F @nexterm/web build
+        env:
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
 
       - name: Disable beforeBuildCommand for CI
         shell: bash

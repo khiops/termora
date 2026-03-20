@@ -44,10 +44,10 @@ export interface AgentSpawnMessage {
 	type: "SPAWN";
 	requestId: string;
 	channelId?: string;
-	shell: string;
+	shell?: string;
 	args?: string[];
-	cwd: string;
-	env: Record<string, string>;
+	cwd?: string;
+	env?: Record<string, string>;
 	cols: number;
 	rows: number;
 	directProcess?: boolean;

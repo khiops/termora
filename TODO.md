@@ -21,6 +21,7 @@
 - [x] ✅ [Hub] Windows Terminal import — POST /api/launch-profiles/import-windows-terminal (2026-03-19)
 
 ### Other
+- [ ] 🟡 [All] Build versioning — git commit hash in /api/health, title bar, package.json — Priority: H
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
 - [ ] 🔧 [Hub] `initSync()` deprecation warning — pass `{ module }` object to toml-edit-js — Priority: L

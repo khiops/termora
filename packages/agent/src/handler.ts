@@ -153,19 +153,25 @@ export class AgentHandler {
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined) processEnvStrings[k] = v;
 			}
-			const spawnEnv: Record<string, string> = { ...processEnvStrings, ...msg.env };
+			const spawnEnv: Record<string, string> = { ...processEnvStrings, ...(msg.env ?? {}) };
 			const expandedArgs = msg.args?.map((arg) => expandVars(arg, spawnEnv, isWindows));
-			const expandedCwd = expandVars(msg.cwd, spawnEnv, isWindows);
+			const expandedCwd = msg.cwd ? expandVars(msg.cwd, spawnEnv, isWindows) : undefined;
 			const expandedEnv: Record<string, string> = {};
-			for (const [k, v] of Object.entries(msg.env)) {
+			for (const [k, v] of Object.entries(msg.env ?? {})) {
 				expandedEnv[k] = expandVars(v, spawnEnv, isWindows);
 			}
+
+			// ── Shell resolution ──────────────────────────────────────────
+			// If no shell specified, use the agent's default (platform-aware).
+			const defaultShell = isWindows
+				? (process.env.COMSPEC ?? "cmd.exe")
+				: (process.env.SHELL ?? "/bin/sh");
 
 			// ── Elevation ─────────────────────────────────────────────────
 			// If elevated=true, wrap the shell/args with sudo (Linux/macOS) or
 			// gsudo (Windows) and inject the SUDO_ASKPASS env variable.
 			// elevationSecret is zeroed immediately after use — never log it.
-			let ptyShell = msg.shell;
+			let ptyShell = msg.shell ?? defaultShell;
 			let ptyArgs = expandedArgs;
 			let ptyEnv = expandedEnv;
 			let askpassCleanup: (() => void) | null = null;
@@ -180,7 +186,7 @@ export class AgentHandler {
 					askpassCleanup = askpass.cleanup;
 
 					const wrapped = wrapWithElevation(
-						msg.shell,
+						ptyShell,
 						expandedArgs ?? [],
 						method,
 						"askpass",
@@ -196,7 +202,7 @@ export class AgentHandler {
 					// No secret → try passwordless
 					if (checkPasswordless(method, process.platform)) {
 						const wrapped = wrapWithElevation(
-							msg.shell,
+							ptyShell,
 							expandedArgs ?? [],
 							method,
 							"passwordless",
@@ -222,7 +228,7 @@ export class AgentHandler {
 				...(msg.channelId !== undefined && { id: msg.channelId }),
 				shell: ptyShell,
 				...(ptyArgs !== undefined && ptyArgs.length > 0 && { args: ptyArgs }),
-				cwd: expandedCwd,
+				...(expandedCwd !== undefined ? { cwd: expandedCwd } : {}),
 				env: ptyEnv,
 				cols: msg.cols,
 				rows: msg.rows,

@@ -17,13 +17,14 @@ describe("Hub Server", () => {
 		expect(server).toBeDefined();
 	});
 
-	it("GET /api/health returns ok status", async () => {
+	it("GET /api/health returns ok status with build hash", async () => {
 		server = await createServer({ logger: false });
 		const response = await server.inject({ method: "GET", url: "/api/health" });
 		expect(response.statusCode).toBe(200);
 		const body = response.json();
 		expect(body.status).toBe("ok");
-		expect(body.version).toBeUndefined();
+		expect(typeof body.build).toBe("string");
+		expect(body.build.length).toBeGreaterThan(0);
 		expect(body.uptime).toBeUndefined();
 	});
 
