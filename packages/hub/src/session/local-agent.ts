@@ -26,13 +26,11 @@ export function resolveAgentPath(): string {
 	// In SEA mode, look for co-located agent binary
 	if (sea) {
 		const seaPath = resolveAgentBinaryPath();
-		console.log(`[local-agent] resolveAgentPath: SEA mode detected, resolveAgentBinaryPath=${seaPath}`);
 		if (seaPath) return seaPath;
 	}
 	// Dev mode fallback
 	const __dirname = dirname(fileURLToPath(import.meta.url));
 	const devPath = join(__dirname, "../../../agent/dist/main.js");
-	console.log(`[local-agent] resolveAgentPath: sea=${sea} devPath=${devPath} process.execPath=${process.execPath}`);
 	return devPath;
 }
 
@@ -76,20 +74,19 @@ export class LocalAgent extends AgentConnection {
 			? [this.agentPath, ["--stdio"]]
 			: [process.execPath, [this.agentPath, "--stdio"]];
 
-		console.log(`[local-agent] start: agentPath=${this.agentPath} isBinary=${isBinary} cmd=${cmd} args=${JSON.stringify(args)}`);
 
 		this.process = spawn(cmd, args, {
 			stdio: ["pipe", "pipe", "pipe"], // stdin=pipe, stdout=pipe, stderr=pipe (capture for logging)
 		});
 
-		console.log(`[local-agent] start: process spawned pid=${this.process.pid}`);
 
 		this.process.stdout?.on("data", (data: Buffer) => {
 			this.handleData(data);
 		});
 
 		this.process.stderr?.on("data", (data: Buffer) => {
-			console.log(`[local-agent] stderr: ${data.toString().trimEnd()}`);
+			process.stderr.write(`[agent] ${data.toString().trimEnd()}
+`);
 		});
 
 		if (this.process.stdin) {
@@ -97,16 +94,10 @@ export class LocalAgent extends AgentConnection {
 		}
 
 		this.process.on("error", (err) => {
-			console.log(`[local-agent] process error event: ${err instanceof Error ? err.stack : String(err)}`);
 			this.emit("error", err);
 		});
 
-		this.process.on("exit", (code, signal) => {
-			console.log(`[local-agent] process exit event: code=${code} signal=${signal}`);
-		});
-
 		this.process.on("close", (code) => {
-			console.log(`[local-agent] process close event: code=${code}`);
 			this.sendQueue.clear();
 			this.process = null;
 			this.emit("close", code);
@@ -114,12 +105,10 @@ export class LocalAgent extends AgentConnection {
 
 		return new Promise<void>((resolve, reject) => {
 			const timeout = setTimeout(() => {
-				console.log(`[local-agent] start: HELLO timeout after ${HELLO_TIMEOUT_MS}ms — agent did not send HELLO`);
 				reject(new Error("Agent HELLO timeout"));
 			}, HELLO_TIMEOUT_MS);
 
 			this.once("ready", () => {
-				console.log(`[local-agent] start: HELLO received — agent ready`);
 				clearTimeout(timeout);
 				resolve();
 			});

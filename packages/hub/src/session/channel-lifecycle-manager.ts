@@ -79,30 +79,19 @@ export class ChannelLifecycleManager {
 			resolvedElevated = false,
 			resolvedElevationMethod = undefined,
 		} = opts;
-		console.log(
-			`[channel-lifecycle] sendSpawnAndWait: entry — hostId=${hostId} requestId=${spawnMsg.requestId} shell=${spawnMsg.shell} agentConnected=${agent.connected}`,
-		);
 		agent.send(spawnMsg);
-		console.log(
-			`[channel-lifecycle] sendSpawnAndWait: SPAWN sent to agent, waiting for SPAWN_OK (timeout=${SPAWN_TIMEOUT_MS}ms)`,
-		);
 
 		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingRequests.delete(spawnMsg.requestId);
-				console.log(
-					`[channel-lifecycle] sendSpawnAndWait: TIMEOUT — no SPAWN_OK received within ${SPAWN_TIMEOUT_MS}ms for requestId=${spawnMsg.requestId}`,
-				);
 				reject(new Error("Agent SPAWN timeout"));
 			}, SPAWN_TIMEOUT_MS);
 
 			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				console.log(`[channel-lifecycle] sendSpawnAndWait: pendingRequest handler fired — incoming.type=${incoming.type} requestId=${spawnMsg.requestId}`);
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_OK received — channelId=${spawnOk.channelId}`);
 
 					const { channelId } = spawnOk;
 
@@ -165,7 +154,6 @@ export class ChannelLifecycleManager {
 					const spawnErr = incoming as import("@nexterm/shared").AgentSpawnErrMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_ERR received — code=${spawnErr.code} message=${spawnErr.message}`);
 
 					if (!suppressClientError) {
 						const errorMsg: ErrorMessage = {

@@ -1,9 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DatabaseManager } from "./storage/db.js";
-import { openTestDatabases } from "./storage/db.js";
-import { MetaDAL } from "./storage/meta.js";
 import {
 	discoverUnixShells,
 	discoverWindowsShells,
@@ -12,8 +9,10 @@ import {
 	parseCommandLine,
 	parseWindowsTerminalSettings,
 	probeWslDistributions,
-	seedShellProfiles,
 } from "./shell-discovery.js";
+import type { DatabaseManager } from "./storage/db.js";
+import { openTestDatabases } from "./storage/db.js";
+import { MetaDAL } from "./storage/meta.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +21,7 @@ vi.mock("node:fs", async (importOriginal) => {
 	return {
 		...actual,
 		existsSync: vi.fn(actual.existsSync),
+		readFileSync: vi.fn(actual.readFileSync),
 		readdirSync: vi.fn(actual.readdirSync),
 	};
 });
@@ -61,17 +61,15 @@ describe("parseCommandLine", () => {
 	});
 
 	it("splits an executable and args", () => {
-		expect(parseCommandLine("bash.exe --login -i")).toEqual([
-			"bash.exe",
-			"--login",
-			"-i",
-		]);
+		expect(parseCommandLine("bash.exe --login -i")).toEqual(["bash.exe", "--login", "-i"]);
 	});
 
 	it("handles a quoted path with spaces", () => {
-		expect(
-			parseCommandLine('"C:\\Program Files\\Git\\bin\\bash.exe" --login -i'),
-		).toEqual(["C:\\Program Files\\Git\\bin\\bash.exe", "--login", "-i"]);
+		expect(parseCommandLine('"C:\\Program Files\\Git\\bin\\bash.exe" --login -i')).toEqual([
+			"C:\\Program Files\\Git\\bin\\bash.exe",
+			"--login",
+			"-i",
+		]);
 	});
 
 	it("handles an absolute path without quotes", () => {
@@ -134,9 +132,7 @@ describe("parseWindowsTerminalSettings", () => {
 	});
 
 	it("returns empty array for empty profiles.list", () => {
-		expect(
-			parseWindowsTerminalSettings(JSON.stringify({ profiles: { list: [] } })),
-		).toEqual([]);
+		expect(parseWindowsTerminalSettings(JSON.stringify({ profiles: { list: [] } }))).toEqual([]);
 	});
 
 	it("extracts startingDirectory and icon", () => {
@@ -236,9 +232,7 @@ describe("importWindowsTerminalProfiles", () => {
 	});
 
 	it("sets supportedOs to windows for all imported profiles", () => {
-		importWindowsTerminalProfiles(dal, [
-			{ name: "PowerShell", commandline: "pwsh.exe" },
-		]);
+		importWindowsTerminalProfiles(dal, [{ name: "PowerShell", commandline: "pwsh.exe" }]);
 
 		const profiles = dal.listLaunchProfiles();
 		expect(profiles[0].supportedOs).toBe("windows");
@@ -286,7 +280,7 @@ describe("findWindowsTerminalSettingsPath", () => {
 		expect(result).toBe(unpackaged);
 	});
 
-	it("returns null when no settings.json is found", () => {
+	it("returns null when no settings.json is found", async () => {
 		mockExistsSync.mockReturnValue(false);
 		const { readdirSync } = vi.mocked(await import("node:fs"));
 		readdirSync.mockReturnValue([]);
@@ -356,9 +350,7 @@ describe("discoverUnixShells", () => {
 
 	it("includes /bin/bash and /bin/zsh when they exist", () => {
 		vi.stubEnv("SHELL", "");
-		mockExistsSync.mockImplementation(
-			(p) => p === "/bin/bash" || p === "/bin/zsh",
-		);
+		mockExistsSync.mockImplementation((p) => p === "/bin/bash" || p === "/bin/zsh");
 
 		const shells = discoverUnixShells();
 		const paths = shells.map((s) => s.shell);
@@ -384,82 +376,8 @@ describe("discoverUnixShells", () => {
 	});
 });
 
-// ─── seedShellProfiles ────────────────────────────────────────────────────────
-
-describe("seedShellProfiles", () => {
-	let dbs: DatabaseManager;
-	let dal: MetaDAL;
-
-	beforeEach(() => {
-		dbs = openTestDatabases();
-		dal = new MetaDAL(dbs.meta);
-	});
-
-	afterEach(() => {
-		dbs.close();
-		vi.unstubAllEnvs();
-		vi.mocked(existsSync).mockRestore();
-	});
-
-	it("returns zero when profiles already exist (idempotency)", async () => {
-		dal.createLaunchProfile(makeProfile({ name: "existing" }));
-
-		const result = await seedShellProfiles(dal);
-		expect(result.profilesCreated).toBe(0);
-		expect(result.profiles).toHaveLength(0);
-	});
-
-	it("creates profiles for discovered shells", async () => {
-		vi.stubEnv("SHELL", "/bin/bash");
-		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
-
-		const result = await seedShellProfiles(dal);
-
-		expect(result.profilesCreated).toBeGreaterThanOrEqual(1);
-		const profiles = dal.listLaunchProfiles();
-		expect(profiles.length).toBeGreaterThanOrEqual(1);
-		const bash = profiles.find((p) => p.shell === "/bin/bash");
-		expect(bash).toBeDefined();
-	});
-
-	it("returns zero when no shells are discovered", async () => {
-		vi.stubEnv("SHELL", "");
-		mockExistsSync.mockReturnValue(false);
-
-		const result = await seedShellProfiles(dal);
-		expect(result.profilesCreated).toBe(0);
-		expect(dal.listLaunchProfiles()).toHaveLength(0);
-	});
-
-	it("assigns sequential sort_order to created profiles", async () => {
-		vi.stubEnv("SHELL", "/bin/zsh");
-		mockExistsSync.mockImplementation(
-			(p) => p === "/bin/zsh" || p === "/bin/bash",
-		);
-
-		await seedShellProfiles(dal);
-
-		const profiles = dal.listLaunchProfiles();
-		expect(profiles.length).toBeGreaterThanOrEqual(2);
-		// Sort orders should be sequential starting at 0
-		const orders = profiles.map((p) => p.sortOrder).sort((a, b) => a - b);
-		expect(orders[0]).toBe(0);
-		expect(orders[1]).toBe(1);
-	});
-
-	it("sets correct mode and elevated defaults", async () => {
-		vi.stubEnv("SHELL", "/bin/bash");
-		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
-
-		await seedShellProfiles(dal);
-
-		const profiles = dal.listLaunchProfiles();
-		for (const p of profiles) {
-			expect(p.mode).toBe("shell");
-			expect(p.elevated).toBe(false);
-		}
-	});
-});
+// seedShellProfiles tests are in shell-discovery-seed.spec.ts
+// (separated because this file's global node:fs mock breaks DB migrations)
 
 // ─── discoverWindowsShells ────────────────────────────────────────────────────
 
@@ -490,13 +408,7 @@ describe("discoverWindowsShells", () => {
 	});
 
 	it("includes Windows PowerShell from System32 path when it exists", async () => {
-		const ps1Path = join(
-			"C:\\Windows",
-			"System32",
-			"WindowsPowerShell",
-			"v1.0",
-			"powershell.exe",
-		);
+		const ps1Path = join("C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 		mockExistsSync.mockImplementation((p) => p === ps1Path);
 		const { execFileSync } = vi.mocked(await import("node:child_process"));
 		execFileSync.mockImplementation(() => {
