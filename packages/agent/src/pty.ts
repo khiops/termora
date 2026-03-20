@@ -1,5 +1,6 @@
 import { generateId } from "@nexterm/shared";
 import type { SnapshotData } from "@nexterm/shared";
+import { detectSea } from "@nexterm/shared/dist/sea-addon-loader.js";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import { HeadlessTerminal } from "./headless.js";
@@ -34,6 +35,8 @@ export class PtyManager {
 			rows: options.rows,
 			cwd: options.cwd,
 			env: { ...process.env, ...options.env } as Record<string, string>,
+			// SEA binaries: force winpty (conpty.node embedding not yet validated on Windows)
+			...(detectSea() ? { useConpty: false } : {}),
 		});
 
 		const headless = new HeadlessTerminal(options.cols, options.rows, options.scrollback);
