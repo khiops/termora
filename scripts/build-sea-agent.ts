@@ -62,8 +62,13 @@ function assign(target) {
 exports.assign = assign;
 
 function loadNativeModule(name) {
-  // SEA mode: pty.node was dlopen'd at startup and its exports are in __seaPtyExports.
-  if (typeof __seaPtyExports !== 'undefined' && __seaPtyExports) {
+  // SEA mode: native addons were dlopen'd at startup.
+  // node-pty calls loadNativeModule('pty') for winpty and loadNativeModule('conpty') for conpty.
+  // Return the right exports based on which module is requested.
+  if (typeof __seaConptyExports !== 'undefined' && __seaConptyExports && name === 'conpty') {
+    return { dir: '__sea__', module: __seaConptyExports };
+  }
+  if (typeof __seaPtyExports !== 'undefined' && __seaPtyExports && name === 'pty') {
     return { dir: '__sea__', module: __seaPtyExports };
   }
   // Normal Node.js mode: search relative paths as usual.
@@ -123,6 +128,7 @@ function importMetaShimPlugin(): Plugin {
 const SEA_BOOTSTRAP_BANNER = `
 // ── SEA native addon bootstrap ────────────────────────────────────────────────
 var __seaPtyExports;
+var __seaConptyExports;
 (function __seaBootstrap() {
   var _sea;
   try { _sea = require('node:sea'); } catch (_) {}
@@ -198,6 +204,31 @@ var __seaPtyExports;
     process.exit(1);
   }
   __seaPtyExports = _ptyMod.exports;
+
+  // Extract and dlopen conpty.node (Windows 10+ ConPTY API). Non-fatal —
+  // the asset is absent on non-Windows builds or when the CI runner doesn't
+  // have it; node-pty will fall back to winpty in that case.
+  if (process.platform === 'win32') {
+    try {
+      var _conptyPath = _path.join(_cacheDir, 'conpty.node');
+      var _cBlob = _sea.getRawAsset('conpty.node');
+      var _cData = Buffer.from(_cBlob);
+      var _cWrite = true;
+      if (_fs.existsSync(_conptyPath)) {
+        try { if (_fs.statSync(_conptyPath).size === _cData.byteLength) _cWrite = false; }
+        catch (_) {}
+      }
+      if (_cWrite) {
+        _fs.mkdirSync(_cacheDir, { recursive: true });
+        _fs.writeFileSync(_conptyPath, _cData, { mode: 0o755 });
+      }
+      var _conptyMod = { id: _conptyPath, filename: _conptyPath, loaded: true, exports: {} };
+      process.dlopen(_conptyMod, _conptyPath);
+      __seaConptyExports = _conptyMod.exports;
+    } catch (err) {
+      process.stderr.write('[nexterm-agent] warn: conpty.node not available, falling back to winpty: ' + err + '\\n');
+    }
+  }
 })();
 // ── end SEA bootstrap ─────────────────────────────────────────────────────────
 `.trim();

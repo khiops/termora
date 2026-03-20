@@ -54,10 +54,31 @@ function locatePtyNode(): string {
 	}
 
 	throw new Error(
-		`[package-sea-agent] node-pty addon not found.\n` +
-			`  Checked:\n${candidates.map((c) => `    ${c}`).join("\n")}\n` +
-			`  Run \`pnpm install\` to build native addons first.`,
+		`[package-sea-agent] node-pty addon not found.\n  Checked:\n${candidates.map((c) => `    ${c}`).join("\n")}\n  Run \`pnpm install\` to build native addons first.`,
 	);
+}
+
+/** Locate conpty.node from node-pty (Windows only).
+ *  Returns undefined when not found — absence is non-fatal (falls back to winpty). */
+function locateConptyNode(): string | undefined {
+	if (process.platform !== "win32") return undefined;
+
+	const ptyBase = join(ROOT, "packages", "agent", "node_modules", "node-pty");
+	const rootPtyBase = join(ROOT, "node_modules", "node-pty");
+
+	const candidates = [
+		join(ptyBase, "build", "Release", "conpty.node"),
+		join(ptyBase, "prebuilds", prebuildDir(), "conpty.node"),
+		join(rootPtyBase, "build", "Release", "conpty.node"),
+		join(rootPtyBase, "prebuilds", prebuildDir(), "conpty.node"),
+	];
+
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) {
+			return candidate;
+		}
+	}
+	return undefined;
 }
 
 /** Locate winpty DLL and agent from node-pty (Windows only).
@@ -117,6 +138,7 @@ async function main(): Promise<void> {
 	console.log("[package-sea-agent] step 2/2: SEA binary packaging");
 
 	const ptyNodePath = locatePtyNode();
+	const conptyNodePath = locateConptyNode();
 	const version = readAgentVersion();
 	const winpty = locateWinptyFiles();
 
@@ -133,6 +155,14 @@ async function main(): Promise<void> {
 	if (winpty.agent) {
 		nativeAddons["winpty-agent.exe"] = winpty.agent;
 		console.log(`[package-sea-agent] winpty-agent.exe: ${winpty.agent}`);
+	}
+	if (conptyNodePath) {
+		nativeAddons["conpty.node"] = conptyNodePath;
+		console.log(`[package-sea-agent] conpty.node: ${conptyNodePath}`);
+	} else if (process.platform === "win32") {
+		console.log(
+			"[package-sea-agent] conpty.node not found — embedding winpty only (conpty unavailable)",
+		);
 	}
 
 	const outputBinary = join(ROOT, "dist", "sea", `nexterm-agent${EXE_EXT}`);

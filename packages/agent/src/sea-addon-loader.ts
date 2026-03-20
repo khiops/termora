@@ -35,6 +35,9 @@ const SEA_ADDON_ASSETS: readonly string[] = [
 	// winpty files must be extracted BEFORE pty.node (it depends on them)
 	...(process.platform === "win32" ? ["winpty.dll", "winpty-agent.exe"] : []),
 	"pty.node",
+	// conpty.node: modern ConPTY API on Windows 10+. Non-fatal if absent
+	// (older Windows or non-Windows builds won't have it embedded).
+	...(process.platform === "win32" ? ["conpty.node"] : []),
 ] as const;
 
 /**
