@@ -3,6 +3,7 @@ import type { AgentConnection } from "./agent-connection.js";
 const SNAPSHOT_IDLE_MS = 3_000; // 3s idle trigger
 const SNAPSHOT_FORCED_MS = 5_000; // 5s forced trigger
 const DEFAULT_MAX_CONCURRENT_SNAPSHOTS = 4;
+const SNAPSHOT_TIMEOUT_MS = 5_000; // 5s timeout — free slot if agent never responds
 
 interface ChannelTimers {
 	lastOutputAt: number;
@@ -16,6 +17,11 @@ export class SnapshotScheduler {
 	/** Number of snapshots currently in-flight (awaiting SNAPSHOT_RES) */
 	private _inFlightSnapshots = 0;
 	private _maxConcurrentSnapshots: number;
+	/**
+	 * Per-channel timeout handles for in-flight snapshot requests.
+	 * Cancelled when onSnapshotResponse fires; fires to free the slot on hang.
+	 */
+	private _snapshotTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
 	constructor(
 		private getAgent: (channelId: string) => AgentConnection | undefined,
@@ -78,6 +84,10 @@ export class SnapshotScheduler {
 		for (const channelId of this.channels.keys()) {
 			this.untrackChannel(channelId);
 		}
+		for (const t of this._snapshotTimeouts.values()) {
+			clearTimeout(t);
+		}
+		this._snapshotTimeouts.clear();
 	}
 
 	private _onIdleTimeout(channelId: string): void {
@@ -95,9 +105,14 @@ export class SnapshotScheduler {
 	 * Called when a SNAPSHOT_RES is received for a channel.
 	 * Decrements the in-flight counter so the concurrency slot is freed.
 	 */
-	onSnapshotResponse(_channelId: string): void {
+	onSnapshotResponse(channelId: string): void {
 		if (this._inFlightSnapshots > 0) {
 			this._inFlightSnapshots--;
+		}
+		const t = this._snapshotTimeouts.get(channelId);
+		if (t !== undefined) {
+			clearTimeout(t);
+			this._snapshotTimeouts.delete(channelId);
 		}
 	}
 
@@ -124,5 +139,23 @@ export class SnapshotScheduler {
 
 		this._inFlightSnapshots++;
 		agent.send({ type: "SNAPSHOT_REQ", channelId });
+
+		// Safety valve: free the slot if the agent never responds (e.g. winpty hang)
+		const existing = this._snapshotTimeouts.get(channelId);
+		if (existing !== undefined) {
+			clearTimeout(existing);
+		}
+		this._snapshotTimeouts.set(
+			channelId,
+			setTimeout(() => {
+				this._snapshotTimeouts.delete(channelId);
+				if (this._inFlightSnapshots > 0) {
+					this._inFlightSnapshots--;
+				}
+				console.warn(
+					`[snapshot-scheduler] snapshot timeout for channel ${channelId} after ${SNAPSHOT_TIMEOUT_MS}ms`,
+				);
+			}, SNAPSHOT_TIMEOUT_MS),
+		);
 	}
 }

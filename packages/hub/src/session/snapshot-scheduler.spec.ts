@@ -302,7 +302,95 @@ describe("SnapshotScheduler", () => {
 		});
 	});
 
-	// ── 9. SNAPSHOT_RES → stored in spool.db + cache_index updated ───────────
+	// ── 9. Snapshot timeout — slot freed when agent never responds ───────────
+
+	describe("snapshot timeout", () => {
+		it("frees the in-flight slot after 5s if no SNAPSHOT_RES arrives", () => {
+			const maxConcurrent = 1;
+			const localScheduler = new SnapshotScheduler(
+				() => agent as unknown as AgentConnection,
+				maxConcurrent,
+			);
+
+			localScheduler.trackChannel("ch-a");
+
+			// Trigger snapshot — occupies the one slot
+			vi.advanceTimersByTime(3_001);
+			expect(localScheduler.inFlightSnapshots).toBe(1);
+
+			// No response arrives — advance past the 5s timeout
+			vi.advanceTimersByTime(5_001);
+			expect(localScheduler.inFlightSnapshots).toBe(0);
+
+			localScheduler.shutdown();
+		});
+
+		it("does not double-decrement when timeout fires after response already received", () => {
+			const maxConcurrent = 1;
+			const localScheduler = new SnapshotScheduler(
+				() => agent as unknown as AgentConnection,
+				maxConcurrent,
+			);
+
+			localScheduler.trackChannel("ch-a");
+			vi.advanceTimersByTime(3_001);
+			expect(localScheduler.inFlightSnapshots).toBe(1);
+
+			// Response arrives normally — clears the pending timeout
+			localScheduler.onSnapshotResponse("ch-a");
+			expect(localScheduler.inFlightSnapshots).toBe(0);
+
+			// Shutdown immediately so the forced-interval cannot fire a new snapshot
+			localScheduler.shutdown();
+
+			// Advance past the original timeout deadline — counter must NOT go negative
+			// (shutdown cleared the timeout handle, so nothing fires)
+			vi.advanceTimersByTime(5_001);
+			expect(localScheduler.inFlightSnapshots).toBe(0);
+		});
+
+		it("timeout warning is logged when slot is reclaimed", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const maxConcurrent = 1;
+			const localScheduler = new SnapshotScheduler(
+				() => agent as unknown as AgentConnection,
+				maxConcurrent,
+			);
+
+			localScheduler.trackChannel("ch-a");
+			vi.advanceTimersByTime(3_001); // trigger snapshot
+			vi.advanceTimersByTime(5_001); // trigger timeout
+
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[snapshot-scheduler] snapshot timeout for channel ch-a"),
+			);
+
+			warnSpy.mockRestore();
+			localScheduler.shutdown();
+		});
+
+		it("shutdown clears pending snapshot timeouts without firing them", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const localScheduler = new SnapshotScheduler(() => agent as unknown as AgentConnection);
+
+			localScheduler.trackChannel("ch-a");
+			vi.advanceTimersByTime(3_001); // snapshot in-flight, timeout armed
+
+			// Shutdown before timeout fires
+			localScheduler.shutdown();
+
+			// Advance well past the timeout — warn must NOT be called by the timeout
+			vi.advanceTimersByTime(10_000);
+			const timeoutWarns = warnSpy.mock.calls.filter((args) =>
+				String(args[0]).includes("snapshot timeout"),
+			);
+			expect(timeoutWarns).toHaveLength(0);
+
+			warnSpy.mockRestore();
+		});
+	});
+
+	// ── 10. SNAPSHOT_RES → stored in spool.db + cache_index updated ──────────
 
 	describe("SNAPSHOT_RES storage (via MetaDAL + SpoolDAL)", () => {
 		it("insertChunk stores a snapshot chunk with kind=snapshot", () => {
