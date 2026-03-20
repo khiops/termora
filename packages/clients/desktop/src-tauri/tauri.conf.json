@@ -25,7 +25,7 @@
 			}
 		],
 		"security": {
-			"csp": "default-src 'self' http://localhost:4100 ws://localhost:4100 http://127.0.0.1:4100 ws://127.0.0.1:4100; connect-src 'self' http://localhost:4100 ws://localhost:4100 http://127.0.0.1:4100 ws://127.0.0.1:4100; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' http://localhost:4100 http://127.0.0.1:4100 data:"
+			"csp": null
 		}
 	},
 	"bundle": {
