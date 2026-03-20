@@ -57,7 +57,7 @@ let server: FastifyInstance;
 
 beforeEach(async () => {
 	dbs = openTestDatabases();
-	server = await createServer({ logger: false, dbManager: dbs });
+	server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true });
 });
 
 afterEach(async () => {

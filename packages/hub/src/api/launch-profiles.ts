@@ -1,6 +1,12 @@
+import { readFileSync } from "node:fs";
 import { toSnakeCase } from "@nexterm/shared";
 import type { LaunchProfile } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
+import {
+	findWindowsTerminalSettingsPath,
+	importWindowsTerminalProfiles,
+	parseWindowsTerminalSettings,
+} from "../shell-discovery.js";
 import type { MetaDAL } from "../storage/meta.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -165,8 +171,8 @@ export function registerLaunchProfileRoutes(server: FastifyInstance, metaDal: Me
 		async (request) => {
 			const rawLimit = request.query.limit;
 			const rawOffset = request.query.offset;
-			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
-			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+			const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? Number.parseInt(rawOffset, 10) : undefined;
 
 			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
 				return {
@@ -404,5 +410,50 @@ export function registerLaunchProfileRoutes(server: FastifyInstance, metaDal: Me
 			});
 		}
 		return reply.code(204).send();
+	});
+
+	// POST /api/launch-profiles/import-windows-terminal
+	// Import profiles from Windows Terminal's settings.json.
+	// Only available on Windows; returns 501 on other platforms.
+	server.post("/api/launch-profiles/import-windows-terminal", async (_request, reply) => {
+		if (process.platform !== "win32") {
+			return reply.code(501).send({
+				error: {
+					code: "NOT_SUPPORTED",
+					message: "Windows Terminal import is only available on Windows",
+				},
+			});
+		}
+
+		const settingsPath = findWindowsTerminalSettingsPath();
+		if (!settingsPath) {
+			return reply.code(404).send({
+				error: {
+					code: "NOT_FOUND",
+					message: "Windows Terminal settings.json not found",
+				},
+			});
+		}
+
+		let settingsJson: string;
+		try {
+			settingsJson = readFileSync(settingsPath, "utf8");
+		} catch {
+			return reply.code(500).send({
+				error: {
+					code: "READ_ERROR",
+					message: "Failed to read Windows Terminal settings.json",
+				},
+			});
+		}
+
+		const wtProfiles = parseWindowsTerminalSettings(settingsJson);
+		const result = importWindowsTerminalProfiles(metaDal, wtProfiles);
+
+		return reply.code(200).send({
+			imported: result.imported,
+			skipped: result.skipped,
+			profiles: result.profiles.map(profileToWire),
+		});
 	});
 }

@@ -91,7 +91,7 @@ let tempDir: string;
 beforeEach(async () => {
 	tempDir = await mkdtemp(join(tmpdir(), "nexterm-theme-api-test-"));
 	dbs = openTestDatabases();
-	server = await createServer({ logger: false, dbManager: dbs, configDir: tempDir });
+	server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tempDir });
 });
 
 afterEach(async () => {

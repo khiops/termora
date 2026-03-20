@@ -48,6 +48,7 @@ beforeEach(async () => {
 	server = await createServer({
 		logger: false,
 		dbManager: dbs,
+		skipShellDiscovery: true,
 		authToken: TEST_TOKEN,
 		authConfig: { tokenTtlDays: 90 },
 	});

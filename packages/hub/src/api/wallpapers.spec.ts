@@ -86,6 +86,7 @@ describe("Wallpaper endpoints", () => {
 		server = await createServer({
 			logger: false,
 			dbManager: dbs,
+			skipShellDiscovery: true,
 			authToken: TEST_TOKEN,
 			configDir,
 		});

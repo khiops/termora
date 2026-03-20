@@ -29,6 +29,7 @@ import {
 import type { AuthConfig } from "./config.js";
 import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
+import { seedShellProfiles } from "./shell-discovery.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
 import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js";
@@ -44,6 +45,7 @@ export interface ServerOptions {
 	authConfig?: AuthConfig; // override auth config (bypasses config.toml, useful for tests)
 	configDir?: string; // override config directory (defaults to getConfigDir())
 	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
+	skipShellDiscovery?: boolean; // disable auto-shell-seeding (useful for tests)
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -187,6 +189,25 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		if (wasNew) {
 			server.log.info("Created default local host");
 		}
+
+		// First-run: auto-detect and seed launch profiles from available shells.
+		// Runs async after startup so it never blocks the server from accepting connections.
+		// seedShellProfiles is idempotent — safe to call on every startup.
+		// Skipped when skipShellDiscovery is set (e.g. in tests).
+		if (!options?.skipShellDiscovery) {
+			void seedShellProfiles(metaDal).then((result) => {
+				if (result.profilesCreated > 0) {
+					server.log.info(
+						{
+							profilesCreated: result.profilesCreated,
+							shells: result.profiles.map((p) => p.shell),
+						},
+						"auto-detected and created launch profiles for available shells",
+					);
+				}
+			});
+		}
+
 		await sessionManager.startup();
 
 		await registerWsRoutes(

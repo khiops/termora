@@ -385,7 +385,10 @@ export class SessionManager {
 		const rows = msg.rows ?? 24;
 
 		// ── Launch profile resolution ─────────────────────────────────────────
-		let resolvedShell = msg.shell ?? process.env.SHELL ?? "/bin/sh";
+		let resolvedShell =
+			msg.shell ??
+			process.env.SHELL ??
+			(process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh");
 		let resolvedArgs = msg.args ?? [];
 		let resolvedCwd = msg.cwd ?? process.env.HOME ?? process.env.USERPROFILE ?? "/";
 		let resolvedEnv: Record<string, string> = msg.env ?? {};
