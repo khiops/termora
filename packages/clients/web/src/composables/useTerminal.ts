@@ -250,6 +250,10 @@ export function useTerminal(
 					msg.type === "ERROR" &&
 					(msg.code === "CHANNEL_NOT_FOUND" || msg.code === "CHANNEL_DEAD")
 				) {
+					// If the ERROR carries a channelId, only act when it matches the channel
+					// being attached — prevents a broadcast error for a different channel
+					// from incorrectly rejecting this pane's attach promise.
+					if (msg.channelId !== undefined && msg.channelId !== id) return;
 					clearTimeout(timer);
 					unsubOk();
 					unsubErr();
