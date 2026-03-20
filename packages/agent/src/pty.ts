@@ -3,6 +3,7 @@ import type { SnapshotData } from "@nexterm/shared";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import { HeadlessTerminal } from "./headless.js";
+import { detectSea } from "./sea-addon-loader.js";
 
 export interface PtyChannel {
 	id: string;
@@ -34,6 +35,11 @@ export class PtyManager {
 			rows: options.rows,
 			cwd: options.cwd,
 			env: { ...process.env, ...options.env } as Record<string, string>,
+			// SEA binary embeds only pty.node (winpty). Forcing useConpty: false
+			// ensures node-pty uses winpty's native module rather than defaulting
+			// to conpty on Windows 10+, which would call it with the wrong
+			// argument signature and produce PTY_SPAWN_FAILED.
+			...(detectSea() ? { useConpty: false } : {}),
 		});
 
 		const headless = new HeadlessTerminal(options.cols, options.rows, options.scrollback);
