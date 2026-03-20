@@ -10,6 +10,16 @@
 
 (All 25 items completed — archived → docs/historic/done-2026-03.md)
 
+### Desktop/Tauri (this session)
+- [x] ✅ [Desktop] Disable CSP — was blocking Tauri IPC + inline styles + xterm.js (2026-03-19)
+- [x] ✅ [Desktop] DevTools in release builds (gated on debug_assertions) (2026-03-19)
+- [x] ✅ [Hub] Agent path resolution for SEA/Tauri — use co-located binary (2026-03-19)
+- [x] ✅ [Agent] PTY conpty/winpty fix — embed conpty.node in SEA build (2026-03-19)
+- [x] ✅ [Hub] Default shell fallback — COMSPEC/cmd.exe on Windows (2026-03-19)
+- [x] ✅ [Web] WS race condition — filter ERROR listener by channelId in reattachChannel (2026-03-19)
+- [x] ✅ [Hub] Shell auto-discovery on first startup — Windows + Unix (/etc/shells) (2026-03-19)
+- [x] ✅ [Hub] Windows Terminal import — POST /api/launch-profiles/import-windows-terminal (2026-03-19)
+
 ### Other
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
@@ -18,7 +28,8 @@
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M
 - [ ] 💡 [Web] Settings panel search/filter (VS Code style) — Priority: M
-- [ ] 💡 [Web+Hub] Windows Terminal import in Add Host modal — Priority: M
+- [ ] 💡 [Desktop] Add permissive CSP for defense-in-depth (review F-004) — Priority: L
+- [ ] 💡 [Agent] Embed conpty.node in SEA for full conpty support (verify on Windows 10+) — Priority: M
 - [ ] 🔧 [Hub] API route tests for /api/host-groups CRUD + reorder — Priority: M
 - [ ] 🔧 [Hub] handleAuthPromptResponse: verify responding clientId matches prompt initiator — Priority: L
 - [ ] 🔧 [Hub] pendingAuthPrompts race condition: guard against concurrent SPAWN for same host — Priority: L

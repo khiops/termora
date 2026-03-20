@@ -4,6 +4,20 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DESKTOP-LAUNCH — Desktop/Tauri launch fixes + shell discovery (2026-03-19)
+
+- CSP disabled for Tauri webview (was blocking IPC + inline styles) — acceptable for local-first, permissive CSP deferred
+- DevTools gated on `#[cfg(debug_assertions)]` — release builds don't auto-open
+- Agent binary resolution: SEA mode uses co-located binary via `resolveAgentBinaryPath()`, dev mode uses `../../../agent/dist/main.js`
+- PTY on Windows SEA: embed both `pty.node` (winpty) AND `conpty.node` (conpty) — node-pty auto-selects
+- Default shell: `process.env.COMSPEC ?? "cmd.exe"` on Windows, `process.env.SHELL ?? "/bin/sh"` on Unix
+- Shell discovery: parse `/etc/shells` on Unix (POSIX, works Linux+macOS), dedup by basename
+- Shell discovery Windows: probe PowerShell Core, Windows PowerShell, cmd.exe, Git Bash, WSL distros
+- Auto-seed launch profiles on first boot (idempotent, async non-blocking)
+- Windows Terminal import: parse `settings.json` from `%LOCALAPPDATA%\Microsoft\Windows Terminal\`
+
+---
+
 ## AUD-P0-SEC — P0 Security Audit Fixes: CORS allowlist, SSH TOFU, custom_command validation (2026-03-18)
 
 - CORS: configurable origin allowlist via [server] cors_origins in config.toml, wildcard port matching
