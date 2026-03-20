@@ -35,7 +35,18 @@ export interface ShellDiscoveryResult {
 export function discoverWindowsShells(): DiscoveredShell[] {
 	const shells: DiscoveredShell[] = [];
 
-	// PowerShell Core (pwsh.exe) — check PATH first, then common install locations
+	// Command Prompt (cmd.exe) — FIRST: always available, guaranteed compatible with winpty
+	// (pwsh.exe and powershell.exe may fail with winpty in SEA mode)
+	const cmdPath =
+		process.env.COMSPEC ?? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+	shells.push({
+		label: "Command Prompt",
+		shell: cmdPath,
+		supportedOs: "windows",
+		iconType: "auto",
+	});
+
+	// PowerShell Core (pwsh.exe) — requires conpty to work reliably
 	const pwshPaths = [
 		join(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell", "7", "pwsh.exe"),
 		join(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell", "pwsh.exe"),
@@ -51,7 +62,7 @@ export function discoverWindowsShells(): DiscoveredShell[] {
 		});
 	}
 
-	// Windows PowerShell (powershell.exe)
+	// Windows PowerShell (powershell.exe) — requires conpty to work reliably
 	const powershellFixed = join(
 		process.env.SystemRoot ?? "C:\\Windows",
 		"System32",
@@ -69,16 +80,6 @@ export function discoverWindowsShells(): DiscoveredShell[] {
 			iconType: "auto",
 		});
 	}
-
-	// Command Prompt (cmd.exe) — always available
-	const cmdPath =
-		process.env.COMSPEC ?? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-	shells.push({
-		label: "Command Prompt",
-		shell: cmdPath,
-		supportedOs: "windows",
-		iconType: "auto",
-	});
 
 	// Git Bash — check common install locations + PATH
 	const localAppData = process.env.LOCALAPPDATA ?? "";
