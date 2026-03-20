@@ -73,6 +73,17 @@ export function initSeaAddons(): void {
 
 	const cacheDir = getAddonCacheDir(version);
 
+	// On Windows, prepend the cache dir to PATH so that pty.node (loaded via
+	// process.dlopen) can find winpty.dll and winpty-agent.exe at runtime.
+	// Without this, the Windows DLL search order won't include the cache dir.
+	if (process.platform === "win32") {
+		const sep = ";";
+		const currentPath = process.env.PATH ?? "";
+		if (!currentPath.split(sep).includes(cacheDir)) {
+			process.env.PATH = `${cacheDir}${sep}${currentPath}`;
+		}
+	}
+
 	for (const assetName of SEA_ADDON_ASSETS) {
 		try {
 			if (assetName.endsWith(".node")) {
