@@ -217,6 +217,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Show the main window (hidden by default in config)
     if let Some(window) = app.get_webview_window("main") {
+        // Enable DevTools in release builds (requires "devtools" feature)
+        #[cfg(feature = "devtools")]
+        window.open_devtools();
         let _ = window.show();
         let _ = window.set_focus();
     }
