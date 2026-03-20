@@ -35,8 +35,7 @@ export class PtyManager {
 			rows: options.rows,
 			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 			env: { ...process.env, ...options.env } as Record<string, string>,
-			// SEA binaries: force winpty (conpty.node embedding not yet validated on Windows)
-			...(detectSea() ? { useConpty: false } : {}),
+			// Let node-pty auto-detect conpty vs winpty based on Windows version
 		});
 
 		const headless = new HeadlessTerminal(options.cols, options.rows, options.scrollback);

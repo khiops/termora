@@ -234,14 +234,20 @@ export class SessionManager {
 	// ─── WS message handlers ──────────────────────────────────────────────────
 
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
+		console.log(`[session-manager] handleSpawn: start — clientId=${clientId} hostId=${msg.hostId}`);
 		const client = this.ctx.clients.get(clientId);
 		if (!client) {
+			console.log(
+				`[session-manager] handleSpawn: client not found for clientId=${clientId}, returning null`,
+			);
 			return null;
 		}
 
 		const hostId = await this.agentMgr.resolveHostId(msg.hostId);
+		console.log(`[session-manager] handleSpawn: resolvedHostId=${hostId}`);
 		const host = this.ctx.metaDal.getHost(hostId);
 		if (!host) {
+			console.log(`[session-manager] handleSpawn: host NOT FOUND for hostId=${hostId}`);
 			const errorMsg: ErrorMessage = {
 				type: "ERROR",
 				code: "HOST_NOT_FOUND",
@@ -251,9 +257,16 @@ export class SessionManager {
 			return null;
 		}
 
+		console.log(
+			`[session-manager] handleSpawn: host found — type=${host.type} label=${host.label}`,
+		);
 		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
+		console.log(`[session-manager] handleSpawn: session id=${session.id} status=${session.status}`);
 
 		let agent = this.ctx.agents.get(hostId);
+		console.log(
+			`[session-manager] handleSpawn: existing agent connected=${agent?.connected ?? false}`,
+		);
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
 				const promptAuth = this.sshMgr.buildPromptAuth(client);
@@ -327,15 +340,32 @@ export class SessionManager {
 					agent = sshAgent;
 				}
 			} else {
+				console.log(
+					`[session-manager] handleSpawn: local host — trying connectDaemonAgent hostId=${hostId}`,
+				);
 				try {
 					agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
+					console.log(
+						`[session-manager] handleSpawn: connectDaemonAgent succeeded for hostId=${hostId}`,
+					);
 				} catch (daemonErr) {
+					console.log(
+						`[session-manager] handleSpawn: connectDaemonAgent FAILED (will fall back to LocalAgent): ${daemonErr instanceof Error ? daemonErr.message : String(daemonErr)}`,
+					);
 					const { LocalAgent, resolveAgentPath } = await import("./local-agent.js");
 					const agentPath = resolveAgentPath();
+					console.log(
+						`[session-manager] handleSpawn: resolvedAgentPath=${agentPath} process.execPath=${process.execPath}`,
+					);
 					const la = new LocalAgent(agentPath);
+					console.log(`[session-manager] handleSpawn: LocalAgent created, calling start()`);
 					try {
 						await la.start();
+						console.log(`[session-manager] handleSpawn: LocalAgent.start() succeeded`);
 					} catch (startErr) {
+						console.log(
+							`[session-manager] handleSpawn: LocalAgent.start() FAILED: ${startErr instanceof Error ? (startErr as Error).stack : String(startErr)}`,
+						);
 						throw startErr;
 					}
 					this.agentMgr.wireAgentEvents(hostId, session.id, la);
@@ -346,6 +376,9 @@ export class SessionManager {
 			}
 		}
 
+		console.log(
+			`[session-manager] handleSpawn: agent ready, building SPAWN message hostId=${hostId}`,
+		);
 		const requestId = generateId();
 		const cols = msg.cols ?? 80;
 		const rows = msg.rows ?? 24;
@@ -536,6 +569,9 @@ export class SessionManager {
 		}
 
 		// ── Non-elevated spawn ─────────────────────────────────────────────────
+		console.log(
+			`[session-manager] handleSpawn: sending SPAWN to agent (non-elevated) requestId=${baseSpawnMsg.requestId} shell=${baseSpawnMsg.shell}`,
+		);
 		const spawnResult = await this.lifecycle.sendSpawnAndWait({
 			agent,
 			spawnMsg: baseSpawnMsg,
@@ -551,6 +587,9 @@ export class SessionManager {
 			cols,
 			rows,
 		});
+		console.log(
+			`[session-manager] handleSpawn: sendSpawnAndWait returned channelId=${spawnResult.channelId} errCode=${spawnResult.errCode}`,
+		);
 		return spawnResult.channelId;
 	}
 

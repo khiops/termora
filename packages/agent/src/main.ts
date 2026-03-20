@@ -56,15 +56,21 @@ function setupDaemonLogging(): void {
 }
 
 function startDaemon(config: AgentConfig): void {
+	process.stderr.write(`[nexterm-agent] daemon starting, pid=${process.pid}\n`);
 	setupDaemonLogging();
 
 	const socketPath = getSocketPath(config.socketPath);
 	const server = new DaemonServer(socketPath, config);
 
-	server.listen().catch((err) => {
-		console.error("[nexterm-agent] failed to start daemon:", err);
-		process.exit(1);
-	});
+	server
+		.listen()
+		.then(() => {
+			process.stderr.write(`[nexterm-agent] daemon listening on ${socketPath}\n`);
+		})
+		.catch((err) => {
+			console.error("[nexterm-agent] failed to start daemon:", err);
+			process.exit(1);
+		});
 
 	const shutdown = (): void => {
 		server

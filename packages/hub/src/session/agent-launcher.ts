@@ -26,25 +26,31 @@ export async function connectOrLaunch(
 	agentBinaryPath?: string,
 ): Promise<NextermAgent> {
 	const agentPath = agentBinaryPath ?? resolveAgentPath();
+	console.log(`[agent-launcher] connectOrLaunch: socketPath=${socketPath} agentPath=${agentPath}`);
 
 	// Verify agent binary exists
 	try {
 		await access(agentPath);
+		console.log(`[agent-launcher] connectOrLaunch: agent binary accessible`);
 	} catch (err) {
+		console.log(`[agent-launcher] connectOrLaunch: agent binary NOT accessible: ${err instanceof Error ? err.message : String(err)}`);
 		throw new Error(`Agent binary not found: ${agentPath}`);
 	}
 
 	// Probe existing socket — EACCES propagates (different user's socket)
 	const alive = await probeSocket(socketPath);
+	console.log(`[agent-launcher] connectOrLaunch: socket probe result alive=${alive}`);
 
 	if (alive) {
 		// Agent already running — connect directly
+		console.log(`[agent-launcher] connectOrLaunch: daemon already running, connecting to socket`);
 		return NextermAgent.connectLocal(socketPath);
 	}
 
 	// Socket not alive — clean up stale file if present
 	try {
 		await unlink(socketPath);
+		console.log(`[agent-launcher] connectOrLaunch: removed stale socket file`);
 	} catch {
 		// ENOENT is fine — file doesn't exist
 	}
@@ -82,12 +88,15 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		? [agentPath, daemonArgs]
 		: [process.execPath, [agentPath, ...daemonArgs]];
 
+	console.log(`[agent-launcher] launchDaemon: cmd=${cmd} args=${JSON.stringify(args)} isBinary=${isBin}`);
 	const child = spawn(cmd, args, {
 		detached: true,
 		stdio: "ignore",
 	});
+	console.log(`[agent-launcher] launchDaemon: daemon spawned pid=${child.pid}`);
 
 	child.on?.("error", (err) => {
+		console.log(`[agent-launcher] launchDaemon: daemon process error: ${err instanceof Error ? err.stack : String(err)}`);
 	});
 
 	child.unref();

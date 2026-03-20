@@ -104,6 +104,8 @@ export async function registerWsRoutes(
 				return;
 			}
 
+			server.log.info({ msgType: msg.type }, "ws: received message");
+
 			// AUTH handshake — must be the first message when auth is enabled
 			if (!authenticated) {
 				if (msg.type !== "AUTH") {
@@ -193,6 +195,7 @@ export async function registerWsRoutes(
 					handleTestConnect(msg as TestConnectMessage, ctx);
 					break;
 				default:
+					server.log.warn({ msgType: msg.type, keys: Object.keys(msg) }, "ws: unhandled message type");
 					break;
 			}
 		});

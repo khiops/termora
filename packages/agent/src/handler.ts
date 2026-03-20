@@ -141,6 +141,7 @@ export class AgentHandler {
 	}
 
 	private handleSpawn(msg: AgentSpawnMessage): void {
+		console.error(`[agent] SPAWN received: shell=${msg.shell} cwd=${msg.cwd} cols=${msg.cols} rows=${msg.rows}`);
 		try {
 			// ── Variable expansion (agent-side, one-pass) ─────────────────────
 			// shell is NOT expanded (must be an exact path).
@@ -233,6 +234,8 @@ export class AgentHandler {
 				cols: msg.cols,
 				rows: msg.rows,
 			});
+			const ptyPid = this.ptyManager.getPid(channelId);
+			console.error(`[agent] PTY spawned: channelId=${channelId} pid=${ptyPid}`);
 
 			// Remove the ASKPASS temp script ~1 s after spawn so sudo has time to read it.
 			if (askpassCleanup !== null) {
@@ -249,6 +252,8 @@ export class AgentHandler {
 			this.setupOsc9Handler(channelId);
 
 			this.ptyManager.onExit(channelId, (exit) => {
+				const exitCode = exit.exitCode;
+				console.error(`[agent] PTY exited: channelId=${channelId} exitCode=${exitCode}`);
 				this.clearTitleDebounce(channelId);
 				const stopPolling = this.processTitleStoppers.get(channelId);
 				if (stopPolling) {
