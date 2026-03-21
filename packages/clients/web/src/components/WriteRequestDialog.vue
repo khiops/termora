@@ -5,7 +5,7 @@
 				<h3 id="wrd-title" class="wrd-title">Write Access Request</h3>
 				<p class="wrd-body">
 					Client <code class="wrd-client-id">{{ request.fromClientId }}</code> is requesting
-					write access to channel <code class="wrd-channel-id">{{ shortChannel }}</code>.
+					write access to channel <code class="wrd-channel-id">{{ channelLabel }}</code>.
 				</p>
 
 				<div class="wrd-countdown-wrap" :title="`Auto-deny in ${secondsLeft}s`">
@@ -29,19 +29,23 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from "vue";
 import { useWriteLockStore } from "../stores/writelock.js";
+import { useChannelsStore } from "../stores/channels.js";
 
 const AUTO_DENY_SECS = 30;
 
 const writeLockStore = useWriteLockStore();
+const channelsStore = useChannelsStore();
 
 const request = computed(() => writeLockStore.incomingRequest);
 
 const secondsLeft = ref(AUTO_DENY_SECS);
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-const shortChannel = computed(() =>
-	request.value ? request.value.channelId.slice(-8) : "",
-);
+const channelLabel = computed(() => {
+	if (!request.value) return "";
+	const ch = channelsStore.channels.find((c) => c.id === request.value!.channelId);
+	return ch?.displayTitle ?? ch?.title ?? request.value.channelId.slice(-8);
+});
 
 function startCountdown(): void {
 	clearCountdownTimer();
