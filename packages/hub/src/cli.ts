@@ -277,7 +277,9 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	const server = await createServer({ port, authToken, dbManager });
 	const address = await startServer(server, { port });
 
-	persistRuntime({ pid: process.pid, port, started_at: new Date().toISOString() });
+	// Extract actual port (may differ from requested due to zero_conf)
+	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
+	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
 	console.log(`nexterm hub listening on ${address} (build: ${BUILD_HASH})`);
 	console.log(`Config dir : ${configDir}`);
@@ -286,7 +288,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	// Open browser if requested via --open flag or NEXTERM_OPEN env (set by daemon spawner)
 	const shouldOpen = args.open === true || process.env.NEXTERM_OPEN === "1";
 	if (shouldOpen) {
-		const url = `http://127.0.0.1:${port}`;
+		const url = `http://127.0.0.1:${actualPort}`;
 		console.log(`Opening browser: ${url}`);
 		openBrowser(url);
 	}

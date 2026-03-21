@@ -19,14 +19,18 @@ async function main() {
 	const server = await createServer({ port, authToken, dbManager });
 	const address = await startServer(server, { port });
 
-	persistRuntime({ pid: process.pid, port, started_at: new Date().toISOString() });
+	// Extract the actual port from the listen address (may differ from
+	// requested port due to zero_conf auto-increment on EADDRINUSE).
+	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
+
+	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
 	console.log(`nexterm hub listening on ${address}`);
 	console.log(`Auth token in: ${configDir}/auth.json`);
 
 	// Open browser if requested via NEXTERM_OPEN env (set by CLI daemon spawner)
 	if (process.env.NEXTERM_OPEN === "1") {
-		openBrowser(`http://127.0.0.1:${port}`);
+		openBrowser(`http://127.0.0.1:${actualPort}`);
 	}
 
 	const shutdown = async () => {
