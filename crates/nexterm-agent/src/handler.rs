@@ -14,7 +14,6 @@ use crate::shell;
 use async_xpty::PtySize;
 
 /// Commands sent from the main task to a per-channel PTY reader task.
-/// Commands sent from the main task to a per-channel PTY reader task.
 pub(crate) enum ChannelCommand {
 	/// Request a snapshot; reply is sent on the oneshot channel.
 	Snapshot(oneshot::Sender<SnapshotInfo>),
@@ -129,8 +128,8 @@ pub(crate) fn build_hello() -> AgentToHub {
 			"snapshot".into(),
 			"launch-profiles".into(),
 		],
-		available_shells: Some(crate::shell::detect_available_shells()),
-		default_shell: Some(crate::shell::get_default_shell()),
+		available_shells: Some(shell::detect_available_shells()),
+		default_shell: Some(shell::get_default_shell()),
 	}
 }
 
@@ -333,7 +332,7 @@ pub(crate) async fn handle_message(
 		}
 
 		HubToAgent::Error { code, message, channel_id } => {
-			if code == "INVALID_MESSAGE" {
+			if code == error_codes::INVALID_MESSAGE {
 				// Unknown message type from FrameReader → send ERROR back to hub
 				send_frame(&frame_tx, &AgentToHub::Error {
 					code,
@@ -428,12 +427,12 @@ async fn handle_spawn(
 						cleanup,
 					)
 				}
-				Err(e) if e.to_string() == "ELEVATION_PASSWORD_REQUIRED" => {
+				Err(e) if e.to_string() == error_codes::ELEVATION_PASSWORD_REQUIRED => {
 					send_frame(
 						&frame_tx,
 						&AgentToHub::SpawnErr {
 							request_id,
-							code: "ELEVATION_PASSWORD_REQUIRED".into(),
+							code: error_codes::ELEVATION_PASSWORD_REQUIRED.into(),
 							message: e.to_string(),
 						},
 					)?;

@@ -11,7 +11,6 @@ use crate::framing::{encode_frame, FrameReader};
 use crate::handler::{handle_message, iso_now, FrameSender, SnapshotSenders};
 use crate::protocol::AgentToHub;
 use crate::pty::PtyManager;
-use crate::shell;
 
 const BIND_RETRY_MAX: u32 = 3;
 const BIND_RETRY_DELAY_MS: u64 = 300;

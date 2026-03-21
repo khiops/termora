@@ -58,6 +58,7 @@ impl PtyManager {
 		Ok((id, pid))
 	}
 
+	#[allow(dead_code)] // Used in tests
 	pub fn get_mut(&mut self, channel_id: &str) -> Option<&mut PtyChannel> {
 		self.channels.get_mut(channel_id)
 	}
@@ -66,10 +67,12 @@ impl PtyManager {
 		self.channels.remove(channel_id)
 	}
 
+	#[allow(dead_code)] // Used in tests
 	pub fn contains(&self, channel_id: &str) -> bool {
 		self.channels.contains_key(channel_id)
 	}
 
+	#[allow(dead_code)] // Used in tests
 	pub fn channel_ids(&self) -> Vec<String> {
 		self.channels.keys().cloned().collect()
 	}
