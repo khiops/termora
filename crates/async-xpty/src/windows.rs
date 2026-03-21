@@ -32,6 +32,7 @@ use tokio::task;
 use windows_sys::Win32::Foundation::{
 	CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK,
 };
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
 	ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
@@ -138,10 +139,8 @@ pub struct WinPtyProcess {
 	/// The child process ID.
 	process_id: u32,
 	/// Shared receiver so `reader()` can be called multiple times.
-	/// Each `WinPtyReader` wraps the same `Arc<Mutex<Receiver>>`.
 	output_rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<io::Result<Vec<u8>>>>>,
-	/// Cloneable sender for the stdin channel — each `writer()` call clones it.
-	/// `mpsc::Sender` is `Clone` so multiple writers share the same pipe.
+	/// Cloneable sender for the stdin channel.
 	input_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
 
@@ -367,8 +366,13 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	//   hStdinWrite → parent writes here
 	let mut stdin_read: HANDLE = INVALID_HANDLE_VALUE;
 	let mut stdin_write: HANDLE = INVALID_HANDLE_VALUE;
+	let sa = SECURITY_ATTRIBUTES {
+		nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+		lpSecurityDescriptor: std::ptr::null_mut(),
+		bInheritHandle: 1, // TRUE — required for ConPTY
+	};
 	let ok = unsafe {
-		CreatePipe(&mut stdin_read, &mut stdin_write, std::ptr::null(), 0)
+		CreatePipe(&mut stdin_read, &mut stdin_write, &sa, 0)
 	};
 	if ok == 0 {
 		return Err(io::Error::last_os_error());
@@ -383,7 +387,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	let mut stdout_read: HANDLE = INVALID_HANDLE_VALUE;
 	let mut stdout_write: HANDLE = INVALID_HANDLE_VALUE;
 	let ok = unsafe {
-		CreatePipe(&mut stdout_read, &mut stdout_write, std::ptr::null(), 0)
+		CreatePipe(&mut stdout_read, &mut stdout_write, &sa, 0)
 	};
 	if ok == 0 {
 		return Err(io::Error::last_os_error());
@@ -394,12 +398,15 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	// ── 3. CreatePseudoConsole ────────────────────────────────────────────────
 	let size = COORD { X: cmd.size.cols as i16, Y: cmd.size.rows as i16 };
 	let mut hpc: HPCON = 0;
+	// PSEUDOCONSOLE_INHERIT_CURSOR (1) skips the initial cursor position
+	// query that causes deadlocks when no terminal emulator is responding.
+	const PSEUDOCONSOLE_INHERIT_CURSOR: u32 = 1;
 	let hr = unsafe {
 		CreatePseudoConsole(
 			size,
 			stdin_read.0,   // ConPTY reads from our stdin pipe
 			stdout_write.0, // ConPTY writes to our stdout pipe
-			0,
+			PSEUDOCONSOLE_INHERIT_CURSOR,
 			&mut hpc,
 		)
 	};
@@ -408,8 +415,8 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	}
 	let hpc = Arc::new(SendHpcon(hpc));
 
-	// The pipe ends owned by ConPTY (stdin_read, stdout_write) must be closed
-	// after CreatePseudoConsole — ConPTY has duplicated them internally.
+	// Close the ConPTY-side pipe ends. ConPTY has duplicated them internally
+	// (per Microsoft sample: "Close handles to PTY after creating pseudoconsole").
 	drop(stdin_read);
 	drop(stdout_write);
 
@@ -426,12 +433,15 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 		return Err(io::Error::last_os_error());
 	}
 
+	// Pass the HPCON value AS a pointer (not a pointer TO the value).
+	// C equivalent: UpdateProcThreadAttribute(..., hPC, sizeof(HPCON), ...)
+	// where hPC is passed by value as PVOID.
 	let ok = unsafe {
 		UpdateProcThreadAttribute(
 			attr_list,
 			0,
 			PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-			(&hpc.0 as *const HPCON).cast(),
+			hpc.0 as *const _,
 			std::mem::size_of::<HPCON>(),
 			std::ptr::null_mut(),
 			std::ptr::null_mut(),
@@ -556,8 +566,25 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	std::mem::forget(stdout_read);
 	std::mem::forget(stdin_write);
 
+	let process_id_for_log = pi.dwProcessId;
 	// Background thread: read from stdout pipe, detect DSR, send chunks.
 	task::spawn_blocking(move || {
+		eprintln!("[async-xpty] ConPTY read thread started, child PID={}", process_id_for_log);
+
+		// Pre-emptive DSR response: ConPTY may block all I/O until it receives
+		// a cursor position report. Send one immediately to unblock it.
+		let mut written: u32 = 0;
+		unsafe {
+			WriteFile(
+				usize_as_handle(stdin_write_for_dsr),
+				DSR_RESPONSE.as_ptr(),
+				DSR_RESPONSE.len() as u32,
+				&mut written,
+				std::ptr::null_mut(),
+			)
+		};
+		eprintln!("[async-xpty] Pre-emptive DSR response sent ({} bytes)", written);
+
 		let mut buf = vec![0u8; 4096];
 		loop {
 			let mut bytes_read: u32 = 0;
@@ -571,12 +598,14 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 				)
 			};
 			if ok == 0 || bytes_read == 0 {
-				// EOF or error — notify consumer and stop.
-				let _ = stdout_tx.blocking_send(Err(io::Error::last_os_error()));
+				let err = io::Error::last_os_error();
+				eprintln!("[async-xpty] ConPTY read: EOF/error (ok={}, bytes={}, err={})", ok, bytes_read, err);
+				let _ = stdout_tx.blocking_send(Err(err));
 				unsafe { CloseHandle(usize_as_handle(stdout_read_usize)) };
 				break;
 			}
 			let chunk = buf[..bytes_read as usize].to_vec();
+			eprintln!("[async-xpty] ConPTY read: {} bytes", bytes_read);
 
 			// DSR deadlock prevention: detect \x1b[6n and respond with \x1b[1;1R.
 			if contains_dsr(&chunk) {
@@ -593,10 +622,11 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 			}
 
 			if stdout_tx.blocking_send(Ok(chunk)).is_err() {
-				// Receiver dropped — stop reading.
+				eprintln!("[async-xpty] ConPTY read: receiver dropped, stopping");
 				unsafe { CloseHandle(usize_as_handle(stdout_read_usize)) };
 				break;
 			}
+			eprintln!("[async-xpty] ConPTY read: chunk sent to channel");
 		}
 	});
 
