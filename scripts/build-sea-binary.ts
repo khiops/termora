@@ -15,9 +15,9 @@
  *   7. Print final binary size.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, execSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,17 @@ export interface SeaBuildConfig {
 	useCodeCache?: boolean;
 	/** Disable the experimental SEA warning (default: true) */
 	disableExperimentalSEAWarning?: boolean;
+	/**
+	 * Target platform for cross-build.
+	 * When set to a platform different from the host (e.g. "win32" on Linux),
+	 * the builder downloads the target Node.js binary instead of copying the
+	 * local one. Supported: "linux", "win32", "darwin".
+	 */
+	targetPlatform?: string;
+	/** Target arch for cross-build (default: same as host). */
+	targetArch?: string;
+	/** Node.js version for cross-build target (default: current process.version). */
+	targetNodeVersion?: string;
 }
 
 /** The sentinel fuse string required by postject. */
@@ -91,6 +102,48 @@ export function buildSeaConfigJson(cfg: SeaBuildConfig, blobPath: string): Recor
 }
 
 /**
+ * Download a Node.js binary for a target platform (cross-build).
+ * Returns the path to the downloaded binary.
+ */
+function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir: string, nodeVersion?: string): string {
+	const version = nodeVersion ?? process.version; // e.g. "v22.14.0"
+	const platformMap: Record<string, string> = { win32: "win", linux: "linux", darwin: "darwin" };
+	const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
+	const plat = platformMap[targetPlatform] ?? targetPlatform;
+	const arch = archMap[targetArch] ?? targetArch;
+
+	const isWindows = targetPlatform === "win32";
+	const ext = isWindows ? "zip" : "tar.gz";
+	const dirName = `node-${version}-${plat}-${arch}`;
+	const fileName = `${dirName}.${ext}`;
+	const url = `https://nodejs.org/dist/${version}/${fileName}`;
+
+	const archivePath = join(destDir, fileName);
+	const nodeBinName = isWindows ? "node.exe" : "node";
+	const extractedBin = join(destDir, dirName, nodeBinName);
+
+	if (existsSync(extractedBin)) {
+		console.log(`[build-sea] cross-build: reusing cached ${extractedBin}`);
+		return extractedBin;
+	}
+
+	console.log(`[build-sea] cross-build: downloading ${url}`);
+	execSync(`curl -sSL "${url}" -o "${archivePath}"`, { stdio: "inherit" });
+
+	console.log(`[build-sea] cross-build: extracting ${fileName}`);
+	if (isWindows) {
+		// unzip on Linux to extract node.exe
+		execSync(`unzip -qo "${archivePath}" "${dirName}/${nodeBinName}" -d "${destDir}"`, { stdio: "inherit" });
+	} else {
+		execSync(`tar -xzf "${archivePath}" -C "${destDir}" "${dirName}/bin/${nodeBinName}"`, { stdio: "inherit" });
+	}
+
+	const finalPath = isWindows ? extractedBin : join(destDir, dirName, "bin", nodeBinName);
+	console.log(`[build-sea] cross-build: node binary at ${finalPath}`);
+	return finalPath;
+}
+
+/**
  * Full SEA binary build pipeline.
  *
  * @param cfg  Build configuration
@@ -121,14 +174,25 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 
 		// ------------------------------------------------------------------
 		// 3. Copy the Node binary to the output location
+		//    (or download target platform binary for cross-build)
 		// ------------------------------------------------------------------
-		console.log(`[build-sea] copying ${nodeBin} → ${cfg.outputBinary}`);
-		copyFileSync(nodeBin, cfg.outputBinary);
+		const targetPlat = cfg.targetPlatform ?? process.platform;
+		const targetArch = cfg.targetArch ?? process.arch;
+		const isCrossBuild = targetPlat !== process.platform || targetArch !== process.arch;
+
+		let sourceBin: string;
+		if (isCrossBuild) {
+			sourceBin = downloadNodeBinary(targetPlat, targetArch, tmpBase, cfg.targetNodeVersion);
+		} else {
+			sourceBin = nodeBin;
+		}
+		console.log(`[build-sea] copying ${sourceBin} → ${cfg.outputBinary}`);
+		copyFileSync(sourceBin, cfg.outputBinary);
 
 		// ------------------------------------------------------------------
 		// 4. macOS: strip codesign so postject can inject the blob
 		// ------------------------------------------------------------------
-		if (process.platform === "darwin") {
+		if (targetPlat === "darwin" && process.platform === "darwin") {
 			run("codesign", ["--remove-signature", cfg.outputBinary], "codesign strip");
 		}
 
@@ -143,7 +207,7 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 			"--sentinel-fuse",
 			SENTINEL_FUSE,
 		];
-		if (process.platform === "darwin") {
+		if (targetPlat === "darwin") {
 			postjectArgs.push("--macho-segment-name", "NODE_SEA");
 		}
 		run("npx", ["postject", ...postjectArgs], "postject inject");
@@ -151,7 +215,7 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 		// ------------------------------------------------------------------
 		// 6. chmod +x on Linux/macOS
 		// ------------------------------------------------------------------
-		if (process.platform !== "win32") {
+		if (targetPlat !== "win32") {
 			chmodSync(cfg.outputBinary, 0o755);
 		}
 

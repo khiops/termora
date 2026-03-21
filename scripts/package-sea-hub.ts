@@ -26,8 +26,14 @@ import { buildOptions } from "./build-sea-hub.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
+/** Parse --target-platform and --target-arch from CLI args. */
+const targetPlatformArg = process.argv.find((a) => a.startsWith("--target-platform="))?.split("=")[1];
+const targetArchArg = process.argv.find((a) => a.startsWith("--target-arch="))?.split("=")[1];
+const targetNodeVersionArg = process.argv.find((a) => a.startsWith("--node-version="))?.split("=")[1];
+const effectivePlatform = targetPlatformArg ?? process.platform;
+
 /** Binary extension — empty on Linux/macOS, .exe on Windows. */
-const EXE_EXT = process.platform === "win32" ? ".exe" : "";
+const EXE_EXT = effectivePlatform === "win32" ? ".exe" : "";
 
 /** Extension → MIME content-type map for web assets. */
 const CONTENT_TYPES: Record<string, string> = {
@@ -314,6 +320,9 @@ async function main(): Promise<void> {
 		},
 		useCodeCache: true,
 		disableExperimentalSEAWarning: true,
+		targetPlatform: targetPlatformArg,
+		targetArch: targetArchArg,
+		targetNodeVersion: targetNodeVersionArg,
 	};
 
 	await buildSeaBinary(seaCfg);
