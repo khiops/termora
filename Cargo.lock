@@ -278,6 +278,7 @@ dependencies = [
  "tracing-subscriber",
  "ulid",
  "vt100",
+ "windows-sys 0.59.0",
  "zeroize",
 ]
 

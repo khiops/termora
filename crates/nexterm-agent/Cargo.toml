@@ -20,6 +20,12 @@ ulid = "1"
 vt100 = "0.15"
 zeroize = { version = "1", features = ["derive"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 rmpv = { version = "1", features = ["with-serde"] }

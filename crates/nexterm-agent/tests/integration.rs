@@ -19,7 +19,10 @@ async fn spawn_agent() -> Child {
     Command::new(binary)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        // stderr must be inherited or actively drained — piping without reading
+        // fills the OS pipe buffer and blocks the agent's tracing subscriber,
+        // deadlocking the tokio runtime (especially on Windows with ConPTY).
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .expect("failed to spawn nexterm-agent binary")
 }
@@ -375,6 +378,79 @@ async fn test_multiple_heartbeats_in_order() {
             Some(ts.as_str()),
             "ts must match for heartbeat {i}"
         );
+    }
+
+    agent.kill().await.ok();
+}
+
+
+// ---------------------------------------------------------------------------
+// Windows ConPTY — verify no stdout leak
+// ---------------------------------------------------------------------------
+
+/// Verify that ConPTY child output doesn't leak onto the agent's stdout.
+///
+/// The bug: when the hub spawns the agent in --stdio mode and the agent spawns
+/// cmd.exe via ConPTY, the cmd.exe banner ("Microsoft Windows...") was leaking
+/// onto the agent's stdout pipe, corrupting the MessagePack protocol stream.
+/// The hub would see `Incoming frame too large: 1919117645` (ASCII "Micr").
+///
+/// The fix: `protect_stdio_handles()` clears HANDLE_FLAG_INHERIT on the agent's
+/// stdout/stderr before any ConPTY creation, preventing conhost.exe from
+/// inheriting the protocol pipe.
+#[cfg(windows)]
+#[tokio::test]
+async fn test_conpty_no_stdout_leak() {
+    let mut agent = spawn_agent().await;
+    let mut stdout = agent.stdout.take().unwrap();
+    let mut stdin = agent.stdin.take().unwrap();
+
+    // HELLO should always be valid.
+    let hello = read_frame_timeout(&mut stdout, 5).await;
+    assert_eq!(hello["type"].as_str(), Some("HELLO"));
+
+    // Spawn cmd.exe — triggers ConPTY creation internally.
+    let spawn_msg = msgmap(vec![
+        ("type", sv("SPAWN")),
+        ("request_id", sv("req-conpty")),
+        ("shell", sv("cmd.exe")),
+        ("cols", iv(80)),
+        ("rows", iv(24)),
+    ]);
+    write_frame(&mut stdin, &spawn_msg).await;
+
+    // ── PRIMARY ASSERTION ──────────────────────────────────────────────────
+    // The next frame MUST be SPAWN_OK — not raw ASCII "Microsoft Windows..."
+    // If the ConPTY stdout leak is present, read_frame_timeout panics because
+    // the first 4 bytes of "Micr" decode as length 1919117645 (> MAX_FRAME_SIZE).
+    let resp = read_frame_timeout(&mut stdout, 10).await;
+    assert_eq!(
+        resp["type"].as_str(),
+        Some("SPAWN_OK"),
+        "Expected SPAWN_OK but got {:?} — ConPTY output may have leaked onto stdout",
+        resp
+    );
+    assert!(
+        resp["channel_id"].as_str().is_some_and(|s| !s.is_empty()),
+        "SPAWN_OK must contain a non-empty channel_id"
+    );
+
+    // ── SECONDARY: verify all subsequent frames are valid protocol ──────
+    // Read a few frames to confirm no delayed corruption.
+    for i in 0..5 {
+        match tokio::time::timeout(Duration::from_secs(2), read_frame(&mut stdout)).await {
+            Ok(frame) => {
+                let ft = frame["type"].as_str().unwrap_or("(none)");
+                assert!(
+                    matches!(ft, "OUTPUT" | "TITLE_CHANGE" | "PROCESS_TITLE" | "BELL" | "NOTIFICATION" | "CHANNEL_EXIT"),
+                    "Frame {} has unexpected type {:?} — possible protocol corruption", i, ft
+                );
+                if ft == "CHANNEL_EXIT" {
+                    break;
+                }
+            }
+            Err(_) => break, // timeout — OK, no more frames
+        }
     }
 
     agent.kill().await.ok();

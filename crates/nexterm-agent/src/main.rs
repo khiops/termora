@@ -93,9 +93,40 @@ async fn main() -> std::io::Result<()> {
             ));
         }
     } else {
-        // Stdio mode
+        // Stdio mode — on Windows, prevent ConPTY children from inheriting
+        // our stdout pipe (which carries the MessagePack protocol stream).
+        #[cfg(windows)]
+        protect_stdio_handles();
+
         handler::run_stdio().await?;
     }
 
     Ok(())
 }
+
+
+/// Clear the INHERIT flag on stdout/stderr handles.
+///
+/// When the hub spawns us with stdio pipes, Node.js creates inheritable handles.
+/// `CreatePseudoConsole` internally spawns `conhost.exe` which inherits all
+/// inheritable handles from the calling process — including our stdout pipe.
+/// This causes ConPTY child output (e.g. cmd.exe banner) to leak onto our
+/// stdout, corrupting the MessagePack protocol stream.
+///
+/// Clearing `HANDLE_FLAG_INHERIT` on stdout/stderr before any ConPTY creation
+/// prevents conhost.exe from inheriting them.
+#[cfg(windows)]
+fn protect_stdio_handles() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+
+    unsafe {
+        for std_id in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            let handle = GetStdHandle(std_id);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
