@@ -9,7 +9,7 @@ keywords = ["pty", "terminal", "async", "tokio", "cross-platform"]
 categories = ["asynchronous", "os"]
 
 [dependencies]
-tokio = { version = "1", features = ["io-util", "rt", "net", "process", "signal", "time"] }
+tokio = { version = "1", features = ["io-util", "rt", "net", "process", "signal", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["term", "fs", "process", "signal"] }

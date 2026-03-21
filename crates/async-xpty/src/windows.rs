@@ -93,11 +93,26 @@ unsafe impl Sync for SendHpcon {}
 
 impl Drop for SendHpcon {
 	fn drop(&mut self) {
-		if !self.0.is_null() {
+		// HPCON is `isize` — use != 0 instead of is_null() (which only works on raw pointers).
+		if self.0 != 0 {
 			unsafe { ClosePseudoConsole(self.0) };
 		}
 	}
 }
+
+/// Cast a `HANDLE` (`*mut c_void`) to `usize` for cross-thread capture.
+///
+/// `usize` is `Send + 'static` unconditionally. We cast back to `HANDLE`
+/// inside the closure. Windows kernel objects are reference-counted by the
+/// kernel and safe to use from any thread.
+///
+/// # Safety
+/// The caller must ensure the handle remains valid for the lifetime of all
+/// threads that hold a copy of this value.
+#[inline(always)]
+fn handle_as_usize(h: HANDLE) -> usize { h as usize }
+#[inline(always)]
+fn usize_as_handle(v: usize) -> HANDLE { v as HANDLE }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared I/O state (Arc)
@@ -162,15 +177,17 @@ impl WinPtyProcess {
 
 	/// Wait for the child process to exit and return its [`ExitStatus`].
 	pub async fn wait(&mut self) -> io::Result<ExitStatus> {
-		let raw_handle = self.process_handle.0;
+		// Convert HANDLE (*mut c_void) to usize so the closure is Send + 'static.
+		let raw_handle = handle_as_usize(self.process_handle.0);
 		task::spawn_blocking(move || {
-			let wait_result = unsafe { WaitForSingleObject(raw_handle, INFINITE) };
+			let h = usize_as_handle(raw_handle);
+			let wait_result = unsafe { WaitForSingleObject(h, INFINITE) };
 			// WAIT_OBJECT_0 == 0; anything else is an error.
 			if wait_result != 0 {
 				return Err(io::Error::last_os_error());
 			}
 			let mut exit_code: u32 = 0;
-			let ok = unsafe { GetExitCodeProcess(raw_handle, &mut exit_code) };
+			let ok = unsafe { GetExitCodeProcess(h, &mut exit_code) };
 			if ok == 0 {
 				return Err(io::Error::last_os_error());
 			}
@@ -352,8 +369,12 @@ impl WinPtyProcess {
 		let (stdin_tx, mut stdin_rx) =
 			tokio::sync::mpsc::channel::<Vec<u8>>(64);
 
-		let stdout_read_handle = self.handles.stdout_read.0;
-		let stdin_write_handle = self.handles.stdin_write.0;
+		// Convert HANDLEs (*mut c_void) to usize so closures are Send + 'static.
+		// stdin_write is used by both the DSR-response path (reader closure) and
+		// the stdin write loop (second closure), so we keep two copies of the usize.
+		let stdout_read_handle = handle_as_usize(self.handles.stdout_read.0);
+		let stdin_write_for_dsr = handle_as_usize(self.handles.stdin_write.0);
+		let stdin_write_handle = handle_as_usize(self.handles.stdin_write.0);
 
 		// Background task: read from stdout pipe, detect DSR, send chunks.
 		task::spawn_blocking(move || {
@@ -362,7 +383,7 @@ impl WinPtyProcess {
 				let mut bytes_read: u32 = 0;
 				let ok = unsafe {
 					ReadFile(
-						stdout_read_handle,
+						usize_as_handle(stdout_read_handle),
 						buf.as_mut_ptr(),
 						buf.len() as u32,
 						&mut bytes_read,
@@ -382,7 +403,7 @@ impl WinPtyProcess {
 					let mut written: u32 = 0;
 					unsafe {
 						WriteFile(
-							stdin_write_handle,
+							usize_as_handle(stdin_write_for_dsr),
 							DSR_RESPONSE.as_ptr(),
 							DSR_RESPONSE.len() as u32,
 							&mut written,
@@ -405,7 +426,7 @@ impl WinPtyProcess {
 					let mut written: u32 = 0;
 					let ok = unsafe {
 						WriteFile(
-							stdin_write_handle,
+							usize_as_handle(stdin_write_handle),
 							data[offset..].as_ptr(),
 							(data.len() - offset) as u32,
 							&mut written,
@@ -489,17 +510,21 @@ impl tokio::io::AsyncWrite for WinChannelWriter {
 		cx: &mut std::task::Context<'_>,
 		buf: &[u8],
 	) -> std::task::Poll<io::Result<usize>> {
-		// Check if the channel has capacity.
-		match self.tx.poll_reserve(cx) {
-			std::task::Poll::Pending => std::task::Poll::Pending,
-			std::task::Poll::Ready(Err(_)) => std::task::Poll::Ready(Err(io::Error::new(
-				io::ErrorKind::BrokenPipe,
-				"stdin channel closed",
-			))),
-			std::task::Poll::Ready(Ok(permit)) => {
-				let len = buf.len();
-				permit.send(buf.to_vec());
-				std::task::Poll::Ready(Ok(len))
+		// `try_send` is non-blocking. If the channel is full we wake the waker
+		// immediately and return Pending so the runtime retries soon. The channel
+		// has capacity 64 and carries keyboard input chunks, so full is rare.
+		match self.tx.try_send(buf.to_vec()) {
+			Ok(()) => std::task::Poll::Ready(Ok(buf.len())),
+			Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+				// Wake immediately so the task is rescheduled.
+				cx.waker().wake_by_ref();
+				std::task::Poll::Pending
+			}
+			Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+				std::task::Poll::Ready(Err(io::Error::new(
+					io::ErrorKind::BrokenPipe,
+					"stdin channel closed",
+				)))
 			}
 		}
 	}
@@ -573,7 +598,8 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 
 	// ── 3. CreatePseudoConsole ────────────────────────────────────────────────
 	let size = COORD { X: cmd.size.cols as i16, Y: cmd.size.rows as i16 };
-	let mut hpc: HPCON = std::ptr::null_mut();
+	// HPCON is `isize` on all windows-sys targets — use 0 as the null sentinel.
+	let mut hpc: HPCON = 0;
 	let hr = unsafe {
 		CreatePseudoConsole(
 			size,
@@ -622,7 +648,9 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 			attr_list,
 			0,
 			PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-			hpc.0,
+			// lpvalue must be a pointer to the HPCON value, not the value itself.
+			// HPCON is `isize`, cast its address to `*const c_void`.
+			(&hpc.0 as *const HPCON).cast(),
 			std::mem::size_of::<HPCON>(),
 			std::ptr::null_mut(),
 			std::ptr::null_mut(),
