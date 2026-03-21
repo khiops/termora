@@ -418,7 +418,7 @@ async function onRestart(): Promise<void> {
 	if (chId !== null) {
 		const ok = await channelsStore.restartChannel(chId);
 		if (ok) {
-			const result = await reattachChannel(chId);
+			const result = await reattachChannel(chId, { preserveContent: true });
 			if (result.writeLockHolder) {
 				writeLockStore.handleWriteLock(chId, result.writeLockHolder);
 			}
@@ -874,7 +874,8 @@ function onDragEnd(): void {
 	align-items: center;
 	justify-content: center;
 	gap: 16px;
-	background: var(--nt-overlay-heavy);
+	background: rgba(0, 0, 0, 0.55);
+	backdrop-filter: blur(2px);
 	z-index: 10;
 }
 
@@ -918,7 +919,8 @@ function onDragEnd(): void {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: var(--nt-overlay-heavy);
+	background: rgba(0, 0, 0, 0.55);
+	backdrop-filter: blur(2px);
 	z-index: 10;
 	pointer-events: none;
 }

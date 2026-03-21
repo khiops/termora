@@ -206,7 +206,7 @@ export function useTerminal(
 	 * Dead channels are respawned by the hub under the same channel ID, so
 	 * the caller always uses the original ID after this returns.
 	 */
-	async function reattachChannel(id: string): Promise<{ writeLockHolder: string | null }> {
+	async function reattachChannel(id: string, opts?: { preserveContent?: boolean }): Promise<{ writeLockHolder: string | null }> {
 		// Clean up previous OUTPUT subscription
 		outputUnsubscribe?.();
 
@@ -265,7 +265,7 @@ export function useTerminal(
 		});
 
 		// Restore snapshot if present (channelId still unset → no RESIZE sent)
-		if (terminal.value && result.snapshot) {
+		if (terminal.value && result.snapshot && !opts?.preserveContent) {
 			terminal.value.reset();
 			const serialized = (result.snapshot as { serialized?: string }).serialized;
 			if (serialized) {
@@ -274,7 +274,7 @@ export function useTerminal(
 		}
 
 		// Replay tail chunks
-		if (terminal.value && result.tail.length > 0) {
+		if (terminal.value && result.tail.length > 0 && !opts?.preserveContent) {
 			for (const chunk of result.tail) {
 				const data = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk as ArrayBuffer);
 				terminal.value.write(data);
