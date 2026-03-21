@@ -187,17 +187,6 @@ impl PtyProcess {
 		return self.inner.kill();
 	}
 
-	/// On Windows: consume this `PtyProcess` and return a properly async
-	/// `(reader, writer)` pair backed by `spawn_blocking` threads.
-	///
-	/// On Unix this is not needed — use [`reader`](Self::reader) and
-	/// [`writer`](Self::writer) directly.
-	#[cfg(windows)]
-	pub fn into_async_io(
-		self,
-	) -> io::Result<(windows::WinChannelReader, windows::WinChannelWriter)> {
-		self.inner.into_async_io()
-	}
 }
 
 /// Async reader for the PTY master fd.
