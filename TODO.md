@@ -46,6 +46,7 @@
 
 ### Other
 - [ ] 💡 [Agent-RS] MessagePack alloc optimization — pool/arena if profiling shows overhead — Priority: L (from /adversarial, deferred: optimize only if measured)
+- [ ] 💡 [Web] Dead channel UX: show last snapshot behind exit overlay, restart resumes on same terminal (seamless) — Priority: H
 - [ ] 🟡 [All] Build versioning — git commit hash in /api/health, title bar, package.json — Priority: H
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
