@@ -1,0 +1,26 @@
+[package]
+name = "nexterm-agent"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nexterm-agent"
+path = "src/main.rs"
+
+[dependencies]
+async-xpty = { path = "../async-xpty" }
+tokio = { version = "1", features = ["full"] }
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ulid = "1"
+vt100 = "0.15"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+rmpv = { version = "1", features = ["with-serde"] }
+serde_json = "1"

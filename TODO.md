@@ -1,5 +1,29 @@
 # nexterm — Backlog
 
+## Active: Rust Agent Rewrite
+
+**Spec:** `docs/plans/rust-agent.md` | **Brief:** `docs/briefs/rust-agent.md`
+
+- [x] ✅ Block 1: async-xpty — Unix PTY (spawn, I/O, resize, exit) (2026-03-21)
+- [x] ✅ Block 2: async-xpty — Windows ConPTY + \x1b[6n fix (2026-03-21) — code only, Windows CI needed
+- [x] ✅ Block 3: nexterm-agent — Scaffold + framing + HELLO + shell detection (2026-03-21)
+- [x] ✅ Block 4: nexterm-agent — SPAWN + INPUT/OUTPUT/RESIZE + batching + var expansion (2026-03-21)
+- [x] ✅ Block 5: nexterm-agent — Terminal mirror (vt100) + snapshots + title/bell/notification (2026-03-21)
+- [x] ✅ Block 6: nexterm-agent — Process title polling (2026-03-21)
+- [x] ✅ Block 7: nexterm-agent — Elevation wrapping (2026-03-21)
+- [x] ✅ Block 8: nexterm-agent — Daemon mode (UDS, connection displacement, output buffer) (2026-03-21)
+- [x] ✅ Block 9: nexterm-agent — HEARTBEAT, ATTACH, backpressure, graceful shutdown (2026-03-21)
+- [x] ✅ Block 10: Integration tests + CI (2026-03-21)
+
+### Review findings (all resolved)
+- [x] ✅ F-001: ERROR frame on INPUT/RESIZE dead channel (2026-03-21)
+- [x] ✅ F-002: Unknown message → ERROR INVALID_MESSAGE, no crash (2026-03-21)
+- [x] ✅ F-003: Extract spawn_reader_task from handle_spawn (2026-03-21)
+- [x] ✅ F-004: DRY HELLO — build_hello() shared function (2026-03-21)
+- [x] ✅ F-005: Pre-build argv/envp before fork — POSIX safety (2026-03-21)
+- [x] ✅ F-006: XDG_RUNTIME_DIR for ASKPASS tmpdir (2026-03-21)
+- [x] ✅ F-007: Document Zeroizing gap in protocol.rs (2026-03-21)
+
 ## Recently Completed
 
 (Archived → docs/historic/done-2026-03.md)
@@ -21,6 +45,7 @@
 - [x] ✅ [Hub] Windows Terminal import — POST /api/launch-profiles/import-windows-terminal (2026-03-19)
 
 ### Other
+- [ ] 💡 [Agent-RS] MessagePack alloc optimization — pool/arena if profiling shows overhead — Priority: L (from /adversarial, deferred: optimize only if measured)
 - [ ] 🟡 [All] Build versioning — git commit hash in /api/health, title bar, package.json — Priority: H
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
