@@ -10,6 +10,7 @@
 import type {
 	AgentBellMessage,
 	AgentChannelStateMessage,
+	AgentLogMessage,
 	AgentNotificationMessage,
 	AgentProcessTitleMessage,
 	AgentSnapshotResMessage,
@@ -194,6 +195,13 @@ export class AgentConnectionManager {
 				this.ctx.chunker.untrackChannel(exitMsg.channelId);
 				this.broadcaster.clearTitleDebounce(exitMsg.channelId);
 				this.broadcaster.clearProcessTitleDebounce(exitMsg.channelId);
+				// Close and remove the channel logger on exit
+				const exitLogger = this.ctx.loggerRegistry?.get(exitMsg.channelId);
+				if (exitLogger) {
+					exitLogger.log("hub", "info", "channel exit", { exitCode: exitMsg.exitCode ?? null });
+					exitLogger.close();
+					this.ctx.loggerRegistry!.delete(exitMsg.channelId);
+				}
 			} else if (msg.type === "TITLE_CHANGE") {
 				this.broadcaster.handleTitleChange(msg as AgentTitleChangeMessage);
 			} else if (msg.type === "PROCESS_TITLE") {
@@ -207,6 +215,17 @@ export class AgentConnectionManager {
 				const notifMsg = msg as AgentNotificationMessage;
 				if (this.broadcaster.rateLimitCheck(this.ctx.notificationTimestamps, notifMsg.channelId, 5)) {
 					this.broadcaster.broadcastToChannel(notifMsg.channelId, notifMsg);
+				}
+			} else if ((msg as { type: string }).type === "LOG") {
+				const logMsg = msg as unknown as AgentLogMessage;
+				// Validate level before casting
+				const validLevels = ["trace", "debug", "info", "warn", "error"];
+				const level = (validLevels.includes(logMsg.level) ? logMsg.level : "info") as import("@nexterm/shared").LogConfig["level"];
+				const channelLogger = this.ctx.loggerRegistry?.get(logMsg.channelId);
+				if (channelLogger) {
+					channelLogger.log("agent", level, logMsg.msg);
+				} else {
+					this.ctx.hubLogger?.log(level, logMsg.msg, { channelId: logMsg.channelId, src: "agent" });
 				}
 			}
 		});

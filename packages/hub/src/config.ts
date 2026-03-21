@@ -32,6 +32,7 @@ import type {
 	ElevationConfig,
 	ElevationMethod,
 	LayoutConfig,
+	LogConfig,
 	PanesConfig,
 	SearchConfig,
 	StartupConfig,
@@ -610,6 +611,48 @@ export function extractAuthConfig(parsed: TOML.JsonMap): AuthConfig {
 	return config;
 }
 
+
+// ─── Logging config ───────────────────────────────────────────────────────────
+
+export const DEFAULT_LOG_CONFIG: LogConfig = {
+	level: "info",
+	output: "file",
+	maxAgeDays: 30,
+	maxSizeMb: 50,
+};
+
+/**
+ * Extract LogConfig from a parsed TOML map's [logging] section.
+ * Returns defaults for any missing or invalid values.
+ */
+export function extractLogConfig(parsed: TOML.JsonMap): LogConfig {
+	const config: LogConfig = { ...DEFAULT_LOG_CONFIG };
+	const section = parsed.logging;
+	if (section != null && typeof section === "object") {
+		const raw = section as Record<string, unknown>;
+		if (
+			raw.level === "trace" ||
+			raw.level === "debug" ||
+			raw.level === "info" ||
+			raw.level === "warn" ||
+			raw.level === "error"
+		) {
+			config.level = raw.level;
+		}
+		if (raw.output === "stderr" || raw.output === "file" || raw.output === "both") {
+			config.output = raw.output;
+		}
+		if (typeof raw.max_age_days === "number") {
+			config.maxAgeDays = Math.max(0, raw.max_age_days);
+		}
+		if (typeof raw.max_size_mb === "number") {
+			config.maxSizeMb = Math.max(0, raw.max_size_mb);
+		}
+	}
+	return config;
+}
+
+
 /**
  * Standalone loader: parse the [auth] section from config.toml and return an AuthConfig.
  * Returns defaults if the file is missing, malformed, or has no [auth] section.
@@ -636,6 +679,7 @@ export class ConfigResolver {
 	private _appearance: AppearanceConfig = { ...DEFAULT_APPEARANCE };
 	private _elevation: ElevationConfig = { ...DEFAULT_ELEVATION_CONFIG };
 	private _corsOrigins: string[] = [...DEFAULT_CORS_ORIGINS];
+	private _logConfig: LogConfig = { ...DEFAULT_LOG_CONFIG };
 	private _configDir: string | null = null;
 
 	constructor(private metaDal: MetaDAL) {}
@@ -663,6 +707,11 @@ export class ConfigResolver {
 	/** Returns the resolved CORS origin patterns (defaults or [server] cors_origins from config.toml). */
 	get corsOrigins(): string[] {
 		return this._corsOrigins;
+	}
+
+	/** Returns the resolved logging configuration (defaults merged with [logging] from config.toml). */
+	get logConfig(): LogConfig {
+		return this._logConfig;
 	}
 
 	/**
@@ -720,6 +769,9 @@ export class ConfigResolver {
 		} else {
 			this._corsOrigins = [...DEFAULT_CORS_ORIGINS];
 		}
+
+		// ── [logging] section ───────────────────────────────────────────────
+		this._logConfig = extractLogConfig(parsed);
 	}
 
 	/** Returns the Layer 2 terminal overrides from config.toml. */

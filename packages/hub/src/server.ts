@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
@@ -11,6 +12,7 @@ import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostGroupRoutes } from "./api/host-groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
+import { registerLogRoutes } from "./api/logs.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
@@ -18,7 +20,7 @@ import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { touchToken, upsertPrimaryToken, validateToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH } from "./build-version.js";
-import { getConfigDir } from "./cli.js";
+import { getConfigDir, getStateDir } from "./cli.js";
 import {
 	ConfigResolver,
 	corsOriginsToRegexps,
@@ -28,6 +30,8 @@ import {
 	matchCorsOrigin,
 } from "./config.js";
 import type { AuthConfig } from "./config.js";
+import type { HubLogger } from "./logging/hub-logger.js";
+import type { LoggerRegistry } from "./logging/index.js";
 import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
 import { seedShellProfiles } from "./shell-discovery.js";
@@ -47,6 +51,9 @@ export interface ServerOptions {
 	configDir?: string; // override config directory (defaults to getConfigDir())
 	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
 	skipShellDiscovery?: boolean; // disable auto-shell-seeding (useful for tests)
+	hubLogger?: HubLogger; // global hub log sink
+	loggerRegistry?: LoggerRegistry; // per-channel log registry
+	logsDir?: string; // base logs directory (e.g. ~/.local/state/nexterm/logs)
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -174,11 +181,17 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const configResolver = new ConfigResolver(metaDalForConfig);
 		configResolver.loadFromFile(configDir);
 
+		// Build a shared LoggerRegistry if not provided (shared across SessionManager + agents)
+		const loggerRegistry: LoggerRegistry = options.loggerRegistry ?? new Map();
+
 		const sessionManager = new SessionManager(
 			options.dbManager,
 			gcConfig,
 			undefined,
 			configResolver,
+			options.hubLogger,
+			loggerRegistry,
+			options.logsDir,
 		);
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
@@ -239,12 +252,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 				authConfig: resolvedAuthConfig,
 				db: options.dbManager.meta,
 				metaDal,
+				...(options.hubLogger && { hubLogger: options.hubLogger }),
 			});
 			registerTokenRoutes(server, { db: options.dbManager.meta });
 		}
 		await registerUserFonts(server, configDir);
 		await registerUserSounds(server, configDir);
 		await registerUserWallpapers(server, configDir);
+		const logsDir = options.logsDir ?? path.join(getStateDir(), "logs");
+		await registerLogRoutes(server, logsDir);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});

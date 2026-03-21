@@ -6,6 +6,8 @@
 
 import type { AgentConfig, ChannelStatus, SessionStatus } from "@nexterm/shared";
 import type { ConfigResolver } from "../config.js";
+import type { HubLogger } from "../logging/hub-logger.js";
+import type { LoggerRegistry } from "../logging/index.js";
 import type { MetaDAL } from "../storage/meta.js";
 import type { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
@@ -91,4 +93,7 @@ export interface SharedSessionContext {
 	/** Config */
 	agentConfig: AgentConfig;
 	configResolver: ConfigResolver | null;
+	/** Logging — null until initialized by SessionManager */
+	loggerRegistry: LoggerRegistry | null;
+	hubLogger: HubLogger | null;
 }

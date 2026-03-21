@@ -16,6 +16,7 @@
 import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
+	AgentLogMessage,
 	AgentSpawnMessage,
 	ErrorMessage,
 	InputMessage,
@@ -29,6 +30,8 @@ import type {
 import type { AgentConfig, ElevationMethod } from "@nexterm/shared";
 import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ConfigResolver, GcConfig } from "../config.js";
+import type { HubLogger } from "../logging/hub-logger.js";
+import type { LoggerRegistry } from "../logging/index.js";
 import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
@@ -68,6 +71,9 @@ export class SessionManager {
 		gcConfig?: GcConfig,
 		agentConfig?: AgentConfig,
 		configResolver?: ConfigResolver,
+		hubLogger?: HubLogger,
+		loggerRegistry?: LoggerRegistry,
+		logsDir?: string,
 	) {
 		const metaDal = new MetaDAL(dbManager.meta);
 		const spoolDal = new SpoolDAL(dbManager.spool);
@@ -103,11 +109,13 @@ export class SessionManager {
 			chunker,
 			agentConfig: resolvedAgentConfig,
 			configResolver: configResolver ?? null,
+			loggerRegistry: loggerRegistry ?? null,
+			hubLogger: hubLogger ?? null,
 		};
 		this.ctx = ctx;
 
 		this.broadcaster = new StateBroadcaster(ctx);
-		this.lifecycle = new ChannelLifecycleManager(ctx, this.broadcaster);
+		this.lifecycle = new ChannelLifecycleManager(ctx, this.broadcaster, logsDir);
 		this.agentMgr = new AgentConnectionManager(ctx, this.broadcaster, this.lifecycle);
 		this.sshMgr = new SshConnectionManager(ctx, this.broadcaster, this.lifecycle, this.agentMgr);
 		// Break the circular reference: AgentConnectionManager needs SshConnectionManager

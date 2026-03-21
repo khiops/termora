@@ -341,6 +341,13 @@ pub(crate) async fn handle_message(
             }
         }
 
+        HubToAgent::Auth { .. } => {
+            // AUTH is consumed by the connection handshake in handle_connection_inner
+            // before the message loop starts. If it arrives here the hub sent it
+            // out-of-order — ignore it silently (the connection was already accepted).
+            tracing::warn!("received AUTH message outside of handshake — ignoring");
+        }
+
         HubToAgent::Error {
             code,
             message,
@@ -543,6 +550,7 @@ async fn handle_spawn(
 
         Err(e) => {
             let code = map_spawn_error(&e);
+            // Send SpawnErr first so the hub can act on it immediately
             send_frame(
                 &frame_tx,
                 &AgentToHub::SpawnErr {
@@ -551,6 +559,15 @@ async fn handle_spawn(
                     message: e.to_string(),
                 },
             )?;
+            // Then emit a LOG diagnostic (best-effort, non-blocking)
+            let _ = send_frame(
+                &frame_tx,
+                &AgentToHub::Log {
+                    channel_id: String::new(),
+                    level: "error".to_string(),
+                    msg: format!("spawn failed: {}", e),
+                },
+            );
         }
     }
 
@@ -584,7 +601,18 @@ fn spawn_reader_task(
                 // PTY output
                 read_result = pty_reader.read(&mut rbuf) => {
                     match read_result {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) | Err(_) => {
+                            // Emit a LOG diagnostic before breaking
+                            let log_msg = AgentToHub::Log {
+                                channel_id: channel_id.clone(),
+                                level: "debug".to_string(),
+                                msg: "PTY closed".to_string(),
+                            };
+                            if let Ok(frame) = encode_frame(&log_msg) {
+                                let _ = frame_tx.send(frame);
+                            }
+                            break;
+                        }
                         Ok(n) => {
                             seq += 1;
                             let data = rbuf[..n].to_vec();

@@ -6,6 +6,7 @@ import type { HelloMessage, HostArch, HostOs } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
+import type { HubLogger } from "../logging/hub-logger.js";
 import { AgentConnection } from "./agent-connection.js";
 import { deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
@@ -146,6 +147,7 @@ export class SshAgent extends AgentConnection {
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
 	private readonly sendQueue = new SendQueue("ssh-agent");
+	private hubLogger: HubLogger | null = null;
 	/**
 	 * Populated by the hostVerifier closure during a connect attempt.
 	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
@@ -158,6 +160,11 @@ export class SshAgent extends AgentConnection {
 		private readonly deployOptions?: SshAgentDeployOptions,
 	) {
 		super();
+	}
+
+	/** Set the hub logger for routing agent stderr output. */
+	setHubLogger(logger: HubLogger): void {
+		this.hubLogger = logger;
 	}
 
 	/**
@@ -278,6 +285,14 @@ export class SshAgent extends AgentConnection {
 
 							stream.on("data", (data: Buffer) => {
 								this.handleData(data);
+							});
+
+							// Capture stderr — SSH agents are multi-channel so route to hub logger
+							stream.stderr.on("data", (data: Buffer) => {
+								const text = (data as Buffer).toString("utf-8").trimEnd();
+								if (this.hubLogger) {
+									this.hubLogger.log("info", text, { src: "agent", hostId: this.host.id });
+								}
 							});
 
 							stream.on("close", () => {

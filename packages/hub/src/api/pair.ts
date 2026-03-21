@@ -4,6 +4,7 @@ import { generateId } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createToken } from "../auth.js";
 import type { AuthConfig } from "../config.js";
+import type { HubLogger } from "../logging/index.js";
 import type { MetaDAL } from "../storage/meta.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -14,6 +15,8 @@ export interface PairRouteOptions {
 	/** The meta DB — used to create a token record on successful pairing. */
 	db: Database.Database;
 	metaDal: MetaDAL;
+	/** Optional hub logger for audit entries. */
+	hubLogger?: HubLogger;
 }
 
 interface VerifyBody {
@@ -47,7 +50,7 @@ export function resetVerifyRateLimit(): void {
 // ─── Route registration ───────────────────────────────────────────────────────
 
 export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptions): void {
-	const { authConfig, db, metaDal } = opts;
+	const { authConfig, db, metaDal, hubLogger } = opts;
 
 	// POST /api/pair — authenticated, generates a one-time pairing code
 	server.post("/api/pair", async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -128,10 +131,12 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 					? new Date(Date.now() + authConfig.tokenTtlDays * 86_400_000).toISOString()
 					: null;
 
-			const { token } = createToken(db, {
+			const { token, id: tokenId } = createToken(db, {
 				label: `Paired from ${clientIp}`,
 				expiresAt: tokenExpiresAt,
 			});
+
+			hubLogger?.log("info", "client paired", { clientId: tokenId, clientIp });
 
 			return reply.code(200).send({ token });
 		},

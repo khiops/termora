@@ -4,6 +4,51 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## LOGGING-DAEMON — Unified per-channel logging + Windows daemon mode (2026-03-21)
+
+- Log granularity: per-channel (1 JSONL file = 1 terminal tab), correlates directly with spool.db (output) and meta.db (metadata) by channel_id
+- Format: JSONL with relative offset `t` (ms since channel creation), first entry stores absolute `created_at` ISO 8601 for wall-clock recovery on reattach
+- Hub global log: hub.jsonl with ISO 8601 timestamps for events not tied to a channel (startup, auth, config)
+- Agent stderr routing: process-global → hub.jsonl (multi-channel/daemon). Exception: stdio mode (single-channel) → attribute to the sole channel's log
+- Hub always sets `src:"agent"` on agent entries (prevents log injection from agent-controlled data)
+- LOG protocol message: new AgentToHub::Log(channel_id, level, msg) for agent diagnostics — NOT a replacement for OUTPUT (PTY data)
+- Daemon logging fallback: agent in daemon mode writes to file when no hub is connected to capture stderr
+- Config [logging] in config.toml: level (trace..error), output (stderr/file/both), max_age_days (default 30), max_size_mb (default 50 per channel)
+- GC: delete channel log files older than max_age_days at hub startup, AFTER daemon reattach (active channel set must be built first — PRE-04)
+- max_size_mb: stop writing when exceeded (no rotation), log warning to hub.jsonl
+- Lazy open/close file handles: no persistent WriteStream, open/write/close per batch (avoids file handle exhaustion at 100+ channels)
+- hub.jsonl runtime rotation: check size before each write, if >10MB rename to .old and start fresh
+- File permissions: 0o600 (owner read/write only) on all log files
+- HubLogger serialized writes: single writer task/mutex to prevent interleaved JSON lines
+- Daemon reattach: reopen existing channel log in append mode, read first line's `created_at` to recover offset baseline
+- Windows daemon: tokio NamedPipeServer at `\\.\pipe\nexterm-agent-<username>`, cfg-gated (no trait abstraction)
+- Named pipe ACL: SecurityDescriptor restricting access to current user SID (defense layer 1)
+- Auth token on daemon connections: hub sends AUTH with token on connect, agent rejects after 5s timeout if invalid (defense layer 2, works on both UDS and named pipe)
+- Cross-platform signals: tokio::signal::ctrl_c() replaces Unix-only SIGTERM/SIGINT for daemon shutdown
+- Log search API: GET /api/logs/channels/:channelId and /api/logs/hub with query params (level, from_t, to_t, search, limit)
+- Log search UI: LogViewer.vue component with level/source/text filters, lazy load pagination
+- ConPTY stdout leak fix (pre-requisite): SetHandleInformation(stdout, HANDLE_FLAG_INHERIT, 0) in agent main.rs prevents conhost.exe from inheriting protocol pipe
+- Integration test stderr: Stdio::inherit() instead of Stdio::piped() — piping without reading fills OS buffer and deadlocks tracing subscriber
+
+---
+
+## RUST-AGENT — Full Rust agent rewrite (async-xpty + nexterm-agent) (2026-03-21)
+
+- New public crate async-xpty: direct OS APIs (nix + windows-sys), not a fork of portable-pty (sync-only, broken v0.9.0)
+- Full agent scope (all 17 message types, daemon mode, elevation, snapshots, process title) — not MVP subset
+- MessagePack serialization: rmp-serde to_vec_named() for map format (struct-as-array was flagged by 3/3 LLMs as blocker)
+- Secrets: zeroize crate (Rust optimizer removes naive String::clear())
+- Unix PTY: TIOCSCTTY required for Ctrl+C to work in child process
+- ConPTY: HPCON passed as value to UpdateProcThreadAttribute (not pointer to value) — root cause of all prior ConPTY issues
+- ConPTY pipes: no SECURITY_ATTRIBUTES (non-inheritable) — inheritable handles cause cmd.exe to inherit agent stdout
+- PSEUDOCONSOLE_INHERIT_CURSOR: skip initial cursor position query (prevents DSR deadlock)
+- DSR response: pre-emptive \x1b[1;1R sent immediately + detection in output stream
+- Agent CLI: --stdio (default), --daemon, --socket, --buffer-per-channel, --buffer-global flags
+- Zero-conf port: hub retries port+1 on EADDRINUSE (up to +99), writes actual port to runtime.json
+- Desktop reads runtime.json only (no hardcoded port 4100 fallback)
+
+---
+
 ## DESKTOP-LAUNCH — Desktop/Tauri launch fixes + shell discovery (2026-03-19)
 
 - CSP disabled for Tauri webview (was blocking IPC + inline styles) — acceptable for local-first, permissive CSP deferred

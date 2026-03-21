@@ -18,6 +18,7 @@ import type {
 } from "@nexterm/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ElevationMethod } from "@nexterm/shared";
+import { ChannelLogger } from "../logging/channel-logger.js";
 import type { AgentConnection } from "./agent-connection.js";
 import type { ChannelState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
@@ -49,6 +50,7 @@ export class ChannelLifecycleManager {
 	constructor(
 		private readonly ctx: SharedSessionContext,
 		private readonly broadcaster: StateBroadcaster,
+		private readonly logsDir?: string,
 	) {}
 
 	// ─── Spawn ───────────────────────────────────────────────────────────────
@@ -144,6 +146,17 @@ export class ChannelLifecycleManager {
 					this.ctx.scheduler.trackChannel(channelId);
 					this.ctx.chunker.trackChannel(channelId);
 					client.attachedChannels.add(channelId);
+
+					// Create a ChannelLogger for this channel if logging is configured
+					if (this.logsDir && this.ctx.loggerRegistry && this.ctx.configResolver) {
+						const logConfig = this.ctx.configResolver.logConfig;
+						const logger = new ChannelLogger(channelId, this.logsDir, logConfig, new Date());
+						this.ctx.loggerRegistry.set(channelId, logger);
+						logger.log("hub", "info", "channel created", {
+							shell: resolvedShell,
+							hostId,
+						});
+					}
 
 					const channelStateMsg: ChannelStateMessage = {
 						type: "CHANNEL_STATE",

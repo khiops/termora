@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
 import { detectSea } from "@nexterm/shared/dist/sea-addon-loader.js";
 import { resolveAgentBinaryPath } from "../sea-agent-resolver.js";
+import type { HubLogger } from "../logging/hub-logger.js";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
@@ -58,9 +59,15 @@ export function isAgentBinary(agentPath: string): boolean {
 export class LocalAgent extends AgentConnection {
 	private process: ChildProcess | null = null;
 	private readonly sendQueue = new SendQueue("local-agent");
+	private hubLogger: HubLogger | null = null;
 
 	constructor(private readonly agentPath: string) {
 		super();
+	}
+
+	/** Set the hub logger for routing agent stderr before a channel logger is available. */
+	setHubLogger(logger: HubLogger): void {
+		this.hubLogger = logger;
 	}
 
 	/**
@@ -89,8 +96,14 @@ export class LocalAgent extends AgentConnection {
 		});
 
 		this.process.stderr?.on("data", (data: Buffer) => {
-			process.stderr.write(`[agent] ${data.toString().trimEnd()}
-`);
+			const text = data.toString("utf-8").trimEnd();
+			// Always route to hubLogger; the LOG protocol message is the proper
+			// mechanism for channel-specific agent diagnostics.
+			if (this.hubLogger) {
+				this.hubLogger.log("info", text, { src: "agent" });
+			} else {
+				process.stderr.write(`[agent] ${text}\n`);
+			}
 		});
 
 		if (this.process.stdin) {

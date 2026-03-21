@@ -201,6 +201,16 @@ export interface AgentNotificationMessage {
 	message: string;
 }
 
+
+/** Agent → Hub: structured log line (forwarded to hub log sink) */
+export interface AgentLogMessage {
+	type: "LOG";
+	channelId: string;
+	level: string;
+	msg: string;
+}
+
+
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)
 // ---------------------------------------------------------------------------
@@ -456,6 +466,7 @@ export type AgentMessage =
 	| AgentProcessTitleMessage
 	| AgentBellMessage
 	| AgentNotificationMessage
+	| AgentLogMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the Agent */

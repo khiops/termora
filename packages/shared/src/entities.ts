@@ -224,3 +224,11 @@ export interface FontFamily {
 	family: string;
 	files: FontFile[];
 }
+
+
+export interface LogConfig {
+	level: "trace" | "debug" | "info" | "warn" | "error";
+	output: "stderr" | "file" | "both";
+	maxAgeDays: number;
+	maxSizeMb: number;
+}
