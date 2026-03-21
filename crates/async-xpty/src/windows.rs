@@ -685,23 +685,53 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	});
 	let cwd_ptr = cwd_w.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
 
-	// ── 8. Build environment block (optional) ─────────────────────────────────
-	// If env_clear, use only cmd.env. Otherwise inherit parent env + overrides.
-	let env_block: Option<Vec<u16>> = if cmd.env_clear || !cmd.env.is_empty() {
+	// ── 8. Build environment block ───────────────────────────────────────────
+	// ALWAYS build an explicit env block on Windows. When the agent runs under
+	// WSL interop the inherited environment contains Linux-style PATH entries
+	// that prevent child processes from finding system DLLs, causing
+	// STATUS_DLL_NOT_FOUND (0xC0000142). By always providing an env block we
+	// guarantee that %SystemRoot%\System32 is on PATH.
+	let env_block: Vec<u16> = {
 		let mut map: std::collections::HashMap<String, String> = if cmd.env_clear {
 			std::collections::HashMap::new()
 		} else {
 			std::env::vars().collect()
 		};
 		map.extend(cmd.env.clone());
-		Some(build_env_block(&map))
-	} else {
-		None
+		// Ensure essential Windows paths are present in PATH
+		let sys_root = std::env::var("SystemRoot")
+			.or_else(|_| std::env::var("SYSTEMROOT"))
+			.unwrap_or_else(|_| r"C:\Windows".to_string());
+		let required_paths = [
+			format!(r"{}\System32", sys_root),
+			sys_root.clone(),
+			format!(r"{}\System32\Wbem", sys_root),
+		];
+		let current_path = map.get("PATH").or(map.get("Path")).cloned().unwrap_or_default();
+		let current_lower: Vec<String> = current_path.split(';')
+			.map(|s| s.to_lowercase())
+			.collect();
+		let mut additions = Vec::new();
+		for rp in &required_paths {
+			if !current_lower.iter().any(|p| p == &rp.to_lowercase()) {
+				additions.push(rp.clone());
+			}
+		}
+		if !additions.is_empty() {
+			let new_path = if current_path.is_empty() {
+				additions.join(";")
+			} else {
+				format!("{};{}", additions.join(";"), current_path)
+			};
+			// Remove both casings to avoid duplicates
+			map.remove("Path");
+			map.insert("PATH".to_string(), new_path);
+		}
+		build_env_block(&map)
 	};
-	let env_ptr = env_block.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
-	// CREATE_UNICODE_ENVIRONMENT if we supply an env block.
-	let create_flags: PROCESS_CREATION_FLAGS = EXTENDED_STARTUPINFO_PRESENT
-		| if env_block.is_some() { 0x0000_0400u32 } else { 0 };
+	let env_ptr = env_block.as_ptr();
+	// CREATE_UNICODE_ENVIRONMENT — always set because we always supply an env block.
+	let create_flags: PROCESS_CREATION_FLAGS = EXTENDED_STARTUPINFO_PRESENT | 0x0000_0400u32;
 
 	// ── 9. CreateProcessW ─────────────────────────────────────────────────────
 	let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
