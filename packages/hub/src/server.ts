@@ -265,10 +265,27 @@ export async function startServer(
 	options?: ServerOptions,
 ): Promise<string> {
 	const host = options?.host ?? "127.0.0.1";
-	const port = options?.port ?? DEFAULT_PORT;
+	const basePort = options?.port ?? DEFAULT_PORT;
+	const maxPort = basePort + 99; // zero_conf: try up to 100 ports
 
-	const address = await server.listen({ host, port });
-	return address;
+	for (let port = basePort; port <= maxPort; port++) {
+		try {
+			const address = await server.listen({ host, port });
+			if (port !== basePort) {
+				console.log(`[hub] port ${basePort} unavailable, using ${port} (zero_conf)`);
+			}
+			return address;
+		} catch (err: unknown) {
+			const isAddrInUse =
+				err instanceof Error &&
+				"code" in err &&
+				(err as NodeJS.ErrnoException).code === "EADDRINUSE";
+			if (!isAddrInUse || port === maxPort) {
+				throw err;
+			}
+		}
+	}
+	throw new Error(`No available port in range ${basePort}-${maxPort}`);
 }
 
 // ─── Static file helper ────────────────────────────────────────────────────────
