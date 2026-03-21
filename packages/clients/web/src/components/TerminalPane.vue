@@ -705,6 +705,14 @@ watch(terminal, (term) => {
 				return false;
 			}
 		}
+		// Ctrl+V / Ctrl+Shift+V → let browser handle paste from clipboard
+		if (ev.ctrlKey && ev.key === "v") {
+			return false;
+		}
+		// Ctrl+C with selection → copy to clipboard (not SIGINT)
+		if (ev.ctrlKey && ev.key === "c" && term.hasSelection()) {
+			return false;
+		}
 		return true;
 	});
 });
