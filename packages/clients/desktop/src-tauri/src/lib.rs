@@ -124,24 +124,17 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         use tauri_plugin_shell::ShellExt;
 
-        // Check if an existing hub is already running (e.g. another instance or WSL hub).
+        // Check if a hub is already running by reading runtime.json.
+        // The hub writes this file with the actual listening port after bind.
         let mut hub_port: u16 = 4100;
         let mut need_spawn = true;
 
-        // First check runtime.json for a known port
         if let Some(port) = read_runtime_port() {
             if is_hub_alive(port) {
-                eprintln!("[nexterm] found existing hub on port {}", port);
+                eprintln!("[nexterm] found existing hub on port {} (from runtime.json)", port);
                 hub_port = port;
                 need_spawn = false;
             }
-        }
-
-        // Fallback: probe the default port (covers WSL hub or externally started hub)
-        if need_spawn && is_hub_alive(4100) {
-            eprintln!("[nexterm] found existing hub on default port 4100");
-            hub_port = 4100;
-            need_spawn = false;
         }
 
         if need_spawn {
