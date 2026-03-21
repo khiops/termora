@@ -128,12 +128,20 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let mut hub_port: u16 = 4100;
         let mut need_spawn = true;
 
+        // First check runtime.json for a known port
         if let Some(port) = read_runtime_port() {
             if is_hub_alive(port) {
                 eprintln!("[nexterm] found existing hub on port {}", port);
                 hub_port = port;
                 need_spawn = false;
             }
+        }
+
+        // Fallback: probe the default port (covers WSL hub or externally started hub)
+        if need_spawn && is_hub_alive(4100) {
+            eprintln!("[nexterm] found existing hub on default port 4100");
+            hub_port = 4100;
+            need_spawn = false;
         }
 
         if need_spawn {
@@ -205,6 +213,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Hub sidecar did not become ready within 15 seconds");
             } else {
                 // Read actual port from runtime.json (hub may have used zero_conf)
+        // First check runtime.json for a known port
                 if let Some(port) = read_runtime_port() {
                     hub_port = port;
                 }
