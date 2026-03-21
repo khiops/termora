@@ -30,7 +30,6 @@ use std::sync::Arc;
 use tokio::task;
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK};
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
@@ -369,12 +368,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     //   hStdinWrite → parent writes here
     let mut stdin_read: HANDLE = INVALID_HANDLE_VALUE;
     let mut stdin_write: HANDLE = INVALID_HANDLE_VALUE;
-    let sa = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: std::ptr::null_mut(),
-        bInheritHandle: 1, // TRUE — required for ConPTY
-    };
-    let ok = unsafe { CreatePipe(&mut stdin_read, &mut stdin_write, &sa, 0) };
+    let ok = unsafe { CreatePipe(&mut stdin_read, &mut stdin_write, std::ptr::null(), 0) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -387,7 +381,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     //   hStdoutWrite → ConPTY output (owned by ConPTY)
     let mut stdout_read: HANDLE = INVALID_HANDLE_VALUE;
     let mut stdout_write: HANDLE = INVALID_HANDLE_VALUE;
-    let ok = unsafe { CreatePipe(&mut stdout_read, &mut stdout_write, &sa, 0) };
+    let ok = unsafe { CreatePipe(&mut stdout_read, &mut stdout_write, std::ptr::null(), 0) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }

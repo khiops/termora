@@ -16,6 +16,10 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(name = "nexterm-agent", version)]
 struct Cli {
+    /// Run in stdio mode (default, used by hub LocalAgent)
+    #[arg(long)]
+    stdio: bool,
+
     /// Run as daemon (UDS server mode)
     #[arg(long)]
     daemon: bool,
@@ -23,6 +27,14 @@ struct Cli {
     /// Socket path for daemon mode
     #[arg(long)]
     socket: Option<String>,
+
+    /// Per-channel output buffer size (daemon mode)
+    #[arg(long)]
+    buffer_per_channel: Option<usize>,
+
+    /// Global output buffer size (daemon mode)
+    #[arg(long)]
+    buffer_global: Option<usize>,
 }
 
 #[tokio::main]
