@@ -670,12 +670,18 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 	let cmdline = build_cmdline(&cmd.program, &cmd.args);
 	let mut cmdline_w: Vec<u16> = cmdline.encode_utf16().chain(std::iter::once(0)).collect();
 
-	// ── 7. Build optional current directory (UTF-16) ──────────────────────────
-	let cwd_w: Option<Vec<u16>> = cmd.cwd.as_ref().map(|p| {
-		p.to_string_lossy()
-			.encode_utf16()
-			.chain(std::iter::once(0))
-			.collect()
+	// ── 7. Build current directory (UTF-16) ──────────────────────────────────
+	// If no cwd provided, default to USERPROFILE or SYSTEMROOT to avoid
+	// inheriting an invalid cwd (e.g. UNC path from WSL interop which causes
+	// STATUS_DLL_NOT_FOUND / 0xC0000142 on cmd.exe).
+	let effective_cwd: Option<String> = cmd
+		.cwd
+		.as_ref()
+		.map(|p| p.to_string_lossy().to_string())
+		.or_else(|| std::env::var("USERPROFILE").ok())
+		.or_else(|| std::env::var("SYSTEMROOT").ok());
+	let cwd_w: Option<Vec<u16>> = effective_cwd.as_ref().map(|s| {
+		s.encode_utf16().chain(std::iter::once(0)).collect()
 	});
 	let cwd_ptr = cwd_w.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
 

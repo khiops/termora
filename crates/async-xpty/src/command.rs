@@ -111,10 +111,16 @@ impl CommandBuilder {
 			return Ok(PtyProcess { inner });
 		}
 
-		#[cfg(not(unix))]
+		#[cfg(windows)]
+		{
+			let inner = crate::windows::spawn(self).await?;
+			return Ok(PtyProcess { inner });
+		}
+
+		#[cfg(not(any(unix, windows)))]
 		Err(std::io::Error::new(
 			std::io::ErrorKind::Unsupported,
-			"async-xpty: only Unix is supported in this version",
+			"async-xpty: platform not supported",
 		))
 	}
 }
