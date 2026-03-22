@@ -6,7 +6,7 @@ import { ConfigResolver } from "./config.js";
 import { HubLogger } from "./logging/hub-logger.js";
 import { runLogGc } from "./logging/log-gc.js";
 import { openBrowser } from "./open-browser.js";
-import { createServer, startServer } from "./server.js";
+import { addCorsOrigins, createServer, startServer } from "./server.js";
 import { openDatabases } from "./storage/db.js";
 
 async function main() {
@@ -48,6 +48,17 @@ async function main() {
 	// Extract the actual port from the listen address (may differ from
 	// requested port due to zero_conf auto-increment on EADDRINUSE).
 	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
+
+	// SEC-020: Inject exact localhost origins now that the actual port is known.
+	// These replace the former wildcard http://localhost:* and http://127.0.0.1:* patterns.
+	addCorsOrigins(
+		`http://localhost:${actualPort}`,
+		`http://127.0.0.1:${actualPort}`,
+	);
+	// In non-production environments also allow the Vite dev server origin.
+	if (process.env.NODE_ENV !== "production") {
+		addCorsOrigins("http://localhost:5173");
+	}
 
 	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 

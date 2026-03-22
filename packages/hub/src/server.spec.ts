@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createServer } from "./server.js";
+import { addCorsOrigins, createServer } from "./server.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { openTestDatabases } from "./storage/db.js";
 
@@ -121,8 +121,10 @@ describe("Hub Server — CORS allowlist", () => {
 		if (server) await server.close();
 	});
 
-	it("allowed origin (localhost:5173) gets Access-Control-Allow-Origin header", async () => {
-		server = await createServer({ logger: false });
+	it("allowed origin (localhost:5173) gets Access-Control-Allow-Origin header when explicitly allowed", async () => {
+		// SEC-020: localhost:5173 is NOT in the default allowlist — it must be explicitly added
+		// (done in main.ts after startServer() in non-production, or via corsOrigins override).
+		server = await createServer({ logger: false, corsOrigins: ["http://localhost:5173"] });
 		const response = await server.inject({
 			method: "GET",
 			url: "/api/health",
@@ -190,13 +192,38 @@ describe("Hub Server — CORS allowlist", () => {
 		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
 	});
 
-	it("127.0.0.1 origin is allowed by default", async () => {
+	it("127.0.0.1 origin is allowed after addCorsOrigins() injects the actual port", async () => {
+		// SEC-020: Exact localhost origins are not in defaults — addCorsOrigins() injects them
+		// after startServer() returns the actual port (done in main.ts).
 		server = await createServer({ logger: false });
+		addCorsOrigins("http://127.0.0.1:4100");
 		const response = await server.inject({
 			method: "GET",
 			url: "/api/health",
 			headers: { origin: "http://127.0.0.1:4100" },
 		});
 		expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:4100");
+	});
+
+	it("localhost:5173 is NOT allowed by default (no wildcard)", async () => {
+		// SEC-020: Verify wildcard removal — localhost:5173 must not be allowed without explicit config.
+		server = await createServer({ logger: false, corsOrigins: [] });
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://localhost:5173" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("addCorsOrigins() adds an exact origin to the allowlist", async () => {
+		server = await createServer({ logger: false, corsOrigins: [] });
+		addCorsOrigins("http://localhost:9999");
+		const response = await server.inject({
+			method: "GET",
+			url: "/api/health",
+			headers: { origin: "http://localhost:9999" },
+		});
+		expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:9999");
 	});
 });

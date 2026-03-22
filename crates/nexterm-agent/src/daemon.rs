@@ -40,6 +40,26 @@ fn get_config_dir() -> String {
 		+ "/nexterm"
 }
 
+
+/// Returns the XDG state directory for nexterm (`~/.local/state/nexterm` on Linux/macOS).
+/// This is where `meta.db` and `spool.db` live.
+#[cfg(not(windows))]
+fn get_state_dir() -> std::path::PathBuf {
+	let base = std::env::var("XDG_STATE_HOME").unwrap_or_else(|_| {
+		let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+		format!("{}/.local/state", home)
+	});
+	std::path::PathBuf::from(base).join("nexterm")
+}
+
+/// Returns the LOCALAPPDATA state directory for nexterm (`%LOCALAPPDATA%\nexterm` on Windows).
+#[cfg(windows)]
+fn get_state_dir() -> std::path::PathBuf {
+	let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\nexterm-state".into());
+	std::path::PathBuf::from(base).join("nexterm")
+}
+
+
 /// Returns the APPDATA config directory for nexterm (`%APPDATA%\nexterm` on Windows).
 #[cfg(windows)]
 fn get_config_dir() -> String {
@@ -295,15 +315,29 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 /// Read the auth token from `{config_dir}/auth.json`.
-/// Returns `None` if the file is absent or malformed (first-run: no auth required).
-/// Returns `None` if the file is absent (first-run: no auth required).
+/// Returns `None` if the file is absent AND meta.db does not exist (true first-run: no auth required).
+/// Returns `Some(String::new())` if auth.json is absent but meta.db exists (fail-closed: auth bypass refused).
 /// Returns `Some(String::new())` if the file exists but is unreadable or malformed (fail-closed).
 /// Returns `Some(token)` on success.
 async fn read_auth_token(config_dir: &str) -> Option<String> {
 	let path = format!("{}/auth.json", config_dir);
 
-	// File doesn't exist → first run, no token yet → OK to skip auth
+	// File doesn't exist — check whether this is truly a first run
 	if !std::path::Path::new(&path).exists() {
+		let meta_db = get_state_dir().join("meta.db");
+		if meta_db.exists() {
+			// State data exists but auth.json is gone — this is NOT a first run.
+			// Refusing to start without authentication to prevent silent auth bypass.
+			tracing::error!(
+				"auth.json is missing but meta.db exists — refusing to start without authentication. \
+				Restore auth.json or re-initialize."
+			);
+			return Some(String::new()); // empty token = nothing will match = fail-closed
+		}
+		// True first run — no state data, no auth.json
+		tracing::info!(
+			"First run: no auth.json found, connections accepted without authentication"
+		);
 		return None;
 	}
 

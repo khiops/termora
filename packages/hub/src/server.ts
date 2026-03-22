@@ -42,6 +42,25 @@ import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js
 import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
 
+/**
+ * Mutable set of exact CORS origins allowed by the server.
+ * Pre-populated with Tauri origins and user-configured origins at server creation.
+ * Exact localhost origins (e.g. http://localhost:4100) are added after the server
+ * starts and the actual port is known — call addCorsOrigins() from main.ts.
+ */
+const _corsAllowedOrigins = new Set<string>();
+
+/**
+ * Add one or more exact origin strings to the CORS allowlist.
+ * Safe to call multiple times; duplicates are ignored.
+ * Call this after startServer() returns the actual port to add exact localhost origins.
+ */
+export function addCorsOrigins(...origins: string[]): void {
+	for (const o of origins) {
+		_corsAllowedOrigins.add(o);
+	}
+}
+
 export interface ServerOptions {
 	host?: string; // default: "127.0.0.1"
 	port?: number; // default: DEFAULT_PORT (4100)
@@ -80,16 +99,40 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)
 	// and for remote hub access from web clients on other domains.
-	// Origins are validated against an allowlist from config.toml [server] cors_origins.
+	// Origins are validated against:
+	//   1. _corsAllowedOrigins — exact strings (Tauri + localhost:actualPort injected after listen)
+	//   2. compiledCorsRegexps — regexp patterns from user config.toml [server] cors_origins
+	// SEC-020: No wildcard localhost origins in defaults. Exact port origins are injected
+	//          by addCorsOrigins() in main.ts after startServer() returns the actual port.
 	const configDir = options?.configDir ?? getConfigDir();
+	// SEC-027: load auth config once and reuse across all call sites
+	const authConfig = options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+
+	// Determine origin patterns for this server instance.
+	// When corsOrigins is overridden (tests), use that list exclusively.
+	// Otherwise, load from config.toml — user patterns may include wildcards.
 	const corsPatterns =
 		options?.corsOrigins !== undefined ? options.corsOrigins : loadCorsOrigins(configDir);
-	const compiledCorsRegexps = corsOriginsToRegexps(corsPatterns);
+
+	// Repopulate the module-level Set. Hub is a singleton — one server per process.
+	_corsAllowedOrigins.clear();
+	// Wildcard patterns go to regex matching; exact strings go into the Set for O(1) lookup.
+	const wildcardPatterns: string[] = [];
+	for (const o of corsPatterns) {
+		if (o.includes("*")) {
+			wildcardPatterns.push(o);
+		} else {
+			_corsAllowedOrigins.add(o);
+		}
+	}
+	const compiledCorsRegexps = corsOriginsToRegexps(wildcardPatterns);
 
 	await server.register(cors, {
 		origin: (origin, cb) => {
 			// No origin header (same-origin or non-browser): deny CORS headers
 			if (!origin) return cb(null, false);
+			// Exact match first (O(1)), then wildcard regexp matching.
+			if (_corsAllowedOrigins.has(origin)) return cb(null, true);
 			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
 			cb(null, matched);
 		},
@@ -102,8 +145,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	if (options?.authToken) {
 		const primaryToken = options.authToken;
 		const db = options.dbManager?.meta ?? null;
-		const resolvedAuthConfig =
-			options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+		const resolvedAuthConfig = authConfig;
 		const ttlDays = resolvedAuthConfig.tokenTtlDays;
 
 		// When a DB is available, seed the primary token record so all validation
@@ -248,9 +290,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			sessionManager,
 			options.authToken,
 			options.authToken ? (options.dbManager.meta ?? null) : null,
-			options.authToken
-				? (options.authConfig ?? loadAuthConfig(configDir)).tokenTtlDays
-				: undefined,
+			options.authToken ? authConfig.tokenTtlDays : undefined,
 		);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
@@ -265,10 +305,8 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await themeManager.init();
 		registerThemeRoutes(server, themeManager);
 		if (options.authToken) {
-			const resolvedAuthConfig =
-				options.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
 			registerPairRoutes(server, {
-				authConfig: resolvedAuthConfig,
+				authConfig: authConfig,
 				db: options.dbManager.meta,
 				metaDal,
 				...(options.hubLogger && { hubLogger: options.hubLogger }),

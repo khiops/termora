@@ -524,11 +524,13 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
  * Default allowed CORS origins.
  * Patterns may contain `*` to match port numbers (e.g. `http://localhost:*`).
  */
+/**
+ * Default allowed CORS origins (exact strings, no wildcards).
+ * Only Tauri desktop origins are included by default.
+ * Exact localhost origins are injected at runtime once the actual port is known.
+ * User-defined origins from config.toml [server] cors_origins are added on top.
+ */
 export const DEFAULT_CORS_ORIGINS: string[] = [
-	"http://localhost:*",
-	"https://localhost:*",
-	"http://127.0.0.1:*",
-	"https://127.0.0.1:*",
 	"tauri://localhost",
 	"http://tauri.localhost",
 ];

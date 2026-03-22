@@ -11,6 +11,15 @@ import { SendQueue } from "./send-queue.js";
 const HELLO_TIMEOUT_MS = 5_000;
 
 /**
+ * SEC-028: Strip ANSI escape sequences and other control characters from
+ * agent stderr before logging to prevent log injection attacks.
+ */
+function sanitizeLogInput(str: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization
+	return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
+/**
  * Resolve the path to the agent entry point or binary.
  *
  * In SEA mode: looks for a co-located nexterm-agent binary next to the hub
@@ -99,10 +108,12 @@ export class LocalAgent extends AgentConnection {
 			const text = data.toString("utf-8").trimEnd();
 			// Always route to hubLogger; the LOG protocol message is the proper
 			// mechanism for channel-specific agent diagnostics.
+			const sanitized = sanitizeLogInput(text);
 			if (this.hubLogger) {
-				this.hubLogger.log("info", text, { src: "agent" });
+				this.hubLogger.log("info", sanitized, { src: "agent" });
 			} else {
-				process.stderr.write(`[agent] ${text}\n`);
+				process.stderr.write(`[agent] ${sanitized}
+`);
 			}
 		});
 
