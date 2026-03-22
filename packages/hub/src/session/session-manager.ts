@@ -96,6 +96,7 @@ export class SessionManager {
 			pendingRequests: new Map(),
 			pendingAuthPrompts: new Map(),
 			pendingHostVerify: new Map(),
+			trustedOnceFingerprints: new Map(),
 			bellTimestamps: new Map(),
 			notificationTimestamps: new Map(),
 			elevationCache: new Map(),
@@ -115,7 +116,7 @@ export class SessionManager {
 		this.ctx = ctx;
 
 		this.broadcaster = new StateBroadcaster(ctx);
-		this.lifecycle = new ChannelLifecycleManager(ctx, this.broadcaster, logsDir);
+		this.lifecycle = new ChannelLifecycleManager(ctx, this.broadcaster);
 		this.agentMgr = new AgentConnectionManager(ctx, this.broadcaster, this.lifecycle);
 		this.sshMgr = new SshConnectionManager(ctx, this.broadcaster, this.lifecycle, this.agentMgr);
 		// Break the circular reference: AgentConnectionManager needs SshConnectionManager
@@ -275,38 +276,27 @@ export class SessionManager {
 				const sshAgent = new SshAgent(host, promptAuth);
 
 				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
+				const sshHostname = host.sshHost?.includes("@")
+					? (host.sshHost.split("@")[1] ?? host.sshHost)
+					: (host.sshHost ?? host.label);
+				const sshPort = host.sshPort ?? 22;
+				const hostKey = `${sshHostname}:${sshPort}`;
+				const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 
 				try {
-					await sshAgent.start(storedFingerprint);
+					await sshAgent.start(storedFingerprint, sessionTrustedFp);
 				} catch (err) {
 					const kv = sshAgent.lastKeyVerification;
-					if (kv.mismatch) {
-						const accepted = await this.sshMgr.promptHostKeyMismatch(
+					if (kv.tofu || kv.mismatch) {
+						const action = await this.sshMgr.promptHostKeyVerify(
 							client,
 							hostId,
 							host.sshHost ?? host.label,
-							storedFingerprint ?? "",
+							kv.mismatch ? (storedFingerprint ?? "") : "",
 							kv.capturedFingerprint,
+							kv.tofu,
 						);
-						if (accepted) {
-							this.ctx.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
-							const retryAgent = new SshAgent(host, promptAuth);
-							try {
-								await retryAgent.start(kv.capturedFingerprint);
-							} catch (retryErr) {
-								this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
-								client.send({
-									type: "ERROR",
-									code: "SSH_CONNECT_FAILED",
-									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
-								} satisfies ErrorMessage);
-								return null;
-							}
-							this.broadcaster.updateSessionStatus(hostId, session.id, "active");
-							this.agentMgr.wireAgentEvents(hostId, session.id, retryAgent);
-							this.ctx.agents.set(hostId, retryAgent);
-							agent = retryAgent;
-						} else {
+						if (action === "reject") {
 							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 							client.send({
 								type: "ERROR",
@@ -315,6 +305,31 @@ export class SessionManager {
 							} satisfies ErrorMessage);
 							return null;
 						}
+						const retryFp = kv.capturedFingerprint;
+						if (action === "trust_permanent") {
+							this.ctx.metaDal.updateHostFingerprint(hostId, retryFp);
+						} else {
+							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
+						}
+						const retryAgent = new SshAgent(host, promptAuth);
+						try {
+							await retryAgent.start(
+								action === "trust_permanent" ? retryFp : null,
+								action === "trust_once" ? retryFp : undefined,
+							);
+						} catch (retryErr) {
+							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+							client.send({
+								type: "ERROR",
+								code: "SSH_CONNECT_FAILED",
+								message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+							} satisfies ErrorMessage);
+							return null;
+						}
+						this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+						this.agentMgr.wireAgentEvents(hostId, session.id, retryAgent);
+						this.ctx.agents.set(hostId, retryAgent);
+						agent = retryAgent;
 					} else {
 						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 						client.send({
@@ -326,16 +341,8 @@ export class SessionManager {
 					}
 				}
 
-				if (agent != null) {
-					// Mismatch-and-accept path: retryAgent was already wired above with the
-					// trusted fingerprint; nothing more to do here.
-				} else {
-					// TOFU (Trust On First Use): if we just connected for the first time and
-					// have no stored fingerprint yet, persist the server's key automatically.
-					const kv = sshAgent.lastKeyVerification;
-					if (kv.capturedFingerprint && !storedFingerprint) {
-						this.ctx.metaDal.updateHostFingerprint(hostId, kv.capturedFingerprint);
-					}
+				if (agent == null) {
+					// First connection succeeded without TOFU/mismatch prompt
 					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
 					this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
 					this.ctx.agents.set(hostId, sshAgent);

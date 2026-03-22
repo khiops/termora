@@ -397,6 +397,8 @@ export interface HostVerifyMessage {
 	oldFingerprint?: string;
 	/** Correlation ID — must be echoed in HOST_VERIFY_RESPONSE for mismatch prompts. */
 	promptId: string;
+	/** Set on first connection (TOFU) — no stored fingerprint yet. */
+	firstConnect?: boolean;
 }
 
 /** UI → Hub: user decision on unknown fingerprint */

@@ -93,4 +93,8 @@ export interface SharedSessionContext {
 	/** Config */
 	agentConfig: AgentConfig;
 	configResolver: ConfigResolver | null;
+	/** Per-channel logger registry */
+	loggerRegistry: import("../logging/index.js").LoggerRegistry | null;
+	/** Structured logger for hub operations (injected by SessionManager constructor) */
+	hubLogger: import("../logging/hub-logger.js").HubLogger | null;
 }
