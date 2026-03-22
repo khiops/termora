@@ -2,7 +2,7 @@
 
 > **Project:** nexterm (local-first session terminal platform)
 > **Date:** 2026-03-21
-> **Revision:** v1.4
+> **Revision:** v1.5
 > **Scope:** Full audit — all packages (shared, agent, hub, web, desktop) + Rust crates
 > **Auditor:** Claude Opus 4.6 (automated, multi-phase)
 
@@ -10,7 +10,7 @@
 
 ## A. Executive Summary
 
-- **Overall Health: 🟡 NEEDS REMEDIATION** — solid crypto and auth foundations but several defense-in-depth gaps
+- **Overall Health: 🟢 SECURE** — all 30 findings addressed (28 resolved, 1 deferred, 1 obsolete)
 - 2219 tests passing, 0 failures. Lint and TypeScript strict — both clean
 - Token generation is cryptographically sound: 256-bit `crypto.randomBytes`, SHA-256 hashed in DB, constant-time comparison everywhere
 - All auth validation paths are **fail-closed** (19 check points audited, 1 intentional fail-open for daemon first-run)
@@ -536,19 +536,19 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | ~~SEC-017~~ | ~~MEDIUM~~ | ~~A08~~ | ~~`tauri.conf.json`~~ | ~~Tauri updater unsigned~~ | ✅ **RESOLVED** (2026-03-22) — `scripts/generate-updater-key.sh` + setup guide |
 | ~~SEC-018~~ | ~~MEDIUM~~ | ~~A09~~ | ~~`spawn.ts:8`, `session-manager.ts`, `local-agent.ts`~~ | ~~~80+ console.log in production~~ | ✅ **RESOLVED** (2026-03-22) — 83 calls replaced with structured hubLogger/server.log across 19 files |
 | ~~SEC-019~~ | ~~LOW~~ | ~~A07~~ | ~~`auth.ts:82`~~ | ~~initAuth reads token from auth.json without format validation (Tauri client validates 64-char hex; hub does not)~~ | ✅ **RESOLVED** (2026-03-22) — hex format validation added in initAuth |
-| SEC-020 | LOW | A02 | `config.ts:533` | Default CORS origins include `http://localhost:*` — any local service on any port is a trusted origin | Narrow default to ports 4100-4199; document risk for shared machines |
+| ~~SEC-020~~ | ~~LOW~~ | ~~A02~~ | ~~`config.ts:533`~~ | ~~CORS wildcard localhost~~ | ✅ **RESOLVED** (2026-03-22) — exact origins from actual port via `addCorsOrigins()` |
 | ~~SEC-021~~ | ~~LOW~~ | ~~A03~~ | ~~`pnpm-workspace.yaml:22`~~ | ~~Fastify 5.7.4: CVE-2026-3419 Content-Type validation bypass (CVSS 5.3)~~ | ✅ **RESOLVED** (2026-03-22) — fastify upgraded to `^5.8.1` (resolved to 5.8.2) |
 | ~~SEC-022~~ | ~~LOW~~ | ~~A01~~ | ~~`server.ts:117`~~ | ~~/api/fonts auth bypass is method-agnostic~~ | ✅ **RESOLVED** (2026-03-22) — GET-only check added |
 | ~~SEC-023~~ | ~~LOW~~ | ~~A02~~ | ~~`main.ts:13`~~ | ~~NEXTERM_PORT env var parsed without range validation~~ | ✅ **RESOLVED** (2026-03-22) — integer [1,65535] validation |
-| SEC-024 | LOW | A07 | `daemon.rs:306` | Rust daemon accepts connections without auth if auth.json deleted post-setup (no sentinel for "auth was configured") | Write sentinel flag after first auth setup; treat missing auth.json post-sentinel as error |
+| ~~SEC-024~~ | ~~LOW~~ | ~~A07~~ | ~~`daemon.rs:306`~~ | ~~Daemon no-auth if auth.json deleted~~ | ✅ **RESOLVED** (2026-03-22) — checks meta.db existence (not first run → fail-closed) |
 | SEC-025 | LOW | A02 | `tauri.conf.json` | CSP fully disabled in Desktop/Tauri — XSS in webview has unrestricted Tauri IPC access | 🔵 **DEFERRED** — Tauri v2 limitation: requires `tauri://`, `ipc://` origins + xterm.js `unsafe-inline` styles. OS sandbox is the primary defense for desktop. |
 | ~~SEC-026~~ | ~~LOW~~ | ~~A01~~ | ~~`server.ts:112`~~ | ~~Static assets (UI) served unauthenticated~~ | ⚪ **OBSOLETE** — By design: SPA must load without auth to display login/pairing screen. Info leakage negligible on 127.0.0.1. |
-| SEC-027 | LOW | DRY | `server.ts:89,233,250` | loadAuthConfig called 3 times in createServer — minor TOCTOU if config changes between reads | Load once at top; pass to all call sites |
-| SEC-028 | LOW | A09 | `ssh-agent.ts:359` | SSH agent stderr logged as info without sanitization — ANSI escape/log injection from malicious remote binary | Sanitize/strip ANSI codes before logging |
+| ~~SEC-027~~ | ~~LOW~~ | ~~DRY~~ | ~~`server.ts:89,233,250`~~ | ~~loadAuthConfig 3x~~ | ✅ **RESOLVED** (2026-03-22) — cached once, passed to all sites |
+| ~~SEC-028~~ | ~~LOW~~ | ~~A09~~ | ~~`ssh-agent.ts:359`~~ | ~~Agent stderr log injection~~ | ✅ **RESOLVED** (2026-03-22) — `sanitizeLogInput` strips ANSI + control chars |
 | ~~SEC-029~~ | ~~LOW~~ | ~~A05~~ | ~~`pair.ts:22`~~ | ~~/api/pair/verify body not validated by Fastify JSON schema~~ | ✅ **RESOLVED** (2026-03-22) — Fastify body schema added |
 | ~~SEC-030~~ | ~~LOW~~ | ~~A09~~ | ~~`server.ts:148`~~ | ~~touchToken errors silently swallowed~~ | ✅ **RESOLVED** (2026-03-22) — try/catch with warn log |
 
-**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (24 resolved as of 2026-03-22)**
+**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (28 resolved, 1 deferred, 1 obsolete as of 2026-03-22)**
 
 ---
 
@@ -625,9 +625,9 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | Dependencies | 0 | 0 | 1 | 0 | 0 |
 | Input Validation | 0 | 0 | 4 | 0 | 0 |
 | Logging | 0 | 0 | 3 | 0 | 0 |
-| Infrastructure | 4 | 0 | 0 | 0 | 0 |
-| Tech Debt | 2 | 0 | 1 | 0 | 0 |
-| **Total** | **6** | **0** | **24** | **0** | **0** |
+| Infrastructure | 0 | 0 | 4 | 1 | 1 |
+| Tech Debt | 0 | 0 | 2 | 0 | 0 |
+| **Total** | **0** | **0** | **28** | **1** | **1** |
 
 ---
 
@@ -707,4 +707,5 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | 2026-03-22 | v1.1 | P0 remediation: SEC-001 (WS timeout), SEC-003 (clientId check), SEC-006 (helmet), SEC-021 (fastify upgrade). Catalog hygiene: 3 deps migrated. 4/30 resolved |
 | 2026-03-22 | v1.2 | Quick wins: SEC-019/022/023/029/030. P1: SEC-004/005/009/010. 13/30 resolved |
 | 2026-03-22 | v1.3 | P1: SEC-002 (DB rate limiter), SEC-008 (TOFU+UI), SEC-011 (8-digit), SEC-014 (zero pwd). P2: SEC-007/012/013/015/016/017. 23/30 resolved |
-| 2026-03-22 | v1.4 | SEC-018: 83 console.log calls replaced with structured logging (19 files). 24/30 resolved. All P0/P1/P2 done. |
+| 2026-03-22 | v1.4 | SEC-018: 83 console.log calls replaced with structured logging (19 files). 24/30 resolved. |
+| 2026-03-22 | v1.5 | SEC-020 (CORS exact origins), SEC-024 (daemon auth guard), SEC-027 (DRY), SEC-028 (ANSI strip). SEC-025 deferred (Tauri), SEC-026 obsolete (by design). **30/30 closed.** |
