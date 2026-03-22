@@ -83,6 +83,16 @@ export async function registerWsRoutes(
 		// Register send function for write-lock targeted messages
 		clientSendRegistry.set(clientId, client.send);
 
+		// Close unauthenticated connections after 10 seconds
+		const authTimeout = authToken
+			? setTimeout(() => {
+					if (!authenticated) {
+						server.log.warn({ clientId }, 'WS connection closed: AUTH timeout')
+						socket.close(4001, 'AUTH_TIMEOUT')
+					}
+				}, 10_000)
+			: null;
+
 		// Only register the client after successful AUTH (or when auth is disabled)
 		if (!authToken) {
 			sessionManager.addClient(client);
@@ -136,6 +146,7 @@ export async function registerWsRoutes(
 				}
 
 				authenticated = true;
+				clearTimeout(authTimeout ?? undefined);
 				sessionManager.addClient(client);
 				server.log.info({ clientId }, "ws-auth: accepted");
 				client.send({ type: "AUTH_OK", clientId });
@@ -201,6 +212,7 @@ export async function registerWsRoutes(
 		});
 
 		socket.on("close", () => {
+			clearTimeout(authTimeout ?? undefined);
 			clientSendRegistry.delete(clientId);
 			if (authenticated) {
 				writeLockManager.onClientDisconnect(clientId);

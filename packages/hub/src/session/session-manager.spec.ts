@@ -1851,7 +1851,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				pendingMap.delete("host-01");
 				resolve(null);
 			}, 60_000);
-			pendingMap.set("host-01", { resolve, timer });
+			pendingMap.set("host-01", { resolve, timer, clientId: "client-1" });
 		});
 
 		// Respond with a secret
@@ -1877,7 +1877,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				pendingMap.delete("host-02");
 				resolve(null);
 			}, 60_000);
-			pendingMap.set("host-02", { resolve, timer });
+			pendingMap.set("host-02", { resolve, timer, clientId: "client-1" });
 		});
 
 		sm.handleAuthPromptResponse("client-1", "host-02", null);
@@ -1904,7 +1904,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 					pendingMap.delete("host-03");
 					resolve(null);
 				}, 60_000);
-				pendingMap.set("host-03", { resolve, timer });
+				pendingMap.set("host-03", { resolve, timer, clientId: "client-1" });
 			});
 
 			// No handleAuthPromptResponse call — advance time past 60s
@@ -1923,6 +1923,36 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 		expect(() => {
 			sm.handleAuthPromptResponse("client-1", "no-such-host", "secret");
 		}).not.toThrow();
+	});
+
+	it("handleAuthPromptResponse ignores response from wrong client (SEC-003)", async () => {
+		// SEC-003: a different client must not be able to inject credentials
+		const pendingMap = (
+			sm as unknown as {
+				pendingAuthPrompts: Map<
+					string,
+					{ resolve: (s: string | null) => void; timer: ReturnType<typeof setTimeout> | null; clientId: string }
+				>;
+			}
+		).pendingAuthPrompts;
+
+		let capturedSecret: string | null = null;
+		const timer = setTimeout(() => {}, 60_000);
+		pendingMap.set("host-sec", {
+			resolve: (s) => { capturedSecret = s; },
+			timer,
+			clientId: "legitimate-client",
+		});
+
+		// Attacker sends a response from a different clientId
+		sm.handleAuthPromptResponse("attacker-client", "host-sec", "injected-secret");
+
+		// Prompt must still be pending and secret must not be resolved
+		expect(capturedSecret).toBeNull();
+		expect(pendingMap.has("host-sec")).toBe(true);
+
+		clearTimeout(timer);
+		pendingMap.delete("host-sec");
 	});
 
 	it("AUTH_PROMPT message is sent to client when promptAuth callback sends it", () => {
@@ -1961,6 +1991,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				capturedSecret = s;
 			},
 			timer,
+			clientId: "c1",
 		});
 
 		// Verify AUTH_PROMPT arrived at the client

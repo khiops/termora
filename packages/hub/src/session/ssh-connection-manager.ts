@@ -54,6 +54,12 @@ export class SshConnectionManager {
 	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
 		const pending = this.ctx.pendingAuthPrompts.get(hostId);
 		if (!pending) return;
+		if (pending.clientId !== clientId) {
+			console.warn(
+				`[ssh-connection] AUTH_PROMPT_RESPONSE from wrong client — hostId=${hostId} expected=${pending.clientId} got=${clientId}`,
+			);
+			return;
+		}
 		if (pending.timer !== null) clearTimeout(pending.timer);
 		this.ctx.pendingAuthPrompts.delete(hostId);
 		pending.resolve(secret);

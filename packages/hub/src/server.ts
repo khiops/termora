@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import cors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -59,6 +60,22 @@ export interface ServerOptions {
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
 	const server = Fastify({
 		logger: options?.logger ?? true,
+	});
+
+	// Helmet — sets security-related HTTP response headers
+	await server.register(fastifyHelmet, {
+		contentSecurityPolicy: {
+			directives: {
+				defaultSrc: ["'self'"],
+				scriptSrc: ["'self'"],
+				styleSrc: ["'self'", "'unsafe-inline'"],
+				connectSrc: ["'self'", "ws:", "wss:"],
+				imgSrc: ["'self'", "data:", "blob:"],
+				fontSrc: ["'self'", "data:"],
+				workerSrc: ["'self'", "blob:"],
+			},
+		},
+		crossOriginEmbedderPolicy: false,
 	});
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)
