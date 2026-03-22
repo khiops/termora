@@ -2,7 +2,7 @@
 
 > **Project:** nexterm (local-first session terminal platform)
 > **Date:** 2026-03-21
-> **Revision:** v1.1
+> **Revision:** v1.2
 > **Scope:** Full audit — all packages (shared, agent, hub, web, desktop) + Rust crates
 > **Auditor:** Claude Opus 4.6 (automated, multi-phase)
 
@@ -457,7 +457,7 @@ sequenceDiagram
 
 | Item | File | Still used | Migration plan |
 |------|------|-----------|----------------|
-| `validateToken` | `auth.ts:235` | **YES** — `server.ts:152`, `ws-handler.ts:129` | Ensure DB always provided; replace with `validateTokenRecord`; delete |
+| ~~`validateToken`~~ | ~~`auth.ts:235`~~ | ~~**YES**~~ | ✅ **Deleted** (2026-03-22) — function removed, call sites fail-closed with 500/AUTH_FAIL |
 
 ### H.2 TODO/FIXME Items (security-relevant)
 
@@ -520,13 +520,13 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | ~~SEC-001~~ | ~~**HIGH**~~ | ~~A01~~ | ~~`server.ts:117`, `ws-handler.ts:68`~~ | ~~WS `/ws` bypasses HTTP auth, no idle timeout on unauthenticated connections — enables DoS via connection flood~~ | ✅ **RESOLVED** (2026-03-22) — 10s `authTimeout` added in `ws-handler.ts`, cleared on AUTH success or socket close |
 | SEC-002 | **HIGH** | A07 | `pair.ts:28-42` | Pairing rate limiter: in-memory global counter, not per-IP, resets on hub restart — brute-force of 6-digit code possible with timed restart | Persist rate-limit state to DB; make per-IP; add exponential backoff |
 | ~~SEC-003~~ | ~~**HIGH**~~ | ~~A01~~ | ~~`session-manager.ts:753`, `channel-lifecycle-manager.ts:885`~~ | ~~AUTH_PROMPT_RESPONSE: no clientId verification — any authenticated WS client can inject credentials into another client's pending SSH prompt~~ | ✅ **RESOLVED** (2026-03-22) — `pending.clientId !== clientId` check added in `ssh-connection-manager.ts` + test |
-| SEC-004 | **HIGH** | A07 | `session-manager.ts:547` | Elevation secret cache keyed by hostId only (not clientId) — shared across all WS clients for 15 minutes | Scope cache to `(hostId, clientId)` pair; reduce TTL to 5min or less |
-| SEC-005 | **HIGH** | A08 | `ssh-agent.ts:359`, `session-manager.ts:363` | Remote agent binary falls back to PATH-relative `nexterm-agent` when deploy fails — compromised remote host can shadow with malicious binary | Use absolute path from deploy only; reject connection if deploy fails and no absolute path known |
+| ~~SEC-004~~ | ~~**HIGH**~~ | ~~A07~~ | ~~`session-manager.ts:547`~~ | ~~Elevation secret cache keyed by hostId only (not clientId) — shared across all WS clients for 15 minutes~~ | ✅ **RESOLVED** (2026-03-22) — cache key `${hostId}:${clientId}`, TTL 15m→5m |
+| ~~SEC-005~~ | ~~**HIGH**~~ | ~~A08~~ | ~~`ssh-agent.ts:359`, `session-manager.ts:363`~~ | ~~Remote agent binary falls back to PATH-relative `nexterm-agent` when deploy fails — compromised remote host can shadow with malicious binary~~ | ✅ **RESOLVED** (2026-03-22) — deploy failure rejects connection; deliberate no-deploy still allowed |
 | ~~SEC-006~~ | ~~**HIGH**~~ | ~~A02~~ | ~~`server.ts:59`~~ | ~~No security response headers set (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy)~~ | ✅ **RESOLVED** (2026-03-22) — `@fastify/helmet@12` registered with strict CSP in `server.ts` |
 | SEC-007 | MEDIUM | A04 | `auth.ts:82-95` | auth.json stores plaintext token; writeFileSync then chmodSync creates brief world-readable window on first write | Use atomic write with umask 0077; consider storing hash only |
 | SEC-008 | MEDIUM | A07 | `ssh-agent.ts:209`, `session-manager.ts:757` | SSH TOFU: first connection silently trusted without user confirmation; `trust_once` behaves identically to `trust_permanent` (both persist fingerprint) | Prompt user on TOFU; implement session-scoped ephemeral fingerprint for trust_once |
-| SEC-009 | MEDIUM | A07 | `auth.ts:235` | `validateToken` is @deprecated but called in `server.ts:152` and `ws-handler.ts:129` as no-DB fallback — skips token expiry and revocation checks | Always inject DB; remove deprecated fallback; delete function |
-| SEC-010 | MEDIUM | A01 | `ws-handler.ts:165`, `session-manager.ts:732` | INPUT messages bypass write-lock check — any authenticated client can send keystrokes to any channel regardless of write-lock state | Verify clientId holds write-lock for channelId before forwarding INPUT to agent |
+| ~~SEC-009~~ | ~~MEDIUM~~ | ~~A07~~ | ~~`auth.ts:235`~~ | ~~`validateToken` is @deprecated but called in `server.ts:152` and `ws-handler.ts:129` as no-DB fallback — skips token expiry and revocation checks~~ | ✅ **RESOLVED** (2026-03-22) — function deleted, fail-closed 500 when no DB |
+| ~~SEC-010~~ | ~~MEDIUM~~ | ~~A01~~ | ~~`ws-handler.ts:165`, `session-manager.ts:732`~~ | ~~INPUT messages bypass write-lock check — any authenticated client can send keystrokes to any channel regardless of write-lock state~~ | ✅ **RESOLVED** (2026-03-22) — `isWriteLockHolder` check + 4 tests |
 | SEC-011 | MEDIUM | A07 | `pair.ts:71` | Pairing code is 6 decimal digits (~20 bits entropy); combined with SEC-002 rate-limiter weakness, brute-force probability is non-trivial | Increase to 8+ digits or alphanumeric; persist rate limit |
 | SEC-012 | MEDIUM | A05 | `launch-profiles.ts:14`, `spawn.ts:22` | Shell field: SPAWN handler validates length only; launch-profiles SHELL_META_RE blocks limited metachar set (missing newline, redirectors, parens) | Validate as absolute path; apply strict allowlist matching validateCustomCommand pattern |
 | SEC-013 | MEDIUM | A05 | `wallpapers.ts:57` | Wallpaper upload validates extension only, no magic-byte MIME check, no file-size quota enforcement beyond multipart limit | Add magic-byte validation (e.g. `file-type` library); enforce per-file size limit |
@@ -535,20 +535,20 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | SEC-016 | MEDIUM | A02 | `pty.ts:37` | Agent merges process.env with hub-supplied env into PTY — hub env vars (AWS, tokens) leak to PTY processes | Use clean environment from login shell; only allow-listed vars from hub |
 | SEC-017 | MEDIUM | A08 | `tauri.conf.json` | Tauri auto-updater signing key not generated — update payloads cannot be cryptographically verified | Generate signing key via `tauri signer generate`; set `updater.pubkey` |
 | SEC-018 | MEDIUM | A09 | `spawn.ts:8`, `session-manager.ts`, `local-agent.ts` | ~80+ console.log calls in production paths expose hostId, clientId, shell paths, stack traces without log-level gating | Replace with hubLogger at debug level; gate behind LOG_LEVEL config |
-| SEC-019 | LOW | A07 | `auth.ts:82` | initAuth reads token from auth.json without format validation (Tauri client validates 64-char hex; hub does not) | Add `/^[0-9a-f]{64}$/` validation in initAuth |
+| ~~SEC-019~~ | ~~LOW~~ | ~~A07~~ | ~~`auth.ts:82`~~ | ~~initAuth reads token from auth.json without format validation (Tauri client validates 64-char hex; hub does not)~~ | ✅ **RESOLVED** (2026-03-22) — hex format validation added in initAuth |
 | SEC-020 | LOW | A02 | `config.ts:533` | Default CORS origins include `http://localhost:*` — any local service on any port is a trusted origin | Narrow default to ports 4100-4199; document risk for shared machines |
 | ~~SEC-021~~ | ~~LOW~~ | ~~A03~~ | ~~`pnpm-workspace.yaml:22`~~ | ~~Fastify 5.7.4: CVE-2026-3419 Content-Type validation bypass (CVSS 5.3)~~ | ✅ **RESOLVED** (2026-03-22) — fastify upgraded to `^5.8.1` (resolved to 5.8.2) |
-| SEC-022 | LOW | A01 | `server.ts:117` | /api/fonts auth bypass is method-agnostic — if POST font upload added, it would inherit bypass | Restrict bypass to GET method only (like wallpapers) |
-| SEC-023 | LOW | A02 | `main.ts:13` | NEXTERM_PORT env var parsed without range validation (float, >65535 accepted) | Validate as integer in [1, 65535] |
+| ~~SEC-022~~ | ~~LOW~~ | ~~A01~~ | ~~`server.ts:117`~~ | ~~/api/fonts auth bypass is method-agnostic~~ | ✅ **RESOLVED** (2026-03-22) — GET-only check added |
+| ~~SEC-023~~ | ~~LOW~~ | ~~A02~~ | ~~`main.ts:13`~~ | ~~NEXTERM_PORT env var parsed without range validation~~ | ✅ **RESOLVED** (2026-03-22) — integer [1,65535] validation |
 | SEC-024 | LOW | A07 | `daemon.rs:306` | Rust daemon accepts connections without auth if auth.json deleted post-setup (no sentinel for "auth was configured") | Write sentinel flag after first auth setup; treat missing auth.json post-sentinel as error |
 | SEC-025 | LOW | A02 | `tauri.conf.json` | CSP fully disabled in Desktop/Tauri — XSS in webview has unrestricted Tauri IPC access | Add permissive CSP allowing tauri:// IPC but blocking unsafe-inline scripts |
 | SEC-026 | LOW | A01 | `server.ts:112` | Static assets (UI) served unauthenticated — reveals app presence and build metadata | Document as intentional; add optional config flag for auth on static assets |
 | SEC-027 | LOW | DRY | `server.ts:89,233,250` | loadAuthConfig called 3 times in createServer — minor TOCTOU if config changes between reads | Load once at top; pass to all call sites |
 | SEC-028 | LOW | A09 | `ssh-agent.ts:359` | SSH agent stderr logged as info without sanitization — ANSI escape/log injection from malicious remote binary | Sanitize/strip ANSI codes before logging |
-| SEC-029 | LOW | A05 | `pair.ts:22` | /api/pair/verify body not validated by Fastify JSON schema — framework-level rejection not enforced | Add Fastify body schema for 6-digit code validation |
-| SEC-030 | LOW | A09 | `server.ts:148` | touchToken errors silently swallowed — impossible to audit token usage | Wrap in try/catch, log at warn level |
+| ~~SEC-029~~ | ~~LOW~~ | ~~A05~~ | ~~`pair.ts:22`~~ | ~~/api/pair/verify body not validated by Fastify JSON schema~~ | ✅ **RESOLVED** (2026-03-22) — Fastify body schema added |
+| ~~SEC-030~~ | ~~LOW~~ | ~~A09~~ | ~~`server.ts:148`~~ | ~~touchToken errors silently swallowed~~ | ✅ **RESOLVED** (2026-03-22) — try/catch with warn log |
 
-**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (4 resolved as of 2026-03-22)**
+**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (13 resolved as of 2026-03-22)**
 
 ---
 
@@ -556,7 +556,7 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 
 | Tool | Result | Actions |
 |------|--------|---------|
-| Unit tests | **2220 pass** / 0 fail / 10 skip | ✅ Clean (+1 SEC-003 test) |
+| Unit tests | **2221 pass** / 0 fail / 10 skip | ✅ Clean (+2 security tests) |
 | Lint (Biome) | 0 errors, 0 warnings | ✅ Clean |
 | TypeScript strict | 0 errors | ✅ Clean |
 | pnpm audit | ~~1 moderate (Fastify CVE-2026-3419)~~ | ✅ Resolved — fastify upgraded to 5.8.2 |
@@ -576,16 +576,16 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | ~~SEC-006~~ | ~~Missing security headers~~ | ~~Register `@fastify/helmet`~~ | ✅ `b605745` |
 | ~~SEC-021~~ | ~~Fastify CVE-2026-3419~~ | ~~Upgrade catalog to `^5.8.1`~~ | ✅ `b605745` |
 
-### K.2 P1 — High (fix this sprint)
+### K.2 P1 — High (4/6 resolved)
 
-| ID | Issue | Fix | Effort |
+| ID | Issue | Fix | Status |
 |----|-------|-----|--------|
-| SEC-002 | Pairing rate limiter weakness | Persist to DB, per-IP counter | M (4h) |
-| SEC-004 | Elevation cache cross-client | Scope to (hostId, clientId) | S (2h) |
-| SEC-005 | Remote agent PATH fallback | Reject if no absolute path | S (1h) |
-| SEC-009 | Deprecated validateToken in production | Always inject DB, remove fallback | S (2h) |
-| SEC-010 | INPUT bypasses write-lock | Add clientId write-lock check | S (2h) |
-| SEC-008 | SSH TOFU silent + trust_once | Prompt on TOFU, differentiate trust_once | M (4h) |
+| SEC-002 | Pairing rate limiter weakness | Persist to DB, per-IP counter | 🔴 Open |
+| ~~SEC-004~~ | ~~Elevation cache cross-client~~ | ~~Scope to (hostId, clientId)~~ | ✅ Done |
+| ~~SEC-005~~ | ~~Remote agent PATH fallback~~ | ~~Reject if no absolute path~~ | ✅ Done |
+| ~~SEC-009~~ | ~~Deprecated validateToken~~ | ~~Always inject DB, remove fallback~~ | ✅ Done |
+| ~~SEC-010~~ | ~~INPUT bypasses write-lock~~ | ~~Add clientId write-lock check~~ | ✅ Done |
+| SEC-008 | SSH TOFU silent + trust_once | Prompt on TOFU, differentiate trust_once | 🔴 Open |
 
 ### K.3 P2 — Medium (plan for next cycle)
 
@@ -607,11 +607,11 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 |----|-----|--------|
 | ~~SEC-021~~ | ~~pnpm-workspace.yaml: fastify `^5.0.0` to `^5.8.1`~~ | ✅ Done |
 | ~~SEC-006~~ | ~~`pnpm add @fastify/helmet` + register in server.ts~~ | ✅ Done |
-| SEC-019 | Add hex validation in initAuth | 15min |
-| SEC-022 | Add method check to /api/fonts bypass | 5min |
-| SEC-023 | Validate NEXTERM_PORT as int in [1, 65535] | 10min |
-| SEC-029 | Add Fastify body schema to /api/pair/verify | 15min |
-| SEC-030 | Wrap touchToken in try/catch with warn log | 10min |
+| ~~SEC-019~~ | ~~Add hex validation in initAuth~~ | ✅ Done |
+| ~~SEC-022~~ | ~~Add method check to /api/fonts bypass~~ | ✅ Done |
+| ~~SEC-023~~ | ~~Validate NEXTERM_PORT as int in [1, 65535]~~ | ✅ Done |
+| ~~SEC-029~~ | ~~Add Fastify body schema to /api/pair/verify~~ | ✅ Done |
+| ~~SEC-030~~ | ~~Wrap touchToken in try/catch with warn log~~ | ✅ Done |
 
 ---
 
@@ -619,15 +619,15 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 
 | Category | 🔴 Open | 🟡 In Progress | ✅ Resolved | ⚪ Obsolete | 🔵 Deferred |
 |----------|---------|----------------|-------------|-------------|-------------|
-| Architecture | 4 | 0 | 1 | 0 | 0 |
-| Auth/AuthZ | 6 | 0 | 2 | 0 | 0 |
-| Crypto | 2 | 0 | 0 | 0 | 0 |
+| Architecture | 2 | 0 | 3 | 0 | 0 |
+| Auth/AuthZ | 3 | 0 | 5 | 0 | 0 |
+| Crypto | 1 | 0 | 1 | 0 | 0 |
 | Dependencies | 0 | 0 | 1 | 0 | 0 |
-| Input Validation | 4 | 0 | 0 | 0 | 0 |
-| Logging | 3 | 0 | 0 | 0 | 0 |
+| Input Validation | 1 | 0 | 3 | 0 | 0 |
+| Logging | 2 | 0 | 1 | 0 | 0 |
 | Infrastructure | 4 | 0 | 0 | 0 | 0 |
-| Tech Debt | 3 | 0 | 0 | 0 | 0 |
-| **Total** | **26** | **0** | **4** | **0** | **0** |
+| Tech Debt | 4 | 0 | 0 | 0 | 0 |
+| **Total** | **17** | **0** | **13** | **0** | **0** |
 
 ---
 
@@ -704,4 +704,5 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | Date | Revision | Changes |
 |------|----------|---------|
 | 2026-03-21 | v1.0 | Initial full audit — all packages, 30 findings, 7 critical paths |
-| 2026-03-22 | v1.1 | P0 remediation: SEC-001 (WS timeout), SEC-003 (clientId check), SEC-006 (helmet), SEC-021 (fastify upgrade). Catalog hygiene: 3 deps migrated. 4/30 findings resolved |
+| 2026-03-22 | v1.1 | P0 remediation: SEC-001 (WS timeout), SEC-003 (clientId check), SEC-006 (helmet), SEC-021 (fastify upgrade). Catalog hygiene: 3 deps migrated. 4/30 resolved |
+| 2026-03-22 | v1.2 | Quick wins: SEC-019/022/023/029/030. P1: SEC-004 (elevation scope), SEC-005 (agent path), SEC-009 (deprecated delete), SEC-010 (write-lock). 13/30 resolved |
