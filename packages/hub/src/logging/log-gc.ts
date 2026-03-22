@@ -45,8 +45,7 @@ export async function runLogGc(
 				deleted++;
 			}
 		} catch {
-			// Warn and continue — don't let one failure abort the whole GC pass
-			console.warn(`[log-gc] Failed to process ${filePath}`);
+			// Continue — don't let one failure abort the whole GC pass
 		}
 	}
 

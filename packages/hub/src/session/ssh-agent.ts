@@ -328,9 +328,7 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								console.warn(
-									`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
-								);
+								process.stderr.write(`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`);
 								runAgent("nexterm-agent --stdio");
 							});
 					} else {

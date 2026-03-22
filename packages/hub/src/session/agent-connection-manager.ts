@@ -165,7 +165,7 @@ export class AgentConnectionManager {
 
 			if (msg.type === "HELLO") {
 				const helloMsg = msg as import("@nexterm/shared").HelloMessage;
-				console.log(`[agent-connection-manager] wireAgentEvents: HELLO received from agent — hostId=${hostId} capabilities=${JSON.stringify(helloMsg.capabilities)} shells=${JSON.stringify(helloMsg.availableShells)}`);
+				this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", { hostId, capabilities: helloMsg.capabilities, availableShells: helloMsg.availableShells });
 				if (helloMsg.availableShells !== undefined) {
 					this.ctx.metaDal.updateHostDiscoveredShells(
 						hostId,
@@ -232,7 +232,7 @@ export class AgentConnectionManager {
 
 		// The HELLO may have fired before we registered the "message" handler
 		if (agent.helloMessage) {
-			console.log(`[agent-connection-manager] wireAgentEvents: replaying cached HELLO for hostId=${hostId}`);
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: replaying cached HELLO", { hostId });
 			const helloMsg = agent.helloMessage;
 			if (helloMsg.availableShells !== undefined) {
 				this.ctx.metaDal.updateHostDiscoveredShells(
@@ -247,7 +247,7 @@ export class AgentConnectionManager {
 		}
 
 		agent.on("close", () => {
-			console.log(`[agent-connection-manager] wireAgentEvents: agent close event — hostId=${hostId}`);
+			this.ctx.hubLogger?.log("info", "agent-connection-manager: agent closed", { hostId });
 			const session = this.ctx.sessions.get(hostId);
 			const host = this.ctx.metaDal.getHost(hostId);
 			this.ctx.agents.delete(hostId);
@@ -278,26 +278,26 @@ export class AgentConnectionManager {
 
 	private async attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
 		const socketPath = getSocketPath(this.ctx.agentConfig.socketPath);
-		console.log(`[agent-connection-manager] attachDaemon: hostId=${hostId} sessionId=${sessionId} socketPath=${socketPath}`);
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", { hostId, sessionId, socketPath });
 		const agent = await connectOrLaunch(socketPath, this.ctx.agentConfig);
-		console.log(`[agent-connection-manager] attachDaemon: connectOrLaunch succeeded, agent connected=${agent.connected}`);
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", { hostId, connected: agent.connected });
 
 		this.wireAgentEvents(hostId, sessionId, agent);
 
-		console.log(`[agent-connection-manager] attachDaemon: waiting for channel state...`);
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", { hostId });
 		const states = await agent.waitForChannelState();
-		console.log(`[agent-connection-manager] attachDaemon: got ${states.length} channel states`);
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", { hostId, count: states.length });
 		this.lifecycle.reconcileChannelState(hostId, states);
 
 		this.ctx.agents.set(hostId, agent);
 		this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
-		console.log(`[agent-connection-manager] attachDaemon: done — agent active for hostId=${hostId}`);
+		this.ctx.hubLogger?.log("info", "agent-connection-manager: agent active", { hostId });
 
 		return agent;
 	}
 
 	async connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
-		console.log(`[agent-connection-manager] connectDaemonAgent: hostId=${hostId} sessionId=${sessionId}`);
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectDaemonAgent", { hostId, sessionId });
 		return this.attachDaemon(hostId, sessionId);
 	}
 

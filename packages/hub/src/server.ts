@@ -307,7 +307,7 @@ export async function startServer(
 		try {
 			const address = await server.listen({ host, port });
 			if (port !== basePort) {
-				console.log(`[hub] port ${basePort} unavailable, using ${port} (zero_conf)`);
+				server.log.info({ basePort, port }, "hub: port unavailable, using zero_conf port");
 			}
 			return address;
 		} catch (err: unknown) {

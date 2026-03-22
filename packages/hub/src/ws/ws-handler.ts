@@ -103,8 +103,9 @@ export async function registerWsRoutes(
 			try {
 				msg = decodeMessage(new Uint8Array(raw));
 			} catch {
-				console.warn(
-					`[ws] malformed MessagePack message from client ${clientId} (${raw.byteLength} bytes)`,
+				server.log.warn(
+					{ clientId, byteLength: raw.byteLength },
+					"ws: malformed MessagePack message",
 				);
 				client.send({
 					type: "ERROR",

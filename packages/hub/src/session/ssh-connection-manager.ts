@@ -91,9 +91,7 @@ export class SshConnectionManager {
 		return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingHostVerify.delete(promptId);
-				console.warn(
-					`[ssh-connection] HOST_VERIFY timeout for host ${hostId} (${hostname}) — rejecting`,
-				);
+				this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", { hostId, hostname });
 				resolve("reject");
 			}, HOST_KEY_MISMATCH_TIMEOUT_MS);
 

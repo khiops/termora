@@ -60,8 +60,8 @@ export function checkPermissions(authFilePath: string): void {
 	}
 
 	if (mode & 0o040) {
-		console.warn(
-			`[nexterm] WARNING: auth.json at ${authFilePath} is group-readable (mode ${(mode & 0o777).toString(8)}). Recommend: chmod 600 auth.json`,
+		process.stderr.write(
+			`[nexterm] WARNING: auth.json at ${authFilePath} is group-readable (mode ${(mode & 0o777).toString(8)}). Recommend: chmod 600 auth.json\n`,
 		);
 	}
 }

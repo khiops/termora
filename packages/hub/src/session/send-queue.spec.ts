@@ -157,7 +157,7 @@ describe("LocalAgent send queue (backpressure)", () => {
 
 	it("queue drops oldest frame at 1000 cap", async () => {
 		const writeSpy = vi.spyOn(mockChild.stdin, "write").mockReturnValue(false);
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
 		const agent = await startAgent();
 
@@ -176,13 +176,13 @@ describe("LocalAgent send queue (backpressure)", () => {
 		// No warning yet: enqueueSend checks >= 1000 BEFORE pushing.
 		// After 1000 enqueues, length is exactly 1000. The warning triggers on
 		// the NEXT enqueue (when length is already 1000, i.e. >= 1000).
-		expect(warnSpy).not.toHaveBeenCalled();
+		expect(stderrSpy).not.toHaveBeenCalled();
 
-		// Send one more -> triggers the warning, shifts oldest, pushes new
+		// Send one more -> triggers the stderr warning, shifts oldest, pushes new
 		agent.send({ type: "OVERFLOW_1" } as never);
 		expect(sq.pending).toBe(1000);
-		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("send queue reached 1000"));
+		expect(stderrSpy).toHaveBeenCalledTimes(1);
+		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("send queue reached 1000"));
 
 		// Send another -> drops oldest again, length stays 1000
 		agent.send({ type: "OVERFLOW_2" } as never);

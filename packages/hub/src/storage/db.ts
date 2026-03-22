@@ -48,7 +48,7 @@ function runMigrations(db: Database.Database, migrationsDir: string): void {
 			.filter((f) => /^\d{3}-.*\.sql$/.test(f))
 			.sort();
 	} catch {
-		console.debug(`No migrations found at ${migrationsDir}`);
+		// No migrations directory — nothing to apply
 		return;
 	}
 
@@ -58,7 +58,7 @@ function runMigrations(db: Database.Database, migrationsDir: string): void {
 	const latestMigration = files.length > 0 && lastFile !== undefined ? parseNum(lastFile) : 0;
 
 	if (currentVersion > latestMigration && latestMigration > 0) {
-		console.warn("[storage] DB schema version ahead of latest migration - skipping");
+		process.stderr.write("[storage] DB schema version ahead of latest migration - skipping\n");
 		return;
 	}
 
@@ -81,7 +81,6 @@ function runMigrations(db: Database.Database, migrationsDir: string): void {
 		});
 
 		applyMigration();
-		console.info(`[storage] Applied migration ${file}`);
 	}
 }
 

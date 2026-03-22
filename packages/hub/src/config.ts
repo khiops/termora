@@ -495,9 +495,7 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_linux);
 			result.customCommandLinux = raw.custom_command_linux;
 		} catch {
-			console.warn(
-				`[config] elevation.custom_command_linux is invalid — ignoring: "${raw.custom_command_linux}"`,
-			);
+			process.stderr.write(`[config] elevation.custom_command_linux is invalid — ignoring: "${raw.custom_command_linux}"\n`);
 		}
 	}
 	if (typeof raw.custom_command_darwin === "string" && raw.custom_command_darwin.length > 0) {
@@ -505,9 +503,7 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_darwin);
 			result.customCommandDarwin = raw.custom_command_darwin;
 		} catch {
-			console.warn(
-				`[config] elevation.custom_command_darwin is invalid — ignoring: "${raw.custom_command_darwin}"`,
-			);
+			process.stderr.write(`[config] elevation.custom_command_darwin is invalid — ignoring: "${raw.custom_command_darwin}"\n`);
 		}
 	}
 	if (typeof raw.custom_command_windows === "string" && raw.custom_command_windows.length > 0) {
@@ -515,9 +511,7 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_windows);
 			result.customCommandWindows = raw.custom_command_windows;
 		} catch {
-			console.warn(
-				`[config] elevation.custom_command_windows is invalid — ignoring: "${raw.custom_command_windows}"`,
-			);
+			process.stderr.write(`[config] elevation.custom_command_windows is invalid — ignoring: "${raw.custom_command_windows}"\n`);
 		}
 	}
 

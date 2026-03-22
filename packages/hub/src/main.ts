@@ -51,9 +51,7 @@ async function main() {
 
 	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
-	hubLogger.log("info", "hub started", { port: actualPort });
-	console.log(`nexterm hub listening on ${address}`);
-	console.log(`Auth token in: ${configDir}/auth.json`);
+	hubLogger.log("info", "hub started", { port: actualPort, address, configDir });
 
 	// Run log GC after startup — active channels are recent enough to not be GC'd
 	// (maxAgeDays=30 by default; any live channel log was created in this session).
@@ -61,7 +59,7 @@ async function main() {
 	// reattach on hub startup yet). When daemon reattach is implemented,
 	// populate activeChannelIds from ctx.channels before running GC.
 	runLogGc(logsDir, earlyConfigResolver.logConfig.maxAgeDays, new Set<string>()).catch((err) => {
-		console.warn("[main] log GC failed:", err);
+		hubLogger.log("warn", "log GC failed", { err: err instanceof Error ? err.message : String(err) });
 	});
 
 	// Open browser if requested via NEXTERM_OPEN env (set by CLI daemon spawner)
@@ -81,6 +79,6 @@ async function main() {
 }
 
 main().catch((err) => {
-	console.error("Failed to start hub:", err);
+	process.stderr.write(`Failed to start hub: ${err instanceof Error ? err.stack : String(err)}\n`);
 	process.exit(1);
 });

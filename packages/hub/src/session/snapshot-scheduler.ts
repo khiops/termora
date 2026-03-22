@@ -123,9 +123,7 @@ export class SnapshotScheduler {
 
 	private _requestSnapshot(channelId: string): void {
 		if (this._inFlightSnapshots >= this._maxConcurrentSnapshots) {
-			console.warn(
-				`[snapshot-scheduler] max concurrent snapshots (${this._maxConcurrentSnapshots}) reached — deferring snapshot for channel ${channelId}`,
-			);
+			// Max concurrent snapshots reached — silently defer (high-frequency path)
 			return;
 		}
 
@@ -152,9 +150,7 @@ export class SnapshotScheduler {
 				if (this._inFlightSnapshots > 0) {
 					this._inFlightSnapshots--;
 				}
-				console.warn(
-					`[snapshot-scheduler] snapshot timeout for channel ${channelId} after ${SNAPSHOT_TIMEOUT_MS}ms`,
-				);
+				// Snapshot timeout — slot freed (agent may be busy or disconnected)
 			}, SNAPSHOT_TIMEOUT_MS),
 		);
 	}

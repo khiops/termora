@@ -27,13 +27,13 @@ export function resolveAgentPath(): string {
 	// In SEA mode, look for co-located agent binary
 	if (sea) {
 		const seaPath = resolveAgentBinaryPath();
-		console.log(`[local-agent] resolveAgentPath: SEA mode detected, resolveAgentBinaryPath=${seaPath}`);
+		// SEA mode: agent binary path resolved at startup, logged by caller if needed
 		if (seaPath) return seaPath;
 	}
 	// Dev mode fallback
 	const __dirname = dirname(fileURLToPath(import.meta.url));
 	const devPath = join(__dirname, "../../../agent/dist/main.js");
-	console.log(`[local-agent] resolveAgentPath: sea=${sea} devPath=${devPath} process.execPath=${process.execPath}`);
+	// dev mode fallback: devPath resolved below
 	return devPath;
 }
 
@@ -83,13 +83,13 @@ export class LocalAgent extends AgentConnection {
 			? [this.agentPath, ["--stdio"]]
 			: [process.execPath, [this.agentPath, "--stdio"]];
 
-		console.log(`[local-agent] start: agentPath=${this.agentPath} isBinary=${isBinary} cmd=${cmd} args=${JSON.stringify(args)}`);
+		this.hubLogger?.log("debug", "local-agent: spawning", { agentPath: this.agentPath, isBinary, cmd, args });
 
 		this.process = spawn(cmd, args, {
 			stdio: ["pipe", "pipe", "pipe"], // stdin=pipe, stdout=pipe, stderr=pipe (capture for logging)
 		});
 
-		console.log(`[local-agent] start: process spawned pid=${this.process.pid}`);
+		this.hubLogger?.log("debug", "local-agent: process spawned", { pid: this.process.pid });
 
 		this.process.stdout?.on("data", (data: Buffer) => {
 			this.handleData(data);
@@ -111,16 +111,16 @@ export class LocalAgent extends AgentConnection {
 		}
 
 		this.process.on("error", (err) => {
-			console.log(`[local-agent] process error event: ${err instanceof Error ? err.stack : String(err)}`);
+			this.hubLogger?.log("error", "local-agent: process error", { err: err instanceof Error ? err.stack : String(err) });
 			this.emit("error", err);
 		});
 
 		this.process.on("exit", (code, signal) => {
-			console.log(`[local-agent] process exit event: code=${code} signal=${signal}`);
+			this.hubLogger?.log("debug", "local-agent: process exit", { code, signal });
 		});
 
 		this.process.on("close", (code) => {
-			console.log(`[local-agent] process close event: code=${code}`);
+			this.hubLogger?.log("debug", "local-agent: process close", { code });
 			this.sendQueue.clear();
 			this.process = null;
 			this.emit("close", code);
@@ -128,12 +128,12 @@ export class LocalAgent extends AgentConnection {
 
 		return new Promise<void>((resolve, reject) => {
 			const timeout = setTimeout(() => {
-				console.log(`[local-agent] start: HELLO timeout after ${HELLO_TIMEOUT_MS}ms — agent did not send HELLO`);
+				this.hubLogger?.log("error", "local-agent: HELLO timeout — agent did not send HELLO", { timeoutMs: HELLO_TIMEOUT_MS });
 				reject(new Error("Agent HELLO timeout"));
 			}, HELLO_TIMEOUT_MS);
 
 			this.once("ready", () => {
-				console.log(`[local-agent] start: HELLO received — agent ready`);
+				this.hubLogger?.log("debug", "local-agent: HELLO received — agent ready");
 				clearTimeout(timeout);
 				resolve();
 			});
