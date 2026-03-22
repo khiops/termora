@@ -2,7 +2,7 @@
 
 > **Project:** nexterm (local-first session terminal platform)
 > **Date:** 2026-03-21
-> **Revision:** v1.3
+> **Revision:** v1.4
 > **Scope:** Full audit — all packages (shared, agent, hub, web, desktop) + Rust crates
 > **Auditor:** Claude Opus 4.6 (automated, multi-phase)
 
@@ -494,7 +494,7 @@ sequenceDiagram
 | A06 | Insecure Design | ⚠️ | Pairing rate limiter in-memory only, no general API rate limiting |
 | A07 | Authentication Failures | ⚠️ | Deprecated auth path in production, pairing code low entropy, elevation cache cross-client |
 | A08 | Data Integrity | ✅ | MessagePack decode guarded, frame size limits, structured error responses |
-| A09 | Logging Failures | ⚠️ | ~80+ console.log in production without log-level gating, sensitive context exposed |
+| A09 | Logging Failures | ✅ | ~~80+ console.log~~ → replaced with structured hubLogger/server.log (SEC-018) |
 | A10 | Exception Handling | ✅ | All error handlers fail-closed, no stack traces in API responses |
 
 ### I.2 Security Headers
@@ -534,7 +534,7 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | ~~SEC-015~~ | ~~MEDIUM~~ | ~~A01~~ | ~~`channel-lifecycle-manager.ts:895`~~ | ~~pendingAuthPrompts no timeout + race~~ | ✅ **RESOLVED** (2026-03-22) — 60s timeout, race guard, disconnect cleanup |
 | ~~SEC-016~~ | ~~MEDIUM~~ | ~~A02~~ | ~~`pty.ts:37`~~ | ~~process.env inheritance~~ | ✅ **RESOLVED** (2026-03-22) — configurable envMode (minimal/inherit) at global/host/channel level + UI |
 | ~~SEC-017~~ | ~~MEDIUM~~ | ~~A08~~ | ~~`tauri.conf.json`~~ | ~~Tauri updater unsigned~~ | ✅ **RESOLVED** (2026-03-22) — `scripts/generate-updater-key.sh` + setup guide |
-| SEC-018 | MEDIUM | A09 | `spawn.ts:8`, `session-manager.ts`, `local-agent.ts` | ~80+ console.log calls in production paths expose hostId, clientId, shell paths, stack traces without log-level gating | Replace with hubLogger at debug level; gate behind LOG_LEVEL config |
+| ~~SEC-018~~ | ~~MEDIUM~~ | ~~A09~~ | ~~`spawn.ts:8`, `session-manager.ts`, `local-agent.ts`~~ | ~~~80+ console.log in production~~ | ✅ **RESOLVED** (2026-03-22) — 83 calls replaced with structured hubLogger/server.log across 19 files |
 | ~~SEC-019~~ | ~~LOW~~ | ~~A07~~ | ~~`auth.ts:82`~~ | ~~initAuth reads token from auth.json without format validation (Tauri client validates 64-char hex; hub does not)~~ | ✅ **RESOLVED** (2026-03-22) — hex format validation added in initAuth |
 | SEC-020 | LOW | A02 | `config.ts:533` | Default CORS origins include `http://localhost:*` — any local service on any port is a trusted origin | Narrow default to ports 4100-4199; document risk for shared machines |
 | ~~SEC-021~~ | ~~LOW~~ | ~~A03~~ | ~~`pnpm-workspace.yaml:22`~~ | ~~Fastify 5.7.4: CVE-2026-3419 Content-Type validation bypass (CVSS 5.3)~~ | ✅ **RESOLVED** (2026-03-22) — fastify upgraded to `^5.8.1` (resolved to 5.8.2) |
@@ -548,7 +548,7 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | ~~SEC-029~~ | ~~LOW~~ | ~~A05~~ | ~~`pair.ts:22`~~ | ~~/api/pair/verify body not validated by Fastify JSON schema~~ | ✅ **RESOLVED** (2026-03-22) — Fastify body schema added |
 | ~~SEC-030~~ | ~~LOW~~ | ~~A09~~ | ~~`server.ts:148`~~ | ~~touchToken errors silently swallowed~~ | ✅ **RESOLVED** (2026-03-22) — try/catch with warn log |
 
-**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (23 resolved as of 2026-03-22)**
+**Summary: 6 HIGH, 12 MEDIUM, 12 LOW — 30 total findings. (24 resolved as of 2026-03-22)**
 
 ---
 
@@ -624,10 +624,10 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | Crypto | 0 | 0 | 2 | 0 | 0 |
 | Dependencies | 0 | 0 | 1 | 0 | 0 |
 | Input Validation | 0 | 0 | 4 | 0 | 0 |
-| Logging | 1 | 0 | 2 | 0 | 0 |
+| Logging | 0 | 0 | 3 | 0 | 0 |
 | Infrastructure | 4 | 0 | 0 | 0 | 0 |
 | Tech Debt | 2 | 0 | 1 | 0 | 0 |
-| **Total** | **7** | **0** | **23** | **0** | **0** |
+| **Total** | **6** | **0** | **24** | **0** | **0** |
 
 ---
 
@@ -707,3 +707,4 @@ The single fail-open is the Rust daemon's first-run mode (`daemon.rs:306`): when
 | 2026-03-22 | v1.1 | P0 remediation: SEC-001 (WS timeout), SEC-003 (clientId check), SEC-006 (helmet), SEC-021 (fastify upgrade). Catalog hygiene: 3 deps migrated. 4/30 resolved |
 | 2026-03-22 | v1.2 | Quick wins: SEC-019/022/023/029/030. P1: SEC-004/005/009/010. 13/30 resolved |
 | 2026-03-22 | v1.3 | P1: SEC-002 (DB rate limiter), SEC-008 (TOFU+UI), SEC-011 (8-digit), SEC-014 (zero pwd). P2: SEC-007/012/013/015/016/017. 23/30 resolved |
+| 2026-03-22 | v1.4 | SEC-018: 83 console.log calls replaced with structured logging (19 files). 24/30 resolved. All P0/P1/P2 done. |
