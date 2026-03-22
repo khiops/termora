@@ -21,7 +21,42 @@ export interface SpawnOptions {
 	cols: number;
 	rows: number;
 	scrollback?: number;
+	envMode?: 'minimal' | 'inherit';
 }
+
+
+
+/** Build the PTY environment according to the configured env mode.
+ *
+ * - "minimal": only essential vars (PATH, HOME, SHELL, TERM, USER, LANG, LC_*, XDG/display) + user env
+ * - "inherit": all process.env minus known-sensitive patterns + user env (default, backward-compatible)
+ */
+function buildPtyEnv(
+	processEnv: NodeJS.ProcessEnv,
+	userEnv: Record<string, string>,
+	mode: 'minimal' | 'inherit',
+): Record<string, string> {
+	if (mode === 'minimal') {
+		const KEEP = ['PATH', 'HOME', 'SHELL', 'TERM', 'USER', 'LANG', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'];
+		const base: Record<string, string> = {};
+		for (const key of KEEP) {
+			if (processEnv[key]) base[key] = processEnv[key]!;
+		}
+		for (const [key, val] of Object.entries(processEnv)) {
+			if (key.startsWith('LC_') && val) base[key] = val;
+		}
+		return { ...base, ...userEnv };
+	} else {
+		// 'inherit' mode — blocklist of known-sensitive patterns
+		const BLOCK = /^(AWS_|GITHUB_|GITLAB_|NEXTERM_|npm_config_|DOCKER_|VAULT_|NODE_AUTH_TOKEN|KUBECONFIG)/;
+		const filtered: Record<string, string> = {};
+		for (const [key, val] of Object.entries(processEnv)) {
+			if (!BLOCK.test(key) && val) filtered[key] = val;
+		}
+		return { ...filtered, ...userEnv };
+	}
+}
+
 
 export class PtyManager {
 	private channels = new Map<string, PtyChannel>();
@@ -34,7 +69,7 @@ export class PtyManager {
 			cols: options.cols,
 			rows: options.rows,
 			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-			env: { ...process.env, ...options.env } as Record<string, string>,
+			env: buildPtyEnv(process.env, options.env, options.envMode ?? 'inherit'),
 			// Let node-pty auto-detect conpty vs winpty based on Windows version
 		});
 

@@ -233,6 +233,7 @@ export class AgentHandler {
 				env: ptyEnv,
 				cols: msg.cols,
 				rows: msg.rows,
+				envMode: msg.envMode ?? 'inherit',
 			});
 			const ptyPid = this.ptyManager.getPid(channelId);
 			console.error(`[agent] PTY spawned: channelId=${channelId} pid=${ptyPid}`);

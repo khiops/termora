@@ -9,6 +9,8 @@ export interface HostVerifyRequest {
 	algorithm: string;
 	oldFingerprint: string;
 	promptId: string;
+	/** True on first connection (TOFU) — no previous fingerprint. */
+	firstConnect?: boolean;
 }
 
 /**
@@ -31,8 +33,9 @@ export const useHostVerifyStore = defineStore("hostVerify", () => {
 		algorithm: string,
 		oldFingerprint: string,
 		promptId: string,
+		firstConnect = false,
 	): void {
-		pendingPrompt.value = { hostId, hostname, fingerprint, algorithm, oldFingerprint, promptId };
+		pendingPrompt.value = { hostId, hostname, fingerprint, algorithm, oldFingerprint, promptId, ...(firstConnect ? { firstConnect: true } : {}) };
 	}
 
 	function respond(action: "trust_permanent" | "trust_once" | "reject"): void {
@@ -51,6 +54,10 @@ export const useHostVerifyStore = defineStore("hostVerify", () => {
 		respond("trust_permanent");
 	}
 
+	function trustOnce(): void {
+		respond("trust_once");
+	}
+
 	function reject(): void {
 		respond("reject");
 	}
@@ -65,6 +72,7 @@ export const useHostVerifyStore = defineStore("hostVerify", () => {
 		handleHostVerify,
 		respond,
 		accept,
+		trustOnce,
 		reject,
 		dismiss,
 	};

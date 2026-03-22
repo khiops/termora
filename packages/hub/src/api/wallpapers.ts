@@ -2,6 +2,16 @@ import { readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { WALLPAPER_EXTENSIONS } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { fileTypeFromBuffer } from "file-type";
+
+const ALLOWED_MIMES = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"image/svg+xml",
+	"image/bmp",
+]);
 
 function isValidExtension(filename: string): boolean {
 	const ext = extname(filename).toLowerCase().slice(1);
@@ -55,6 +65,32 @@ export function registerWallpaperRoutes(server: FastifyInstance, configDir: stri
 		}
 
 		const buffer = await file.toBuffer();
+
+		// Magic-byte MIME validation (defense-in-depth, before writing to disk)
+		const ext = extname(sanitized).toLowerCase().slice(1);
+		if (ext === "svg") {
+			// SVG is text-based — file-type cannot detect it; validate content heuristically
+			const head = buffer.slice(0, 512).toString("utf8");
+			if (!head.includes("<svg") && !head.includes("<?xml")) {
+				return reply.code(400).send({
+					error: {
+						code: "INVALID_FILE_TYPE",
+						message: "File content does not match an allowed image type (detected: unknown)",
+					},
+				});
+			}
+		} else {
+			const detectedType = await fileTypeFromBuffer(buffer);
+			if (!detectedType || !ALLOWED_MIMES.has(detectedType.mime)) {
+				return reply.code(400).send({
+					error: {
+						code: "INVALID_FILE_TYPE",
+						message: `File content does not match an allowed image type (detected: ${detectedType?.mime ?? "unknown"})`,
+					},
+				});
+			}
+		}
+
 		const target = join(wallpapersDir, sanitized);
 
 		// Directory containment check

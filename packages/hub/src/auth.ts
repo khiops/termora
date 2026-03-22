@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { generateId } from "@nexterm/shared";
@@ -89,8 +89,15 @@ export function initAuth(configDir: string): string {
 	// First run — generate and store token
 	mkdirSync(configDir, { recursive: true });
 	const token = randomBytes(32).toString("hex");
-	writeFileSync(authFilePath, JSON.stringify({ token }), { encoding: "utf-8" });
-	chmodSync(authFilePath, 0o600);
+	// Atomic: open with restricted mode so the file is never world-readable,
+	// even briefly. writeFileSync + chmodSync has a TOCTOU window at 0644.
+	const fd = openSync(authFilePath, "w", 0o600);
+	try {
+		writeSync(fd, JSON.stringify({ token }, null, "\t"));
+		fchmodSync(fd, 0o600); // Belt-and-suspenders: enforce even if umask is weird
+	} finally {
+		closeSync(fd);
+	}
 
 	return token;
 }

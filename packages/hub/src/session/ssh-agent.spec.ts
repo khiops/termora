@@ -104,6 +104,29 @@ function createMockSshServer(
 }
 
 /** Build a minimal Host object for a mock SSH server on localhost. */
+
+/**
+ * Probe the mock server on `port` once with `start(null)` to capture its
+ * host-key fingerprint via the SSH_TOFU rejection path, then return it.
+ * Use this fingerprint as `storedFingerprint` in subsequent `start()` calls
+ * so non-TOFU tests can authenticate without triggering TOFU rejection.
+ */
+async function getServerFingerprint(port: number, host?: Partial<Host>): Promise<string> {
+	const probeAgent = new SshAgent(makeHost(port, host));
+	try {
+		await probeAgent.start(null);
+		// Should not reach here — start(null) always rejects with SSH_TOFU now.
+		const fp = probeAgent.lastKeyVerification.capturedFingerprint;
+		probeAgent.close();
+		return fp;
+	} catch {
+		// SSH_TOFU rejection — fingerprint is captured in lastKeyVerification.
+		const fp = probeAgent.lastKeyVerification.capturedFingerprint;
+		probeAgent.close();
+		return fp;
+	}
+}
+
 function makeHost(port: number, overrides: Partial<Host> = {}): Host {
 	return {
 		id: "01HZ000000000000000000001",
@@ -161,10 +184,11 @@ describe("SshAgent", () => {
 			});
 			servers.push(server);
 
+			const fp = await getServerFingerprint(port);
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			const { hello } = await agent.start();
+			const { hello } = await agent.start(fp);
 
 			expect(hello.type).toBe("HELLO");
 			expect(hello.version).toBe(1);
@@ -198,10 +222,11 @@ describe("SshAgent", () => {
 			});
 			servers.push(server);
 
+			const fp = await getServerFingerprint(port);
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			await agent.start();
+			await agent.start(fp);
 
 			const spawnOkPromise = new Promise<ProtocolMessage>((resolve, reject) => {
 				const timeout = setTimeout(() => reject(new Error("Timeout waiting for SPAWN_OK")), 5_000);
@@ -274,11 +299,12 @@ describe("SshAgent", () => {
 		});
 		servers.push(server);
 
+		const fp = await getServerFingerprint(port);
 		const agent = new SshAgent(makeHost(port));
 		agents.push(agent);
 
 		// SshAgent uses 5 s HELLO timeout — give 6 s for the test.
-		await expect(agent.start()).rejects.toThrow("Agent HELLO timeout");
+		await expect(agent.start(fp)).rejects.toThrow("Agent HELLO timeout");
 	}, 6_000);
 
 	it(
@@ -289,10 +315,11 @@ describe("SshAgent", () => {
 			});
 			servers.push(server);
 
+			const fp = await getServerFingerprint(port);
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			await agent.start();
+			await agent.start(fp);
 			expect(agent.connected).toBe(true);
 
 			const closePromise = new Promise<void>((resolve) => {
@@ -347,11 +374,12 @@ describe("SshAgent — auth prompting", () => {
 			});
 			servers.push(server);
 
+			const fp = await getServerFingerprint(port);
 			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue(PASSPHRASE);
 			const agent = new SshAgent(makeHost(port, { sshKeyPath: ENCRYPTED_KEY_PATH }), promptAuth);
 			agents.push(agent);
 
-			const { hello } = await agent.start();
+			const { hello } = await agent.start(fp);
 			expect(hello.type).toBe("HELLO");
 			expect(promptAuth).toHaveBeenCalledOnce();
 			expect(promptAuth).toHaveBeenCalledWith(
@@ -408,11 +436,13 @@ describe("SshAgent — auth prompting", () => {
 			});
 			servers.push(server);
 
+			// Probe with key auth (no promptAuth needed) to capture the server fingerprint.
+			const fp = await getServerFingerprint(port);
 			const promptAuth: AuthPromptFn = vi.fn().mockResolvedValue("hunter2");
 			const agent = new SshAgent(makeHost(port, { sshAuth: "password" }), promptAuth);
 			agents.push(agent);
 
-			const { hello } = await agent.start();
+			const { hello } = await agent.start(fp);
 			expect(hello.type).toBe("HELLO");
 			expect(promptAuth).toHaveBeenCalledOnce();
 			expect(promptAuth).toHaveBeenCalledWith(
@@ -486,7 +516,7 @@ describe("SshAgent — TOFU host key verification", () => {
 	});
 
 	it(
-		"TOFU: accepts unknown fingerprint on first connect and captures it",
+		"TOFU: rejects with SSH_TOFU on first connect and captures fingerprint",
 		async () => {
 			const { server, port } = await createMockSshServer((stream) => {
 				stream.write(makeHelloFrame());
@@ -496,11 +526,12 @@ describe("SshAgent — TOFU host key verification", () => {
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			// null = no stored fingerprint (TOFU first connect)
-			const { keyVerification } = await agent.start(null);
+			// null = no stored fingerprint → should reject with SSH_TOFU
+			await expect(agent.start(null)).rejects.toThrow("SSH_TOFU");
 
-			expect(keyVerification.mismatch).toBe(false);
-			expect(keyVerification.capturedFingerprint).toMatch(/^SHA256:/);
+			expect(agent.lastKeyVerification.tofu).toBe(true);
+			expect(agent.lastKeyVerification.mismatch).toBe(false);
+			expect(agent.lastKeyVerification.capturedFingerprint).toMatch(/^SHA256:/);
 		},
 		TEST_TIMEOUT,
 	);
@@ -513,19 +544,20 @@ describe("SshAgent — TOFU host key verification", () => {
 			});
 			servers.push(server);
 
-			// First connect to capture the actual fingerprint
+			// First connect: TOFU rejects, capture fingerprint from lastKeyVerification
 			const agent1 = new SshAgent(makeHost(port));
 			agents.push(agent1);
-			const { keyVerification: kv1 } = await agent1.start(null);
-			const capturedFingerprint = kv1.capturedFingerprint;
+			await expect(agent1.start(null)).rejects.toThrow("SSH_TOFU");
+			const capturedFingerprint = agent1.lastKeyVerification.capturedFingerprint;
 			agent1.close();
 			agents = agents.filter((a) => a !== agent1);
 
-			// Second connect with the trusted fingerprint — should match without mismatch
+			// Second connect with the stored fingerprint — should match without mismatch
 			const agent2 = new SshAgent(makeHost(port));
 			agents.push(agent2);
 			const { keyVerification: kv2 } = await agent2.start(capturedFingerprint);
 
+			expect(kv2.tofu).toBe(false);
 			expect(kv2.mismatch).toBe(false);
 			expect(kv2.capturedFingerprint).toBe(capturedFingerprint);
 		},
@@ -566,10 +598,11 @@ describe("SshAgent — TOFU host key verification", () => {
 			const agent = new SshAgent(makeHost(port));
 			agents.push(agent);
 
-			const { keyVerification } = await agent.start(null);
+			// TOFU rejects, but still captures the fingerprint in lastKeyVerification
+			await expect(agent.start(null)).rejects.toThrow("SSH_TOFU");
 
 			// SHA256: prefix followed by base64 (standard chars + padding)
-			expect(keyVerification.capturedFingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]+=*$/);
+			expect(agent.lastKeyVerification.capturedFingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]+=*$/);
 		},
 		TEST_TIMEOUT,
 	);

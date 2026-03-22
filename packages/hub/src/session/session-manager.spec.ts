@@ -2201,6 +2201,8 @@ function makeMockConfigResolver(
 		uiConfig: {
 			title: { source, staticTitle },
 		},
+		resolve: () => ({ envMode: 'inherit' }),
+		resolveElevationMethod: () => 'sudo',
 	} as unknown as ConfigResolver;
 }
 

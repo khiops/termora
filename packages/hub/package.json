@@ -33,6 +33,7 @@
 		"@rainbowatcher/toml-edit-js": "catalog:",
 		"better-sqlite3": "catalog:",
 		"fastify": "catalog:",
+		"file-type": "catalog:",
 		"ssh2": "catalog:"
 	},
 	"devDependencies": {

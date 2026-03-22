@@ -444,6 +444,12 @@ export class SessionManager {
 			}
 		}
 
+		// ── Resolve terminal profile for env mode ─────────────────────────────
+		const terminalProfile = this.ctx.configResolver
+			? this.ctx.configResolver.resolve(hostId)
+			: null;
+		const resolvedEnvMode = terminalProfile?.envMode ?? 'inherit';
+
 		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
 			type: "SPAWN",
@@ -455,6 +461,7 @@ export class SessionManager {
 			cols,
 			rows,
 			...(resolvedDirectProcess && { directProcess: true }),
+			envMode: resolvedEnvMode,
 		};
 
 		// ── Elevated spawn ────────────────────────────────────────────────────

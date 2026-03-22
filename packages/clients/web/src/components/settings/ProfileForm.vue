@@ -268,6 +268,15 @@
 						placeholder="Inherited"
 					/>
 				</div>
+
+				<div class="form-row">
+					<label class="form-label" for="pf-env-mode">Environment Inheritance</label>
+					<select id="pf-env-mode" v-model="form.profileOverrides.envMode" class="form-select">
+						<option value="">Inherited</option>
+						<option value="inherit">Inherit with blocklist</option>
+						<option value="minimal">Minimal (secure)</option>
+					</select>
+				</div>
 			</div>
 		</section>
 
@@ -309,7 +318,7 @@ interface FormState {
 	iconType: IconType;
 	iconValue: string;
 	color: string;
-	profileOverrides: Partial<TerminalProfile> & { cursorStyle?: string };
+	profileOverrides: Partial<TerminalProfile> & { cursorStyle?: string; envMode?: string };
 }
 
 function buildInitialForm(p?: LaunchProfile): FormState {
@@ -329,6 +338,7 @@ function buildInitialForm(p?: LaunchProfile): FormState {
 			...(p?.profileOverrides?.fontSize !== undefined && { fontSize: p.profileOverrides.fontSize }),
 			...(p?.profileOverrides?.cursorStyle !== undefined && { cursorStyle: p.profileOverrides.cursorStyle }),
 			...(p?.profileOverrides?.scrollback !== undefined && { scrollback: p.profileOverrides.scrollback }),
+			...(p?.profileOverrides?.envMode !== undefined && { envMode: p.profileOverrides.envMode }),
 		},
 	};
 }
@@ -460,6 +470,9 @@ async function handleSave(): Promise<void> {
 		}
 		if (form.profileOverrides.scrollback != null && form.profileOverrides.scrollback >= 0) {
 			overrides.scrollback = form.profileOverrides.scrollback;
+		}
+		if (form.profileOverrides.envMode) {
+			overrides.envMode = form.profileOverrides.envMode as 'minimal' | 'inherit';
 		}
 
 		const envRecord = buildEnvRecord();

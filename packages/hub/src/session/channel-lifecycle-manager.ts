@@ -18,7 +18,6 @@ import type {
 } from "@nexterm/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ElevationMethod } from "@nexterm/shared";
-import { ChannelLogger } from "../logging/channel-logger.js";
 import type { AgentConnection } from "./agent-connection.js";
 import type { ChannelState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
@@ -50,7 +49,6 @@ export class ChannelLifecycleManager {
 	constructor(
 		private readonly ctx: SharedSessionContext,
 		private readonly broadcaster: StateBroadcaster,
-		private readonly logsDir?: string,
 	) {}
 
 	// ─── Spawn ───────────────────────────────────────────────────────────────
@@ -146,17 +144,6 @@ export class ChannelLifecycleManager {
 					this.ctx.scheduler.trackChannel(channelId);
 					this.ctx.chunker.trackChannel(channelId);
 					client.attachedChannels.add(channelId);
-
-					// Create a ChannelLogger for this channel if logging is configured
-					if (this.logsDir && this.ctx.loggerRegistry && this.ctx.configResolver) {
-						const logConfig = this.ctx.configResolver.logConfig;
-						const logger = new ChannelLogger(channelId, this.logsDir, logConfig, new Date());
-						this.ctx.loggerRegistry.set(channelId, logger);
-						logger.log("hub", "info", "channel created", {
-							shell: resolvedShell,
-							hostId,
-						});
-					}
 
 					const channelStateMsg: ChannelStateMessage = {
 						type: "CHANNEL_STATE",
@@ -290,7 +277,36 @@ export class ChannelLifecycleManager {
 				promptClient = attachedClientId ? this.ctx.clients.get(attachedClientId) : undefined;
 			}
 			if (!promptClient) {
-				// No client for prompting — no clientId available for cache lookup, try passwordless only
+				// No client for prompting — try cache or passwordless only
+				// Scan for any valid cache entry for this host (composite key ${hostId}:*)
+				let cached: { secret: string; expiresAt: number } | undefined;
+				for (const [key, val] of this.ctx.elevationCache) {
+					if (key.startsWith(`${hostId}:`) && val.expiresAt > Date.now()) {
+						cached = val;
+						break;
+					}
+				}
+				if (cached) {
+					const spawnWithSecret: AgentSpawnMessage = {
+						...baseElevatedSpawn,
+						requestId: generateId(),
+						elevationSecret: cached.secret,
+					};
+					return await this.restartSendAndWait(
+						agent,
+						spawnWithSecret,
+						channelId,
+						hostId,
+						sessionEntry,
+						ch,
+						shell,
+						args,
+						cwd,
+						cols,
+						rows,
+						channel.directProcess,
+					);
+				}
 				return await this.restartSendAndWait(
 					agent,
 					baseElevatedSpawn,
@@ -307,9 +323,9 @@ export class ChannelLifecycleManager {
 				);
 			}
 
-			// Cache hit — keyed by hostId:clientId to prevent cross-client privilege escalation
-			const restartCacheKey = `${hostId}:${promptClient.id}`;
-			const cached = this.ctx.elevationCache.get(restartCacheKey);
+			// Cache hit — SEC-004: composite key ${hostId}:${clientId}
+			const cacheKey = `${hostId}:${promptClient.id}`;
+			const cached = this.ctx.elevationCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				const spawnWithSecret: AgentSpawnMessage = {
 					...baseElevatedSpawn,
@@ -392,9 +408,9 @@ export class ChannelLifecycleManager {
 				return false;
 			}
 
-			this.ctx.elevationCache.set(restartCacheKey, {
+			this.ctx.elevationCache.set(`${hostId}:${promptClient.id}`, {
 				secret,
-				expiresAt: Date.now() + 300_000,
+				expiresAt: Date.now() + 900_000,
 			});
 
 			const retrySpawn: AgentSpawnMessage = {
@@ -871,8 +887,41 @@ export class ChannelLifecycleManager {
 			};
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
-				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
+				// Race condition guard: cancel any existing pending prompt for this hostId
+				// before setting a new one (e.g. concurrent SPAWNs for the same host).
+				const existing = this.ctx.pendingAuthPrompts.get(hostId);
+				if (existing) {
+					if (existing.timer !== null) clearTimeout(existing.timer);
+					existing.resolve(null);
+				}
+
+				// 60-second server-side timeout: if the client disconnects or never
+				// responds, the promise resolves with null (= cancelled) instead of
+				// hanging forever.
+				const timer = setTimeout(() => {
+					const p = this.ctx.pendingAuthPrompts.get(hostId);
+					if (p) {
+						this.ctx.pendingAuthPrompts.delete(hostId);
+						p.resolve(null);
+					}
+				}, 60_000);
+
+				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer, clientId: client.id });
 			});
 		};
+	}
+
+	/**
+	 * Cancel all pending auth prompts for a disconnected client.
+	 * Must be called from the client disconnect handler (ws-handler.ts).
+	 */
+	cancelPendingAuthPromptsForClient(clientId: string): void {
+		for (const [hostId, pending] of this.ctx.pendingAuthPrompts.entries()) {
+			if (pending.clientId === clientId) {
+				if (pending.timer !== null) clearTimeout(pending.timer);
+				pending.resolve(null);
+				this.ctx.pendingAuthPrompts.delete(hostId);
+			}
+		}
 	}
 }

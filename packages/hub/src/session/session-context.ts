@@ -6,8 +6,6 @@
 
 import type { AgentConfig, ChannelStatus, SessionStatus } from "@nexterm/shared";
 import type { ConfigResolver } from "../config.js";
-import type { HubLogger } from "../logging/hub-logger.js";
-import type { LoggerRegistry } from "../logging/index.js";
 import type { MetaDAL } from "../storage/meta.js";
 import type { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
@@ -62,19 +60,21 @@ export interface SharedSessionContext {
 			clientId: string;
 		}
 	>;
-	/** promptId → pending host-key-mismatch resolution */
+	/** promptId → pending host-key verification resolution */
 	pendingHostVerify: Map<
 		string,
 		{
-			resolve: (accepted: boolean) => void;
+			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
 			timer: ReturnType<typeof setTimeout>;
 		}
 	>;
+	/** '${hostname}:${port}' → fingerprint trusted for this session only (trust_once, not persisted) */
+	trustedOnceFingerprints: Map<string, string>;
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
 	notificationTimestamps: Map<string, number[]>;
-	/** `${hostId}:${clientId}` → cached elevation secret + expiry (TTL 5 min) */
+	/** hostId → cached elevation secret + expiry (TTL 15 min) */
 	elevationCache: Map<string, { secret: string; expiresAt: number }>;
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	agentCapabilities: Map<string, string[]>;
@@ -93,7 +93,4 @@ export interface SharedSessionContext {
 	/** Config */
 	agentConfig: AgentConfig;
 	configResolver: ConfigResolver | null;
-	/** Logging — null until initialized by SessionManager */
-	loggerRegistry: LoggerRegistry | null;
-	hubLogger: HubLogger | null;
 }

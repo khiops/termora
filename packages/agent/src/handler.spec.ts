@@ -213,6 +213,7 @@ describe("AgentHandler", () => {
 			env: { TERM: "xterm-256color" },
 			cols: 120,
 			rows: 40,
+			envMode: 'inherit',
 		});
 	});
 

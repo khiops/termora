@@ -1,5 +1,5 @@
 import type { UiSpawnMessage } from "@nexterm/shared";
-import { isValidDimensions, isValidEnv, isValidUlid } from "@nexterm/shared";
+import { isValidDimensions, isValidEnv, isValidUlid, validateShell } from "@nexterm/shared";
 import type { WsHandlerContext } from "./types.js";
 
 export function handleSpawn(msg: UiSpawnMessage, ctx: WsHandlerContext): void {
@@ -19,12 +19,9 @@ export function handleSpawn(msg: UiSpawnMessage, ctx: WsHandlerContext): void {
 			return;
 		}
 	}
-	if (msg.shell !== undefined && (typeof msg.shell !== "string" || msg.shell.length > 4096)) {
-		client.send({
-			type: "ERROR",
-			code: "INVALID_INPUT",
-			message: "shell must be a string ≤ 4096 chars",
-		});
+	const shellError = validateShell(msg.shell);
+	if (shellError !== null) {
+		client.send({ type: "ERROR", code: "INVALID_INPUT", message: shellError });
 		return;
 	}
 	if (msg.cwd !== undefined && (typeof msg.cwd !== "string" || msg.cwd.length > 4096)) {

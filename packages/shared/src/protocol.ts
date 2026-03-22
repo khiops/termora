@@ -55,6 +55,7 @@ export interface AgentSpawnMessage {
 	elevationSecret?: string;
 	elevationMethod?: string;
 	customCommand?: string;
+	envMode?: 'minimal' | 'inherit';
 }
 
 /** Agent → Hub: PTY spawned successfully */

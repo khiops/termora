@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
-import { resetVerifyRateLimit } from "./pair.js";
 
 // ─── Mock agents so no real PTY / SSH is spawned ─────────────────────────────
 
@@ -43,7 +42,6 @@ let dbs: DatabaseManager;
 let server: FastifyInstance;
 
 beforeEach(async () => {
-	resetVerifyRateLimit();
 	dbs = openTestDatabases();
 	server = await createServer({
 		logger: false,
@@ -74,7 +72,7 @@ describe("POST /api/pair", () => {
 		});
 		expect(res.statusCode).toBe(201);
 		const body = res.json<{ code: string; expires_at: string }>();
-		expect(body.code).toMatch(/^\d{6}$/);
+		expect(body.code).toMatch(/^\d{8}$/);
 		expect(body.expires_at).toBeTruthy();
 	});
 
@@ -164,15 +162,14 @@ describe("POST /api/pair/verify", () => {
 		expect(res.statusCode).toBe(200);
 	});
 
-	it("rejects numeric code (coerced to string by Fastify, treated as unknown code)", async () => {
-		// Fastify coerceTypes converts 123456 → "123456" (valid 6-digit format, unknown code).
-		// Numbers pass schema coercion and reach the handler; the DB returns 404.
+	it("returns 400 for non-string code", async () => {
 		const res = await server.inject({
 			method: "POST",
 			url: "/api/pair/verify",
 			payload: { code: 123456 },
 		});
-		expect([400,404]).toContain(res.statusCode);
+		// Fastify schema validation rejects non-string before handler runs
+		expect(res.statusCode).toBe(400);
 	});
 
 	it("returns 400 for code with wrong length", async () => {
@@ -181,6 +178,7 @@ describe("POST /api/pair/verify", () => {
 			url: "/api/pair/verify",
 			payload: { code: "12345" },
 		});
+		// Fastify schema validation rejects strings not matching ^\d{8}$ before handler runs
 		expect(res.statusCode).toBe(400);
 	});
 
@@ -190,7 +188,7 @@ describe("POST /api/pair/verify", () => {
 			url: "/api/pair/verify",
 			payload: { code: "12345a" },
 		});
-		// Fastify JSON schema validation intercepts before handler — returns 400 FST_ERR_VALIDATION
+		// Fastify schema validation rejects non-digit strings before handler runs
 		expect(res.statusCode).toBe(400);
 	});
 
@@ -198,7 +196,7 @@ describe("POST /api/pair/verify", () => {
 		const res = await server.inject({
 			method: "POST",
 			url: "/api/pair/verify",
-			payload: { code: "000000" },
+			payload: { code: "00000000" },
 		});
 		expect(res.statusCode).toBe(404);
 		const body = res.json<{ error: { code: string } }>();
@@ -239,7 +237,7 @@ describe("POST /api/pair/verify", () => {
 		const pastExpiry = new Date(Date.now() - 1000).toISOString();
 		dal.createPairingCode(
 			"EXPIRED01AAAAAAAAAAAAAAAAAAA",
-			"777777",
+			"77777777",
 			new Date().toISOString(),
 			pastExpiry,
 		);
@@ -247,7 +245,7 @@ describe("POST /api/pair/verify", () => {
 		const res = await server.inject({
 			method: "POST",
 			url: "/api/pair/verify",
-			payload: { code: "777777" },
+			payload: { code: "77777777" },
 		});
 		expect(res.statusCode).toBe(410);
 		const body = res.json<{ error: { code: string } }>();
@@ -260,7 +258,7 @@ describe("POST /api/pair/verify", () => {
 			const r = await server.inject({
 				method: "POST",
 				url: "/api/pair/verify",
-				payload: { code: "000000" },
+				payload: { code: "00000000" },
 			});
 			// All return 404, but that's fine — counter still increments
 			expect(r.statusCode).toBe(404);
@@ -270,7 +268,7 @@ describe("POST /api/pair/verify", () => {
 		const res = await server.inject({
 			method: "POST",
 			url: "/api/pair/verify",
-			payload: { code: "000000" },
+			payload: { code: "00000000" },
 		});
 		expect(res.statusCode).toBe(429);
 		const body = res.json<{ error: { code: string } }>();

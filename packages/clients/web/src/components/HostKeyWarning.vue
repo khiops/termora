@@ -10,30 +10,40 @@
 			<div class="hkw-card">
 				<div class="hkw-header">
 					<span class="hkw-icon" aria-hidden="true">&#9888;</span>
-					<h3 id="hkw-title" class="hkw-title">SSH Host Key Changed</h3>
+					<h3 id="hkw-title" class="hkw-title">
+						{{ prompt.firstConnect ? 'First SSH Connection' : 'SSH Host Key Changed' }}
+					</h3>
 				</div>
 
 				<p class="hkw-hostname">{{ prompt.hostname }}</p>
 
 				<p class="hkw-warning">
-					The SSH host key for this server has changed. This could indicate a
-					man-in-the-middle attack.
+					<template v-if="prompt.firstConnect">
+						First connection to this host. Verify the fingerprint before trusting it.
+					</template>
+					<template v-else>
+						The SSH host key for this server has changed. This could indicate a
+						man-in-the-middle attack.
+					</template>
 				</p>
 
-				<div class="hkw-fingerprint-block">
-					<span class="hkw-fp-label">Previous key</span>
-					<button
-						class="hkw-fp-value"
-						type="button"
-						:title="copiedOld ? 'Copied!' : 'Click to copy'"
-						@click="copyOld"
-					>{{ prompt.oldFingerprint }}</button>
-				</div>
+				<template v-if="!prompt.firstConnect && prompt.oldFingerprint">
+					<div class="hkw-fingerprint-block">
+						<span class="hkw-fp-label">Previous key</span>
+						<button
+							class="hkw-fp-value"
+							type="button"
+							:title="copiedOld ? 'Copied!' : 'Click to copy'"
+							@click="copyOld"
+						>{{ prompt.oldFingerprint }}</button>
+					</div>
+				</template>
 
 				<div class="hkw-fingerprint-block">
-					<span class="hkw-fp-label">New key</span>
+					<span class="hkw-fp-label">{{ prompt.firstConnect ? 'Server fingerprint' : 'New key' }}</span>
 					<button
-						class="hkw-fp-value hkw-fp-new"
+						class="hkw-fp-value"
+						:class="{ 'hkw-fp-new': !prompt.firstConnect }"
 						type="button"
 						:title="copiedNew ? 'Copied!' : 'Click to copy'"
 						@click="copyNew"
@@ -42,7 +52,10 @@
 
 				<div class="hkw-actions">
 					<button class="hkw-btn hkw-reject" @click="handleReject">Reject</button>
-					<button class="hkw-btn hkw-accept" @click="handleAccept">Accept New Key</button>
+					<button class="hkw-btn hkw-trust-once" @click="handleTrustOnce">Trust Once</button>
+					<button class="hkw-btn hkw-accept" @click="handleAccept">
+						{{ prompt.firstConnect ? 'Trust Permanently' : 'Accept New Key' }}
+					</button>
 				</div>
 			</div>
 		</div>
@@ -79,6 +92,10 @@ async function copyNew(): Promise<void> {
 
 function handleAccept(): void {
 	store.accept();
+}
+
+function handleTrustOnce(): void {
+	store.trustOnce();
 }
 
 function handleReject(): void {
@@ -217,6 +234,18 @@ function handleReject(): void {
 .hkw-reject:hover {
 	background: var(--nt-tab-hover);
 	color: var(--nt-fg);
+}
+
+.hkw-trust-once {
+	background: var(--nt-border);
+	border-color: var(--nt-tab-hover);
+	color: var(--nt-accent);
+}
+
+.hkw-trust-once:hover {
+	background: var(--nt-tab-hover);
+	color: var(--nt-accent);
+	opacity: 0.9;
 }
 
 .hkw-accept {

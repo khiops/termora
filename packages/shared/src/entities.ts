@@ -14,6 +14,8 @@ export interface TerminalProfile {
 	wallpaper?: string;
 	wallpaperBlur?: number;
 	wallpaperDim?: number;
+	/** Controls how process.env is merged into PTY environment. Default: 'inherit'. */
+	envMode?: 'minimal' | 'inherit';
 	[key: string]: unknown;
 }
 

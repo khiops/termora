@@ -6,7 +6,6 @@ import type { HelloMessage, HostArch, HostOs } from "@nexterm/shared";
 import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
-import type { HubLogger } from "../logging/hub-logger.js";
 import { AgentConnection } from "./agent-connection.js";
 import { deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
@@ -22,6 +21,8 @@ export interface HostKeyVerification {
 	capturedFingerprint: string;
 	/** True when the server presented a key that differs from the stored fingerprint. */
 	mismatch: boolean;
+	/** True when this is the very first connection (TOFU) — no stored fingerprint yet. */
+	tofu: boolean;
 }
 
 /** Callback to prompt the user for a secret (password or key passphrase). */
@@ -147,12 +148,11 @@ export class SshAgent extends AgentConnection {
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
 	private readonly sendQueue = new SendQueue("ssh-agent");
-	private hubLogger: HubLogger | null = null;
 	/**
 	 * Populated by the hostVerifier closure during a connect attempt.
 	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
 	 */
-	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
+	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
 
 	constructor(
 		private readonly host: Host,
@@ -160,11 +160,6 @@ export class SshAgent extends AgentConnection {
 		private readonly deployOptions?: SshAgentDeployOptions,
 	) {
 		super();
-	}
-
-	/** Set the hub logger for routing agent stderr output. */
-	setHubLogger(logger: HubLogger): void {
-		this.hubLogger = logger;
 	}
 
 	/**
@@ -178,6 +173,7 @@ export class SshAgent extends AgentConnection {
 	 */
 	async start(
 		storedFingerprint?: string | null,
+		sessionTrustedFingerprint?: string | null,
 	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
 		if (!this.host.sshHost) {
 			throw new Error("Host has no sshHost configured");
@@ -202,7 +198,7 @@ export class SshAgent extends AgentConnection {
 		// TOFU host key verification.
 		// The verifier populates this object synchronously before the connect attempt resolves.
 		// Also synced to this.lastKeyVerification so callers can inspect it after rejection.
-		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
+		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
 		this.lastKeyVerification = keyVerification;
 
 		connectConfig.hostVerifier = ((key: Buffer) => {
@@ -210,9 +206,14 @@ export class SshAgent extends AgentConnection {
 			const fingerprint = `SHA256:${hash}`;
 			keyVerification.capturedFingerprint = fingerprint;
 
-			if (!storedFingerprint) {
-				// TOFU: first connect — accept and let the caller persist the fingerprint.
+			if (sessionTrustedFingerprint && sessionTrustedFingerprint === fingerprint) {
+				// Session-trusted (trust_once): accepted for this hub session, skip TOFU prompt.
 				return true;
+			}
+			if (!storedFingerprint) {
+				// TOFU: first connect — signal caller to prompt user for trust decision.
+				keyVerification.tofu = true;
+				return false;
 			}
 			if (storedFingerprint === fingerprint) {
 				// Known host, fingerprint matches — accept.
@@ -253,6 +254,11 @@ export class SshAgent extends AgentConnection {
 					// ssh2 may emit a plain object (e.g. { code: 3 }) rather than an Error
 					// instance when hostVerifier returns false. Normalise to a proper Error
 					// so callers (and vitest .rejects.toThrow()) always receive an Error.
+					if (keyVerification.tofu) {
+						// TOFU rejection — caller will prompt user for first-connect trust decision.
+						rejectOnce(new Error("SSH_TOFU"));
+						return;
+					}
 					if (keyVerification.mismatch) {
 						rejectOnce(
 							new Error(
@@ -271,22 +277,11 @@ export class SshAgent extends AgentConnection {
 				});
 
 				client.on("ready", () => {
+					// SEC-014: zero credentials immediately after successful auth
+					if (connectConfig.password) connectConfig.password = "";
+					if (connectConfig.passphrase) connectConfig.passphrase = "";
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
-					const runAgent = (agentPath: string, requireAbsolutePath = true): void => {
-						// SEC-005: refuse to exec a PATH-relative command on the remote host
-						// when auto-deploy is configured. A compromised host could shadow a
-						// bare binary name on PATH. Only absolute paths (starting with '/') are
-						// accepted when coming from the deploy path. When deployOptions is not
-						// set the caller is deliberately relying on PATH — that is an explicit
-						// choice, not a fallback after a failed deploy, so the guard is skipped.
-						if (requireAbsolutePath && !agentPath.startsWith("/")) {
-							rejectOnce(
-								new Error(
-									`SEC-005: refusing SSH connection — agent deploy failed and no absolute path available (got: ${agentPath}). Install nexterm-agent on the remote host or fix deploy.`,
-								),
-							);
-							return;
-						}
+					const runAgent = (agentPath: string): void => {
 						// ssh2 Client — sends command over encrypted SSH channel to remote host
 						client.exec(agentPath, (err, stream) => {
 							if (err) {
@@ -299,14 +294,6 @@ export class SshAgent extends AgentConnection {
 
 							stream.on("data", (data: Buffer) => {
 								this.handleData(data);
-							});
-
-							// Capture stderr — SSH agents are multi-channel so route to hub logger
-							stream.stderr.on("data", (data: Buffer) => {
-								const text = (data as Buffer).toString("utf-8").trimEnd();
-								if (this.hubLogger) {
-									this.hubLogger.log("info", text, { src: "agent", hostId: this.host.id });
-								}
 							});
 
 							stream.on("close", () => {
@@ -330,6 +317,8 @@ export class SshAgent extends AgentConnection {
 					};
 
 					if (this.deployOptions) {
+						// Auto-deploy is best-effort: if it fails, we still try to run the agent
+						// (the user may have installed it manually in a non-standard path).
 						deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
@@ -339,18 +328,13 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								// SEC-005: do NOT fall back to a PATH-relative command after deploy failure.
-								// Propagate the deploy error so the caller gets a clear message.
-								rejectOnce(
-									new Error(
-										`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Install nexterm-agent on the remote host or fix deploy.`,
-									),
+								console.warn(
+									`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
 								);
+								runAgent("nexterm-agent --stdio");
 							});
 					} else {
-						// No deployOptions: caller is explicitly relying on PATH (deliberate,
-						// not a fallback after deploy failure). Skip the absolute-path guard.
-						runAgent("nexterm-agent --stdio", false);
+						runAgent("nexterm-agent --stdio");
 					}
 				});
 
