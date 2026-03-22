@@ -2829,10 +2829,10 @@ describe("SessionManager — elevation support", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]?.promptType).toBe("elevation");
 
-		// Elevation cache should now be set
+		// Elevation cache should now be set (keyed by hostId:clientId)
 		const cache = getElevationCache();
-		expect(cache.has(localHostId)).toBe(true);
-		expect(cache.get(localHostId)?.secret).toBe("hunter2");
+		expect(cache.has(`${localHostId}:c-sc20`)).toBe(true);
+		expect(cache.get(`${localHostId}:c-sc20`)?.secret).toBe("hunter2");
 
 		// ── Second spawn: cache hit → no new AUTH_PROMPT ─────────────────
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -2853,8 +2853,8 @@ describe("SessionManager — elevation support", () => {
 
 		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
 
-		// Pre-seed the cache with an expired entry
-		getElevationCache().set(localHostId, { secret: "old-secret", expiresAt: Date.now() - 1 });
+		// Pre-seed the cache with an expired entry (composite key)
+		getElevationCache().set(`${localHostId}:c-sc20b`, { secret: "old-secret", expiresAt: Date.now() - 1 });
 
 		// Spawn: expired cache → AUTH_PROMPT triggered → auto-responded → completes
 		await sm.handleSpawn("c-sc20b", { type: "SPAWN", hostId: localHostId, elevated: true });
@@ -2864,8 +2864,8 @@ describe("SessionManager — elevation support", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]?.promptType).toBe("elevation");
 
-		// Cache should be updated with the new secret
-		expect(getElevationCache().get(localHostId)?.secret).toBe("new-secret");
+		// Cache should be updated with the new secret (composite key)
+		expect(getElevationCache().get(`${localHostId}:c-sc20b`)?.secret).toBe("new-secret");
 	});
 
 	it("SC-20: user cancels elevation prompt → spawn returns null, ELEVATION_CANCELLED error sent", async () => {
@@ -2963,9 +2963,9 @@ describe("SessionManager — elevation support", () => {
 		});
 		expect(channelId).not.toBeNull();
 
-		// Verify cache was primed
+		// Verify cache was primed (composite key hostId:clientId)
 		const cache = getElevationCache();
-		expect(cache.has(localHostId)).toBe(true);
+		expect(cache.has(`${localHostId}:c-restart01`)).toBe(true);
 
 		// Count AUTH_PROMPT messages before restart
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -3000,8 +3000,8 @@ describe("SessionManager — elevation support", () => {
 		});
 		expect(channelId).not.toBeNull();
 
-		// Expire the cache
-		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+		// Expire the cache (composite key)
+		getElevationCache().set(`${localHostId}:c-restart02`, { secret: "old", expiresAt: Date.now() - 1 });
 
 		// Count AUTH_PROMPT messages before restart
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -3014,8 +3014,8 @@ describe("SessionManager — elevation support", () => {
 		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
 		expect(promptsAfter).toBe(promptsBefore + 1);
 
-		// Cache updated with new secret
-		expect(getElevationCache().get(localHostId)?.secret).toBe("new-p@ss");
+		// Cache updated with new secret (composite key)
+		expect(getElevationCache().get(`${localHostId}:c-restart02`)?.secret).toBe("new-p@ss");
 
 		// Channel should be live in DB
 		const channel = dal.getChannel(channelId!);
@@ -3057,8 +3057,8 @@ describe("SessionManager — elevation support", () => {
 		expect(channelId).not.toBeNull();
 		spawnDone = true;
 
-		// Expire cache so restart will prompt
-		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+		// Expire cache so restart will prompt (composite key)
+		getElevationCache().set(`${localHostId}:c-restart03`, { secret: "old", expiresAt: Date.now() - 1 });
 
 		// Restart — user cancels prompt → returns false
 		const ok = await sm.restartChannel(channelId!, "c-restart03");

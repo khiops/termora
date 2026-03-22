@@ -272,7 +272,21 @@ export class SshAgent extends AgentConnection {
 
 				client.on("ready", () => {
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
-					const runAgent = (agentPath: string): void => {
+					const runAgent = (agentPath: string, requireAbsolutePath = true): void => {
+						// SEC-005: refuse to exec a PATH-relative command on the remote host
+						// when auto-deploy is configured. A compromised host could shadow a
+						// bare binary name on PATH. Only absolute paths (starting with '/') are
+						// accepted when coming from the deploy path. When deployOptions is not
+						// set the caller is deliberately relying on PATH — that is an explicit
+						// choice, not a fallback after a failed deploy, so the guard is skipped.
+						if (requireAbsolutePath && !agentPath.startsWith("/")) {
+							rejectOnce(
+								new Error(
+									`SEC-005: refusing SSH connection — agent deploy failed and no absolute path available (got: ${agentPath}). Install nexterm-agent on the remote host or fix deploy.`,
+								),
+							);
+							return;
+						}
 						// ssh2 Client — sends command over encrypted SSH channel to remote host
 						client.exec(agentPath, (err, stream) => {
 							if (err) {
@@ -316,8 +330,6 @@ export class SshAgent extends AgentConnection {
 					};
 
 					if (this.deployOptions) {
-						// Auto-deploy is best-effort: if it fails, we still try to run the agent
-						// (the user may have installed it manually in a non-standard path).
 						deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
@@ -327,13 +339,18 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								console.warn(
-									`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
+								// SEC-005: do NOT fall back to a PATH-relative command after deploy failure.
+								// Propagate the deploy error so the caller gets a clear message.
+								rejectOnce(
+									new Error(
+										`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Install nexterm-agent on the remote host or fix deploy.`,
+									),
 								);
-								runAgent("nexterm-agent --stdio");
 							});
 					} else {
-						runAgent("nexterm-agent --stdio");
+						// No deployOptions: caller is explicitly relying on PATH (deliberate,
+						// not a fallback after deploy failure). Skip the absolute-path guard.
+						runAgent("nexterm-agent --stdio", false);
 					}
 				});
 

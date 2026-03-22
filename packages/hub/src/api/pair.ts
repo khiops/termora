@@ -85,6 +85,18 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 	// POST /api/pair/verify — unauthenticated, exchanges code for a new token
 	server.post<{ Body: VerifyBody }>(
 		"/api/pair/verify",
+		{
+			schema: {
+				body: {
+					type: "object",
+					required: ["code"],
+					properties: {
+						code: { type: "string", pattern: "^\\d{6}$" },
+					},
+					additionalProperties: false,
+				},
+			},
+		},
 		async (request: FastifyRequest<{ Body: VerifyBody }>, reply: FastifyReply) => {
 			if (!checkVerifyRateLimit()) {
 				return reply.code(429).send({

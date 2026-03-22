@@ -74,7 +74,7 @@ export interface SharedSessionContext {
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
 	notificationTimestamps: Map<string, number[]>;
-	/** hostId → cached elevation secret + expiry (TTL 15 min) */
+	/** `${hostId}:${clientId}` → cached elevation secret + expiry (TTL 5 min) */
 	elevationCache: Map<string, { secret: string; expiresAt: number }>;
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	agentCapabilities: Map<string, string[]>;

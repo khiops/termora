@@ -93,6 +93,35 @@ describe("WriteLockManager — isHolder", () => {
 	});
 });
 
+describe("WriteLockManager — isWriteLockHolder", () => {
+	it("returns true when no lock holder exists (open channel)", () => {
+		const { mgr } = makeManager();
+		// No attach — no holder. Any client may write.
+		expect(mgr.isWriteLockHolder("ch1", "client-A")).toBe(true);
+	});
+
+	it("returns true when the client is the holder", () => {
+		const { mgr } = makeManager();
+		mgr.attach("ch1", "client-A");
+		expect(mgr.isWriteLockHolder("ch1", "client-A")).toBe(true);
+	});
+
+	it("returns false when another client holds the lock", () => {
+		const { mgr } = makeManager();
+		mgr.attach("ch1", "client-A");
+		// client-B does not hold the lock
+		expect(mgr.isWriteLockHolder("ch1", "client-B")).toBe(false);
+	});
+
+	it("returns true again after lock is released", () => {
+		const { mgr } = makeManager();
+		mgr.attach("ch1", "client-A");
+		mgr.release("ch1", "client-A");
+		// Lock released — open again, any client may write
+		expect(mgr.isWriteLockHolder("ch1", "client-B")).toBe(true);
+	});
+});
+
 describe("WriteLockManager — claim (Tier 1)", () => {
 	it("claim on free lock grants immediately and broadcasts WRITE_LOCK", () => {
 		const { mgr, lastBroadcast } = makeManager();

@@ -290,29 +290,7 @@ export class ChannelLifecycleManager {
 				promptClient = attachedClientId ? this.ctx.clients.get(attachedClientId) : undefined;
 			}
 			if (!promptClient) {
-				// No client for prompting — try cache or passwordless only
-				const cached = this.ctx.elevationCache.get(hostId);
-				if (cached && cached.expiresAt > Date.now()) {
-					const spawnWithSecret: AgentSpawnMessage = {
-						...baseElevatedSpawn,
-						requestId: generateId(),
-						elevationSecret: cached.secret,
-					};
-					return await this.restartSendAndWait(
-						agent,
-						spawnWithSecret,
-						channelId,
-						hostId,
-						sessionEntry,
-						ch,
-						shell,
-						args,
-						cwd,
-						cols,
-						rows,
-						channel.directProcess,
-					);
-				}
+				// No client for prompting — no clientId available for cache lookup, try passwordless only
 				return await this.restartSendAndWait(
 					agent,
 					baseElevatedSpawn,
@@ -329,8 +307,9 @@ export class ChannelLifecycleManager {
 				);
 			}
 
-			// Cache hit
-			const cached = this.ctx.elevationCache.get(hostId);
+			// Cache hit — keyed by hostId:clientId to prevent cross-client privilege escalation
+			const restartCacheKey = `${hostId}:${promptClient.id}`;
+			const cached = this.ctx.elevationCache.get(restartCacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				const spawnWithSecret: AgentSpawnMessage = {
 					...baseElevatedSpawn,
@@ -413,9 +392,9 @@ export class ChannelLifecycleManager {
 				return false;
 			}
 
-			this.ctx.elevationCache.set(hostId, {
+			this.ctx.elevationCache.set(restartCacheKey, {
 				secret,
-				expiresAt: Date.now() + 900_000,
+				expiresAt: Date.now() + 300_000,
 			});
 
 			const retrySpawn: AgentSpawnMessage = {

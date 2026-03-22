@@ -10,7 +10,16 @@ import { createServer, startServer } from "./server.js";
 import { openDatabases } from "./storage/db.js";
 
 async function main() {
-	const port = Number(process.env.NEXTERM_PORT) || 4100;
+	const envPort = process.env.NEXTERM_PORT;
+	if (envPort !== undefined) {
+		const parsedEnvPort = Number(envPort);
+		if (!Number.isInteger(parsedEnvPort) || parsedEnvPort < 1 || parsedEnvPort > 65535) {
+			throw new Error(
+				`Invalid NEXTERM_PORT: ${envPort} — must be an integer between 1 and 65535`,
+			);
+		}
+	}
+	const port = envPort !== undefined ? Number(envPort) : 4100;
 
 	const configDir = getConfigDir();
 	const stateDir = getStateDir();

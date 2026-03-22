@@ -80,6 +80,9 @@ export function initAuth(configDir: string): string {
 		checkPermissions(authFilePath);
 		const raw = readFileSync(authFilePath, "utf-8");
 		const parsed = JSON.parse(raw) as { token: string };
+		if (typeof parsed.token !== "string" || !/^[0-9a-f]{64}$/.test(parsed.token)) {
+			throw new Error(`Invalid token format in ${authFilePath} — expected 64-char hex string`);
+		}
 		return parsed.token;
 	}
 
@@ -235,11 +238,3 @@ export function validateTokenRecord(
  * @deprecated Use validateTokenRecord for DB-backed validation with expiry/revocation.
  *   This function is kept for backward-compatibility with tests that don't use a DB.
  */
-export function validateToken(provided: string, expected: string): boolean {
-	if (provided.length !== expected.length) return false;
-
-	const a = Buffer.from(provided);
-	const b = Buffer.from(expected);
-
-	return timingSafeEqual(a, b);
-}

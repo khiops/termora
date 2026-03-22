@@ -18,7 +18,7 @@ import type {
 import { decodeMessage, encodeMessage, generateId } from "@nexterm/shared";
 import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import { touchToken, validateToken, validateTokenRecord } from "../auth.js";
+import { touchToken, validateTokenRecord } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
 import {
@@ -135,8 +135,12 @@ export async function registerWsRoutes(
 						tokenAccepted = true;
 					}
 				} else {
-					// Fallback: constant-time comparison (no DB — test/minimal mode)
-					tokenAccepted = validateToken(authMsg.token, authToken as string);
+					// DB is required for token validation — fail closed to prevent
+					// skipping expiry/revocation checks.
+					server.log.warn({ clientId }, "ws-auth: database unavailable");
+					client.send({ type: "AUTH_FAIL", message: "Database unavailable" });
+					socket.close();
+					return;
 				}
 				if (!tokenAccepted) {
 					server.log.warn({ clientId }, "ws-auth: invalid, expired, or revoked token");

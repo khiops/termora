@@ -19,7 +19,7 @@ import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
-import { touchToken, upsertPrimaryToken, validateToken, validateTokenRecord } from "./auth.js";
+import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH } from "./build-version.js";
 import { getConfigDir, getStateDir } from "./cli.js";
 import {
@@ -122,7 +122,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
-			if (pathname === "/api/fonts") return;
+			if (pathname === "/api/fonts" && request.method === "GET") return;
 			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
@@ -162,18 +162,20 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 					});
 				}
 				// Sliding-window expiry refresh + last_used_at update (best-effort, non-blocking)
-				touchToken(db, record.id, ttlDays);
+				try {
+					touchToken(db, record.id, ttlDays);
+				} catch (err) {
+					server.log.warn({ err, tokenId: record.id }, "touchToken failed");
+				}
 				server.log.debug({ url: pathname, tokenId: record.id }, "auth: accepted");
 			} else {
-				// Fallback: direct constant-time comparison (no DB — test/minimal mode)
-				if (!validateToken(token, primaryToken)) {
-					server.log.warn({ url: pathname }, "auth: invalid token");
-					return reply.code(401).send({
-						error: "AUTH_INVALID",
-						message: "Invalid token",
-					});
-				}
-				server.log.debug({ url: pathname }, "auth: accepted");
+				// DB is required for token validation — fail closed to prevent
+				// skipping expiry/revocation checks.
+				server.log.warn({ url: pathname }, "auth: database unavailable");
+				return reply.code(500).send({
+					error: "SERVER_ERROR",
+					message: "Database unavailable",
+				});
 			}
 		});
 	}

@@ -185,6 +185,18 @@ export class WriteLockManager {
 		return this.holders.get(channelId) === clientId;
 	}
 
+	/**
+	 * Returns true if the client is allowed to send INPUT for this channel.
+	 * Input is allowed when:
+	 *   - No write lock is held (anyone may write), OR
+	 *   - The client is the current write-lock holder.
+	 * Input is denied only when another client explicitly holds the lock.
+	 */
+	isWriteLockHolder(channelId: string, clientId: string): boolean {
+		const holder = this.holders.get(channelId);
+		return holder === undefined || holder === clientId;
+	}
+
 	/** Returns the current holder for a channel, or null if none. */
 	getHolder(channelId: string): string | null {
 		return this.holders.get(channelId) ?? null;

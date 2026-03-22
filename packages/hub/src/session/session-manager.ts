@@ -478,7 +478,8 @@ export class SessionManager {
 				...(customCommand !== undefined && { customCommand }),
 			};
 
-			const cached = this.ctx.elevationCache.get(hostId);
+			const cacheKey = `${hostId}:${clientId}`;
+			const cached = this.ctx.elevationCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				agentSpawn.elevationSecret = cached.secret;
 				return (
@@ -544,9 +545,9 @@ export class SessionManager {
 				return null;
 			}
 
-			this.ctx.elevationCache.set(hostId, {
+			this.ctx.elevationCache.set(cacheKey, {
 				secret,
-				expiresAt: Date.now() + 900_000,
+				expiresAt: Date.now() + 300_000,
 			});
 
 			const retrySpawn: AgentSpawnMessage = {
