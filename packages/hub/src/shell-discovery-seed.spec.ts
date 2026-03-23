@@ -9,9 +9,7 @@ import type { DatabaseManager } from "./storage/db.js";
 import { openTestDatabases } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
 
-function makeProfile(
-	overrides: Partial<Parameters<MetaDAL["createLaunchProfile"]>[0]> = {},
-) {
+function makeProfile(overrides: Partial<Parameters<MetaDAL["createLaunchProfile"]>[0]> = {}) {
 	return {
 		name: "My Shell",
 		shell: "/bin/bash",
@@ -59,7 +57,7 @@ describe("seedShellProfiles", () => {
 		expect(result.profiles).toHaveLength(0);
 	});
 
-	it("creates profiles for discovered shells", async () => {
+	it.skipIf(process.platform === "win32")("creates profiles for discovered shells", async () => {
 		vi.stubEnv("SHELL", "/bin/bash");
 		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
 
@@ -72,7 +70,7 @@ describe("seedShellProfiles", () => {
 		expect(bash).toBeDefined();
 	});
 
-	it("returns zero when no shells are discovered", async () => {
+	it.skipIf(process.platform === "win32")("returns zero when no shells are discovered", async () => {
 		vi.stubEnv("SHELL", "");
 		mockExistsSync.mockReturnValue(false);
 
@@ -81,11 +79,9 @@ describe("seedShellProfiles", () => {
 		expect(dal.listLaunchProfiles()).toHaveLength(0);
 	});
 
-	it("assigns sequential sort_order to created profiles", async () => {
+	it.skipIf(process.platform === "win32")("assigns sequential sort_order to created profiles", async () => {
 		vi.stubEnv("SHELL", "/bin/zsh");
-		mockExistsSync.mockImplementation(
-			(p) => p === "/bin/zsh" || p === "/bin/bash",
-		);
+		mockExistsSync.mockImplementation((p) => p === "/bin/zsh" || p === "/bin/bash");
 
 		await seedShellProfiles(dal);
 
@@ -96,7 +92,7 @@ describe("seedShellProfiles", () => {
 		expect(orders[1]).toBe(1);
 	});
 
-	it("sets correct mode and elevated defaults", async () => {
+	it.skipIf(process.platform === "win32")("sets correct mode and elevated defaults", async () => {
 		vi.stubEnv("SHELL", "/bin/bash");
 		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
 

@@ -10,6 +10,7 @@ import {
 } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextermAgent } from "./nexterm-agent.js";
+import { getTestSocketPath } from "./test-socket-path.js";
 
 /**
  * Mock child_process.spawn so connectOrLaunch never creates real processes.
@@ -81,7 +82,7 @@ describe("connectOrLaunch", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(path.join(os.tmpdir(), "nexterm-launcher-test-"));
-		socketPath = path.join(tmpDir, "agent.sock");
+		socketPath = getTestSocketPath();
 
 		// Reset spawn mock to default (no-op)
 		mockSpawnImpl = () => ({ unref: vi.fn(), pid: 99999 });
@@ -126,7 +127,7 @@ describe("connectOrLaunch", () => {
 		);
 	});
 
-	describe("Given stale socket file", () => {
+	describe.skipIf(process.platform === "win32")("Given stale socket file", () => {
 		it(
 			"unlinks stale socket and connects to newly started daemon",
 			async () => {

@@ -10,7 +10,7 @@
  * Also parses the [gc] section for spool garbage collector configuration.
  */
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
 import {
@@ -495,7 +495,9 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_linux);
 			result.customCommandLinux = raw.custom_command_linux;
 		} catch {
-			process.stderr.write(`[config] elevation.custom_command_linux is invalid — ignoring: "${raw.custom_command_linux}"\n`);
+			process.stderr.write(
+				`[config] elevation.custom_command_linux is invalid — ignoring: "${raw.custom_command_linux}"\n`,
+			);
 		}
 	}
 	if (typeof raw.custom_command_darwin === "string" && raw.custom_command_darwin.length > 0) {
@@ -503,7 +505,9 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_darwin);
 			result.customCommandDarwin = raw.custom_command_darwin;
 		} catch {
-			process.stderr.write(`[config] elevation.custom_command_darwin is invalid — ignoring: "${raw.custom_command_darwin}"\n`);
+			process.stderr.write(
+				`[config] elevation.custom_command_darwin is invalid — ignoring: "${raw.custom_command_darwin}"\n`,
+			);
 		}
 	}
 	if (typeof raw.custom_command_windows === "string" && raw.custom_command_windows.length > 0) {
@@ -511,7 +515,9 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
 			validateCustomCommand(raw.custom_command_windows);
 			result.customCommandWindows = raw.custom_command_windows;
 		} catch {
-			process.stderr.write(`[config] elevation.custom_command_windows is invalid — ignoring: "${raw.custom_command_windows}"\n`);
+			process.stderr.write(
+				`[config] elevation.custom_command_windows is invalid — ignoring: "${raw.custom_command_windows}"\n`,
+			);
 		}
 	}
 
@@ -530,10 +536,7 @@ export function extractElevationConfig(parsed: TOML.JsonMap): Partial<ElevationC
  * Exact localhost origins are injected at runtime once the actual port is known.
  * User-defined origins from config.toml [server] cors_origins are added on top.
  */
-export const DEFAULT_CORS_ORIGINS: string[] = [
-	"tauri://localhost",
-	"http://tauri.localhost",
-];
+export const DEFAULT_CORS_ORIGINS: string[] = ["tauri://localhost", "http://tauri.localhost"];
 
 /**
  * Convert an array of origin patterns into compiled RegExp objects.
@@ -607,7 +610,6 @@ export function extractAuthConfig(parsed: TOML.JsonMap): AuthConfig {
 	return config;
 }
 
-
 // ─── Logging config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_LOG_CONFIG: LogConfig = {
@@ -647,7 +649,6 @@ export function extractLogConfig(parsed: TOML.JsonMap): LogConfig {
 	}
 	return config;
 }
-
 
 /**
  * Standalone loader: parse the [auth] section from config.toml and return an AuthConfig.
@@ -880,6 +881,9 @@ export class ConfigResolver {
 		// null = remove key (pass undefined to toml-edit)
 		const editValue = value === null ? undefined : value;
 		tomlString = edit(tomlString, path, editValue);
+
+		// Ensure the config directory exists (may not exist on first run or in CI)
+		mkdirSync(this._configDir, { recursive: true });
 
 		// Atomic write: write to temp, then rename
 		const tmpPath = `${configPath}.tmp`;
