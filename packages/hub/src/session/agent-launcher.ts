@@ -29,9 +29,9 @@ export function resolveAgentPath(): string {
 	}
 	// Dev mode fallback: Rust agent binary
 	const __dirname = dirname(fileURLToPath(import.meta.url));
-	// This file is at packages/hub/src/session/ — go up 5 levels to project root
+	// This file is at packages/hub/src/session/ — go up 4 levels to project root
 	const ext = process.platform === "win32" ? ".exe" : "";
-	return join(__dirname, "../../../../..", `target/release/nexterm-agent${ext}`);
+	return join(__dirname, "../../../..", `target/release/nexterm-agent${ext}`);
 }
 
 /**
