@@ -26,11 +26,46 @@ import { buildOptions } from "./build-sea-hub.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
+
+/**
+ * Map a Rust-style target triple (e.g. "x86_64-unknown-linux-gnu") to a Node.js
+ * platform string. Used to interpret NEXTERM_TARGET_TRIPLE env var.
+ */
+function tripleToNodePlatform(triple: string | undefined): NodeJS.Platform | undefined {
+	if (!triple) return undefined;
+	if (triple.includes("linux")) return "linux";
+	if (triple.includes("windows") || triple.includes("win32")) return "win32";
+	if (triple.includes("apple") || triple.includes("darwin")) return "darwin";
+	return undefined;
+}
+
+/**
+ * Map a Rust-style target triple to a Node.js arch string.
+ * Used to interpret NEXTERM_TARGET_TRIPLE env var.
+ */
+function tripleToNodeArch(triple: string | undefined): string | undefined {
+	if (!triple) return undefined;
+	if (triple.startsWith("x86_64") || triple.startsWith("x64")) return "x64";
+	if (triple.startsWith("aarch64") || triple.startsWith("arm64")) return "arm64";
+	return undefined;
+}
+
+
 /** Parse --target-platform and --target-arch from CLI args. */
 const targetPlatformArg = process.argv.find((a) => a.startsWith("--target-platform="))?.split("=")[1];
 const targetArchArg = process.argv.find((a) => a.startsWith("--target-arch="))?.split("=")[1];
 const targetNodeVersionArg = process.argv.find((a) => a.startsWith("--node-version="))?.split("=")[1];
-const effectivePlatform = targetPlatformArg ?? process.platform;
+// Priority: CLI arg > NEXTERM_TARGET_TRIPLE env var > host process defaults.
+const effectivePlatform =
+	(targetPlatformArg as NodeJS.Platform | undefined) ??
+	tripleToNodePlatform(process.env.NEXTERM_TARGET_TRIPLE) ??
+	process.platform;
+const effectiveArch =
+	targetArchArg ?? tripleToNodeArch(process.env.NEXTERM_TARGET_TRIPLE) ?? process.arch;
+const effectiveNodeVersion =
+	targetNodeVersionArg ?? process.env.NEXTERM_NODE_VERSION ?? process.version;
+/** Output directory for SEA artefacts. Override with NEXTERM_DIST_DIR env var. */
+const distDir = process.env.NEXTERM_DIST_DIR ?? join(ROOT, "dist", "sea");
 
 /** Binary extension — empty on Linux/macOS, .exe on Windows. */
 const EXE_EXT = effectivePlatform === "win32" ? ".exe" : "";
@@ -266,10 +301,9 @@ async function main(): Promise<void> {
 	// Step 4: Create static-files manifest
 	// ------------------------------------------------------------------
 	console.log("[package-sea-hub] step 4/5: building static file manifest");
-	const outDir = join(ROOT, "dist", "sea");
-	mkdirSync(outDir, { recursive: true });
+	mkdirSync(distDir, { recursive: true });
 
-	const staticManifestPath = join(outDir, "static-manifest.json");
+	const staticManifestPath = join(distDir, "static-manifest.json");
 
 	if (!existsSync(staticDir)) {
 		console.warn(
@@ -300,10 +334,10 @@ async function main(): Promise<void> {
 	console.log(`[package-sea-hub] toml-edit WASM:        ${tomlWasmPath}`);
 	console.log(`[package-sea-hub] hub version: ${version}`);
 
-	const outputBinary = join(ROOT, "dist", "sea", `nexterm-hub${EXE_EXT}`);
+	const outputBinary = join(distDir, `nexterm-hub${EXE_EXT}`);
 
 	// Write VERSION asset file.
-	const versionFilePath = join(ROOT, "dist", "sea", "VERSION");
+	const versionFilePath = join(distDir, "VERSION");
 	writeFileSync(versionFilePath, version, "utf8");
 
 	const seaCfg: SeaBuildConfig = {
@@ -320,9 +354,9 @@ async function main(): Promise<void> {
 		},
 		useCodeCache: true,
 		disableExperimentalSEAWarning: true,
-		targetPlatform: targetPlatformArg,
-		targetArch: targetArchArg,
-		targetNodeVersion: targetNodeVersionArg,
+		targetPlatform: effectivePlatform,
+		targetArch: effectiveArch,
+		targetNodeVersion: effectiveNodeVersion,
 	};
 
 	await buildSeaBinary(seaCfg);
