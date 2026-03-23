@@ -391,6 +391,17 @@ async fn handle_spawn(
     output_tx: mpsc::UnboundedSender<OutputEvent>,
     cmd_senders: SnapshotSenders,
 ) -> std::io::Result<()> {
+    tracing::info!(
+        request_id = %request_id,
+        shell = ?shell,
+        cwd = ?cwd,
+        cols = cols,
+        rows = rows,
+        elevated = ?elevated,
+        env_count = env.as_ref().map(|e| e.len()).unwrap_or(0),
+        "SPAWN received"
+    );
+
     let resolved_shell = shell.unwrap_or_else(shell::get_default_shell);
 
     // Expand vars in args, cwd, env values (NOT shell)
@@ -509,6 +520,14 @@ async fn handle_spawn(
 
     match spawn_result {
         Ok((ch_id, pty_pid)) => {
+            tracing::info!(
+                channel_id = %ch_id,
+                pid = pty_pid,
+                program = %effective_program,
+                args = ?effective_args,
+                cwd = ?expanded_cwd,
+                "SPAWN_OK — PTY created"
+            );
             // Get a reader for the new channel before releasing the broader context
             let pty_reader_opt = {
                 let mgr = pty_manager.lock().await;
@@ -549,6 +568,11 @@ async fn handle_spawn(
         }
 
         Err(e) => {
+            tracing::error!(
+                program = %effective_program,
+                error = %e,
+                "SPAWN_ERR — PTY creation failed"
+            );
             let code = map_spawn_error(&e);
             // Send SpawnErr first so the hub can act on it immediately
             send_frame(
@@ -725,6 +749,13 @@ fn spawn_reader_task(
             Some(s) => (s.code().unwrap_or(-1), s.signal().map(|n| format!("{}", n))),
             None => (-1, None),
         };
+
+        tracing::info!(
+            channel_id = %channel_id,
+            exit_code = exit_code,
+            signal = ?signal,
+            "PTY process exited"
+        );
 
         let msg = AgentToHub::ChannelExit {
             channel_id,
