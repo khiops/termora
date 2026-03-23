@@ -29,10 +29,13 @@ use std::sync::Arc;
 
 use tokio::task;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, S_OK,
+};
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
-    ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
+    ClosePseudoConsole, CreatePseudoConsole, GetStdHandle, ResizePseudoConsole, COORD, HPCON,
+    STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -41,6 +44,7 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOEXW,
 };
+use windows_sys::Win32::Foundation::SetHandleInformation;
 
 use crate::{CommandBuilder, ExitStatus, PtySize};
 
@@ -85,19 +89,49 @@ impl Drop for SendHandle {
 }
 
 /// A `HPCON` wrapper that is safe to send across threads.
+///
+/// Supports idempotent `close()` — the watcher thread calls it when the child
+/// exits, and `Drop` is a no-op if already closed.  This breaks the ConPTY
+/// shutdown deadlock: without explicit close, conhost.exe keeps the stdout pipe
+/// open until `ClosePseudoConsole` is called, but the pipe reader blocks the
+/// task that would eventually drop the handle.
 #[derive(Debug)]
-struct SendHpcon(HPCON);
+struct SendHpcon {
+    val: HPCON,
+    closed: std::sync::atomic::AtomicBool,
+}
+
+impl SendHpcon {
+    fn new(val: HPCON) -> Self {
+        Self {
+            val,
+            closed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Close the pseudo-console.  Idempotent — safe to call from any thread,
+    /// any number of times.  The first call closes; subsequent calls are no-ops.
+    fn close(&self) {
+        if !self
+            .closed
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            unsafe { ClosePseudoConsole(self.val) };
+        }
+    }
+}
 
 // SAFETY: HPCON is a pseudo-console handle, which is kernel-managed and
-// safe to use from any thread once created.
+// safe to use from any thread once created.  AtomicBool is inherently
+// Send + Sync.
 unsafe impl Send for SendHpcon {}
 unsafe impl Sync for SendHpcon {}
 
 impl Drop for SendHpcon {
     fn drop(&mut self) {
-        // HPCON is `isize` — use != 0 instead of is_null() (only works on raw pointers).
-        if self.0 != 0 {
-            unsafe { ClosePseudoConsole(self.0) };
+        // `get_mut` is safe — Drop guarantees exclusive access.
+        if !*self.closed.get_mut() && self.val != 0 {
+            unsafe { ClosePseudoConsole(self.val) };
         }
     }
 }
@@ -175,7 +209,7 @@ impl WinPtyProcess {
             X: size.cols as i16,
             Y: size.rows as i16,
         };
-        let hpc_raw = self.hpc.0;
+        let hpc_raw = self.hpc.val;
         task::spawn_blocking(move || {
             let hr = unsafe { ResizePseudoConsole(hpc_raw, coord) };
             if hr >= S_OK {
@@ -388,28 +422,44 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     let stdout_read = SendHandle(stdout_read);
     let stdout_write = SendHandle(stdout_write);
 
-    // ── 3. CreatePseudoConsole ────────────────────────────────────────────────
+    // ── 3. Prevent ConPTY stdout leak ─────────────────────────────────────────
+    // Clear HANDLE_FLAG_INHERIT on the agent's own stdout/stderr BEFORE
+    // CreatePseudoConsole. ConPTY internally spawns conhost.exe which inherits
+    // all inheritable handles from the calling process. If the agent's stdout
+    // pipe (connected to the hub) is inheritable, conhost passes it to the
+    // child shell, causing shell output to leak to the hub's frame reader.
+    unsafe {
+        let h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        if h_stdout != INVALID_HANDLE_VALUE && !h_stdout.is_null() {
+            SetHandleInformation(h_stdout, HANDLE_FLAG_INHERIT, 0);
+        }
+        let h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+        if h_stderr != INVALID_HANDLE_VALUE && !h_stderr.is_null() {
+            SetHandleInformation(h_stderr, HANDLE_FLAG_INHERIT, 0);
+        }
+    }
+
+    // ── 4. CreatePseudoConsole ────────────────────────────────────────────────
     let size = COORD {
         X: cmd.size.cols as i16,
         Y: cmd.size.rows as i16,
     };
     let mut hpc: HPCON = 0;
-    // PSEUDOCONSOLE_INHERIT_CURSOR (1) skips the initial cursor position
-    // query that causes deadlocks when no terminal emulator is responding.
-    const PSEUDOCONSOLE_INHERIT_CURSOR: u32 = 1;
+    // flags=0: ConPTY blocks on DSR until reactive handler responds.
+    // ConPTY CONSUMES the response (doesn't pass to child).
     let hr = unsafe {
         CreatePseudoConsole(
             size,
-            stdin_read.0,   // ConPTY reads from our stdin pipe
-            stdout_write.0, // ConPTY writes to our stdout pipe
-            PSEUDOCONSOLE_INHERIT_CURSOR,
+            stdin_read.0,
+            stdout_write.0,
+            0,
             &mut hpc,
         )
     };
     if hr < S_OK {
         return Err(io::Error::from_raw_os_error(hr));
     }
-    let hpc = Arc::new(SendHpcon(hpc));
+    let hpc = Arc::new(SendHpcon::new(hpc));
 
     // Close the ConPTY-side pipe ends. ConPTY has duplicated them internally
     // (per Microsoft sample: "Close handles to PTY after creating pseudoconsole").
@@ -434,7 +484,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
             attr_list,
             0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-            hpc.0 as *const _,
+            hpc.val as *const _,
             std::mem::size_of::<HPCON>(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -449,6 +499,15 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     let mut si_ex: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     si_ex.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     si_ex.lpAttributeList = attr_list;
+    // CRITICAL: Set STARTF_USESTDHANDLES with INVALID_HANDLE_VALUE to prevent
+    // the child from inheriting the parent's std handles. In daemon mode
+    // (stdio:ignore), the parent has NUL handles which confuse the shell.
+    // The pseudoconsole provides the actual console handles to the child.
+    // (Ref: wezterm's ConPTY implementation uses this pattern.)
+    si_ex.StartupInfo.dwFlags = 0x00000100; // STARTF_USESTDHANDLES
+    si_ex.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+    si_ex.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
+    si_ex.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
 
     // ── 6. Build command line (UTF-16) ────────────────────────────────────────
     let cmdline = build_cmdline(&cmd.program, &cmd.args);
@@ -516,10 +575,9 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
         build_env_block(&map)
     };
     let env_ptr = env_block.as_ptr();
-    // CREATE_UNICODE_ENVIRONMENT — always set because we always supply an env block.
     let create_flags: PROCESS_CREATION_FLAGS = EXTENDED_STARTUPINFO_PRESENT | 0x0000_0400u32;
 
-    // ── 9. CreateProcessW ─────────────────────────────────────────────────────
+    // ── 10. CreateProcessW ────────────────────────────────────────────────────
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let ok = unsafe {
         CreateProcessW(
@@ -544,7 +602,19 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 
     unsafe { CloseHandle(pi.hThread) };
 
-    // ── 10. Initialize channel-backed I/O (at spawn time) ────────────────────
+    // (diagnostics removed)
+
+    // Watcher: close pseudoconsole when child exits
+    {
+        let hpc_watcher = Arc::clone(&hpc);
+        let child_handle = handle_as_usize(pi.hProcess);
+        task::spawn_blocking(move || {
+            unsafe { WaitForSingleObject(usize_as_handle(child_handle), INFINITE) };
+            hpc_watcher.close();
+        });
+    }
+
+    // ── 10b. Initialize channel-backed I/O (at spawn time) ───────────────────
     // Channels are created here so reader() and writer() return working types
     // immediately — no extra setup call needed from the caller.
 
@@ -568,18 +638,9 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
 
     // Background thread: read from stdout pipe, detect DSR, send chunks.
     task::spawn_blocking(move || {
-        // Pre-emptive DSR response: ConPTY may block all I/O until it receives
-        // a cursor position report. Send one immediately to unblock it.
-        let mut written: u32 = 0;
-        unsafe {
-            WriteFile(
-                usize_as_handle(stdin_write_for_dsr),
-                DSR_RESPONSE.as_ptr(),
-                DSR_RESPONSE.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
-        };
+        // Do NOT write a pre-emptive DSR response.  With INHERIT_CURSOR,
+        // ConPTY does not block on DSR.  Writing \x1b[1;1R here pollutes
+        // the child's console input buffer and kills the shell.
 
         let mut buf = vec![0u8; 4096];
         loop {
@@ -601,7 +662,8 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
             }
             let chunk = buf[..bytes_read as usize].to_vec();
 
-            // DSR deadlock prevention: detect \x1b[6n and respond with \x1b[1;1R.
+            // Reactive DSR: with flags=0, ConPTY blocks until this response.
+            // ConPTY CONSUMES it (expected response) — NOT passed to child.
             if contains_dsr(&chunk) {
                 let mut written: u32 = 0;
                 unsafe {
@@ -692,6 +754,8 @@ fn quote_arg(s: &str) -> String {
 }
 
 /// Build a null-terminated, double-null-terminated UTF-16 environment block
+
+
 /// as required by `CreateProcessW` with `CREATE_UNICODE_ENVIRONMENT`.
 ///
 /// Format: `KEY=VALUE\0KEY=VALUE\0\0`

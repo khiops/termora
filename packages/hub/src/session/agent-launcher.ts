@@ -1,13 +1,46 @@
 import { spawn } from "node:child_process";
 import { access, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	AGENT_SOCKET_POLL_MS,
 	AGENT_SOCKET_TIMEOUT,
 	type AgentConfig,
 	probeSocket,
 } from "@nexterm/shared";
-import { isAgentBinary, resolveAgentPath } from "./local-agent.js";
+import { detectSea } from "@nexterm/shared/dist/sea-addon-loader.js";
+import { resolveAgentBinaryPath } from "../sea-agent-resolver.js";
 import { NextermAgent } from "./nexterm-agent.js";
+
+/**
+ * Resolve the path to the agent binary.
+ *
+ * In SEA mode: looks for a co-located nexterm-agent binary next to the hub
+ * executable. Falls back to PATH resolution via resolveAgentBinaryPath().
+ *
+ * In dev mode: returns the Rust agent binary built by cargo at
+ *   <project-root>/target/release/nexterm-agent[.exe]
+ */
+export function resolveAgentPath(): string {
+	const sea = detectSea();
+	if (sea) {
+		const seaPath = resolveAgentBinaryPath();
+		if (seaPath) return seaPath;
+	}
+	// Dev mode fallback: Rust agent binary
+	const __dirname = dirname(fileURLToPath(import.meta.url));
+	// This file is at packages/hub/src/session/ — go up 5 levels to project root
+	const ext = process.platform === "win32" ? ".exe" : "";
+	return join(__dirname, "../../../../..", `target/release/nexterm-agent${ext}`);
+}
+
+/**
+ * Returns true if the given agent path is a self-contained executable
+ * (i.e. a native binary) rather than a JS module file.
+ */
+export function isAgentBinary(agentPath: string): boolean {
+	return !agentPath.endsWith(".js");
+}
 
 /**
  * Connect to an existing agent daemon or spawn a new one.
@@ -26,31 +59,27 @@ export async function connectOrLaunch(
 	agentBinaryPath?: string,
 ): Promise<NextermAgent> {
 	const agentPath = agentBinaryPath ?? resolveAgentPath();
-	console.log(`[agent-launcher] connectOrLaunch: socketPath=${socketPath} agentPath=${agentPath}`);
 
 	// Verify agent binary exists
 	try {
 		await access(agentPath);
-		console.log(`[agent-launcher] connectOrLaunch: agent binary accessible`);
 	} catch (err) {
-		console.log(`[agent-launcher] connectOrLaunch: agent binary NOT accessible: ${err instanceof Error ? err.message : String(err)}`);
-		throw new Error(`Agent binary not found: ${agentPath}`);
+		throw new Error(
+			`Agent binary not found: ${agentPath} (${err instanceof Error ? err.message : String(err)})`,
+		);
 	}
 
 	// Probe existing socket — EACCES propagates (different user's socket)
 	const alive = await probeSocket(socketPath);
-	console.log(`[agent-launcher] connectOrLaunch: socket probe result alive=${alive}`);
 
 	if (alive) {
 		// Agent already running — connect directly
-		console.log(`[agent-launcher] connectOrLaunch: daemon already running, connecting to socket`);
 		return NextermAgent.connectLocal(socketPath);
 	}
 
 	// Socket not alive — clean up stale file if present
 	try {
 		await unlink(socketPath);
-		console.log(`[agent-launcher] connectOrLaunch: removed stale socket file`);
 	} catch {
 		// ENOENT is fine — file doesn't exist
 	}
@@ -88,15 +117,16 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		? [agentPath, daemonArgs]
 		: [process.execPath, [agentPath, ...daemonArgs]];
 
-	console.log(`[agent-launcher] launchDaemon: cmd=${cmd} args=${JSON.stringify(args)} isBinary=${isBin}`);
 	const child = spawn(cmd, args, {
 		detached: true,
 		stdio: "ignore",
+		windowsHide: true,
 	});
-	console.log(`[agent-launcher] launchDaemon: daemon spawned pid=${child.pid}`);
 
 	child.on?.("error", (err) => {
-		console.log(`[agent-launcher] launchDaemon: daemon process error: ${err instanceof Error ? err.stack : String(err)}`);
+		process.stderr.write(
+			`[agent-launcher] daemon process error (pid=${child.pid}): ${err instanceof Error ? err.stack : String(err)}\n`,
+		);
 	});
 
 	child.unref();

@@ -22,17 +22,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all SEA artifacts
+      - name: Download agent artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: sea-*
+          pattern: agent-*
           path: release-staging/
           merge-multiple: true
 
-      - name: Download all Tauri artifacts
+      - name: Download hub artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: tauri-*
+          pattern: hub-*
+          path: release-staging/
+          merge-multiple: true
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
           path: release-staging/
           merge-multiple: true
 

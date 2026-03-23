@@ -19,14 +19,15 @@ function nextSshChannelId(): string {
 	return `ssh-ch-${++sshSpawnCount}`;
 }
 
-// ─── Mock LocalAgent ─────────────────────────────────────────────────────────
-vi.mock("./local-agent.js", () => {
+// ─── Mock agent-launcher (connectOrLaunch) ───────────────────────────────────
+vi.mock("./agent-launcher.js", () => {
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const { EventEmitter } = require("node:events");
 
 	class MockLocalAgent extends EventEmitter {
 		private _connected = true;
 		start = vi.fn().mockResolvedValue(undefined);
+		waitForChannelState = vi.fn().mockResolvedValue([]);
 		send = vi.fn((msg: ProtocolMessage) => {
 			if (msg.type === "SPAWN") {
 				const spawnMsg = msg as unknown as Record<string, unknown>;
@@ -77,8 +78,9 @@ vi.mock("./local-agent.js", () => {
 	}
 
 	return {
-		LocalAgent: MockLocalAgent,
+		connectOrLaunch: vi.fn().mockImplementation(() => Promise.resolve(new MockLocalAgent())),
 		resolveAgentPath: () => "/mock/agent/path",
+		isAgentBinary: () => true,
 	};
 });
 
@@ -1428,12 +1430,20 @@ describe("SessionManager", () => {
 			dal.createSession({ id: sessionId, hostId: host.id, status: "active" });
 			dal.createChannel({ id: "track-ch-1", sessionId, status: "live" });
 
+			// startup() connects via connectDaemonAgent (not warmRestartLocal),
+			// so restartTracking is not incremented during startup.
 			await sm.startup();
-
-			// Wait for SPAWN_OK responses from MockLocalAgent (setImmediate-based)
 			await new Promise((r) => setImmediate(r));
 
-			// restartTracking should have an entry for this host after warm restart
+			// Trigger a warm restart explicitly (simulates agent crash after startup)
+			const smAny = sm as unknown as {
+				_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
+			};
+			const p = smAny._warmRestartLocal(host.id, sessionId);
+			await new Promise((r) => setImmediate(r));
+			await p;
+
+			// restartTracking should now have an entry with count=1
 			const tracking = (
 				sm as unknown as {
 					restartTracking: Map<string, { count: number; windowStart: number }>;
@@ -1548,14 +1558,13 @@ describe("SessionManager", () => {
 					shell: "/bin/sh",
 				});
 
-				// startup() triggers the first warm restart (count=1).
-				// _spawnChannelsForHost sends SPAWN; MockLocalAgent replies via setImmediate.
-				// Await the promise after flushing setImmediate so SPAWN_OK is processed.
+				// startup() uses connectDaemonAgent (not warmRestartLocal), so the restart
+				// counter is not incremented. Flush setImmediate so SPAWN_OK is processed.
 				const p1 = sm.startup();
 				await new Promise((r) => setImmediate(r));
 				await p1;
 
-				// Verify session is active after 1st restart
+				// Verify session is active after startup
 				const sessionState = (
 					sm as unknown as {
 						sessions: Map<string, { id: string; status: string }>;
@@ -1564,21 +1573,27 @@ describe("SessionManager", () => {
 				expect(sessionState).toBeDefined();
 				expect(sessionState?.status).toBe("active");
 
-				// Access the private _warmRestartLocal to trigger additional restarts
+				// Access the private _warmRestartLocal to trigger manual restarts
 				const smAny = sm as unknown as {
 					_warmRestartLocal: (hostId: string, sessionId: string) => Promise<void>;
 				};
 
-				// 2nd restart (count=2)
+				// 1st restart (count=1)
 				const p2 = smAny._warmRestartLocal(host.id, sessionId);
 				await new Promise((r) => setImmediate(r));
 				await p2;
 				expect(sessionState?.status).toBe("active");
 
-				// 3rd restart (count=3)
+				// 2nd restart (count=2)
 				const p3 = smAny._warmRestartLocal(host.id, sessionId);
 				await new Promise((r) => setImmediate(r));
 				await p3;
+				expect(sessionState?.status).toBe("active");
+
+				// 3rd restart (count=3)
+				const p4 = smAny._warmRestartLocal(host.id, sessionId);
+				await new Promise((r) => setImmediate(r));
+				await p4;
 				expect(sessionState?.status).toBe("active");
 
 				// 4th restart (count=4 > 3) — triggers _closeSession synchronously,
@@ -1851,7 +1866,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				pendingMap.delete("host-01");
 				resolve(null);
 			}, 60_000);
-			pendingMap.set("host-01", { resolve, timer });
+			pendingMap.set("host-01", { resolve, timer, clientId: "client-1" });
 		});
 
 		// Respond with a secret
@@ -1877,7 +1892,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				pendingMap.delete("host-02");
 				resolve(null);
 			}, 60_000);
-			pendingMap.set("host-02", { resolve, timer });
+			pendingMap.set("host-02", { resolve, timer, clientId: "client-1" });
 		});
 
 		sm.handleAuthPromptResponse("client-1", "host-02", null);
@@ -1904,7 +1919,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 					pendingMap.delete("host-03");
 					resolve(null);
 				}, 60_000);
-				pendingMap.set("host-03", { resolve, timer });
+				pendingMap.set("host-03", { resolve, timer, clientId: "client-1" });
 			});
 
 			// No handleAuthPromptResponse call — advance time past 60s
@@ -1923,6 +1938,42 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 		expect(() => {
 			sm.handleAuthPromptResponse("client-1", "no-such-host", "secret");
 		}).not.toThrow();
+	});
+
+	it("handleAuthPromptResponse ignores response from wrong client (SEC-003)", async () => {
+		// SEC-003: a different client must not be able to inject credentials
+		const pendingMap = (
+			sm as unknown as {
+				pendingAuthPrompts: Map<
+					string,
+					{
+						resolve: (s: string | null) => void;
+						timer: ReturnType<typeof setTimeout> | null;
+						clientId: string;
+					}
+				>;
+			}
+		).pendingAuthPrompts;
+
+		let capturedSecret: string | null = null;
+		const timer = setTimeout(() => {}, 60_000);
+		pendingMap.set("host-sec", {
+			resolve: (s) => {
+				capturedSecret = s;
+			},
+			timer,
+			clientId: "legitimate-client",
+		});
+
+		// Attacker sends a response from a different clientId
+		sm.handleAuthPromptResponse("attacker-client", "host-sec", "injected-secret");
+
+		// Prompt must still be pending and secret must not be resolved
+		expect(capturedSecret).toBeNull();
+		expect(pendingMap.has("host-sec")).toBe(true);
+
+		clearTimeout(timer);
+		pendingMap.delete("host-sec");
 	});
 
 	it("AUTH_PROMPT message is sent to client when promptAuth callback sends it", () => {
@@ -1961,6 +2012,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 				capturedSecret = s;
 			},
 			timer,
+			clientId: "c1",
 		});
 
 		// Verify AUTH_PROMPT arrived at the client
@@ -2170,6 +2222,8 @@ function makeMockConfigResolver(
 		uiConfig: {
 			title: { source, staticTitle },
 		},
+		resolve: () => ({ envMode: "inherit" }),
+		resolveElevationMethod: () => "sudo",
 	} as unknown as ConfigResolver;
 }
 
@@ -2798,10 +2852,10 @@ describe("SessionManager — elevation support", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]?.promptType).toBe("elevation");
 
-		// Elevation cache should now be set
+		// Elevation cache should now be set (keyed by hostId:clientId)
 		const cache = getElevationCache();
-		expect(cache.has(localHostId)).toBe(true);
-		expect(cache.get(localHostId)?.secret).toBe("hunter2");
+		expect(cache.has(`${localHostId}:c-sc20`)).toBe(true);
+		expect(cache.get(`${localHostId}:c-sc20`)?.secret).toBe("hunter2");
 
 		// ── Second spawn: cache hit → no new AUTH_PROMPT ─────────────────
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -2822,8 +2876,11 @@ describe("SessionManager — elevation support", () => {
 
 		setAgentCapabilities(localHostId, ["multiplex", "snapshot", "launch-profiles"]);
 
-		// Pre-seed the cache with an expired entry
-		getElevationCache().set(localHostId, { secret: "old-secret", expiresAt: Date.now() - 1 });
+		// Pre-seed the cache with an expired entry (composite key)
+		getElevationCache().set(`${localHostId}:c-sc20b`, {
+			secret: "old-secret",
+			expiresAt: Date.now() - 1,
+		});
 
 		// Spawn: expired cache → AUTH_PROMPT triggered → auto-responded → completes
 		await sm.handleSpawn("c-sc20b", { type: "SPAWN", hostId: localHostId, elevated: true });
@@ -2833,8 +2890,8 @@ describe("SessionManager — elevation support", () => {
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0]?.promptType).toBe("elevation");
 
-		// Cache should be updated with the new secret
-		expect(getElevationCache().get(localHostId)?.secret).toBe("new-secret");
+		// Cache should be updated with the new secret (composite key)
+		expect(getElevationCache().get(`${localHostId}:c-sc20b`)?.secret).toBe("new-secret");
 	});
 
 	it("SC-20: user cancels elevation prompt → spawn returns null, ELEVATION_CANCELLED error sent", async () => {
@@ -2932,9 +2989,9 @@ describe("SessionManager — elevation support", () => {
 		});
 		expect(channelId).not.toBeNull();
 
-		// Verify cache was primed
+		// Verify cache was primed (composite key hostId:clientId)
 		const cache = getElevationCache();
-		expect(cache.has(localHostId)).toBe(true);
+		expect(cache.has(`${localHostId}:c-restart01`)).toBe(true);
 
 		// Count AUTH_PROMPT messages before restart
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -2969,8 +3026,11 @@ describe("SessionManager — elevation support", () => {
 		});
 		expect(channelId).not.toBeNull();
 
-		// Expire the cache
-		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+		// Expire the cache (composite key)
+		getElevationCache().set(`${localHostId}:c-restart02`, {
+			secret: "old",
+			expiresAt: Date.now() - 1,
+		});
 
 		// Count AUTH_PROMPT messages before restart
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
@@ -2983,8 +3043,8 @@ describe("SessionManager — elevation support", () => {
 		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
 		expect(promptsAfter).toBe(promptsBefore + 1);
 
-		// Cache updated with new secret
-		expect(getElevationCache().get(localHostId)?.secret).toBe("new-p@ss");
+		// Cache updated with new secret (composite key)
+		expect(getElevationCache().get(`${localHostId}:c-restart02`)?.secret).toBe("new-p@ss");
 
 		// Channel should be live in DB
 		const channel = dal.getChannel(channelId!);
@@ -3026,8 +3086,11 @@ describe("SessionManager — elevation support", () => {
 		expect(channelId).not.toBeNull();
 		spawnDone = true;
 
-		// Expire cache so restart will prompt
-		getElevationCache().set(localHostId, { secret: "old", expiresAt: Date.now() - 1 });
+		// Expire cache so restart will prompt (composite key)
+		getElevationCache().set(`${localHostId}:c-restart03`, {
+			secret: "old",
+			expiresAt: Date.now() - 1,
+		});
 
 		// Restart — user cancels prompt → returns false
 		const ok = await sm.restartChannel(channelId!, "c-restart03");

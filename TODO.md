@@ -1,6 +1,18 @@
 # nexterm — Backlog
 
-## Active: Rust Agent Rewrite
+## Recently Completed: LOGGING-DAEMON (2026-03-21)
+
+(8 blocks archived → docs/historic/done-2026-03.md)
+
+### Review findings (M — deferred)
+- [ ] 🔧 [Logging] Async I/O for loggers — replace appendFileSync with createWriteStream (from /review F-002) — Priority: M
+- [ ] 🔧 [Logging] Streaming readJsonl — use readline for log search API instead of readFileSync (from /review F-003) — Priority: M
+- [ ] 🔧 [Web] Frontend tests for LogViewer.vue and useLogs.ts composable (from /review F-008) — Priority: M
+
+### Out-of-scope
+- [ ] 💡 [Logging] Log format config (always JSONL for now) — Priority: L
+
+## Completed: Rust Agent Rewrite
 
 **Spec:** `docs/plans/rust-agent.md` | **Brief:** `docs/briefs/rust-agent.md`
 

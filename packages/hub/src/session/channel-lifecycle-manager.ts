@@ -79,30 +79,40 @@ export class ChannelLifecycleManager {
 			resolvedElevated = false,
 			resolvedElevationMethod = undefined,
 		} = opts;
-		console.log(
-			`[channel-lifecycle] sendSpawnAndWait: entry — hostId=${hostId} requestId=${spawnMsg.requestId} shell=${spawnMsg.shell} agentConnected=${agent.connected}`,
-		);
+		this.ctx.hubLogger?.log("debug", "channel-lifecycle: sendSpawnAndWait entry", {
+			hostId,
+			requestId: spawnMsg.requestId,
+			shell: spawnMsg.shell,
+			agentConnected: agent.connected,
+		});
 		agent.send(spawnMsg);
-		console.log(
-			`[channel-lifecycle] sendSpawnAndWait: SPAWN sent to agent, waiting for SPAWN_OK (timeout=${SPAWN_TIMEOUT_MS}ms)`,
-		);
+		this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN sent, awaiting SPAWN_OK", {
+			requestId: spawnMsg.requestId,
+			timeoutMs: SPAWN_TIMEOUT_MS,
+		});
 
 		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingRequests.delete(spawnMsg.requestId);
-				console.log(
-					`[channel-lifecycle] sendSpawnAndWait: TIMEOUT — no SPAWN_OK received within ${SPAWN_TIMEOUT_MS}ms for requestId=${spawnMsg.requestId}`,
-				);
+				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN_OK timeout", {
+					requestId: spawnMsg.requestId,
+					timeoutMs: SPAWN_TIMEOUT_MS,
+				});
 				reject(new Error("Agent SPAWN timeout"));
 			}, SPAWN_TIMEOUT_MS);
 
 			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				console.log(`[channel-lifecycle] sendSpawnAndWait: pendingRequest handler fired — incoming.type=${incoming.type} requestId=${spawnMsg.requestId}`);
+				this.ctx.hubLogger?.log("debug", "channel-lifecycle: pendingRequest handler fired", {
+					msgType: incoming.type,
+					requestId: spawnMsg.requestId,
+				});
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_OK received — channelId=${spawnOk.channelId}`);
+					this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN_OK received", {
+						channelId: spawnOk.channelId,
+					});
 
 					const { channelId } = spawnOk;
 
@@ -162,10 +172,13 @@ export class ChannelLifecycleManager {
 					client.send(response);
 					resolve({ channelId, errCode: null });
 				} else if (incoming.type === "SPAWN_ERR") {
-					const spawnErr = incoming as import("@nexterm/shared").AgentSpawnErrMessage;
+					const spawnErr = incoming as AgentSpawnErrMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					console.log(`[channel-lifecycle] sendSpawnAndWait: SPAWN_ERR received — code=${spawnErr.code} message=${spawnErr.message}`);
+					this.ctx.hubLogger?.log("warn", "channel-lifecycle: SPAWN_ERR received", {
+						code: spawnErr.code,
+						message: spawnErr.message,
+					});
 
 					if (!suppressClientError) {
 						const errorMsg: ErrorMessage = {
@@ -244,8 +257,10 @@ export class ChannelLifecycleManager {
 				method,
 			);
 			if ("validationError" in elevCfg) {
-				console.warn(
-					`[channel-lifecycle] restartChannel: invalid custom command for hostId=${hostId}: ${elevCfg.validationError.message}`,
+				this.ctx.hubLogger?.log(
+					"warn",
+					"channel-lifecycle: restartChannel invalid elevation config",
+					{ hostId, message: elevCfg.validationError.message },
 				);
 				return false;
 			}
@@ -278,8 +293,15 @@ export class ChannelLifecycleManager {
 			}
 			if (!promptClient) {
 				// No client for prompting — try cache or passwordless only
-				const cached = this.ctx.elevationCache.get(hostId);
-				if (cached && cached.expiresAt > Date.now()) {
+				// Scan for any valid cache entry for this host (composite key ${hostId}:*)
+				let cached: { secret: string; expiresAt: number } | undefined;
+				for (const [key, val] of this.ctx.elevationCache) {
+					if (key.startsWith(`${hostId}:`) && val.expiresAt > Date.now()) {
+						cached = val;
+						break;
+					}
+				}
+				if (cached) {
 					const spawnWithSecret: AgentSpawnMessage = {
 						...baseElevatedSpawn,
 						requestId: generateId(),
@@ -316,8 +338,9 @@ export class ChannelLifecycleManager {
 				);
 			}
 
-			// Cache hit
-			const cached = this.ctx.elevationCache.get(hostId);
+			// Cache hit — SEC-004: composite key ${hostId}:${clientId}
+			const cacheKey = `${hostId}:${promptClient.id}`;
+			const cached = this.ctx.elevationCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				const spawnWithSecret: AgentSpawnMessage = {
 					...baseElevatedSpawn,
@@ -354,7 +377,7 @@ export class ChannelLifecycleManager {
 					if (incoming.type === "SPAWN_OK") {
 						resolve(true);
 					} else if (incoming.type === "SPAWN_ERR") {
-						firstErrCode = (incoming as import("@nexterm/shared").AgentSpawnErrMessage).code;
+						firstErrCode = (incoming as AgentSpawnErrMessage).code;
 						resolve(false);
 					} else {
 						resolve(false);
@@ -400,7 +423,7 @@ export class ChannelLifecycleManager {
 				return false;
 			}
 
-			this.ctx.elevationCache.set(hostId, {
+			this.ctx.elevationCache.set(`${hostId}:${promptClient.id}`, {
 				secret,
 				expiresAt: Date.now() + 900_000,
 			});
@@ -791,9 +814,11 @@ export class ChannelLifecycleManager {
 
 			const timeout = setTimeout(() => {
 				this.ctx.pendingRequests.delete(requestId);
-				console.warn(
-					`[channel-lifecycle] SPAWN timeout for channel ${channelId} (request ${requestId})`,
-				);
+				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN timeout", {
+					channelId,
+					requestId,
+					timeoutMs: SPAWN_TIMEOUT_MS,
+				});
 				onSpawnErr(channelId, ch);
 				settle();
 			}, SPAWN_TIMEOUT_MS);
@@ -879,8 +904,41 @@ export class ChannelLifecycleManager {
 			};
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
-				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
+				// Race condition guard: cancel any existing pending prompt for this hostId
+				// before setting a new one (e.g. concurrent SPAWNs for the same host).
+				const existing = this.ctx.pendingAuthPrompts.get(hostId);
+				if (existing) {
+					if (existing.timer !== null) clearTimeout(existing.timer);
+					existing.resolve(null);
+				}
+
+				// 60-second server-side timeout: if the client disconnects or never
+				// responds, the promise resolves with null (= cancelled) instead of
+				// hanging forever.
+				const timer = setTimeout(() => {
+					const p = this.ctx.pendingAuthPrompts.get(hostId);
+					if (p) {
+						this.ctx.pendingAuthPrompts.delete(hostId);
+						p.resolve(null);
+					}
+				}, 60_000);
+
+				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer, clientId: client.id });
 			});
 		};
+	}
+
+	/**
+	 * Cancel all pending auth prompts for a disconnected client.
+	 * Must be called from the client disconnect handler (ws-handler.ts).
+	 */
+	cancelPendingAuthPromptsForClient(clientId: string): void {
+		for (const [hostId, pending] of this.ctx.pendingAuthPrompts.entries()) {
+			if (pending.clientId === clientId) {
+				if (pending.timer !== null) clearTimeout(pending.timer);
+				pending.resolve(null);
+				this.ctx.pendingAuthPrompts.delete(hostId);
+			}
+		}
 	}
 }

@@ -18,7 +18,7 @@ import type {
 import { decodeMessage, encodeMessage, generateId } from "@nexterm/shared";
 import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import { touchToken, validateToken, validateTokenRecord } from "../auth.js";
+import { touchToken, validateTokenRecord } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
 import {
@@ -83,6 +83,16 @@ export async function registerWsRoutes(
 		// Register send function for write-lock targeted messages
 		clientSendRegistry.set(clientId, client.send);
 
+		// Close unauthenticated connections after 10 seconds
+		const authTimeout = authToken
+			? setTimeout(() => {
+					if (!authenticated) {
+						server.log.warn({ clientId }, 'WS connection closed: AUTH timeout')
+						socket.close(4001, 'AUTH_TIMEOUT')
+					}
+				}, 10_000)
+			: null;
+
 		// Only register the client after successful AUTH (or when auth is disabled)
 		if (!authToken) {
 			sessionManager.addClient(client);
@@ -93,8 +103,9 @@ export async function registerWsRoutes(
 			try {
 				msg = decodeMessage(new Uint8Array(raw));
 			} catch {
-				console.warn(
-					`[ws] malformed MessagePack message from client ${clientId} (${raw.byteLength} bytes)`,
+				server.log.warn(
+					{ clientId, byteLength: raw.byteLength },
+					"ws: malformed MessagePack message",
 				);
 				client.send({
 					type: "ERROR",
@@ -125,8 +136,12 @@ export async function registerWsRoutes(
 						tokenAccepted = true;
 					}
 				} else {
-					// Fallback: constant-time comparison (no DB — test/minimal mode)
-					tokenAccepted = validateToken(authMsg.token, authToken as string);
+					// DB is required for token validation — fail closed to prevent
+					// skipping expiry/revocation checks.
+					server.log.warn({ clientId }, "ws-auth: database unavailable");
+					client.send({ type: "AUTH_FAIL", message: "Database unavailable" });
+					socket.close();
+					return;
 				}
 				if (!tokenAccepted) {
 					server.log.warn({ clientId }, "ws-auth: invalid, expired, or revoked token");
@@ -136,6 +151,7 @@ export async function registerWsRoutes(
 				}
 
 				authenticated = true;
+				clearTimeout(authTimeout ?? undefined);
 				sessionManager.addClient(client);
 				server.log.info({ clientId }, "ws-auth: accepted");
 				client.send({ type: "AUTH_OK", clientId });
@@ -201,6 +217,7 @@ export async function registerWsRoutes(
 		});
 
 		socket.on("close", () => {
+			clearTimeout(authTimeout ?? undefined);
 			clientSendRegistry.delete(clientId);
 			if (authenticated) {
 				writeLockManager.onClientDisconnect(clientId);

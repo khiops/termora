@@ -1,4 +1,6 @@
+import * as path from "node:path";
 import cors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -11,14 +13,15 @@ import { registerGroupRoutes } from "./api/groups.js";
 import { registerHostGroupRoutes } from "./api/host-groups.js";
 import { registerHostRoutes } from "./api/hosts.js";
 import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
+import { registerLogRoutes } from "./api/logs.js";
 import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
-import { touchToken, upsertPrimaryToken, validateToken, validateTokenRecord } from "./auth.js";
+import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH } from "./build-version.js";
-import { getConfigDir } from "./cli.js";
+import { getConfigDir, getStateDir } from "./cli.js";
 import {
 	ConfigResolver,
 	corsOriginsToRegexps,
@@ -28,6 +31,8 @@ import {
 	matchCorsOrigin,
 } from "./config.js";
 import type { AuthConfig } from "./config.js";
+import type { HubLogger } from "./logging/hub-logger.js";
+import type { LoggerRegistry } from "./logging/index.js";
 import { registerSeaStaticServing } from "./sea-static-server.js";
 import { SessionManager } from "./session/session-manager.js";
 import { seedShellProfiles } from "./shell-discovery.js";
@@ -36,6 +41,25 @@ import { MetaDAL } from "./storage/meta.js";
 import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js";
 import { ThemeManager } from "./theme-manager.js";
 import { registerWsRoutes } from "./ws/ws-handler.js";
+
+/**
+ * Mutable set of exact CORS origins allowed by the server.
+ * Pre-populated with Tauri origins and user-configured origins at server creation.
+ * Exact localhost origins (e.g. http://localhost:4100) are added after the server
+ * starts and the actual port is known — call addCorsOrigins() from main.ts.
+ */
+const _corsAllowedOrigins = new Set<string>();
+
+/**
+ * Add one or more exact origin strings to the CORS allowlist.
+ * Safe to call multiple times; duplicates are ignored.
+ * Call this after startServer() returns the actual port to add exact localhost origins.
+ */
+export function addCorsOrigins(...origins: string[]): void {
+	for (const o of origins) {
+		_corsAllowedOrigins.add(o);
+	}
+}
 
 export interface ServerOptions {
 	host?: string; // default: "127.0.0.1"
@@ -47,6 +71,9 @@ export interface ServerOptions {
 	configDir?: string; // override config directory (defaults to getConfigDir())
 	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
 	skipShellDiscovery?: boolean; // disable auto-shell-seeding (useful for tests)
+	hubLogger?: HubLogger; // global hub log sink
+	loggerRegistry?: LoggerRegistry; // per-channel log registry
+	logsDir?: string; // base logs directory (e.g. ~/.local/state/nexterm/logs)
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -54,18 +81,58 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		logger: options?.logger ?? true,
 	});
 
+	// Helmet — sets security-related HTTP response headers
+	await server.register(fastifyHelmet, {
+		contentSecurityPolicy: {
+			directives: {
+				defaultSrc: ["'self'"],
+				scriptSrc: ["'self'"],
+				styleSrc: ["'self'", "'unsafe-inline'"],
+				connectSrc: ["'self'", "ws:", "wss:"],
+				imgSrc: ["'self'", "data:", "blob:"],
+				fontSrc: ["'self'", "data:"],
+				workerSrc: ["'self'", "blob:"],
+			},
+		},
+		crossOriginEmbedderPolicy: false,
+	});
+
 	// CORS — required for Tauri desktop (webview origin differs from hub)
 	// and for remote hub access from web clients on other domains.
-	// Origins are validated against an allowlist from config.toml [server] cors_origins.
+	// Origins are validated against:
+	//   1. _corsAllowedOrigins — exact strings (Tauri + localhost:actualPort injected after listen)
+	//   2. compiledCorsRegexps — regexp patterns from user config.toml [server] cors_origins
+	// SEC-020: No wildcard localhost origins in defaults. Exact port origins are injected
+	//          by addCorsOrigins() in main.ts after startServer() returns the actual port.
 	const configDir = options?.configDir ?? getConfigDir();
+	// SEC-027: load auth config once and reuse across all call sites
+	const authConfig = options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+
+	// Determine origin patterns for this server instance.
+	// When corsOrigins is overridden (tests), use that list exclusively.
+	// Otherwise, load from config.toml — user patterns may include wildcards.
 	const corsPatterns =
 		options?.corsOrigins !== undefined ? options.corsOrigins : loadCorsOrigins(configDir);
-	const compiledCorsRegexps = corsOriginsToRegexps(corsPatterns);
+
+	// Repopulate the module-level Set. Hub is a singleton — one server per process.
+	_corsAllowedOrigins.clear();
+	// Wildcard patterns go to regex matching; exact strings go into the Set for O(1) lookup.
+	const wildcardPatterns: string[] = [];
+	for (const o of corsPatterns) {
+		if (o.includes("*")) {
+			wildcardPatterns.push(o);
+		} else {
+			_corsAllowedOrigins.add(o);
+		}
+	}
+	const compiledCorsRegexps = corsOriginsToRegexps(wildcardPatterns);
 
 	await server.register(cors, {
 		origin: (origin, cb) => {
 			// No origin header (same-origin or non-browser): deny CORS headers
 			if (!origin) return cb(null, false);
+			// Exact match first (O(1)), then wildcard regexp matching.
+			if (_corsAllowedOrigins.has(origin)) return cb(null, true);
 			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
 			cb(null, matched);
 		},
@@ -78,8 +145,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	if (options?.authToken) {
 		const primaryToken = options.authToken;
 		const db = options.dbManager?.meta ?? null;
-		const resolvedAuthConfig =
-			options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+		const resolvedAuthConfig = authConfig;
 		const ttlDays = resolvedAuthConfig.tokenTtlDays;
 
 		// When a DB is available, seed the primary token record so all validation
@@ -98,7 +164,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
-			if (pathname === "/api/fonts") return;
+			if (pathname === "/api/fonts" && request.method === "GET") return;
 			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
@@ -138,18 +204,20 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 					});
 				}
 				// Sliding-window expiry refresh + last_used_at update (best-effort, non-blocking)
-				touchToken(db, record.id, ttlDays);
+				try {
+					touchToken(db, record.id, ttlDays);
+				} catch (err) {
+					server.log.warn({ err, tokenId: record.id }, "touchToken failed");
+				}
 				server.log.debug({ url: pathname, tokenId: record.id }, "auth: accepted");
 			} else {
-				// Fallback: direct constant-time comparison (no DB — test/minimal mode)
-				if (!validateToken(token, primaryToken)) {
-					server.log.warn({ url: pathname }, "auth: invalid token");
-					return reply.code(401).send({
-						error: "AUTH_INVALID",
-						message: "Invalid token",
-					});
-				}
-				server.log.debug({ url: pathname }, "auth: accepted");
+				// DB is required for token validation — fail closed to prevent
+				// skipping expiry/revocation checks.
+				server.log.warn({ url: pathname }, "auth: database unavailable");
+				return reply.code(500).send({
+					error: "SERVER_ERROR",
+					message: "Database unavailable",
+				});
 			}
 		});
 	}
@@ -174,12 +242,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const configResolver = new ConfigResolver(metaDalForConfig);
 		configResolver.loadFromFile(configDir);
 
+		// Build a shared LoggerRegistry if not provided (shared across SessionManager + agents)
+		const loggerRegistry: LoggerRegistry = options.loggerRegistry ?? new Map();
+
 		const sessionManager = new SessionManager(
 			options.dbManager,
 			gcConfig,
 			undefined,
 			configResolver,
+			options.hubLogger,
+			loggerRegistry,
+			options.logsDir,
 		);
+		if (options?.authToken) {
+			sessionManager.setPrimaryToken(options.authToken);
+		}
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
 		migrateLegacyShellDefaults(metaDal, configResolver);
@@ -216,9 +293,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			sessionManager,
 			options.authToken,
 			options.authToken ? (options.dbManager.meta ?? null) : null,
-			options.authToken
-				? (options.authConfig ?? loadAuthConfig(configDir)).tokenTtlDays
-				: undefined,
+			options.authToken ? authConfig.tokenTtlDays : undefined,
 		);
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
@@ -233,18 +308,19 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await themeManager.init();
 		registerThemeRoutes(server, themeManager);
 		if (options.authToken) {
-			const resolvedAuthConfig =
-				options.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
 			registerPairRoutes(server, {
-				authConfig: resolvedAuthConfig,
+				authConfig: authConfig,
 				db: options.dbManager.meta,
 				metaDal,
+				...(options.hubLogger && { hubLogger: options.hubLogger }),
 			});
 			registerTokenRoutes(server, { db: options.dbManager.meta });
 		}
 		await registerUserFonts(server, configDir);
 		await registerUserSounds(server, configDir);
 		await registerUserWallpapers(server, configDir);
+		const logsDir = options.logsDir ?? path.join(getStateDir(), "logs");
+		await registerLogRoutes(server, logsDir);
 		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
@@ -272,7 +348,7 @@ export async function startServer(
 		try {
 			const address = await server.listen({ host, port });
 			if (port !== basePort) {
-				console.log(`[hub] port ${basePort} unavailable, using ${port} (zero_conf)`);
+				server.log.info({ basePort, port }, "hub: port unavailable, using zero_conf port");
 			}
 			return address;
 		} catch (err: unknown) {

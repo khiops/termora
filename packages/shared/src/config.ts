@@ -235,6 +235,7 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	wallpaper: "",
 	wallpaperBlur: 0,
 	wallpaperDim: 0,
+	envMode: 'inherit',
 };
 
 // ─── UI behavioral config (combined) ─────────────────────────────────────────

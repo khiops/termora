@@ -41,20 +41,32 @@ vi.mock("../session/ssh-agent.js", () => {
 
 const TEST_TOKEN = "test-wallpaper-token-64chars-padded-aaaaaaaaaaaaaaaaaaaaaaaaa";
 
+// Minimal valid PNG for tests (signature + IHDR chunk, enough for file-type detection)
+// signature(8) + chunk_length(4=13) + "IHDR"(4) + width(4=1) + height(4=1) +
+// bit_depth(1=8) + color_type(1=2) + compress(1) + filter(1) + interlace(1) + crc(4)
+const PNG_MAGIC = Buffer.from([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+	0x00, 0x00, 0x00, 0x0d,                           // IHDR chunk length = 13
+	0x49, 0x48, 0x44, 0x52,                           // "IHDR"
+	0x00, 0x00, 0x00, 0x01,                           // width = 1
+	0x00, 0x00, 0x00, 0x01,                           // height = 1
+	0x08, 0x02, 0x00, 0x00, 0x00,                     // bit depth=8, color type=2 (RGB)
+	0x90, 0x77, 0x53, 0xde,                           // CRC
+]);
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+
 function buildMultipart(
 	filename: string,
-	content: string,
+	content: Buffer | string,
 	contentType = "image/jpeg",
-): { payload: string; headers: Record<string, string> } {
+): { payload: Buffer; headers: Record<string, string> } {
 	const boundary = "----TestBoundary42";
-	const payload = [
-		`--${boundary}`,
-		`Content-Disposition: form-data; name="image"; filename="${filename}"`,
-		`Content-Type: ${contentType}`,
-		"",
-		content,
-		`--${boundary}--`,
-	].join("\r\n");
+	const header = Buffer.from(
+		`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`,
+	);
+	const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+	const bodyBuf = Buffer.isBuffer(content) ? content : Buffer.from(content);
+	const payload = Buffer.concat([header, bodyBuf, footer]);
 	return {
 		payload,
 		headers: {
@@ -139,7 +151,7 @@ describe("Wallpaper endpoints", () => {
 
 	describe("POST /api/wallpapers", () => {
 		it("should upload a valid image file", async () => {
-			const { payload, headers } = buildMultipart("test.jpg", "fake-image-data");
+			const { payload, headers } = buildMultipart("test.jpg", JPEG_MAGIC);
 			const res = await server.inject({
 				method: "POST",
 				url: "/api/wallpapers",
@@ -202,7 +214,7 @@ describe("Wallpaper endpoints", () => {
 		it("should overwrite existing file with same name", async () => {
 			writeFileSync(join(configDir, "wallpapers", "bg.png"), "original");
 
-			const { payload, headers } = buildMultipart("bg.png", "updated-content", "image/png");
+			const { payload, headers } = buildMultipart("bg.png", PNG_MAGIC, "image/png");
 			const res = await server.inject({
 				method: "POST",
 				url: "/api/wallpapers",
@@ -219,7 +231,7 @@ describe("Wallpaper endpoints", () => {
 			// framework-level feature trusted at framework level — sending an actual 10 MB+
 			// payload in tests would be slow and brittle, so we rely on @fastify/multipart's
 			// own test suite for the 413 rejection path and only assert the happy path here.
-			const { payload, headers } = buildMultipart("small.jpg", "x".repeat(50));
+			const { payload, headers } = buildMultipart("small.jpg", Buffer.concat([JPEG_MAGIC, Buffer.alloc(50)]));
 			const res = await server.inject({
 				method: "POST",
 				url: "/api/wallpapers",

@@ -9,6 +9,12 @@ catalogs:
     '@biomejs/biome':
       specifier: ^1.9.0
       version: 1.9.4
+    '@fastify/cors':
+      specifier: ^11.2.0
+      version: 11.2.0
+    '@fastify/helmet':
+      specifier: ^12.0.0
+      version: 12.0.1
     '@fastify/multipart':
       specifier: ^9.0.0
       version: 9.4.0
@@ -45,15 +51,9 @@ catalogs:
     '@xterm/addon-search':
       specifier: ^0.16.0
       version: 0.16.0
-    '@xterm/addon-serialize':
-      specifier: ^0.13.0
-      version: 0.13.0
     '@xterm/addon-unicode11':
       specifier: ^0.8.0
       version: 0.8.0
-    '@xterm/headless':
-      specifier: ^5.0.0
-      version: 5.5.0
     '@xterm/xterm':
       specifier: ^5.5.0
       version: 5.5.0
@@ -67,14 +67,20 @@ catalogs:
       specifier: ^0.27.0
       version: 0.27.3
     fastify:
-      specifier: ^5.0.0
-      version: 5.7.4
-    node-pty:
-      specifier: ^1.0.0
-      version: 1.1.0
+      specifier: ^5.8.1
+      version: 5.8.2
+    file-type:
+      specifier: ^20.0.0
+      version: 20.5.0
+    happy-dom:
+      specifier: ^20.8.3
+      version: 20.8.3
     pinia:
       specifier: ^3.0.0
       version: 3.0.4
+    postject:
+      specifier: ^1.0.0-alpha.6
+      version: 1.0.0-alpha.6
     ssh2:
       specifier: ^1.16.0
       version: 1.17.0
@@ -118,10 +124,10 @@ importers:
         specifier: 'catalog:'
         version: 0.27.3
       happy-dom:
-        specifier: ^20.8.3
+        specifier: 'catalog:'
         version: 20.8.3
       postject:
-        specifier: ^1.0.0-alpha.6
+        specifier: 'catalog:'
         version: 1.0.0-alpha.6
       tsx:
         specifier: 'catalog:'
@@ -132,31 +138,6 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/node@25.3.3)(happy-dom@20.8.3)(tsx@4.21.0)
-
-  packages/agent:
-    dependencies:
-      '@msgpack/msgpack':
-        specifier: 'catalog:'
-        version: 3.1.3
-      '@nexterm/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@xterm/addon-serialize':
-        specifier: 'catalog:'
-        version: 0.13.0(@xterm/xterm@5.5.0)
-      '@xterm/headless':
-        specifier: 'catalog:'
-        version: 5.5.0
-      node-pty:
-        specifier: 'catalog:'
-        version: 1.1.0
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 20.19.35
-      typescript:
-        specifier: 'catalog:'
-        version: 5.7.3
 
   packages/clients/desktop:
     dependencies:
@@ -220,8 +201,11 @@ importers:
   packages/hub:
     dependencies:
       '@fastify/cors':
-        specifier: ^11.2.0
+        specifier: 'catalog:'
         version: 11.2.0
+      '@fastify/helmet':
+        specifier: 'catalog:'
+        version: 12.0.1
       '@fastify/multipart':
         specifier: 'catalog:'
         version: 9.4.0
@@ -248,7 +232,10 @@ importers:
         version: 11.10.0
       fastify:
         specifier: 'catalog:'
-        version: 5.7.4
+        version: 5.8.2
+      file-type:
+        specifier: 'catalog:'
+        version: 20.5.0
       ssh2:
         specifier: 'catalog:'
         version: 1.17.0
@@ -360,6 +347,9 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@borewit/text-codec@0.2.2':
+    resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -697,6 +687,9 @@ packages:
   '@fastify/forwarded@3.0.1':
     resolution: {integrity: sha512-JqDochHFqXs3C3Ml3gOY58zM7OqO9ENqPo0UqAjAjH8L01fRZqwX9iLeX34//kiJubF7r2ZQHtBRU36vONbLlw==}
 
+  '@fastify/helmet@12.0.1':
+    resolution: {integrity: sha512-kkjBcedWwdflRThovGuvN9jB2QQLytBqArCFPdMIb7o2Fp0l/H3xxYi/6x/SSRuH/FFt9qpTGIfJz2bfnMrLqA==}
+
   '@fastify/merge-json-schemas@0.2.1':
     resolution: {integrity: sha512-OA3KGBCy6KtIvLf8DINC5880o5iBlDX4SxzLQS8HorJAbqluzLRn80UXU0bxZn7UOFhFgpRJDasfwn9nG4FG4A==}
 
@@ -962,6 +955,13 @@ packages:
   '@tauri-apps/plugin-updater@2.10.0':
     resolution: {integrity: sha512-ljN8jPlnT0aSn8ecYhuBib84alxfMx6Hc8vJSKMJyzGbTPFZAC44T2I1QNFZssgWKrAlofvJqCC6Rr472JWfkQ==}
 
+  '@tokenizer/inflate@0.2.7':
+    resolution: {integrity: sha512-MADQgmZT1eKjp06jpI2yozxaU9uVs4GzzgSL+uEq7bVcJ9V1ZXQkeGNql1fsSI0gMy1vhvNTNbUqrx+pZfJVmg==}
+    engines: {node: '>=18'}
+
+  '@tokenizer/token@0.3.0':
+    resolution: {integrity: sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==}
+
   '@types/better-sqlite3@7.6.13':
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
 
@@ -1094,18 +1094,10 @@ packages:
   '@xterm/addon-search@0.16.0':
     resolution: {integrity: sha512-9OeuBFu0/uZJPu+9AHKY6g/w0Czyb/Ut0A5t79I4ULoU4IfU5BEpPFVGQxP4zTTMdfZEYkVIRYbHBX1xWwjeSA==}
 
-  '@xterm/addon-serialize@0.13.0':
-    resolution: {integrity: sha512-kGs8o6LWAmN1l2NpMp01/YkpxbmO4UrfWybeGu79Khw5K9+Krp7XhXbBTOTc3GJRRhd6EmILjpR8k5+odY39YQ==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
-
   '@xterm/addon-unicode11@0.8.0':
     resolution: {integrity: sha512-LxinXu8SC4OmVa6FhgwsVCBZbr8WoSGzBl2+vqe8WcQ6hb1r6Gj9P99qTNdPiFPh4Ceiu2pC8xukZ6+2nnh49Q==}
     peerDependencies:
       '@xterm/xterm': ^5.0.0
-
-  '@xterm/headless@5.5.0':
-    resolution: {integrity: sha512-5xXB7kdQlFBP82ViMJTwwEc3gKCLGKR/eoxQm4zge7GPBl86tCdI0IdPJjoKd8mUSFXz5V7i/25sfsEkP4j46g==}
 
   '@xterm/xterm@5.5.0':
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
@@ -1351,8 +1343,8 @@ packages:
   fastify-plugin@5.1.0:
     resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
 
-  fastify@5.7.4:
-    resolution: {integrity: sha512-e6l5NsRdaEP8rdD8VR0ErJASeyaRbzXYpmkrpr2SuvuMq6Si3lvsaVy5C+7gLanEkvjpMDzBXWE5HPeb/hgTxA==}
+  fastify@5.8.2:
+    resolution: {integrity: sha512-lZmt3navvZG915IE+f7/TIVamxIwmBd+OMB+O9WBzcpIwOo6F0LTh0sluoMFk5VkrKTvvrwIaoJPkir4Z+jtAg==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -1365,6 +1357,13 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
+
+  file-type@20.5.0:
+    resolution: {integrity: sha512-BfHZtG/l9iMm4Ecianu7P8HRD2tBHLtjXinm4X62XBOYzi7CYA7jyqfJzOvXHqzVrVPYqBo2/GvbARMaaJkKVg==}
+    engines: {node: '>=18'}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -1412,6 +1411,10 @@ packages:
   he@1.2.0:
     resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
     hasBin: true
+
+  helmet@7.2.0:
+    resolution: {integrity: sha512-ZRiwvN089JfMXokizgqEPXsl2Guk094yExfoDXR0cBYWxtBbaSww/w+vT4WEJsBW2iTUi1GgZ6swmoug3Oy4Xw==}
+    engines: {node: '>=16.0.0'}
 
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
@@ -1520,12 +1523,6 @@ packages:
   node-abi@3.87.0:
     resolution: {integrity: sha512-+CGM1L1CgmtheLcBuleyYOn7NWPVu0s0EJH2C4puxgEZb9h8QpR9G2dBfZJOAUhi7VQxuBPMd0hiISWcTyiYyQ==}
     engines: {node: '>=10'}
-
-  node-addon-api@7.1.1:
-    resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
-
-  node-pty@1.1.0:
-    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -1755,6 +1752,10 @@ packages:
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
 
+  strtok3@10.3.5:
+    resolution: {integrity: sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==}
+    engines: {node: '>=18'}
+
   superjson@2.2.6:
     resolution: {integrity: sha512-H+ue8Zo4vJmV2nRjpx86P35lzwDT3nItnIsocgumgr0hHMQ+ZGq5vrERg9kJBo5AWGmxZDhzDo+WVIJqkB0cGA==}
     engines: {node: '>=16'}
@@ -1808,6 +1809,10 @@ packages:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
     engines: {node: '>=0.6'}
 
+  token-types@6.1.2:
+    resolution: {integrity: sha512-dRXchy+C0IgK8WPC6xvCHFRIWYUbqqdEIKPaKo/AcTUNzwLTK6AH7RjdLWsEZcAN/TBdtfUw3PYEgPr5VPr6ww==}
+    engines: {node: '>=14.16'}
+
   tree-kill@1.2.2:
     resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
     hasBin: true
@@ -1830,6 +1835,10 @@ packages:
     resolution: {integrity: sha512-84MVSjMEHP+FQRPy3pX9sTVV/INIex71s9TL2Gm5FG/WG1SqXeKyZ0k7/blY/4FdOzI12CBy1vGc4og/eus0fw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  uint8array-extras@1.5.0:
+    resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
+    engines: {node: '>=18'}
 
   ulid@2.4.0:
     resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
@@ -2072,6 +2081,8 @@ snapshots:
   '@biomejs/cli-win32-x64@1.9.4':
     optional: true
 
+  '@borewit/text-codec@0.2.2': {}
+
   '@esbuild/aix-ppc64@0.25.12':
     optional: true
 
@@ -2252,6 +2263,11 @@ snapshots:
       fast-json-stringify: 6.3.0
 
   '@fastify/forwarded@3.0.1': {}
+
+  '@fastify/helmet@12.0.1':
+    dependencies:
+      fastify-plugin: 5.1.0
+      helmet: 7.2.0
 
   '@fastify/merge-json-schemas@0.2.1':
     dependencies:
@@ -2441,6 +2457,16 @@ snapshots:
   '@tauri-apps/plugin-updater@2.10.0':
     dependencies:
       '@tauri-apps/api': 2.10.1
+
+  '@tokenizer/inflate@0.2.7':
+    dependencies:
+      debug: 4.4.3
+      fflate: 0.8.2
+      token-types: 6.1.2
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tokenizer/token@0.3.0': {}
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
@@ -2632,15 +2658,9 @@ snapshots:
 
   '@xterm/addon-search@0.16.0': {}
 
-  '@xterm/addon-serialize@0.13.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
-
   '@xterm/addon-unicode11@0.8.0(@xterm/xterm@5.5.0)':
     dependencies:
       '@xterm/xterm': 5.5.0
-
-  '@xterm/headless@5.5.0': {}
 
   '@xterm/xterm@5.5.0': {}
 
@@ -2917,7 +2937,7 @@ snapshots:
 
   fastify-plugin@5.1.0: {}
 
-  fastify@5.7.4:
+  fastify@5.8.2:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
@@ -2942,6 +2962,17 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
       picomatch: 4.0.3
+
+  fflate@0.8.2: {}
+
+  file-type@20.5.0:
+    dependencies:
+      '@tokenizer/inflate': 0.2.7
+      strtok3: 10.3.5
+      token-types: 6.1.2
+      uint8array-extras: 1.5.0
+    transitivePeerDependencies:
+      - supports-color
 
   file-uri-to-path@1.0.0: {}
 
@@ -2993,6 +3024,8 @@ snapshots:
   has-flag@4.0.0: {}
 
   he@1.2.0: {}
+
+  helmet@7.2.0: {}
 
   hookable@5.5.3: {}
 
@@ -3078,12 +3111,6 @@ snapshots:
   node-abi@3.87.0:
     dependencies:
       semver: 7.7.4
-
-  node-addon-api@7.1.1: {}
-
-  node-pty@1.1.0:
-    dependencies:
-      node-addon-api: 7.1.1
 
   on-exit-leak-free@2.1.2: {}
 
@@ -3321,6 +3348,10 @@ snapshots:
     dependencies:
       js-tokens: 9.0.1
 
+  strtok3@10.3.5:
+    dependencies:
+      '@tokenizer/token': 0.3.0
+
   superjson@2.2.6:
     dependencies:
       copy-anything: 4.0.5
@@ -3371,6 +3402,12 @@ snapshots:
 
   toidentifier@1.0.1: {}
 
+  token-types@6.1.2:
+    dependencies:
+      '@borewit/text-codec': 0.2.2
+      '@tokenizer/token': 0.3.0
+      ieee754: 1.2.1
+
   tree-kill@1.2.2: {}
 
   tslib@2.8.1: {}
@@ -3389,6 +3426,8 @@ snapshots:
   tweetnacl@0.14.5: {}
 
   typescript@5.7.3: {}
+
+  uint8array-extras@1.5.0: {}
 
   ulid@2.4.0: {}
 

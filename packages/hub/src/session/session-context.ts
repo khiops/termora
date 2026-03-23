@@ -60,14 +60,16 @@ export interface SharedSessionContext {
 			clientId: string;
 		}
 	>;
-	/** promptId → pending host-key-mismatch resolution */
+	/** promptId → pending host-key verification resolution */
 	pendingHostVerify: Map<
 		string,
 		{
-			resolve: (accepted: boolean) => void;
+			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
 			timer: ReturnType<typeof setTimeout>;
 		}
 	>;
+	/** '${hostname}:${port}' → fingerprint trusted for this session only (trust_once, not persisted) */
+	trustedOnceFingerprints: Map<string, string>;
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
@@ -91,4 +93,10 @@ export interface SharedSessionContext {
 	/** Config */
 	agentConfig: AgentConfig;
 	configResolver: ConfigResolver | null;
+	/** Per-channel logger registry */
+	loggerRegistry: import("../logging/index.js").LoggerRegistry | null;
+	/** Structured logger for hub operations (injected by SessionManager constructor) */
+	hubLogger: import("../logging/hub-logger.js").HubLogger | null;
+	/** Primary auth token for daemon agent authentication */
+	primaryToken: string | null;
 }

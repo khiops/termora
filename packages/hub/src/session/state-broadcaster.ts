@@ -227,7 +227,7 @@ export class StateBroadcaster {
 	handleTitleChange(msg: AgentTitleChangeMessage): void {
 		const channel = this.ctx.channels.get(msg.channelId);
 		if (!channel) {
-			console.warn(`[state-broadcaster] TITLE_CHANGE for unknown channel ${msg.channelId} — ignored`);
+			this.ctx.hubLogger?.log("warn", "state-broadcaster: TITLE_CHANGE for unknown channel, ignored", { channelId: msg.channelId });
 			return;
 		}
 
@@ -260,9 +260,7 @@ export class StateBroadcaster {
 	handleProcessTitle(msg: AgentProcessTitleMessage): void {
 		const channel = this.ctx.channels.get(msg.channelId);
 		if (!channel) {
-			console.warn(
-				`[state-broadcaster] PROCESS_TITLE for unknown channel ${msg.channelId} — ignored`,
-			);
+			this.ctx.hubLogger?.log("warn", "state-broadcaster: PROCESS_TITLE for unknown channel, ignored", { channelId: msg.channelId });
 			return;
 		}
 

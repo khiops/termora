@@ -14,6 +14,8 @@ export interface TerminalProfile {
 	wallpaper?: string;
 	wallpaperBlur?: number;
 	wallpaperDim?: number;
+	/** Controls how process.env is merged into PTY environment. Default: 'inherit'. */
+	envMode?: 'minimal' | 'inherit';
 	[key: string]: unknown;
 }
 
@@ -223,4 +225,12 @@ export interface FontFile {
 export interface FontFamily {
 	family: string;
 	files: FontFile[];
+}
+
+
+export interface LogConfig {
+	level: "trace" | "debug" | "info" | "warn" | "error";
+	output: "stderr" | "file" | "both";
+	maxAgeDays: number;
+	maxSizeMb: number;
 }

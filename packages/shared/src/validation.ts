@@ -101,3 +101,67 @@ export function validateCustomCommand(cmd: string): void {
 		};
 	}
 }
+
+
+/**
+ * Validates a shell executable path for the SPAWN handler.
+ * Returns an error message string, or null if valid.
+ *
+ * Rules:
+ * - Optional field — null/undefined is allowed (hub will use default shell)
+ * - Must be a non-empty string
+ * - Length: 1–4096 characters
+ * - No null bytes
+ * - No shell metacharacters: ; & | $ ` ( ) < > \n \r
+ * - No path traversal (..)
+ * - Must be an absolute path: starts with / (Unix) or drive letter (Windows)
+ * - Character allowlist: a-zA-Z0-9 / \ . _ - (space) :
+ */
+export function validateShell(shell: unknown): string | null {
+	if (shell == null) return null; // optional field
+
+	if (typeof shell !== "string") {
+		return "shell must be a string";
+	}
+
+	if (shell.length === 0) {
+		return "shell must not be empty";
+	}
+
+	if (shell.length > 4096) {
+		return "shell must be 4096 characters or fewer";
+	}
+
+	// Null bytes
+	if (shell.includes("\0")) {
+		return "shell contains invalid characters";
+	}
+
+	// Shell metacharacters (injection risk even with execvp)
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional security check
+	const metaRe = /[;&|$`()<>\n\r]/;
+	if (metaRe.test(shell)) {
+		return "shell must be an executable path, not a command";
+	}
+
+	// Character allowlist: alphanumeric, / \ . _ - (space) :
+	const allowlistRe = /^[a-zA-Z0-9/\\._ :-]+$/;
+	if (!allowlistRe.test(shell)) {
+		return "shell contains invalid characters";
+	}
+
+	// Must be an absolute path
+	const isUnixAbsolute = shell.startsWith("/");
+	const isWindowsAbsolute = /^[A-Za-z]:[/\\]/.test(shell);
+	if (!isUnixAbsolute && !isWindowsAbsolute) {
+		return "shell must be an absolute path";
+	}
+
+	// Path traversal check (segment-aware)
+	if (/(?:^|[/\\])\.\.[/\\]/.test(shell) || shell.endsWith("/..") || shell.endsWith("\\..")) {
+		return "shell must not contain path traversal";
+	}
+
+	return null;
+}
+

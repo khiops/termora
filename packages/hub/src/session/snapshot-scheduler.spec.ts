@@ -349,8 +349,7 @@ describe("SnapshotScheduler", () => {
 			expect(localScheduler.inFlightSnapshots).toBe(0);
 		});
 
-		it("timeout warning is logged when slot is reclaimed", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		it("slot is reclaimed after snapshot timeout", () => {
 			const maxConcurrent = 1;
 			const localScheduler = new SnapshotScheduler(
 				() => agent as unknown as AgentConnection,
@@ -358,19 +357,24 @@ describe("SnapshotScheduler", () => {
 			);
 
 			localScheduler.trackChannel("ch-a");
-			vi.advanceTimersByTime(3_001); // trigger snapshot
-			vi.advanceTimersByTime(5_001); // trigger timeout
+			vi.advanceTimersByTime(3_001); // trigger snapshot — slot consumed
 
-			expect(warnSpy).toHaveBeenCalledWith(
-				expect.stringContaining("[snapshot-scheduler] snapshot timeout for channel ch-a"),
-			);
+			// In-flight count is 1 after snapshot fires
+			const inFlight = (localScheduler as unknown as { _inFlightSnapshots: number })
+				._inFlightSnapshots;
+			expect(inFlight).toBe(1);
 
-			warnSpy.mockRestore();
+			vi.advanceTimersByTime(5_001); // trigger timeout — slot freed
+
+			// After timeout, in-flight count is decremented back to 0
+			const inFlightAfter = (localScheduler as unknown as { _inFlightSnapshots: number })
+				._inFlightSnapshots;
+			expect(inFlightAfter).toBe(0);
+
 			localScheduler.shutdown();
 		});
 
 		it("shutdown clears pending snapshot timeouts without firing them", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const localScheduler = new SnapshotScheduler(() => agent as unknown as AgentConnection);
 
 			localScheduler.trackChannel("ch-a");
@@ -379,14 +383,13 @@ describe("SnapshotScheduler", () => {
 			// Shutdown before timeout fires
 			localScheduler.shutdown();
 
-			// Advance well past the timeout — warn must NOT be called by the timeout
+			// Advance well past the timeout — slot should not be freed (timer was cleared)
 			vi.advanceTimersByTime(10_000);
-			const timeoutWarns = warnSpy.mock.calls.filter((args) =>
-				String(args[0]).includes("snapshot timeout"),
-			);
-			expect(timeoutWarns).toHaveLength(0);
 
-			warnSpy.mockRestore();
+			// In-flight count remains 1 because the timeout was cancelled by shutdown
+			const inFlight = (localScheduler as unknown as { _inFlightSnapshots: number })
+				._inFlightSnapshots;
+			expect(inFlight).toBe(1);
 		});
 	});
 

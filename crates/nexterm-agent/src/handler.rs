@@ -144,6 +144,19 @@ pub(crate) async fn handle_message(
 ) -> std::io::Result<()> {
     use crate::protocol::HubToAgent;
 
+    let summary = match &msg {
+        HubToAgent::Heartbeat { .. } => "HEARTBEAT".to_string(),
+        HubToAgent::Spawn { shell, cols, rows, .. } => format!("SPAWN shell={:?} {}x{}", shell, cols, rows),
+        HubToAgent::Input { channel_id, data } => format!("INPUT ch={} {} bytes", &channel_id[..8.min(channel_id.len())], data.len()),
+        HubToAgent::Resize { channel_id, cols, rows } => format!("RESIZE ch={} {}x{}", &channel_id[..8.min(channel_id.len())], cols, rows),
+        HubToAgent::Destroy { channel_id } => format!("DESTROY ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::SnapshotReq { channel_id } => format!("SNAPSHOT_REQ ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::Attach { channel_id } => format!("ATTACH ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::Auth { .. } => "AUTH".to_string(),
+        HubToAgent::Error { code, .. } => format!("ERROR {}", code),
+    };
+    tracing::debug!(msg = %summary, "hub message received");
+
     match msg {
         HubToAgent::Heartbeat { ts } => {
             send_frame(&frame_tx, &AgentToHub::HeartbeatAck { ts })?;
@@ -238,6 +251,7 @@ pub(crate) async fn handle_message(
         }
 
         HubToAgent::Destroy { channel_id } => {
+            tracing::debug!("DESTROY received for channel {}", channel_id);
             let mut mgr = pty_manager.lock().await;
             if let Some(ch) = mgr.remove(&channel_id) {
                 let _ = ch.process.kill();
@@ -341,6 +355,13 @@ pub(crate) async fn handle_message(
             }
         }
 
+        HubToAgent::Auth { .. } => {
+            // AUTH is consumed by the connection handshake in handle_connection_inner
+            // before the message loop starts. If it arrives here the hub sent it
+            // out-of-order — ignore it silently (the connection was already accepted).
+            tracing::warn!("received AUTH message outside of handshake — ignoring");
+        }
+
         HubToAgent::Error {
             code,
             message,
@@ -384,6 +405,17 @@ async fn handle_spawn(
     output_tx: mpsc::UnboundedSender<OutputEvent>,
     cmd_senders: SnapshotSenders,
 ) -> std::io::Result<()> {
+    tracing::info!(
+        request_id = %request_id,
+        shell = ?shell,
+        cwd = ?cwd,
+        cols = cols,
+        rows = rows,
+        elevated = ?elevated,
+        env_count = env.as_ref().map(|e| e.len()).unwrap_or(0),
+        "SPAWN received"
+    );
+
     let resolved_shell = shell.unwrap_or_else(shell::get_default_shell);
 
     // Expand vars in args, cwd, env values (NOT shell)
@@ -502,6 +534,14 @@ async fn handle_spawn(
 
     match spawn_result {
         Ok((ch_id, pty_pid)) => {
+            tracing::info!(
+                channel_id = %ch_id,
+                pid = pty_pid,
+                program = %effective_program,
+                args = ?effective_args,
+                cwd = ?expanded_cwd,
+                "SPAWN_OK — PTY created"
+            );
             // Get a reader for the new channel before releasing the broader context
             let pty_reader_opt = {
                 let mgr = pty_manager.lock().await;
@@ -542,7 +582,13 @@ async fn handle_spawn(
         }
 
         Err(e) => {
+            tracing::error!(
+                program = %effective_program,
+                error = %e,
+                "SPAWN_ERR — PTY creation failed"
+            );
             let code = map_spawn_error(&e);
+            // Send SpawnErr first so the hub can act on it immediately
             send_frame(
                 &frame_tx,
                 &AgentToHub::SpawnErr {
@@ -551,6 +597,15 @@ async fn handle_spawn(
                     message: e.to_string(),
                 },
             )?;
+            // Then emit a LOG diagnostic (best-effort, non-blocking)
+            let _ = send_frame(
+                &frame_tx,
+                &AgentToHub::Log {
+                    channel_id: String::new(),
+                    level: "error".to_string(),
+                    msg: format!("spawn failed: {}", e),
+                },
+            );
         }
     }
 
@@ -584,10 +639,39 @@ fn spawn_reader_task(
                 // PTY output
                 read_result = pty_reader.read(&mut rbuf) => {
                     match read_result {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) | Err(_) => {
+                            let reason = match &read_result {
+                                Ok(0) => "EOF (0 bytes)".to_string(),
+                                Err(e) => format!("Error: {}", e),
+                                _ => "unexpected".to_string(),
+                            };
+                            tracing::debug!(channel_id = %channel_id, reason = %reason, "PTY reader EOF");
+                            // Emit a LOG diagnostic before breaking
+                            let log_msg = AgentToHub::Log {
+                                channel_id: channel_id.clone(),
+                                level: "debug".to_string(),
+                                msg: "PTY closed".to_string(),
+                            };
+                            if let Ok(frame) = encode_frame(&log_msg) {
+                                let _ = frame_tx.send(frame);
+                            }
+                            break;
+                        }
                         Ok(n) => {
                             seq += 1;
-                            let data = rbuf[..n].to_vec();
+                            // Strip DSR queries (\x1b[6n) from output before
+                            // forwarding to the hub.  With PSEUDOCONSOLE_INHERIT_CURSOR,
+                            // ConPTY sends DSR but does not need a response.  If xterm.js
+                            // sees the DSR, it responds with \x1b[row;colR which travels
+                            // back as INPUT → ConPTY stdin → child console input buffer,
+                            // killing the shell with garbage keyboard events.
+                            let raw = &rbuf[..n];
+                            let data = strip_dsr(raw);
+
+                            // Skip empty chunks (e.g. all-DSR data after stripping)
+                            if data.is_empty() {
+                                continue;
+                            }
 
                             // Feed output to the headless mirror BEFORE sending to batch
                             mirror.process(&data);
@@ -698,6 +782,13 @@ fn spawn_reader_task(
             None => (-1, None),
         };
 
+        tracing::info!(
+            channel_id = %channel_id,
+            exit_code = exit_code,
+            signal = ?signal,
+            "PTY process exited"
+        );
+
         let msg = AgentToHub::ChannelExit {
             channel_id,
             exit_code,
@@ -722,6 +813,30 @@ fn map_spawn_error(e: &std::io::Error) -> &'static str {
 /// Encode and write a frame to the shared stdout.
 /// Encode a message and send it via the frame channel.
 /// Synchronous — no await needed. Errors are ignored if receiver is gone.
+/// Strip DSR query sequences (`\x1b[6n`) from ConPTY output.
+///
+/// ConPTY with `PSEUDOCONSOLE_INHERIT_CURSOR` sends DSR but doesn't need
+/// a response.  If we forward DSR to xterm.js, it responds with
+/// `\x1b[row;colR` which the hub sends back as INPUT.  ConPTY passes this
+/// to the child's console input buffer as keyboard events, killing the shell.
+fn strip_dsr(data: &[u8]) -> Vec<u8> {
+    const DSR: &[u8] = b"\x1b[6n";
+    if !data.windows(DSR.len()).any(|w| w == DSR) {
+        return data.to_vec(); // fast path: no DSR
+    }
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if i + DSR.len() <= data.len() && &data[i..i + DSR.len()] == DSR {
+            i += DSR.len(); // skip the DSR sequence
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 pub(crate) fn send_frame(tx: &FrameSender, msg: &AgentToHub) -> std::io::Result<()> {
     let frame = encode_frame(msg)?;
     // SendError means receiver dropped — treat as EOF, not a hard error

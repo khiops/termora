@@ -13,13 +13,6 @@ export default defineConfig({
 			},
 			{
 				test: {
-					name: "agent",
-					include: ["packages/agent/**/*.spec.ts"],
-					environment: "node",
-				},
-			},
-			{
-				test: {
 					name: "hub",
 					include: ["packages/hub/**/*.spec.ts"],
 					environment: "node",

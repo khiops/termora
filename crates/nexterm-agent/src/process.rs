@@ -80,6 +80,7 @@ async fn get_title_windows(pid: u32) -> Option<String> {
             "get",
             "Name",
         ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .await
         .ok()?;

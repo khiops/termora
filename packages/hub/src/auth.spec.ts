@@ -13,7 +13,6 @@ import {
 	revokeToken,
 	touchToken,
 	upsertPrimaryToken,
-	validateToken,
 	validateTokenRecord,
 } from "./auth.js";
 import { openTestDatabases } from "./storage/db.js";
@@ -52,29 +51,6 @@ describe("initAuth", () => {
 		const authFile = join(testDir, "auth.json");
 		const mode = statSync(authFile).mode & 0o777;
 		expect(mode).toBe(0o600);
-	});
-});
-
-// ─── validateToken (legacy) ──────────────────────────────────────────────────
-
-describe("validateToken", () => {
-	it("returns true for matching tokens", () => {
-		const token = randomBytes(32).toString("hex");
-		expect(validateToken(token, token)).toBe(true);
-	});
-
-	it("returns false for wrong token", () => {
-		const expected = randomBytes(32).toString("hex");
-		const provided = randomBytes(32).toString("hex");
-		// Extremely unlikely to collide, but skip if they do
-		if (provided === expected) return;
-		expect(validateToken(provided, expected)).toBe(false);
-	});
-
-	it("returns false for different-length token (no crash)", () => {
-		expect(validateToken("short", "a".repeat(64))).toBe(false);
-		expect(validateToken("a".repeat(64), "short")).toBe(false);
-		expect(validateToken("", "token")).toBe(false);
 	});
 });
 

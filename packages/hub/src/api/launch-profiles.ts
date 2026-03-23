@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { toSnakeCase } from "@nexterm/shared";
+import { toSnakeCase, validateShell } from "@nexterm/shared";
 import type { LaunchProfile } from "@nexterm/shared";
 import type { FastifyInstance } from "fastify";
 import {
@@ -11,23 +11,10 @@ import type { MetaDAL } from "../storage/meta.js";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
-const SHELL_META_RE = /[;&|$`]/;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const ENV_MASK_RE = /password|secret|token|key|credential/i;
 const ENV_SENTINEL = "********";
 
-function validateShell(shell: string): string | null {
-	if (!shell || shell.trim().length === 0) {
-		return "shell is required";
-	}
-	if (shell.length > 512) {
-		return "shell must be 512 characters or fewer";
-	}
-	if (SHELL_META_RE.test(shell)) {
-		return "shell must be an executable path, not a command";
-	}
-	return null;
-}
 
 function validateCreateBody(body: CreateLaunchProfileBody): string | null {
 	if (!body.name || body.name.trim().length === 0) {

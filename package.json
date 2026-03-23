@@ -25,12 +25,9 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "pnpm -r typecheck",
-		"build:sea-agent": "tsx scripts/build-sea-agent.ts",
 		"build:sea-hub": "tsx scripts/build-sea-hub.ts",
-		"package:sea-agent": "tsx scripts/package-sea-agent.ts",
 		"package:sea-hub": "tsx scripts/package-sea-hub.ts",
-		"prepare:desktop": "bash scripts/prepare-desktop.sh",
-		"build:desktop": "bash scripts/prepare-desktop.sh && cd packages/clients/desktop && pnpm tauri build"
+		"build:desktop": "bash scripts/build-desktop.sh"
 	},
 	"dependencies": {
 		"@nexterm/hub": "workspace:*"
@@ -39,8 +36,8 @@
 		"@biomejs/biome": "catalog:",
 		"concurrently": "catalog:",
 		"esbuild": "catalog:",
-		"happy-dom": "^20.8.3",
-		"postject": "^1.0.0-alpha.6",
+		"happy-dom": "catalog:",
+		"postject": "catalog:",
 		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"

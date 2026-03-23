@@ -6,7 +6,7 @@ import { createToken } from "../auth.js";
 import type { AuthConfig } from "../config.js";
 import type { MetaDAL } from "../storage/meta.js";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────────────────────
 
 export interface PairRouteOptions {
 	/** The auth config (for token TTL). */
@@ -20,31 +20,12 @@ interface VerifyBody {
 	code?: unknown;
 }
 
-// ─── Rate limit state (in-memory, resets every 60 s) ─────────────────────────
+// ─── Constants ─────────────────────────────────────────────────────────────────────────────
 
 const VERIFY_WINDOW_MS = 60_000;
 const VERIFY_MAX = 10;
 
-let verifyCount = 0;
-let verifyWindowStart = Date.now();
-
-function checkVerifyRateLimit(): boolean {
-	const now = Date.now();
-	if (now - verifyWindowStart >= VERIFY_WINDOW_MS) {
-		verifyCount = 0;
-		verifyWindowStart = now;
-	}
-	verifyCount += 1;
-	return verifyCount <= VERIFY_MAX;
-}
-
-// Exported so tests can reset state between runs
-export function resetVerifyRateLimit(): void {
-	verifyCount = 0;
-	verifyWindowStart = Date.now();
-}
-
-// ─── Route registration ───────────────────────────────────────────────────────
+// ─── Route registration ─────────────────────────────────────────────────────────────────────────────
 
 export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptions): void {
 	const { authConfig, db, metaDal } = opts;
@@ -62,10 +43,10 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 		const expiresAt = new Date(now.getTime() + 60_000).toISOString();
 		const id = generateId();
 
-		// Generate a unique 6-digit code with retry on collision (UNIQUE constraint).
+		// Generate a unique 8-digit code with retry on collision (UNIQUE constraint).
 		const maxAttempts = 5;
 		for (let attempt = 0; attempt < maxAttempts; attempt++) {
-			const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+			const code = randomInt(0, 100_000_000).toString().padStart(8, "0");
 			try {
 				metaDal.createPairingCode(id, code, now.toISOString(), expiresAt);
 				return reply.code(201).send({ code, expires_at: expiresAt });
@@ -82,18 +63,36 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 	// POST /api/pair/verify — unauthenticated, exchanges code for a new token
 	server.post<{ Body: VerifyBody }>(
 		"/api/pair/verify",
+		{
+			schema: {
+				body: {
+					type: "object",
+					required: ["code"],
+					properties: {
+						code: { type: "string", pattern: "^\\d{8}$" },
+					},
+					additionalProperties: false,
+				},
+			},
+		},
 		async (request: FastifyRequest<{ Body: VerifyBody }>, reply: FastifyReply) => {
-			if (!checkVerifyRateLimit()) {
+			const clientIp = request.ip ?? "unknown";
+
+			// DB-backed per-IP rate limit with exponential backoff after 5 attempts.
+			if (!metaDal.checkAndIncrementPairRate(clientIp, VERIFY_MAX, VERIFY_WINDOW_MS)) {
 				return reply.code(429).send({
 					error: { code: "RATE_LIMIT", message: "Too many verification attempts" },
 				});
 			}
 
+			// Periodically clean up stale rate-limit records (best-effort).
+			metaDal.cleanExpiredPairRates(VERIFY_WINDOW_MS);
+
 			const { code } = request.body;
 
-			if (typeof code !== "string" || !/^\d{6}$/.test(code)) {
+			if (typeof code !== "string" || !/^\d{8}$/.test(code)) {
 				return reply.code(400).send({
-					error: { code: "INVALID_FORMAT", message: "Code must be 6 digits" },
+					error: { code: "INVALID_FORMAT", message: "Code must be 8 digits" },
 				});
 			}
 
@@ -118,7 +117,6 @@ export function registerPairRoutes(server: FastifyInstance, opts: PairRouteOptio
 				});
 			}
 
-			const clientIp = request.ip ?? "unknown";
 			metaDal.markPairingCodeUsed(row.id, now, clientIp);
 
 			// Create a new token in the DB — distinct from the primary token.

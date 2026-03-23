@@ -7,6 +7,7 @@ import {
 	isValidInputData,
 	isValidUlid,
 	validateCustomCommand,
+	validateShell,
 } from "./validation.js";
 
 describe("isValidUlid", () => {
@@ -327,5 +328,195 @@ describe("validateCustomCommand", () => {
 		expect(() => validateCustomCommand("sudo")).toThrow(
 			expect.objectContaining({ code: "INVALID_CUSTOM_COMMAND" }),
 		);
+	});
+});
+
+describe("validateShell", () => {
+	// ── Optional field ────────────────────────────────────────────────────────
+
+	it("accepts null (optional field)", () => {
+		expect(validateShell(null)).toBeNull();
+	});
+
+	it("accepts undefined (optional field)", () => {
+		expect(validateShell(undefined)).toBeNull();
+	});
+
+	// ── Valid paths ───────────────────────────────────────────────────────────
+
+	it("accepts /bin/bash", () => {
+		expect(validateShell("/bin/bash")).toBeNull();
+	});
+
+	it("accepts /usr/bin/zsh", () => {
+		expect(validateShell("/usr/bin/zsh")).toBeNull();
+	});
+
+	it("accepts /usr/local/bin/fish", () => {
+		expect(validateShell("/usr/local/bin/fish")).toBeNull();
+	});
+
+	it("accepts path with hyphen /usr/bin/my-shell", () => {
+		expect(validateShell("/usr/bin/my-shell")).toBeNull();
+	});
+
+	it("accepts path with underscore /usr/bin/my_shell", () => {
+		expect(validateShell("/usr/bin/my_shell")).toBeNull();
+	});
+
+	it("accepts path with dot /usr/bin/shell.v2", () => {
+		expect(validateShell("/usr/bin/shell.v2")).toBeNull();
+	});
+
+	it("accepts path with space /usr/bin/my shell", () => {
+		expect(validateShell("/usr/bin/my shell")).toBeNull();
+	});
+
+	it("accepts Windows path C:\\Windows\\System32\\cmd.exe", () => {
+		expect(validateShell("C:\\Windows\\System32\\cmd.exe")).toBeNull();
+	});
+
+	it("accepts Windows path with forward slash C:/Windows/System32/cmd.exe", () => {
+		expect(validateShell("C:/Windows/System32/cmd.exe")).toBeNull();
+	});
+
+	// ── Non-string types ──────────────────────────────────────────────────────
+
+	it("rejects number type", () => {
+		expect(validateShell(42)).toBe("shell must be a string");
+	});
+
+	it("rejects boolean type", () => {
+		expect(validateShell(true)).toBe("shell must be a string");
+	});
+
+	it("rejects object type", () => {
+		expect(validateShell({})).toBe("shell must be a string");
+	});
+
+	// ── Empty string ──────────────────────────────────────────────────────────
+
+	it("rejects empty string", () => {
+		expect(validateShell("")).toBe("shell must not be empty");
+	});
+
+	// ── Length ────────────────────────────────────────────────────────────────
+
+	it("accepts path at exactly 4096 characters", () => {
+		const shell = `/${"a".repeat(4095)}`;
+		expect(validateShell(shell)).toBeNull();
+	});
+
+	it("rejects path exceeding 4096 characters", () => {
+		const shell = `/${"a".repeat(4096)}`;
+		expect(validateShell(shell)).toBe("shell must be 4096 characters or fewer");
+	});
+
+	// ── Null bytes ────────────────────────────────────────────────────────────
+
+	it("rejects null bytes", () => {
+		expect(validateShell("/bin/bash\0evil")).toBe("shell contains invalid characters");
+	});
+
+	// ── Shell metacharacters ─────────────────────────────────────────────────
+
+	it("rejects semicolon", () => {
+		expect(validateShell("/bin/bash;rm -rf /")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects ampersand", () => {
+		expect(validateShell("/bin/bash&cat /etc/passwd")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects pipe", () => {
+		expect(validateShell("/bin/bash|cat")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects dollar sign", () => {
+		expect(validateShell("/bin/$SHELL")).toBe("shell must be an executable path, not a command");
+	});
+
+	it("rejects backtick", () => {
+		expect(validateShell("/bin/`id`")).toBe("shell must be an executable path, not a command");
+	});
+
+	it("rejects open paren", () => {
+		expect(validateShell("/bin/bash(")).toBe("shell must be an executable path, not a command");
+	});
+
+	it("rejects close paren", () => {
+		expect(validateShell("/bin/bash)")).toBe("shell must be an executable path, not a command");
+	});
+
+	it("rejects less-than", () => {
+		expect(validateShell("/bin/bash</etc/passwd")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects greater-than", () => {
+		expect(validateShell("/bin/bash>/tmp/out")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects newline", () => {
+		expect(validateShell("/bin/bash\nrm -rf /")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	it("rejects carriage return", () => {
+		expect(validateShell("/bin/bash\rrm -rf /")).toBe(
+			"shell must be an executable path, not a command",
+		);
+	});
+
+	// ── Character allowlist ───────────────────────────────────────────────────
+
+	it("rejects non-ASCII characters", () => {
+		expect(validateShell("/usr/bin/bäsh")).toBe("shell contains invalid characters");
+	});
+
+	it("rejects brackets", () => {
+		expect(validateShell("/bin/[bash]")).toBe("shell contains invalid characters");
+	});
+
+	// ── Absolute path requirement ─────────────────────────────────────────────
+
+	it("rejects relative path 'bash'", () => {
+		expect(validateShell("bash")).toBe("shell must be an absolute path");
+	});
+
+	it("rejects relative path './bash'", () => {
+		expect(validateShell("./bash")).toBe("shell must be an absolute path");
+	});
+
+	it("rejects relative path 'usr/bin/bash'", () => {
+		expect(validateShell("usr/bin/bash")).toBe("shell must be an absolute path");
+	});
+
+	// ── Path traversal ────────────────────────────────────────────────────────
+
+	it("rejects path traversal /bin/../etc/shadow", () => {
+		expect(validateShell("/bin/../etc/shadow")).toBe("shell must not contain path traversal");
+	});
+
+	it("rejects path ending with /..", () => {
+		expect(validateShell("/bin/..")).toBe("shell must not contain path traversal");
+	});
+
+	it("rejects Windows path traversal C:\\foo\\..\\cmd.exe", () => {
+		expect(validateShell("C:\\foo\\..\\cmd.exe")).toBe("shell must not contain path traversal");
+	});
+
+	it("rejects Windows path ending with \\..", () => {
+		expect(validateShell("C:\\Windows\\..")).toBe("shell must not contain path traversal");
 	});
 });

@@ -11,6 +11,7 @@ import {
 	ConfigResolver,
 	DEFAULT_CHANNELS_CONFIG,
 	DEFAULT_GC_CONFIG,
+	DEFAULT_LOG_CONFIG,
 	DEFAULT_PANES_CONFIG,
 	DEFAULT_SEARCH_CONFIG,
 	DEFAULT_STARTUP_CONFIG,
@@ -19,6 +20,7 @@ import {
 	DEFAULT_UI_CONFIG,
 	extractAppearanceConfig,
 	extractElevationConfig,
+	extractLogConfig,
 	extractUiConfig,
 	loadGcConfig,
 	loadUiConfig,
@@ -2011,5 +2013,95 @@ describe("ConfigResolver.resolveCustomCommand", () => {
 		const cmd = resolver.resolveCustomCommand("");
 		// empty string → falls back to global (which is also undefined by default)
 		expect(cmd).toBeUndefined();
+	});
+});
+
+// ─── extractLogConfig ────────────────────────────────────────────────────────
+
+describe("extractLogConfig", () => {
+	it("returns defaults when [logging] section is absent", () => {
+		const result = extractLogConfig({});
+		expect(result).toEqual(DEFAULT_LOG_CONFIG);
+		expect(result.level).toBe("info");
+		expect(result.output).toBe("file");
+		expect(result.maxAgeDays).toBe(30);
+		expect(result.maxSizeMb).toBe(50);
+	});
+
+	it("parses all valid fields from [logging] section", () => {
+		const result = extractLogConfig({
+			logging: {
+				level: "debug",
+				output: "both",
+				max_age_days: 7,
+				max_size_mb: 100,
+			},
+		});
+		expect(result.level).toBe("debug");
+		expect(result.output).toBe("both");
+		expect(result.maxAgeDays).toBe(7);
+		expect(result.maxSizeMb).toBe(100);
+	});
+
+	it("accepts all valid level values", () => {
+		for (const level of ["trace", "debug", "info", "warn", "error"] as const) {
+			const result = extractLogConfig({ logging: { level } });
+			expect(result.level).toBe(level);
+		}
+	});
+
+	it("accepts all valid output values", () => {
+		for (const output of ["stderr", "file", "both"] as const) {
+			const result = extractLogConfig({ logging: { output } });
+			expect(result.output).toBe(output);
+		}
+	});
+
+	it("ignores invalid level — falls back to default", () => {
+		const result = extractLogConfig({ logging: { level: "verbose" } });
+		expect(result.level).toBe("info");
+	});
+
+	it("ignores invalid output — falls back to default", () => {
+		const result = extractLogConfig({ logging: { output: "console" } });
+		expect(result.output).toBe("file");
+	});
+
+	it("clamps max_age_days to 0 minimum", () => {
+		const result = extractLogConfig({ logging: { max_age_days: -5 } });
+		expect(result.maxAgeDays).toBe(0);
+	});
+
+	it("clamps max_size_mb to 0 minimum", () => {
+		const result = extractLogConfig({ logging: { max_size_mb: -1 } });
+		expect(result.maxSizeMb).toBe(0);
+	});
+
+	it("ignores non-object [logging] section", () => {
+		const result = extractLogConfig({ logging: "not-an-object" });
+		expect(result).toEqual(DEFAULT_LOG_CONFIG);
+	});
+
+	it("ignores null [logging] section", () => {
+		const result = extractLogConfig({ logging: null });
+		expect(result).toEqual(DEFAULT_LOG_CONFIG);
+	});
+
+	it("partial override — only overrides specified keys", () => {
+		const result = extractLogConfig({ logging: { level: "warn" } });
+		expect(result.level).toBe("warn");
+		expect(result.output).toBe(DEFAULT_LOG_CONFIG.output);
+		expect(result.maxAgeDays).toBe(DEFAULT_LOG_CONFIG.maxAgeDays);
+		expect(result.maxSizeMb).toBe(DEFAULT_LOG_CONFIG.maxSizeMb);
+	});
+
+	it("ignores non-number max_age_days", () => {
+		const result = extractLogConfig({ logging: { max_age_days: "thirty" } });
+		expect(result.maxAgeDays).toBe(DEFAULT_LOG_CONFIG.maxAgeDays);
+	});
+
+	it("ignores non-number max_size_mb", () => {
+		const result = extractLogConfig({ logging: { max_size_mb: "50mb" } });
+		expect(result.maxSizeMb).toBe(DEFAULT_LOG_CONFIG.maxSizeMb);
 	});
 });

@@ -55,6 +55,7 @@ export interface AgentSpawnMessage {
 	elevationSecret?: string;
 	elevationMethod?: string;
 	customCommand?: string;
+	envMode?: 'minimal' | 'inherit';
 }
 
 /** Agent → Hub: PTY spawned successfully */
@@ -200,6 +201,16 @@ export interface AgentNotificationMessage {
 	channelId: string;
 	message: string;
 }
+
+
+/** Agent → Hub: structured log line (forwarded to hub log sink) */
+export interface AgentLogMessage {
+	type: "LOG";
+	channelId: string;
+	level: string;
+	msg: string;
+}
+
 
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)
@@ -386,6 +397,8 @@ export interface HostVerifyMessage {
 	oldFingerprint?: string;
 	/** Correlation ID — must be echoed in HOST_VERIFY_RESPONSE for mismatch prompts. */
 	promptId: string;
+	/** Set on first connection (TOFU) — no stored fingerprint yet. */
+	firstConnect?: boolean;
 }
 
 /** UI → Hub: user decision on unknown fingerprint */
@@ -456,6 +469,7 @@ export type AgentMessage =
 	| AgentProcessTitleMessage
 	| AgentBellMessage
 	| AgentNotificationMessage
+	| AgentLogMessage
 	| ErrorMessage;
 
 /** All messages that the Hub sends to the Agent */

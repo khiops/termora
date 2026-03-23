@@ -20,9 +20,6 @@ start_hub() {
 	echo "Building shared…"
 	(cd "$ROOT" && pnpm -F @nexterm/shared build) > "$LOG_DIR/shared-build.log" 2>&1
 
-	echo "Building agent…"
-	(cd "$ROOT" && pnpm -F @nexterm/agent build) > "$LOG_DIR/agent-build.log" 2>&1
-
 	echo "Starting hub + web…"
 	cd "$ROOT"
 	setsid pnpm dev > "$LOG_DIR/dev.log" 2>&1 &
@@ -84,12 +81,12 @@ start_agent() {
 	"$ROOT/scripts/dev-stop.sh" agent
 	echo ""
 
-	echo "Building agent…"
-	(cd "$ROOT" && pnpm -F @nexterm/agent build) > "$LOG_DIR/agent-build.log" 2>&1
+	echo "Building Rust agent…"
+	(cd "$ROOT" && cargo build -p nexterm-agent --release) > "$LOG_DIR/agent-build.log" 2>&1
 
 	echo "Starting agent daemon…"
-	local AGENT_BIN="$ROOT/packages/agent/dist/main.js"
-	setsid node "$AGENT_BIN" --daemon --socket "$AGENT_SOCK" \
+	local AGENT_BIN="$ROOT/target/release/nexterm-agent"
+	setsid "$AGENT_BIN" --daemon --socket "$AGENT_SOCK" \
 		--buffer-per-channel 1048576 --buffer-global 20971520 \
 		> "$LOG_DIR/agent.log" 2>&1 &
 

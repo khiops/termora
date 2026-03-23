@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { generateId } from "@nexterm/shared";
@@ -60,8 +60,8 @@ export function checkPermissions(authFilePath: string): void {
 	}
 
 	if (mode & 0o040) {
-		console.warn(
-			`[nexterm] WARNING: auth.json at ${authFilePath} is group-readable (mode ${(mode & 0o777).toString(8)}). Recommend: chmod 600 auth.json`,
+		process.stderr.write(
+			`[nexterm] WARNING: auth.json at ${authFilePath} is group-readable (mode ${(mode & 0o777).toString(8)}). Recommend: chmod 600 auth.json\n`,
 		);
 	}
 }
@@ -80,14 +80,24 @@ export function initAuth(configDir: string): string {
 		checkPermissions(authFilePath);
 		const raw = readFileSync(authFilePath, "utf-8");
 		const parsed = JSON.parse(raw) as { token: string };
+		if (typeof parsed.token !== "string" || !/^[0-9a-f]{64}$/.test(parsed.token)) {
+			throw new Error(`Invalid token format in ${authFilePath} — expected 64-char hex string`);
+		}
 		return parsed.token;
 	}
 
 	// First run — generate and store token
 	mkdirSync(configDir, { recursive: true });
 	const token = randomBytes(32).toString("hex");
-	writeFileSync(authFilePath, JSON.stringify({ token }), { encoding: "utf-8" });
-	chmodSync(authFilePath, 0o600);
+	// Atomic: open with restricted mode so the file is never world-readable,
+	// even briefly. writeFileSync + chmodSync has a TOCTOU window at 0644.
+	const fd = openSync(authFilePath, "w", 0o600);
+	try {
+		writeSync(fd, JSON.stringify({ token }, null, "\t"));
+		fchmodSync(fd, 0o600); // Belt-and-suspenders: enforce even if umask is weird
+	} finally {
+		closeSync(fd);
+	}
 
 	return token;
 }
@@ -235,11 +245,3 @@ export function validateTokenRecord(
  * @deprecated Use validateTokenRecord for DB-backed validation with expiry/revocation.
  *   This function is kept for backward-compatibility with tests that don't use a DB.
  */
-export function validateToken(provided: string, expected: string): boolean {
-	if (provided.length !== expected.length) return false;
-
-	const a = Buffer.from(provided);
-	const b = Buffer.from(expected);
-
-	return timingSafeEqual(a, b);
-}

@@ -207,16 +207,17 @@ export const useSessionStore = defineStore("session", () => {
 		hostVerifyStore: ReturnType<typeof useHostVerifyStore>,
 	): void {
 		wsClient.on("HOST_VERIFY", (msg) => {
-			if (msg.type === "HOST_VERIFY" && msg.promptId && msg.oldFingerprint) {
-				// Only surface the dialog for mismatch prompts (has promptId + oldFingerprint)
+			if (msg.type === "HOST_VERIFY" && msg.promptId) {
+				// Surface dialog for both TOFU (firstConnect) and mismatch (oldFingerprint) prompts
 				const hostname = msg.hostId; // best-effort; hub doesn't send hostname yet
 				hostVerifyStore.handleHostVerify(
 					msg.hostId,
 					hostname,
 					msg.fingerprint,
 					msg.algorithm,
-					msg.oldFingerprint,
+					msg.oldFingerprint ?? "",
 					msg.promptId,
+					msg.firstConnect ?? false,
 				);
 			}
 		});

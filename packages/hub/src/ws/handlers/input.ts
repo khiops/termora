@@ -17,11 +17,11 @@ export function handleInput(msg: InputMessage, ctx: WsHandlerContext): void {
 		});
 		return;
 	}
-	if (!writeLockManager.isHolder(msg.channelId, clientId)) {
+	if (!writeLockManager.isWriteLockHolder(msg.channelId, clientId)) {
 		const errMsg: ErrorMessage = {
 			type: "ERROR",
-			code: "WRITE_LOCK_HELD",
-			message: "You do not hold the write lock",
+			code: "WRITE_LOCK_DENIED",
+			message: "You do not hold the write lock for this channel",
 			channelId: msg.channelId,
 		};
 		client.send(errMsg);

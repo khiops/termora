@@ -21,6 +21,8 @@ export interface HostKeyVerification {
 	capturedFingerprint: string;
 	/** True when the server presented a key that differs from the stored fingerprint. */
 	mismatch: boolean;
+	/** True when this is the very first connection (TOFU) — no stored fingerprint yet. */
+	tofu: boolean;
 }
 
 /** Callback to prompt the user for a secret (password or key passphrase). */
@@ -150,7 +152,7 @@ export class SshAgent extends AgentConnection {
 	 * Populated by the hostVerifier closure during a connect attempt.
 	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
 	 */
-	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
+	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
 
 	constructor(
 		private readonly host: Host,
@@ -171,6 +173,7 @@ export class SshAgent extends AgentConnection {
 	 */
 	async start(
 		storedFingerprint?: string | null,
+		sessionTrustedFingerprint?: string | null,
 	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
 		if (!this.host.sshHost) {
 			throw new Error("Host has no sshHost configured");
@@ -195,7 +198,7 @@ export class SshAgent extends AgentConnection {
 		// TOFU host key verification.
 		// The verifier populates this object synchronously before the connect attempt resolves.
 		// Also synced to this.lastKeyVerification so callers can inspect it after rejection.
-		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false };
+		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
 		this.lastKeyVerification = keyVerification;
 
 		connectConfig.hostVerifier = ((key: Buffer) => {
@@ -203,9 +206,14 @@ export class SshAgent extends AgentConnection {
 			const fingerprint = `SHA256:${hash}`;
 			keyVerification.capturedFingerprint = fingerprint;
 
-			if (!storedFingerprint) {
-				// TOFU: first connect — accept and let the caller persist the fingerprint.
+			if (sessionTrustedFingerprint && sessionTrustedFingerprint === fingerprint) {
+				// Session-trusted (trust_once): accepted for this hub session, skip TOFU prompt.
 				return true;
+			}
+			if (!storedFingerprint) {
+				// TOFU: first connect — signal caller to prompt user for trust decision.
+				keyVerification.tofu = true;
+				return false;
 			}
 			if (storedFingerprint === fingerprint) {
 				// Known host, fingerprint matches — accept.
@@ -246,6 +254,11 @@ export class SshAgent extends AgentConnection {
 					// ssh2 may emit a plain object (e.g. { code: 3 }) rather than an Error
 					// instance when hostVerifier returns false. Normalise to a proper Error
 					// so callers (and vitest .rejects.toThrow()) always receive an Error.
+					if (keyVerification.tofu) {
+						// TOFU rejection — caller will prompt user for first-connect trust decision.
+						rejectOnce(new Error("SSH_TOFU"));
+						return;
+					}
 					if (keyVerification.mismatch) {
 						rejectOnce(
 							new Error(
@@ -264,6 +277,9 @@ export class SshAgent extends AgentConnection {
 				});
 
 				client.on("ready", () => {
+					// SEC-014: zero credentials immediately after successful auth
+					if (connectConfig.password) connectConfig.password = "";
+					if (connectConfig.passphrase) connectConfig.passphrase = "";
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
 					const runAgent = (agentPath: string): void => {
 						// ssh2 Client — sends command over encrypted SSH channel to remote host
@@ -312,9 +328,7 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								console.warn(
-									`[ssh-agent] Auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.`,
-								);
+								process.stderr.write(`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`);
 								runAgent("nexterm-agent --stdio");
 							});
 					} else {

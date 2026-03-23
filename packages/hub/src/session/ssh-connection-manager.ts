@@ -54,6 +54,8 @@ export class SshConnectionManager {
 	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
 		const pending = this.ctx.pendingAuthPrompts.get(hostId);
 		if (!pending) return;
+		// SEC-003: only the client that triggered the prompt may respond
+		if (pending.clientId !== clientId) return;
 		if (pending.timer !== null) clearTimeout(pending.timer);
 		this.ctx.pendingAuthPrompts.delete(hostId);
 		pending.resolve(secret);
@@ -62,34 +64,35 @@ export class SshConnectionManager {
 	// ─── Host key mismatch ────────────────────────────────────────────────────
 
 	/**
-	 * Send HOST_VERIFY to the client with mismatch details and wait (30 s timeout)
-	 * for HOST_VERIFY_RESPONSE. Returns true if the user accepted the new key.
+	 * Send HOST_VERIFY to the client and wait (30 s timeout) for HOST_VERIFY_RESPONSE.
+	 * Returns the action chosen by the user.
+	 * @param firstConnect - true for TOFU (first connection), false for mismatch.
 	 */
-	async promptHostKeyMismatch(
+	async promptHostKeyVerify(
 		client: WsClient,
 		hostId: string,
 		hostname: string,
 		oldFingerprint: string,
 		newFingerprint: string,
-	): Promise<boolean> {
+		firstConnect = false,
+	): Promise<"trust_permanent" | "trust_once" | "reject"> {
 		const promptId = generateId();
 		const verifyMsg: HostVerifyMessage = {
 			type: "HOST_VERIFY",
 			hostId,
 			fingerprint: newFingerprint,
 			algorithm: "SHA256",
-			oldFingerprint,
+			...(oldFingerprint ? { oldFingerprint } : {}),
 			promptId,
+			...(firstConnect ? { firstConnect: true } : {}),
 		};
 		client.send(verifyMsg);
 
-		return new Promise<boolean>((resolve) => {
+		return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingHostVerify.delete(promptId);
-				console.warn(
-					`[ssh-connection] HOST_VERIFY timeout for host ${hostId} (${hostname}) — rejecting`,
-				);
-				resolve(false);
+				this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", { hostId, hostname });
+				resolve("reject");
 			}, HOST_KEY_MISMATCH_TIMEOUT_MS);
 
 			this.ctx.pendingHostVerify.set(promptId, { resolve, timer });
@@ -108,7 +111,7 @@ export class SshConnectionManager {
 		if (!pending) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingHostVerify.delete(promptId);
-		pending.resolve(action !== "reject");
+		pending.resolve(action);
 	}
 
 	// ─── Reconnect ────────────────────────────────────────────────────────────
@@ -143,7 +146,8 @@ export class SshConnectionManager {
 			try {
 				const sshAgent = new SshAgent(host);
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
-				await sshAgent.start(storedFp);
+				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostId);
+				await sshAgent.start(storedFp, sessionFp);
 				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);
 				this.ctx.agents.set(hostId, sshAgent);

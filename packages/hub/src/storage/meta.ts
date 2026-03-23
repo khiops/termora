@@ -23,6 +23,7 @@ import type {
 	CreateSessionInput,
 	PairingCodeRow,
 } from "./meta-types.js";
+import { PairRateLimitsDAL } from "./pair-rate-limits-dal.js";
 import { PairingCodesDAL } from "./pairing-codes-dal.js";
 import { SessionsDAL } from "./sessions-dal.js";
 
@@ -30,7 +31,15 @@ import { SessionsDAL } from "./sessions-dal.js";
 export type { CreateChannelInput, CreateHostInput, CreateSessionInput, PairingCodeRow };
 
 // Re-export sub-DAL classes for consumers that want direct access
-export { ChannelGroupsDAL, ChannelsDAL, HostsDAL, LaunchProfilesDAL, PairingCodesDAL, SessionsDAL };
+export {
+	ChannelGroupsDAL,
+	ChannelsDAL,
+	HostsDAL,
+	LaunchProfilesDAL,
+	PairRateLimitsDAL,
+	PairingCodesDAL,
+	SessionsDAL,
+};
 
 // ─── MetaDAL — facade over domain-specific DALs ──────────────────────────────
 
@@ -41,6 +50,7 @@ export class MetaDAL {
 	readonly channels: ChannelsDAL;
 	readonly launchProfiles: LaunchProfilesDAL;
 	readonly pairingCodes: PairingCodesDAL;
+	readonly pairRateLimits: PairRateLimitsDAL;
 
 	constructor(private db: Database.Database) {
 		this.hosts = new HostsDAL(db);
@@ -49,6 +59,7 @@ export class MetaDAL {
 		this.channels = new ChannelsDAL(db);
 		this.launchProfiles = new LaunchProfilesDAL(db);
 		this.pairingCodes = new PairingCodesDAL(db);
+		this.pairRateLimits = new PairRateLimitsDAL(db);
 	}
 
 	// ─── Hosts ──────────────────────────────────────────────────────────────
@@ -346,6 +357,16 @@ export class MetaDAL {
 
 	cleanExpiredPairingCodes(): void {
 		return this.pairingCodes.cleanExpiredPairingCodes();
+	}
+
+	// ─── Pair Rate Limits ────────────────────────────────────────────────────
+
+	checkAndIncrementPairRate(ip: string, maxAttempts: number, windowMs: number): boolean {
+		return this.pairRateLimits.checkAndIncrement(ip, maxAttempts, windowMs);
+	}
+
+	cleanExpiredPairRates(windowMs: number): void {
+		return this.pairRateLimits.cleanExpired(windowMs);
 	}
 
 	// ─── Launch Profiles ─────────────────────────────────────────────────────

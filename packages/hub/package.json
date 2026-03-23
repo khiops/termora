@@ -22,7 +22,8 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
-		"@fastify/cors": "^11.2.0",
+		"@fastify/cors": "catalog:",
+		"@fastify/helmet": "catalog:",
 		"@fastify/multipart": "catalog:",
 		"@fastify/static": "catalog:",
 		"@fastify/websocket": "catalog:",
@@ -32,6 +33,7 @@
 		"@rainbowatcher/toml-edit-js": "catalog:",
 		"better-sqlite3": "catalog:",
 		"fastify": "catalog:",
+		"file-type": "catalog:",
 		"ssh2": "catalog:"
 	},
 	"devDependencies": {

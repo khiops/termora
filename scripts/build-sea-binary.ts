@@ -106,7 +106,7 @@ export function buildSeaConfigJson(cfg: SeaBuildConfig, blobPath: string): Recor
  * Returns the path to the downloaded binary.
  */
 function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir: string, nodeVersion?: string): string {
-	const version = nodeVersion ?? process.version; // e.g. "v22.14.0"
+	const version = nodeVersion ?? process.env.NEXTERM_NODE_VERSION ?? process.version; // e.g. "v22.14.0"
 	const platformMap: Record<string, string> = { win32: "win", linux: "linux", darwin: "darwin" };
 	const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
 	const plat = platformMap[targetPlatform] ?? targetPlatform;

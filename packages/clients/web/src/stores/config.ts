@@ -40,7 +40,7 @@ function injectFontFaces(families: FontFamily[]): void {
 			rules.push(
 				`@font-face {
 	font-family: "${family.family}";
-	src: url("${file.url}") format("${format}");
+	src: url("${file.url.startsWith("/") ? hubBaseUrl() + file.url : file.url}") format("${format}");
 	font-weight: ${file.weight};
 	font-style: ${file.style};
 	font-display: swap;
