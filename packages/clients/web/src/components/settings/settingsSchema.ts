@@ -3,7 +3,7 @@ export interface SettingDefinition {
 	key: string;
 	label: string;
 	description?: string;
-	type: "text" | "number" | "select" | "toggle" | "range" | "color";
+	type: "text" | "number" | "select" | "toggle" | "range" | "color" | "font";
 	/** UI category for navigation (e.g. "terminal", "tabs") */
 	category: string;
 	/**
@@ -48,11 +48,11 @@ export const settingsSchema: SettingDefinition[] = [
 	{
 		key: "fontFamily",
 		label: "Font Family",
-		type: "text",
+		type: "font",
 		category: "terminal",
 		section: "terminal",
 		scopes: ["global", "host", "channel"],
-		description: "CSS font stack for the terminal",
+		description: "Font family for terminal rendering",
 	},
 	{
 		key: "fontSize",
