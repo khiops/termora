@@ -32,20 +32,6 @@ import { MetaDAL } from "./storage/meta.js";
 
 // ─── Mock agents so no real PTY / SSH is spawned ─────────────────────────────
 
-vi.mock("./session/local-agent.js", () => {
-	const { EventEmitter } = require("node:events");
-	class MockLocalAgent extends EventEmitter {
-		connected = true;
-		start = vi.fn().mockResolvedValue(undefined);
-		send = vi.fn();
-		close = vi.fn(() => {
-			this.connected = false;
-			this.emit("close");
-		});
-	}
-	return { LocalAgent: MockLocalAgent };
-});
-
 vi.mock("./session/ssh-agent.js", () => {
 	const { EventEmitter } = require("node:events");
 	class MockSshAgent extends EventEmitter {

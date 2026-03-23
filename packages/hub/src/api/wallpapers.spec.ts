@@ -9,20 +9,6 @@ import type { DatabaseManager } from "../storage/db.js";
 
 // ─── Mock agents so no real PTY / SSH is spawned ─────────────────────────────
 
-vi.mock("../session/local-agent.js", () => {
-	const { EventEmitter } = require("node:events");
-	class MockLocalAgent extends EventEmitter {
-		connected = true;
-		start = vi.fn().mockResolvedValue(undefined);
-		send = vi.fn();
-		close = vi.fn(() => {
-			this.connected = false;
-			this.emit("close");
-		});
-	}
-	return { LocalAgent: MockLocalAgent };
-});
-
 vi.mock("../session/ssh-agent.js", () => {
 	const { EventEmitter } = require("node:events");
 	class MockSshAgent extends EventEmitter {
@@ -45,13 +31,39 @@ const TEST_TOKEN = "test-wallpaper-token-64chars-padded-aaaaaaaaaaaaaaaaaaaaaaaa
 // signature(8) + chunk_length(4=13) + "IHDR"(4) + width(4=1) + height(4=1) +
 // bit_depth(1=8) + color_type(1=2) + compress(1) + filter(1) + interlace(1) + crc(4)
 const PNG_MAGIC = Buffer.from([
-	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-	0x00, 0x00, 0x00, 0x0d,                           // IHDR chunk length = 13
-	0x49, 0x48, 0x44, 0x52,                           // "IHDR"
-	0x00, 0x00, 0x00, 0x01,                           // width = 1
-	0x00, 0x00, 0x00, 0x01,                           // height = 1
-	0x08, 0x02, 0x00, 0x00, 0x00,                     // bit depth=8, color type=2 (RGB)
-	0x90, 0x77, 0x53, 0xde,                           // CRC
+	0x89,
+	0x50,
+	0x4e,
+	0x47,
+	0x0d,
+	0x0a,
+	0x1a,
+	0x0a, // PNG signature
+	0x00,
+	0x00,
+	0x00,
+	0x0d, // IHDR chunk length = 13
+	0x49,
+	0x48,
+	0x44,
+	0x52, // "IHDR"
+	0x00,
+	0x00,
+	0x00,
+	0x01, // width = 1
+	0x00,
+	0x00,
+	0x00,
+	0x01, // height = 1
+	0x08,
+	0x02,
+	0x00,
+	0x00,
+	0x00, // bit depth=8, color type=2 (RGB)
+	0x90,
+	0x77,
+	0x53,
+	0xde, // CRC
 ]);
 const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
 
@@ -231,7 +243,10 @@ describe("Wallpaper endpoints", () => {
 			// framework-level feature trusted at framework level — sending an actual 10 MB+
 			// payload in tests would be slow and brittle, so we rely on @fastify/multipart's
 			// own test suite for the 413 rejection path and only assert the happy path here.
-			const { payload, headers } = buildMultipart("small.jpg", Buffer.concat([JPEG_MAGIC, Buffer.alloc(50)]));
+			const { payload, headers } = buildMultipart(
+				"small.jpg",
+				Buffer.concat([JPEG_MAGIC, Buffer.alloc(50)]),
+			);
 			const res = await server.inject({
 				method: "POST",
 				url: "/api/wallpapers",
