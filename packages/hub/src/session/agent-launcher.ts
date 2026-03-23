@@ -69,15 +69,15 @@ export async function connectOrLaunch(
 		);
 	}
 
-	// Probe existing socket — EACCES propagates (different user's socket)
-	const alive = await probeSocket(socketPath);
-
-	if (alive) {
-		// Agent already running — connect directly
-		return NextermAgent.connectLocal(socketPath);
+	// Try direct connect first — avoids a throwaway probe connection that
+	// confuses the agent's AUTH handshake on Windows named pipes.
+	try {
+		return await NextermAgent.connectLocal(socketPath);
+	} catch {
+		// Connection failed — agent not running or stale socket
 	}
 
-	// Socket not alive — clean up stale file if present
+	// Clean up stale socket file if present (no-op on named pipes)
 	try {
 		await unlink(socketPath);
 	} catch {
