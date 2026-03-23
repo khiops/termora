@@ -216,7 +216,7 @@ impl WinPtyProcess {
             }
         })
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        .map_err(io::Error::other)?
     }
 
     /// Wait for the child process to exit and return its [`ExitStatus`].
@@ -237,7 +237,7 @@ impl WinPtyProcess {
             Ok(ExitStatus::from_code(exit_code as i32))
         })
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        .map_err(io::Error::other)?
     }
 
     /// Returns the OS process ID of the child.
@@ -385,7 +385,7 @@ impl tokio::io::AsyncWrite for WinPtyWriter {
 pub async fn spawn(cmd: CommandBuilder) -> io::Result<WinPtyProcess> {
     task::spawn_blocking(move || spawn_sync(&cmd))
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        .map_err(io::Error::other)?
 }
 
 /// Synchronous spawn — called from `spawn_blocking`.
@@ -733,17 +733,16 @@ fn build_cmdline(program: &str, args: &[String]) -> String {
 
 fn quote_arg(s: &str) -> String {
     if s.is_empty() {
-        return "\"\"".to_string();
+        "\"\"".to_string()
+    } else if !s.contains(' ') && !s.contains('"') && !s.contains('\t') {
+        s.to_string()
+    } else {
+        let escaped = s.replace('"', "\\\"");
+        format!("\"{}\"", escaped)
     }
-    if !s.contains(' ') && !s.contains('"') && !s.contains('\t') {
-        return s.to_string();
-    }
-    let escaped = s.replace('"', "\\\"");
-    format!("\"{}\"", escaped)
 }
 
 /// Build a null-terminated, double-null-terminated UTF-16 environment block
-
 /// as required by `CreateProcessW` with `CREATE_UNICODE_ENVIRONMENT`.
 ///
 /// Format: `KEY=VALUE\0KEY=VALUE\0\0`
