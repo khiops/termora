@@ -20,7 +20,7 @@ async fn test_spawn_pty() {
 /// SC-02: Read PTY output from a one-shot command.
 #[tokio::test]
 async fn test_read_output() {
-    let mut pty = CommandBuilder::new("/bin/sh")
+    let pty = CommandBuilder::new("/bin/sh")
         .arg("-c")
         .arg("echo hello")
         .spawn()
@@ -42,7 +42,7 @@ async fn test_read_output() {
 /// SC-03: Write to PTY stdin and read the echoed output back.
 #[tokio::test]
 async fn test_write_input() {
-    let mut pty = CommandBuilder::new("/bin/sh").spawn().await.unwrap();
+    let pty = CommandBuilder::new("/bin/sh").spawn().await.unwrap();
 
     let mut writer = pty.writer();
     writer.write_all(b"echo test123\n").await.unwrap();
@@ -106,7 +106,7 @@ async fn test_exit_code() {
 /// SC-06: Env and cwd are set in the child.
 #[tokio::test]
 async fn test_env_and_cwd() {
-    let mut pty = CommandBuilder::new("/bin/sh")
+    let pty = CommandBuilder::new("/bin/sh")
         .arg("-c")
         .arg("echo $FOO && pwd")
         .env("FOO", "bar")
@@ -178,7 +178,7 @@ async fn test_env_clear() {
     // We know HOME is set in the test process environment. After env_clear it
     // should not be visible in the child (unless we re-export it, which we
     // don't here).
-    let mut pty = CommandBuilder::new("/bin/sh")
+    let pty = CommandBuilder::new("/bin/sh")
         .arg("-c")
         .arg("echo HOME=${HOME}")
         .env_clear()

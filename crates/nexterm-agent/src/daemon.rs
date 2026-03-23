@@ -300,11 +300,11 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
 
 // ─── Shared connection logic ──────────────────────────────────────────────────
 
-/// Core connection handler, generic over any AsyncRead + AsyncWrite stream.
-///
-/// Handles one hub connection: sends HELLO + channel state, then runs the
-/// read/write loop until EOF, error, or displacement by a new connection.
-/// Used by both the Unix UDS path and the Windows named-pipe path.
+// Core connection handler, generic over any AsyncRead + AsyncWrite stream.
+// Handles one hub connection: sends HELLO + channel state, then runs the
+// read/write loop until EOF, error, or displacement by a new connection.
+// Used by both the Unix UDS path and the Windows named-pipe path.
+
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 /// Read the auth token from `{config_dir}/auth.json`.
@@ -525,6 +525,7 @@ fn create_secure_pipe(
 }
 
 /// Used by both the Unix UDS path and the Windows named-pipe path.
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection_inner<S>(
     stream: S,
     pty_manager: Arc<Mutex<PtyManager>>,

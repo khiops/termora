@@ -221,7 +221,7 @@ impl tokio::io::AsyncRead for PtyReader {
         #[cfg(unix)]
         {
             let inner = unsafe { self.map_unchecked_mut(|s| &mut s.inner) };
-            return inner.poll_read(cx, buf);
+            inner.poll_read(cx, buf)
         }
 
         #[cfg(windows)]
@@ -251,7 +251,7 @@ impl tokio::io::AsyncWrite for PtyWriter {
         #[cfg(unix)]
         {
             let inner = unsafe { self.map_unchecked_mut(|s| &mut s.inner) };
-            return inner.poll_write(cx, buf);
+            inner.poll_write(cx, buf)
         }
 
         #[cfg(windows)]

@@ -372,7 +372,7 @@ pub async fn spawn(cmd: CommandBuilder) -> io::Result<UnixPtyProcess> {
                 libc::close(pipe_read);
                 libc::close(pipe_write);
             }
-            return Err(io::Error::last_os_error());
+            Err(io::Error::last_os_error())
         }
 
         0 => {

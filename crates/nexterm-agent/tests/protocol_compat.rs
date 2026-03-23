@@ -1,12 +1,11 @@
-/// Protocol compatibility tests for nexterm-agent.
-///
-/// These tests verify that the Rust MessagePack serialization output matches
-/// what the TypeScript hub expects: binary data fields use MsgPack Bin (not
-/// Array), all field names are snake_case, and messages serialize as maps
-/// (not arrays).
-///
-/// Tests do NOT spawn the binary — they work directly with the encoding layer.
-
+//! Protocol compatibility tests for nexterm-agent.
+//!
+//! These tests verify that the Rust MessagePack serialization output matches
+//! what the TypeScript hub expects: binary data fields use MsgPack Bin (not
+//! Array), all field names are snake_case, and messages serialize as maps
+//! (not arrays).
+//!
+//! Tests do NOT spawn the binary — they work directly with the encoding layer.
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

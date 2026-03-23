@@ -478,7 +478,7 @@ async fn handle_spawn(
         };
 
         // Immediately wrap secret in Zeroizing — clears on drop
-        let secret: Option<Zeroizing<String>> = elevation_secret.map(|s| Zeroizing::new(s));
+        let secret: Option<Zeroizing<String>> = elevation_secret.map(Zeroizing::new);
 
         match wrap_elevated(&method, &resolved_shell, &expanded_args, secret).await {
             Ok(elevated_cmd) => {
@@ -633,6 +633,7 @@ async fn handle_spawn(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_reader_task(
     channel_id: String,
     pty_pid: u32,

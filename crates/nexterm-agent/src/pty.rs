@@ -19,6 +19,7 @@ impl PtyManager {
     }
 
     /// Spawn a new PTY channel. Returns (channel_id, pid).
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &mut self,
         channel_id: Option<String>,
