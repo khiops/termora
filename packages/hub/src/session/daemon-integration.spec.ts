@@ -5,6 +5,7 @@ import path from "node:path";
 import { PROTOCOL_VERSION, type ProtocolMessage, encodeFrame } from "@nexterm/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextermAgent } from "./nexterm-agent.js";
+import { getTestSocketPath } from "./test-socket-path.js";
 
 const TEST_TIMEOUT = 10_000;
 
@@ -78,7 +79,7 @@ describe("Daemon integration", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(path.join(os.tmpdir(), "nexterm-daemon-int-"));
-		socketPath = path.join(tmpDir, "agent.sock");
+		socketPath = getTestSocketPath();
 	});
 
 	afterEach(async () => {

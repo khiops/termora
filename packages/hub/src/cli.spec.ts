@@ -179,14 +179,14 @@ describe("path helpers", () => {
 		expect(getConfigDir()).toContain("nexterm");
 	});
 
-	it("getStateDir uses XDG_STATE_HOME when set", () => {
+	it.skipIf(process.platform === "win32")("getStateDir uses XDG_STATE_HOME when set", () => {
 		const orig = process.env.XDG_STATE_HOME;
 		process.env.XDG_STATE_HOME = "/tmp/xdg-state";
 		expect(getStateDir()).toBe("/tmp/xdg-state/nexterm");
 		process.env.XDG_STATE_HOME = orig;
 	});
 
-	it("getConfigDir uses XDG_CONFIG_HOME when set", () => {
+	it.skipIf(process.platform === "win32")("getConfigDir uses XDG_CONFIG_HOME when set", () => {
 		const orig = process.env.XDG_CONFIG_HOME;
 		process.env.XDG_CONFIG_HOME = "/tmp/xdg-cfg";
 		expect(getConfigDir()).toBe("/tmp/xdg-cfg/nexterm");

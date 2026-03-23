@@ -323,7 +323,7 @@ describe("probeWslDistributions", () => {
 
 // ─── discoverUnixShells ───────────────────────────────────────────────────────
 
-describe("discoverUnixShells", () => {
+describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 		vi.mocked(existsSync).mockRestore();

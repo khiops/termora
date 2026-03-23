@@ -15,7 +15,7 @@ describe("getSocketPath", () => {
 		vi.restoreAllMocks();
 	});
 
-	describe("on Linux/macOS", () => {
+	describe.skipIf(process.platform === "win32")("on Linux/macOS", () => {
 		beforeEach(() => {
 			Object.defineProperty(process, "platform", { value: "linux" });
 		});
@@ -68,6 +68,14 @@ describe("getSocketPath", () => {
 	});
 });
 
+/** Returns a platform-appropriate socket path for probeSocket tests. */
+function makeProbeSocketPath(name: string, tmpDir: string): string {
+	if (process.platform === "win32") {
+		return `\\\\.\\pipe\\nexterm-probe-${name}-${process.pid}`;
+	}
+	return path.join(tmpDir, `${name}.sock`);
+}
+
 describe("probeSocket", () => {
 	let tmpDir: string;
 
@@ -81,7 +89,7 @@ describe("probeSocket", () => {
 
 	describe("Given a listening server", () => {
 		it("returns true", async () => {
-			const socketPath = path.join(tmpDir, "test.sock");
+			const socketPath = makeProbeSocketPath("active", tmpDir);
 			const server = net.createServer();
 
 			await new Promise<void>((resolve) => {
@@ -101,7 +109,7 @@ describe("probeSocket", () => {
 
 	describe("Given no server (ENOENT)", () => {
 		it("returns false", async () => {
-			const socketPath = path.join(tmpDir, "nonexistent.sock");
+			const socketPath = makeProbeSocketPath("nonexistent", tmpDir);
 
 			const result = await probeSocket(socketPath);
 
@@ -110,8 +118,8 @@ describe("probeSocket", () => {
 	});
 
 	describe("Given a stale socket (ECONNREFUSED)", () => {
-		it("returns false", async () => {
-			const socketPath = path.join(tmpDir, "stale.sock");
+		it.skipIf(process.platform === "win32")("returns false", async () => {
+			const socketPath = makeProbeSocketPath("stale", tmpDir);
 			const server = net.createServer();
 
 			// Create a real socket file then close the server to make it stale

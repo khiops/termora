@@ -426,7 +426,7 @@ describe("deployAgentIfNeeded", () => {
 // ---------- getBinaryCacheDir ------------------------------------------------
 
 describe("getBinaryCacheDir", () => {
-	it("returns path under XDG_STATE_HOME when set", () => {
+	it.skipIf(process.platform === "win32")("returns path under XDG_STATE_HOME when set", () => {
 		const orig = process.env.XDG_STATE_HOME;
 		process.env.XDG_STATE_HOME = "/custom/state";
 		try {

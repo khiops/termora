@@ -408,7 +408,12 @@ describe("GET /api/config/resolved", () => {
 	beforeEach(async () => {
 		dbs = openTestDatabases();
 		// Use tmpdir as configDir to avoid loading the real ~/.config/nexterm/config.toml
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tmpdir() });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: tmpdir(),
+		});
 	});
 
 	afterEach(async () => {
@@ -637,7 +642,12 @@ describe("GET /api/config/ui", () => {
 
 	beforeEach(async () => {
 		dbs = openTestDatabases();
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tmpdir() });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: tmpdir(),
+		});
 	});
 
 	afterEach(async () => {
@@ -1385,7 +1395,12 @@ describe("GET /api/config/cascade", () => {
 		dbs = openTestDatabases();
 		const dir = join(tmpdir(), `nexterm-cascade-api-${Date.now()}`);
 		mkdirSync(dir, { recursive: true });
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: dir });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: dir,
+		});
 	});
 
 	afterEach(async () => {
@@ -1446,7 +1461,12 @@ describe("PUT /api/config/global", () => {
 		tempDir = join(tmpdir(), `nexterm-global-api-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 		dbs = openTestDatabases();
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tempDir });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: tempDir,
+		});
 	});
 
 	afterEach(async () => {
@@ -1501,7 +1521,12 @@ describe("PUT /api/config/ui", () => {
 		tempDir = join(tmpdir(), `nexterm-ui-api-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 		dbs = openTestDatabases();
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tempDir });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: tempDir,
+		});
 	});
 
 	afterEach(async () => {
@@ -1569,7 +1594,12 @@ describe("PUT /api/config/appearance", () => {
 		tempDir = join(tmpdir(), `nexterm-appear-api-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 		dbs = openTestDatabases();
-		server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true, configDir: tempDir });
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir: tempDir,
+		});
 	});
 
 	afterEach(async () => {
@@ -1721,7 +1751,8 @@ describe("Auth enforcement on cascade/config endpoints", () => {
 		mkdirSync(dir, { recursive: true });
 		server = await createServer({
 			logger: false,
-			dbManager: dbs, skipShellDiscovery: true,
+			dbManager: dbs,
+			skipShellDiscovery: true,
 			authToken: "abc123",
 			configDir: dir,
 		});
@@ -1988,7 +2019,7 @@ describe("ConfigResolver.resolveCustomCommand", () => {
 		expect(cmd).toBe("/host/custom/cmd");
 	});
 
-	it("falls back to global custom_command_linux when host not set (Linux)", () => {
+	it.skipIf(process.platform === "win32")("falls back to global custom_command_linux when host not set (Linux)", () => {
 		const dir = join(tmpdir(), `nexterm-custom-cmd-${Date.now()}`);
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "config.toml"), '[elevation]\ncustom_command_linux = "/global/cmd"\n');
