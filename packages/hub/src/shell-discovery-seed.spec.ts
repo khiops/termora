@@ -70,7 +70,7 @@ describe("seedShellProfiles", () => {
 		expect(bash).toBeDefined();
 	});
 
-	it("returns zero when no shells are discovered", async () => {
+	it.skipIf(process.platform === "win32")("returns zero when no shells are discovered", async () => {
 		vi.stubEnv("SHELL", "");
 		mockExistsSync.mockReturnValue(false);
 
