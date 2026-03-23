@@ -79,24 +79,40 @@ export class ChannelLifecycleManager {
 			resolvedElevated = false,
 			resolvedElevationMethod = undefined,
 		} = opts;
-		this.ctx.hubLogger?.log("debug", "channel-lifecycle: sendSpawnAndWait entry", { hostId, requestId: spawnMsg.requestId, shell: spawnMsg.shell, agentConnected: agent.connected });
+		this.ctx.hubLogger?.log("debug", "channel-lifecycle: sendSpawnAndWait entry", {
+			hostId,
+			requestId: spawnMsg.requestId,
+			shell: spawnMsg.shell,
+			agentConnected: agent.connected,
+		});
 		agent.send(spawnMsg);
-		this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN sent, awaiting SPAWN_OK", { requestId: spawnMsg.requestId, timeoutMs: SPAWN_TIMEOUT_MS });
+		this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN sent, awaiting SPAWN_OK", {
+			requestId: spawnMsg.requestId,
+			timeoutMs: SPAWN_TIMEOUT_MS,
+		});
 
 		return new Promise<{ channelId: string | null; errCode: string | null }>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingRequests.delete(spawnMsg.requestId);
-				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN_OK timeout", { requestId: spawnMsg.requestId, timeoutMs: SPAWN_TIMEOUT_MS });
+				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN_OK timeout", {
+					requestId: spawnMsg.requestId,
+					timeoutMs: SPAWN_TIMEOUT_MS,
+				});
 				reject(new Error("Agent SPAWN timeout"));
 			}, SPAWN_TIMEOUT_MS);
 
 			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				this.ctx.hubLogger?.log("debug", "channel-lifecycle: pendingRequest handler fired", { msgType: incoming.type, requestId: spawnMsg.requestId });
+				this.ctx.hubLogger?.log("debug", "channel-lifecycle: pendingRequest handler fired", {
+					msgType: incoming.type,
+					requestId: spawnMsg.requestId,
+				});
 				if (incoming.type === "SPAWN_OK") {
 					const spawnOk = incoming as AgentSpawnOkMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN_OK received", { channelId: spawnOk.channelId });
+					this.ctx.hubLogger?.log("debug", "channel-lifecycle: SPAWN_OK received", {
+						channelId: spawnOk.channelId,
+					});
 
 					const { channelId } = spawnOk;
 
@@ -156,10 +172,13 @@ export class ChannelLifecycleManager {
 					client.send(response);
 					resolve({ channelId, errCode: null });
 				} else if (incoming.type === "SPAWN_ERR") {
-					const spawnErr = incoming as import("@nexterm/shared").AgentSpawnErrMessage;
+					const spawnErr = incoming as AgentSpawnErrMessage;
 					clearTimeout(timer);
 					this.ctx.pendingRequests.delete(spawnMsg.requestId);
-					this.ctx.hubLogger?.log("warn", "channel-lifecycle: SPAWN_ERR received", { code: spawnErr.code, message: spawnErr.message });
+					this.ctx.hubLogger?.log("warn", "channel-lifecycle: SPAWN_ERR received", {
+						code: spawnErr.code,
+						message: spawnErr.message,
+					});
 
 					if (!suppressClientError) {
 						const errorMsg: ErrorMessage = {
@@ -238,7 +257,11 @@ export class ChannelLifecycleManager {
 				method,
 			);
 			if ("validationError" in elevCfg) {
-				this.ctx.hubLogger?.log("warn", "channel-lifecycle: restartChannel invalid elevation config", { hostId, message: elevCfg.validationError.message });
+				this.ctx.hubLogger?.log(
+					"warn",
+					"channel-lifecycle: restartChannel invalid elevation config",
+					{ hostId, message: elevCfg.validationError.message },
+				);
 				return false;
 			}
 			const { customCommand } = elevCfg;
@@ -354,7 +377,7 @@ export class ChannelLifecycleManager {
 					if (incoming.type === "SPAWN_OK") {
 						resolve(true);
 					} else if (incoming.type === "SPAWN_ERR") {
-						firstErrCode = (incoming as import("@nexterm/shared").AgentSpawnErrMessage).code;
+						firstErrCode = (incoming as AgentSpawnErrMessage).code;
 						resolve(false);
 					} else {
 						resolve(false);
@@ -791,7 +814,11 @@ export class ChannelLifecycleManager {
 
 			const timeout = setTimeout(() => {
 				this.ctx.pendingRequests.delete(requestId);
-				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN timeout", { channelId, requestId, timeoutMs: SPAWN_TIMEOUT_MS });
+				this.ctx.hubLogger?.log("error", "channel-lifecycle: SPAWN timeout", {
+					channelId,
+					requestId,
+					timeoutMs: SPAWN_TIMEOUT_MS,
+				});
 				onSpawnErr(channelId, ch);
 				settle();
 			}, SPAWN_TIMEOUT_MS);

@@ -17,18 +17,20 @@ import type {
 	AgentSpawnMessage,
 	AgentTitleChangeMessage,
 	ChannelExitMessage,
+	HelloMessage,
+	LogConfig,
 	OutputMessage,
 	ProtocolMessage,
 	SessionStatus,
 } from "@nexterm/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from "@nexterm/shared";
-import { connectOrLaunch } from "./agent-launcher.js";
-import { NextermAgent } from "./nexterm-agent.js";
 import type { AgentConnection } from "./agent-connection.js";
-import type { SharedSessionContext, SessionState } from "./session-context.js";
-import type { StateBroadcaster } from "./state-broadcaster.js";
+import { connectOrLaunch } from "./agent-launcher.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
+import { NextermAgent } from "./nexterm-agent.js";
+import type { SessionState, SharedSessionContext } from "./session-context.js";
 import type { SshConnectionManager } from "./ssh-connection-manager.js";
+import type { StateBroadcaster } from "./state-broadcaster.js";
 
 export class AgentConnectionManager {
 	/** Lazy ref to SshConnectionManager — set after construction to break circular dep */
@@ -163,8 +165,12 @@ export class AgentConnectionManager {
 			}
 
 			if (msg.type === "HELLO") {
-				const helloMsg = msg as import("@nexterm/shared").HelloMessage;
-				this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", { hostId, capabilities: helloMsg.capabilities, availableShells: helloMsg.availableShells });
+				const helloMsg = msg as HelloMessage;
+				this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", {
+					hostId,
+					capabilities: helloMsg.capabilities,
+					availableShells: helloMsg.availableShells,
+				});
 				if (helloMsg.availableShells !== undefined) {
 					this.ctx.metaDal.updateHostDiscoveredShells(
 						hostId,
@@ -188,7 +194,12 @@ export class AgentConnectionManager {
 				const exitMsg = msg as ChannelExitMessage;
 				const channel = this.ctx.channels.get(exitMsg.channelId);
 				if (channel) {
-					this.broadcaster.updateChannelStatus(exitMsg.channelId, channel.sessionId, "dead", exitMsg.exitCode);
+					this.broadcaster.updateChannelStatus(
+						exitMsg.channelId,
+						channel.sessionId,
+						"dead",
+						exitMsg.exitCode,
+					);
 				}
 				this.ctx.scheduler.untrackChannel(exitMsg.channelId);
 				this.ctx.chunker.untrackChannel(exitMsg.channelId);
@@ -212,14 +223,16 @@ export class AgentConnectionManager {
 				}
 			} else if (msg.type === "NOTIFICATION") {
 				const notifMsg = msg as AgentNotificationMessage;
-				if (this.broadcaster.rateLimitCheck(this.ctx.notificationTimestamps, notifMsg.channelId, 5)) {
+				if (
+					this.broadcaster.rateLimitCheck(this.ctx.notificationTimestamps, notifMsg.channelId, 5)
+				) {
 					this.broadcaster.broadcastToChannel(notifMsg.channelId, notifMsg);
 				}
 			} else if ((msg as { type: string }).type === "LOG") {
 				const logMsg = msg as unknown as AgentLogMessage;
 				// Validate level before casting
 				const validLevels = ["trace", "debug", "info", "warn", "error"];
-				const level = (validLevels.includes(logMsg.level) ? logMsg.level : "info") as import("@nexterm/shared").LogConfig["level"];
+				const level = (validLevels.includes(logMsg.level) ? logMsg.level : "info") as LogConfig["level"];
 				const channelLogger = this.ctx.loggerRegistry?.get(logMsg.channelId);
 				if (channelLogger) {
 					channelLogger.log("agent", level, logMsg.msg);
@@ -231,7 +244,9 @@ export class AgentConnectionManager {
 
 		// The HELLO may have fired before we registered the "message" handler
 		if (agent.helloMessage) {
-			this.ctx.hubLogger?.log("debug", "agent-connection-manager: replaying cached HELLO", { hostId });
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: replaying cached HELLO", {
+				hostId,
+			});
 			const helloMsg = agent.helloMessage;
 			if (helloMsg.availableShells !== undefined) {
 				this.ctx.metaDal.updateHostDiscoveredShells(
@@ -277,9 +292,16 @@ export class AgentConnectionManager {
 
 	private async attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
 		const socketPath = getSocketPath(this.ctx.agentConfig.socketPath);
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", { hostId, sessionId, socketPath });
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", {
+			hostId,
+			sessionId,
+			socketPath,
+		});
 		const agent = await connectOrLaunch(socketPath, this.ctx.agentConfig);
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", { hostId, connected: agent.connected });
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", {
+			hostId,
+			connected: agent.connected,
+		});
 
 		// Send AUTH to daemon agent (required before CHANNEL_STATE handshake)
 		if (this.ctx.primaryToken) {
@@ -288,9 +310,14 @@ export class AgentConnectionManager {
 
 		this.wireAgentEvents(hostId, sessionId, agent);
 
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", { hostId });
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", {
+			hostId,
+		});
 		const states = await agent.waitForChannelState();
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", { hostId, count: states.length });
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", {
+			hostId,
+			count: states.length,
+		});
 		this.lifecycle.reconcileChannelState(hostId, states);
 
 		this.ctx.agents.set(hostId, agent);
@@ -301,7 +328,10 @@ export class AgentConnectionManager {
 	}
 
 	async connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectDaemonAgent", { hostId, sessionId });
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectDaemonAgent", {
+			hostId,
+			sessionId,
+		});
 		return this.attachDaemon(hostId, sessionId);
 	}
 
