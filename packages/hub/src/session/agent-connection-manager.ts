@@ -23,7 +23,6 @@ import type {
 } from "@nexterm/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from "@nexterm/shared";
 import { connectOrLaunch } from "./agent-launcher.js";
-import { LocalAgent, resolveAgentPath } from "./local-agent.js";
 import { NextermAgent } from "./nexterm-agent.js";
 import type { AgentConnection } from "./agent-connection.js";
 import type { SharedSessionContext, SessionState } from "./session-context.js";
@@ -282,6 +281,11 @@ export class AgentConnectionManager {
 		const agent = await connectOrLaunch(socketPath, this.ctx.agentConfig);
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", { hostId, connected: agent.connected });
 
+		// Send AUTH to daemon agent (required before CHANNEL_STATE handshake)
+		if (this.ctx.primaryToken) {
+			agent.send({ type: "AUTH", token: this.ctx.primaryToken });
+		}
+
 		this.wireAgentEvents(hostId, sessionId, agent);
 
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", { hostId });
@@ -323,17 +327,13 @@ export class AgentConnectionManager {
 			return;
 		}
 
-		const agent = new LocalAgent(resolveAgentPath());
+		let agent: NextermAgent;
 		try {
-			await agent.start();
+			agent = await this.attachDaemon(hostId, sessionId);
 		} catch {
 			this.lifecycle.closeSession(hostId, sessionId);
 			return;
 		}
-
-		this.wireAgentEvents(hostId, sessionId, agent);
-		this.ctx.agents.set(hostId, agent);
-		this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 
 		await this.lifecycle.spawnChannelsForHost(
 			hostId,

@@ -85,6 +85,7 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 	const child = spawn(cmd, args, {
 		detached: true,
 		stdio: "ignore",
+		windowsHide: true,
 	});
 
 	child.on?.("error", (err) => {

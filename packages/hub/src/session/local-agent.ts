@@ -95,7 +95,9 @@ export class LocalAgent extends AgentConnection {
 		this.hubLogger?.log("debug", "local-agent: spawning", { agentPath: this.agentPath, isBinary, cmd, args });
 
 		this.process = spawn(cmd, args, {
-			stdio: ["pipe", "pipe", "pipe"], // stdin=pipe, stdout=pipe, stderr=pipe (capture for logging)
+			stdio: ["pipe", "pipe", "pipe"],
+			windowsHide: true,
+			detached: process.platform === "win32", // DETACHED_PROCESS: no inherited console on Windows
 		});
 
 		this.hubLogger?.log("debug", "local-agent: process spawned", { pid: this.process.pid });

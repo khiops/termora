@@ -112,6 +112,7 @@ export class SessionManager {
 			configResolver: configResolver ?? null,
 			loggerRegistry: loggerRegistry ?? null,
 			hubLogger: hubLogger ?? null,
+			primaryToken: null,
 		};
 		this.ctx = ctx;
 
@@ -166,6 +167,10 @@ export class SessionManager {
 	}
 
 	// ─── DAL accessors ────────────────────────────────────────────────────────
+
+	setPrimaryToken(token: string): void {
+		this.ctx.primaryToken = token;
+	}
 
 	getMetaDal(): MetaDAL {
 		return this.ctx.metaDal;
@@ -349,29 +354,9 @@ export class SessionManager {
 					agent = sshAgent;
 				}
 			} else {
-				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — trying connectDaemonAgent", { hostId });
-				try {
-					agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
-					this.ctx.hubLogger?.log("debug", "handleSpawn: connectDaemonAgent succeeded", { hostId });
-				} catch (daemonErr) {
-					this.ctx.hubLogger?.log("warn", "handleSpawn: connectDaemonAgent failed, falling back to LocalAgent", { hostId, err: daemonErr instanceof Error ? daemonErr.message : String(daemonErr) });
-					const { LocalAgent, resolveAgentPath } = await import("./local-agent.js");
-					const agentPath = resolveAgentPath();
-					this.ctx.hubLogger?.log("debug", "handleSpawn: resolved agent path", { agentPath, execPath: process.execPath });
-					const la = new LocalAgent(agentPath);
-					this.ctx.hubLogger?.log("debug", "handleSpawn: LocalAgent created, calling start()");
-					try {
-						await la.start();
-						this.ctx.hubLogger?.log("debug", "handleSpawn: LocalAgent.start() succeeded");
-					} catch (startErr) {
-						this.ctx.hubLogger?.log("error", "handleSpawn: LocalAgent.start() failed", { err: startErr instanceof Error ? (startErr as Error).stack : String(startErr) });
-						throw startErr;
-					}
-					this.agentMgr.wireAgentEvents(hostId, session.id, la);
-					this.ctx.agents.set(hostId, la);
-					agent = la;
-					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
-				}
+				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — connecting to daemon agent", { hostId });
+				agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
+				this.ctx.hubLogger?.log("debug", "handleSpawn: daemon agent connected", { hostId });
 			}
 		}
 

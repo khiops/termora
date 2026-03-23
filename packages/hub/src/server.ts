@@ -254,6 +254,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			loggerRegistry,
 			options.logsDir,
 		);
+		if (options?.authToken) {
+			sessionManager.setPrimaryToken(options.authToken);
+		}
 		const metaDal = sessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
 		migrateLegacyShellDefaults(metaDal, configResolver);

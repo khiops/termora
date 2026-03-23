@@ -97,4 +97,6 @@ export interface SharedSessionContext {
 	loggerRegistry: import("../logging/index.js").LoggerRegistry | null;
 	/** Structured logger for hub operations (injected by SessionManager constructor) */
 	hubLogger: import("../logging/hub-logger.js").HubLogger | null;
+	/** Primary auth token for daemon agent authentication */
+	primaryToken: string | null;
 }

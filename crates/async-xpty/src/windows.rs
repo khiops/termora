@@ -29,10 +29,13 @@ use std::sync::Arc;
 
 use tokio::task;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, S_OK,
+};
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
-    ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
+    ClosePseudoConsole, CreatePseudoConsole, GetStdHandle, ResizePseudoConsole, COORD, HPCON,
+    STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -41,6 +44,7 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOEXW,
 };
+use windows_sys::Win32::Foundation::SetHandleInformation;
 
 use crate::{CommandBuilder, ExitStatus, PtySize};
 
@@ -388,7 +392,24 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     let stdout_read = SendHandle(stdout_read);
     let stdout_write = SendHandle(stdout_write);
 
-    // ── 3. CreatePseudoConsole ────────────────────────────────────────────────
+    // ── 3. Prevent ConPTY stdout leak ─────────────────────────────────────────
+    // Clear HANDLE_FLAG_INHERIT on the agent's own stdout/stderr BEFORE
+    // CreatePseudoConsole. ConPTY internally spawns conhost.exe which inherits
+    // all inheritable handles from the calling process. If the agent's stdout
+    // pipe (connected to the hub) is inheritable, conhost passes it to the
+    // child shell, causing shell output to leak to the hub's frame reader.
+    unsafe {
+        let h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        if h_stdout != INVALID_HANDLE_VALUE {
+            SetHandleInformation(h_stdout, HANDLE_FLAG_INHERIT, 0);
+        }
+        let h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+        if h_stderr != INVALID_HANDLE_VALUE {
+            SetHandleInformation(h_stderr, HANDLE_FLAG_INHERIT, 0);
+        }
+    }
+
+    // ── 4. CreatePseudoConsole ────────────────────────────────────────────────
     let size = COORD {
         X: cmd.size.cols as i16,
         Y: cmd.size.rows as i16,
@@ -519,7 +540,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     // CREATE_UNICODE_ENVIRONMENT — always set because we always supply an env block.
     let create_flags: PROCESS_CREATION_FLAGS = EXTENDED_STARTUPINFO_PRESENT | 0x0000_0400u32;
 
-    // ── 9. CreateProcessW ─────────────────────────────────────────────────────
+    // ── 10. CreateProcessW ────────────────────────────────────────────────────
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let ok = unsafe {
         CreateProcessW(
