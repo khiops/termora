@@ -7,7 +7,7 @@
 		"devUrl": "http://localhost:5173",
 		"frontendDist": "../../web/dist",
 		"beforeDevCommand": "",
-		"beforeBuildCommand": "cd ../../.. && bash scripts/prepare-desktop.sh"
+		"beforeBuildCommand": ""
 	},
 	"app": {
 		"windows": [

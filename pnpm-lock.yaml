@@ -51,15 +51,9 @@ catalogs:
     '@xterm/addon-search':
       specifier: ^0.16.0
       version: 0.16.0
-    '@xterm/addon-serialize':
-      specifier: ^0.13.0
-      version: 0.13.0
     '@xterm/addon-unicode11':
       specifier: ^0.8.0
       version: 0.8.0
-    '@xterm/headless':
-      specifier: ^5.0.0
-      version: 5.5.0
     '@xterm/xterm':
       specifier: ^5.5.0
       version: 5.5.0
@@ -81,9 +75,6 @@ catalogs:
     happy-dom:
       specifier: ^20.8.3
       version: 20.8.3
-    node-pty:
-      specifier: ^1.0.0
-      version: 1.1.0
     pinia:
       specifier: ^3.0.0
       version: 3.0.4
@@ -147,31 +138,6 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/node@25.3.3)(happy-dom@20.8.3)(tsx@4.21.0)
-
-  packages/agent:
-    dependencies:
-      '@msgpack/msgpack':
-        specifier: 'catalog:'
-        version: 3.1.3
-      '@nexterm/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@xterm/addon-serialize':
-        specifier: 'catalog:'
-        version: 0.13.0(@xterm/xterm@5.5.0)
-      '@xterm/headless':
-        specifier: 'catalog:'
-        version: 5.5.0
-      node-pty:
-        specifier: 'catalog:'
-        version: 1.1.0
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 20.19.35
-      typescript:
-        specifier: 'catalog:'
-        version: 5.7.3
 
   packages/clients/desktop:
     dependencies:
@@ -1128,18 +1094,10 @@ packages:
   '@xterm/addon-search@0.16.0':
     resolution: {integrity: sha512-9OeuBFu0/uZJPu+9AHKY6g/w0Czyb/Ut0A5t79I4ULoU4IfU5BEpPFVGQxP4zTTMdfZEYkVIRYbHBX1xWwjeSA==}
 
-  '@xterm/addon-serialize@0.13.0':
-    resolution: {integrity: sha512-kGs8o6LWAmN1l2NpMp01/YkpxbmO4UrfWybeGu79Khw5K9+Krp7XhXbBTOTc3GJRRhd6EmILjpR8k5+odY39YQ==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
-
   '@xterm/addon-unicode11@0.8.0':
     resolution: {integrity: sha512-LxinXu8SC4OmVa6FhgwsVCBZbr8WoSGzBl2+vqe8WcQ6hb1r6Gj9P99qTNdPiFPh4Ceiu2pC8xukZ6+2nnh49Q==}
     peerDependencies:
       '@xterm/xterm': ^5.0.0
-
-  '@xterm/headless@5.5.0':
-    resolution: {integrity: sha512-5xXB7kdQlFBP82ViMJTwwEc3gKCLGKR/eoxQm4zge7GPBl86tCdI0IdPJjoKd8mUSFXz5V7i/25sfsEkP4j46g==}
 
   '@xterm/xterm@5.5.0':
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
@@ -1565,12 +1523,6 @@ packages:
   node-abi@3.87.0:
     resolution: {integrity: sha512-+CGM1L1CgmtheLcBuleyYOn7NWPVu0s0EJH2C4puxgEZb9h8QpR9G2dBfZJOAUhi7VQxuBPMd0hiISWcTyiYyQ==}
     engines: {node: '>=10'}
-
-  node-addon-api@7.1.1:
-    resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
-
-  node-pty@1.1.0:
-    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -2706,15 +2658,9 @@ snapshots:
 
   '@xterm/addon-search@0.16.0': {}
 
-  '@xterm/addon-serialize@0.13.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
-
   '@xterm/addon-unicode11@0.8.0(@xterm/xterm@5.5.0)':
     dependencies:
       '@xterm/xterm': 5.5.0
-
-  '@xterm/headless@5.5.0': {}
 
   '@xterm/xterm@5.5.0': {}
 
@@ -3165,12 +3111,6 @@ snapshots:
   node-abi@3.87.0:
     dependencies:
       semver: 7.7.4
-
-  node-addon-api@7.1.1: {}
-
-  node-pty@1.1.0:
-    dependencies:
-      node-addon-api: 7.1.1
 
   on-exit-leak-free@2.1.2: {}
 
