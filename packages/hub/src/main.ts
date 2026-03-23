@@ -14,9 +14,7 @@ async function main() {
 	if (envPort !== undefined) {
 		const parsedEnvPort = Number(envPort);
 		if (!Number.isInteger(parsedEnvPort) || parsedEnvPort < 1 || parsedEnvPort > 65535) {
-			throw new Error(
-				`Invalid NEXTERM_PORT: ${envPort} — must be an integer between 1 and 65535`,
-			);
+			throw new Error(`Invalid NEXTERM_PORT: ${envPort} — must be an integer between 1 and 65535`);
 		}
 	}
 	const port = envPort !== undefined ? Number(envPort) : 4100;
@@ -51,10 +49,7 @@ async function main() {
 
 	// SEC-020: Inject exact localhost origins now that the actual port is known.
 	// These replace the former wildcard http://localhost:* and http://127.0.0.1:* patterns.
-	addCorsOrigins(
-		`http://localhost:${actualPort}`,
-		`http://127.0.0.1:${actualPort}`,
-	);
+	addCorsOrigins(`http://localhost:${actualPort}`, `http://127.0.0.1:${actualPort}`);
 	// In non-production environments also allow the Vite dev server origin.
 	if (process.env.NODE_ENV !== "production") {
 		addCorsOrigins("http://localhost:5173");
@@ -70,7 +65,9 @@ async function main() {
 	// reattach on hub startup yet). When daemon reattach is implemented,
 	// populate activeChannelIds from ctx.channels before running GC.
 	runLogGc(logsDir, earlyConfigResolver.logConfig.maxAgeDays, new Set<string>()).catch((err) => {
-		hubLogger.log("warn", "log GC failed", { err: err instanceof Error ? err.message : String(err) });
+		hubLogger.log("warn", "log GC failed", {
+			err: err instanceof Error ? err.message : String(err),
+		});
 	});
 
 	// Open browser if requested via NEXTERM_OPEN env (set by CLI daemon spawner)

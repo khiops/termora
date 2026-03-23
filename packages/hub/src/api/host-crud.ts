@@ -11,8 +11,8 @@ export function registerHostCrudRoutes(server: FastifyInstance, metaDal: MetaDAL
 		async (request) => {
 			const rawLimit = request.query.limit;
 			const rawOffset = request.query.offset;
-			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
-			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+			const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? Number.parseInt(rawOffset, 10) : undefined;
 
 			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
 				return { error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 1000" } };

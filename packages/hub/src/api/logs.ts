@@ -1,4 +1,3 @@
-
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -145,10 +144,7 @@ function filterBySearch(
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
-export async function registerLogRoutes(
-	app: FastifyInstance,
-	logsDir: string,
-): Promise<void> {
+export async function registerLogRoutes(app: FastifyInstance, logsDir: string): Promise<void> {
 	// GET /api/logs/channels/:channelId
 	app.get<{ Params: { channelId: string }; Querystring: LogQueryParams }>(
 		"/api/logs/channels/:channelId",
@@ -189,29 +185,26 @@ export async function registerLogRoutes(
 	);
 
 	// GET /api/logs/hub
-	app.get<{ Querystring: LogQueryParams }>(
-		"/api/logs/hub",
-		async (request, reply) => {
-			const { level, from_t, to_t, search, limit: rawLimit, offset: rawOffset } = request.query;
+	app.get<{ Querystring: LogQueryParams }>("/api/logs/hub", async (request, reply) => {
+		const { level, from_t, to_t, search, limit: rawLimit, offset: rawOffset } = request.query;
 
-			const { limit, offset, error: paginationError } = parsePagination(rawLimit, rawOffset);
-			if (paginationError) {
-				return reply.code(400).send({
-					error: { code: "VALIDATION_ERROR", message: paginationError },
-				});
-			}
+		const { limit, offset, error: paginationError } = parsePagination(rawLimit, rawOffset);
+		if (paginationError) {
+			return reply.code(400).send({
+				error: { code: "VALIDATION_ERROR", message: paginationError },
+			});
+		}
 
-			const filePath = path.join(logsDir, "hub.jsonl");
-			let entries = readJsonl(filePath);
+		const filePath = path.join(logsDir, "hub.jsonl");
+		let entries = readJsonl(filePath);
 
-			entries = filterByLevel(entries, level);
-			entries = filterHubByTime(entries, from_t, to_t);
-			entries = filterBySearch(entries, search);
+		entries = filterByLevel(entries, level);
+		entries = filterHubByTime(entries, from_t, to_t);
+		entries = filterBySearch(entries, search);
 
-			const total = entries.length;
-			const page = entries.slice(offset, offset + limit);
+		const total = entries.length;
+		const page = entries.slice(offset, offset + limit);
 
-			return { entries: page, total };
-		},
-	);
+		return { entries: page, total };
+	});
 }

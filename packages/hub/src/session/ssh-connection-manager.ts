@@ -15,16 +15,12 @@ import type {
 } from "@nexterm/shared";
 import { generateId } from "@nexterm/shared";
 import { Client as SshClient } from "ssh2";
-import type { SharedSessionContext } from "./session-context.js";
-import type { StateBroadcaster } from "./state-broadcaster.js";
-import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import type { AgentConnectionManager } from "./agent-connection-manager.js";
+import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
+import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
-import {
-	type AuthPromptFn,
-	SshAgent,
-	buildSshConnectConfig,
-} from "./ssh-agent.js";
+import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
+import type { StateBroadcaster } from "./state-broadcaster.js";
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
 const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
@@ -91,7 +87,10 @@ export class SshConnectionManager {
 		return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
 			const timer = setTimeout(() => {
 				this.ctx.pendingHostVerify.delete(promptId);
-				this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", { hostId, hostname });
+				this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", {
+					hostId,
+					hostname,
+				});
 				resolve("reject");
 			}, HOST_KEY_MISMATCH_TIMEOUT_MS);
 

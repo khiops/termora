@@ -35,9 +35,7 @@ export class PairRateLimitsDAL {
 		if (!row) {
 			// First attempt from this IP -- insert fresh record and allow.
 			this.db
-				.prepare(
-					"INSERT INTO pair_rate_limits (ip, attempts, window_start) VALUES (?, 1, ?)",
-				)
+				.prepare("INSERT INTO pair_rate_limits (ip, attempts, window_start) VALUES (?, 1, ?)")
 				.run(ip, nowIso);
 			return true;
 		}
@@ -55,17 +53,13 @@ export class PairRateLimitsDAL {
 		if (now - windowStart >= effectiveWindow) {
 			// Window expired -- reset counter and allow.
 			this.db
-				.prepare(
-					"UPDATE pair_rate_limits SET attempts = 1, window_start = ? WHERE ip = ?",
-				)
+				.prepare("UPDATE pair_rate_limits SET attempts = 1, window_start = ? WHERE ip = ?")
 				.run(nowIso, ip);
 			return true;
 		}
 
 		// Within the window -- increment and check.
-		this.db
-			.prepare("UPDATE pair_rate_limits SET attempts = attempts + 1 WHERE ip = ?")
-			.run(ip);
+		this.db.prepare("UPDATE pair_rate_limits SET attempts = attempts + 1 WHERE ip = ?").run(ip);
 
 		return row.attempts + 1 <= maxAttempts;
 	}

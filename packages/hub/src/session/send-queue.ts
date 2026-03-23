@@ -75,7 +75,9 @@ export class SendQueue {
 	private enqueue(frame: Buffer): void {
 		if (this.queue.length >= MAX_QUEUE_SIZE) {
 			if (this.queue.length === MAX_QUEUE_SIZE) {
-				process.stderr.write(`[${this.label}] send queue reached ${MAX_QUEUE_SIZE} messages, dropping oldest\n`);
+				process.stderr.write(
+					`[${this.label}] send queue reached ${MAX_QUEUE_SIZE} messages, dropping oldest\n`,
+				);
 			}
 			this.queue.shift();
 		}

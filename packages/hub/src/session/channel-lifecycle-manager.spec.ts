@@ -33,10 +33,7 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 	beforeEach(() => {
 		ctx = makeMinimalCtx();
 		// Cast ctx: ChannelLifecycleManager only uses pendingAuthPrompts for these tests
-		lifecycle = new ChannelLifecycleManager(
-			ctx as unknown as SharedSessionContext,
-			broadcaster,
-		);
+		lifecycle = new ChannelLifecycleManager(ctx as unknown as SharedSessionContext, broadcaster);
 	});
 
 	afterEach(() => {
@@ -57,11 +54,9 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 			// Access _buildPromptAuth via cast (private method under test)
 			const buildPromptAuth = (
 				lifecycle as unknown as {
-					_buildPromptAuth: (client: typeof client) => (
-						hostId: string,
-						promptType: string,
-						message: string,
-					) => Promise<string | null>;
+					_buildPromptAuth: (
+						client: typeof client,
+					) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
 				}
 			)._buildPromptAuth.bind(lifecycle);
 
@@ -100,11 +95,9 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 
 		const buildPromptAuth = (
 			lifecycle as unknown as {
-				_buildPromptAuth: (client: typeof client) => (
-					hostId: string,
-					promptType: string,
-					message: string,
-				) => Promise<string | null>;
+				_buildPromptAuth: (
+					client: typeof client,
+				) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
 			}
 		)._buildPromptAuth.bind(lifecycle);
 
@@ -117,7 +110,9 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 		expect(firstPending).toBeDefined();
 
 		let firstResolved: string | null = "NOT_SET";
-		void firstPromise.then((v) => { firstResolved = v; });
+		void firstPromise.then((v) => {
+			firstResolved = v;
+		});
 
 		// Second call for same hostId: should cancel first
 		const secondPromise = promptFn(hostId, "elevation", "Second prompt");
@@ -153,16 +148,24 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 		let resolvedA: string | null = "NOT_SET";
 		let resolvedB: string | null = "NOT_SET";
 
-		const timerA = setTimeout(() => { /* no-op */ }, 60_000);
-		const timerB = setTimeout(() => { /* no-op */ }, 60_000);
+		const timerA = setTimeout(() => {
+			/* no-op */
+		}, 60_000);
+		const timerB = setTimeout(() => {
+			/* no-op */
+		}, 60_000);
 
 		ctx.pendingAuthPrompts.set(hostId1, {
-			resolve: (s) => { resolvedA = s; },
+			resolve: (s) => {
+				resolvedA = s;
+			},
 			timer: timerA,
 			clientId: clientA,
 		});
 		ctx.pendingAuthPrompts.set(hostId2, {
-			resolve: (s) => { resolvedB = s; },
+			resolve: (s) => {
+				resolvedB = s;
+			},
 			timer: timerB,
 			clientId: clientB,
 		});
@@ -192,11 +195,9 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 
 			const buildPromptAuth = (
 				lifecycle as unknown as {
-					_buildPromptAuth: (client: typeof client) => (
-						hostId: string,
-						promptType: string,
-						message: string,
-					) => Promise<string | null>;
+					_buildPromptAuth: (
+						client: typeof client,
+					) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
 				}
 			)._buildPromptAuth.bind(lifecycle);
 

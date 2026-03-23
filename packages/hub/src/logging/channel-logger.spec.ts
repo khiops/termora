@@ -1,9 +1,8 @@
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LogConfig } from "@nexterm/shared";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChannelLogger } from "./channel-logger.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -89,12 +88,7 @@ describe("ChannelLogger", () => {
 
 	it("stops writing when file exceeds maxSizeMb", () => {
 		// maxSizeMb = 0.0001 MB = ~102 bytes
-		const logger = new ChannelLogger(
-			"ch4",
-			tmpDir,
-			makeConfig({ maxSizeMb: 0.0001 }),
-			createdAt,
-		);
+		const logger = new ChannelLogger("ch4", tmpDir, makeConfig({ maxSizeMb: 0.0001 }), createdAt);
 
 		// Write enough lines to exceed the limit
 		for (let i = 0; i < 20; i++) {

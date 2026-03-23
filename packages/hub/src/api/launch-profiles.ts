@@ -15,7 +15,6 @@ const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const ENV_MASK_RE = /password|secret|token|key|credential/i;
 const ENV_SENTINEL = "********";
 
-
 function validateCreateBody(body: CreateLaunchProfileBody): string | null {
 	if (!body.name || body.name.trim().length === 0) {
 		return "name is required";

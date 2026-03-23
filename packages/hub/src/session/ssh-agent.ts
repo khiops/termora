@@ -152,7 +152,11 @@ export class SshAgent extends AgentConnection {
 	 * Populated by the hostVerifier closure during a connect attempt.
 	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
 	 */
-	lastKeyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
+	lastKeyVerification: HostKeyVerification = {
+		capturedFingerprint: "",
+		mismatch: false,
+		tofu: false,
+	};
 
 	constructor(
 		private readonly host: Host,
@@ -198,7 +202,11 @@ export class SshAgent extends AgentConnection {
 		// TOFU host key verification.
 		// The verifier populates this object synchronously before the connect attempt resolves.
 		// Also synced to this.lastKeyVerification so callers can inspect it after rejection.
-		const keyVerification: HostKeyVerification = { capturedFingerprint: "", mismatch: false, tofu: false };
+		const keyVerification: HostKeyVerification = {
+			capturedFingerprint: "",
+			mismatch: false,
+			tofu: false,
+		};
 		this.lastKeyVerification = keyVerification;
 
 		connectConfig.hostVerifier = ((key: Buffer) => {
@@ -328,7 +336,9 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								process.stderr.write(`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`);
+								process.stderr.write(
+									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`,
+								);
 								runAgent("nexterm-agent --stdio");
 							});
 					} else {

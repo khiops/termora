@@ -381,13 +381,9 @@ export class HostsDAL {
 		const rows = (
 			limit !== undefined
 				? this.db
-						.prepare(
-							"SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC LIMIT ? OFFSET ?",
-						)
+						.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC LIMIT ? OFFSET ?")
 						.all(limit, offset ?? 0)
-				: this.db
-						.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC")
-						.all()
+				: this.db.prepare("SELECT * FROM host_groups ORDER BY sort_order ASC, name ASC").all()
 		) as HostGroupRow[];
 		return rows.map(rowToHostGroup);
 	}

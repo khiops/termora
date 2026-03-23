@@ -1,5 +1,5 @@
 import { generateId } from "@nexterm/shared";
-import { triggerRef, type Ref } from "vue";
+import { type Ref, triggerRef } from "vue";
 import { useConfigStore } from "../stores/config.js";
 import type { PaneNode } from "./usePaneTree.js";
 

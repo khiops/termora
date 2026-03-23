@@ -1,9 +1,9 @@
 import { generateId } from "@nexterm/shared";
 import { ref, watch } from "vue";
 import {
+	MAX_PANE_COUNT,
 	ensurePaneIds,
 	findFirstLeafPaneId,
-	MAX_PANE_COUNT,
 	truncateToMaxPanes,
 	usePaneTree,
 } from "./usePaneTree.js";
@@ -162,14 +162,18 @@ export function useLayout() {
 	// Persistence: auto-save on any state change
 	// ------------------------------------------------------------------
 
-	watch([tabs, activeTabIndex, layouts, activePaneIds], () => {
-		saveToStorage({
-			tabs: tabs.value,
-			activeTabIndex: activeTabIndex.value,
-			layouts: layouts.value,
-			activePaneIds: activePaneIds.value,
-		});
-	}, { deep: true });
+	watch(
+		[tabs, activeTabIndex, layouts, activePaneIds],
+		() => {
+			saveToStorage({
+				tabs: tabs.value,
+				activeTabIndex: activeTabIndex.value,
+				layouts: layouts.value,
+				activePaneIds: activePaneIds.value,
+			});
+		},
+		{ deep: true },
+	);
 
 	// ------------------------------------------------------------------
 	// Public API — same shape as the original useLayout

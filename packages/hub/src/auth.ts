@@ -1,8 +1,18 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from "node:fs";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	fchmodSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	statSync,
+	writeSync,
+} from "node:fs";
 import { join } from "node:path";
-import type Database from "better-sqlite3";
 import { generateId } from "@nexterm/shared";
+import type Database from "better-sqlite3";
 
 const AUTH_FILE = "auth.json";
 
@@ -162,9 +172,9 @@ export function getTokenByValue(
 	plaintextToken: string,
 ): AuthTokenRecord | null {
 	const hash = hashToken(plaintextToken);
-	const row = db
-		.prepare("SELECT * FROM auth_tokens WHERE token_hash = ?")
-		.get(hash) as Record<string, unknown> | undefined;
+	const row = db.prepare("SELECT * FROM auth_tokens WHERE token_hash = ?").get(hash) as
+		| Record<string, unknown>
+		| undefined;
 	return row ? rowToRecord(row) : null;
 }
 
@@ -173,9 +183,9 @@ export function getTokenByValue(
  * Returns newest-first.
  */
 export function listTokens(db: Database.Database): AuthTokenRecord[] {
-	const rows = db
-		.prepare("SELECT * FROM auth_tokens ORDER BY created_at DESC")
-		.all() as Array<Record<string, unknown>>;
+	const rows = db.prepare("SELECT * FROM auth_tokens ORDER BY created_at DESC").all() as Array<
+		Record<string, unknown>
+	>;
 	return rows.map(rowToRecord);
 }
 
@@ -186,9 +196,7 @@ export function listTokens(db: Database.Database): AuthTokenRecord[] {
 export function revokeToken(db: Database.Database, id: string): boolean {
 	const now = new Date().toISOString();
 	const result = db
-		.prepare(
-			"UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-		)
+		.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
 		.run(now, id);
 	return result.changes > 0;
 }

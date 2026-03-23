@@ -433,9 +433,7 @@ describe("validateShell", () => {
 	});
 
 	it("rejects pipe", () => {
-		expect(validateShell("/bin/bash|cat")).toBe(
-			"shell must be an executable path, not a command",
-		);
+		expect(validateShell("/bin/bash|cat")).toBe("shell must be an executable path, not a command");
 	});
 
 	it("rejects dollar sign", () => {

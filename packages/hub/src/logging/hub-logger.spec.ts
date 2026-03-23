@@ -1,9 +1,8 @@
-
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LogConfig } from "@nexterm/shared";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HubLogger } from "./hub-logger.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

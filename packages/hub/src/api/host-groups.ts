@@ -22,8 +22,8 @@ export function registerHostGroupRoutes(server: FastifyInstance, metaDal: MetaDA
 		async (request) => {
 			const rawLimit = request.query.limit;
 			const rawOffset = request.query.offset;
-			const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
-			const offset = rawOffset !== undefined ? parseInt(rawOffset, 10) : undefined;
+			const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : undefined;
+			const offset = rawOffset !== undefined ? Number.parseInt(rawOffset, 10) : undefined;
 
 			if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
 				return { error: { code: "VALIDATION_ERROR", message: "limit must be between 1 and 1000" } };
@@ -75,24 +75,21 @@ export function registerHostGroupRoutes(server: FastifyInstance, metaDal: MetaDA
 	// Alias: PUT /api/host-groups/reorder (kept for backward compatibility)
 	// MUST be registered BEFORE /:id to avoid param collision.
 	for (const url of ["/api/host-groups/order", "/api/host-groups/reorder"]) {
-		server.put<{ Body: { group_ids: string[] } }>(
-			url,
-			async (request, reply) => {
-				const { group_ids } = request.body;
+		server.put<{ Body: { group_ids: string[] } }>(url, async (request, reply) => {
+			const { group_ids } = request.body;
 
-				if (!Array.isArray(group_ids) || group_ids.length === 0) {
-					return reply.code(400).send({
-						error: {
-							code: "VALIDATION_ERROR",
-							message: "group_ids must be a non-empty array",
-						},
-					});
-				}
+			if (!Array.isArray(group_ids) || group_ids.length === 0) {
+				return reply.code(400).send({
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "group_ids must be a non-empty array",
+					},
+				});
+			}
 
-				metaDal.reorderHostGroups(group_ids);
-				return reply.code(200).send({ ok: true });
-			},
-		);
+			metaDal.reorderHostGroups(group_ids);
+			return reply.code(200).send({ ok: true });
+		});
 	}
 
 	// PUT /api/host-groups/:id

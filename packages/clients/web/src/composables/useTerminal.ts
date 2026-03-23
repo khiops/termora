@@ -206,7 +206,10 @@ export function useTerminal(
 	 * Dead channels are respawned by the hub under the same channel ID, so
 	 * the caller always uses the original ID after this returns.
 	 */
-	async function reattachChannel(id: string, opts?: { preserveContent?: boolean }): Promise<{ writeLockHolder: string | null }> {
+	async function reattachChannel(
+		id: string,
+		opts?: { preserveContent?: boolean },
+	): Promise<{ writeLockHolder: string | null }> {
 		// Clean up previous OUTPUT subscription
 		outputUnsubscribe?.();
 

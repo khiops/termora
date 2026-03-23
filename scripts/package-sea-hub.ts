@@ -26,7 +26,6 @@ import { buildOptions } from "./build-sea-hub.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
-
 /**
  * Map a Rust-style target triple (e.g. "x86_64-unknown-linux-gnu") to a Node.js
  * platform string. Used to interpret NEXTERM_TARGET_TRIPLE env var.
@@ -50,11 +49,14 @@ function tripleToNodeArch(triple: string | undefined): string | undefined {
 	return undefined;
 }
 
-
 /** Parse --target-platform and --target-arch from CLI args. */
-const targetPlatformArg = process.argv.find((a) => a.startsWith("--target-platform="))?.split("=")[1];
+const targetPlatformArg = process.argv
+	.find((a) => a.startsWith("--target-platform="))
+	?.split("=")[1];
 const targetArchArg = process.argv.find((a) => a.startsWith("--target-arch="))?.split("=")[1];
-const targetNodeVersionArg = process.argv.find((a) => a.startsWith("--node-version="))?.split("=")[1];
+const targetNodeVersionArg = process.argv
+	.find((a) => a.startsWith("--node-version="))
+	?.split("=")[1];
 // Priority: CLI arg > NEXTERM_TARGET_TRIPLE env var > host process defaults.
 const effectivePlatform =
 	(targetPlatformArg as NodeJS.Platform | undefined) ??

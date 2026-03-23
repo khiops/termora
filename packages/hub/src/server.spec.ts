@@ -52,20 +52,35 @@ describe("Hub Server — Bearer auth", () => {
 	});
 
 	it("GET /api/health is accessible without token", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		const response = await server.inject({ method: "GET", url: "/api/health" });
 		expect(response.statusCode).toBe(200);
 	});
 
 	it("GET /api/pair/verify is accessible without token", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		// Route doesn't exist yet (M4.2) — but auth must not block it; expect 404 not 401
 		const response = await server.inject({ method: "GET", url: "/api/pair/verify" });
 		expect(response.statusCode).not.toBe(401);
 	});
 
 	it("API route without Authorization header → 401 AUTH_REQUIRED", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		const response = await server.inject({ method: "GET", url: "/api/unknown" });
 		expect(response.statusCode).toBe(401);
 		const body = response.json();
@@ -73,7 +88,12 @@ describe("Hub Server — Bearer auth", () => {
 	});
 
 	it("API route with wrong token → 401 AUTH_INVALID", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		const response = await server.inject({
 			method: "GET",
 			url: "/api/unknown",
@@ -85,7 +105,12 @@ describe("Hub Server — Bearer auth", () => {
 	});
 
 	it("API route with malformed Authorization header → 401", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		const response = await server.inject({
 			method: "GET",
 			url: "/api/unknown",
@@ -97,7 +122,12 @@ describe("Hub Server — Bearer auth", () => {
 	});
 
 	it("API route with correct token → passes auth (404 from missing route, not 401)", async () => {
-		server = await createServer({ logger: false, authToken: TEST_TOKEN, dbManager: dbs, skipShellDiscovery: true });
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
 		const response = await server.inject({
 			method: "GET",
 			url: "/api/unknown",

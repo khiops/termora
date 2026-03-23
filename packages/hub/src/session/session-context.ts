@@ -10,8 +10,8 @@ import type { MetaDAL } from "../storage/meta.js";
 import type { SpoolDAL } from "../storage/spool.js";
 import type { AgentConnection } from "./agent-connection.js";
 import type { OutputChunker } from "./output-chunker.js";
-import type { SnapshotScheduler } from "./snapshot-scheduler.js";
 import type { WsClient } from "./session-manager.js";
+import type { SnapshotScheduler } from "./snapshot-scheduler.js";
 
 export interface ChannelState {
 	sessionId: string;

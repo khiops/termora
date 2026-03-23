@@ -269,12 +269,21 @@ export class SessionManager {
 			return null;
 		}
 
-		this.ctx.hubLogger?.log("debug", "handleSpawn: host found", { hostId, type: host.type, label: host.label });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: host found", {
+			hostId,
+			type: host.type,
+			label: host.label,
+		});
 		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
-		this.ctx.hubLogger?.log("debug", "handleSpawn: session", { sessionId: session.id, status: session.status });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: session", {
+			sessionId: session.id,
+			status: session.status,
+		});
 
 		let agent = this.ctx.agents.get(hostId);
-		this.ctx.hubLogger?.log("debug", "handleSpawn: existing agent", { connected: agent?.connected ?? false });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: existing agent", {
+			connected: agent?.connected ?? false,
+		});
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
 				const promptAuth = this.sshMgr.buildPromptAuth(client);
@@ -354,13 +363,17 @@ export class SessionManager {
 					agent = sshAgent;
 				}
 			} else {
-				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — connecting to daemon agent", { hostId });
+				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — connecting to daemon agent", {
+					hostId,
+				});
 				agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
 				this.ctx.hubLogger?.log("debug", "handleSpawn: daemon agent connected", { hostId });
 			}
 		}
 
-		this.ctx.hubLogger?.log("debug", "handleSpawn: agent ready, building SPAWN message", { hostId });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: agent ready, building SPAWN message", {
+			hostId,
+		});
 		const requestId = generateId();
 		const cols = msg.cols ?? 80;
 		const rows = msg.rows ?? 24;
@@ -401,7 +414,11 @@ export class SessionManager {
 		// ── Elevation checks ──────────────────────────────────────────────────
 		if (resolvedElevated) {
 			if (host.type === "ssh") {
-				this.ctx.hubLogger?.log("warn", "ERR-04: elevation not supported over SSH, spawning without elevation", { hostId });
+				this.ctx.hubLogger?.log(
+					"warn",
+					"ERR-04: elevation not supported over SSH, spawning without elevation",
+					{ hostId },
+				);
 				resolvedElevated = false;
 			}
 		}
@@ -409,7 +426,11 @@ export class SessionManager {
 		if (resolvedElevated) {
 			const caps = this.ctx.agentCapabilities.get(hostId) ?? [];
 			if (!caps.includes("launch-profiles")) {
-				this.ctx.hubLogger?.log("warn", "ERR-05: agent does not advertise launch-profiles capability, spawning without elevation", { hostId });
+				this.ctx.hubLogger?.log(
+					"warn",
+					"ERR-05: agent does not advertise launch-profiles capability, spawning without elevation",
+					{ hostId },
+				);
 				resolvedElevated = false;
 			}
 		}
@@ -418,7 +439,7 @@ export class SessionManager {
 		const terminalProfile = this.ctx.configResolver
 			? this.ctx.configResolver.resolve(hostId)
 			: null;
-		const resolvedEnvMode = terminalProfile?.envMode ?? 'inherit';
+		const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
 
 		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
@@ -555,7 +576,10 @@ export class SessionManager {
 		}
 
 		// ── Non-elevated spawn ─────────────────────────────────────────────────
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sending non-elevated SPAWN", { requestId: baseSpawnMsg.requestId, shell: baseSpawnMsg.shell });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: sending non-elevated SPAWN", {
+			requestId: baseSpawnMsg.requestId,
+			shell: baseSpawnMsg.shell,
+		});
 		const spawnResult = await this.lifecycle.sendSpawnAndWait({
 			agent,
 			spawnMsg: baseSpawnMsg,
@@ -571,7 +595,10 @@ export class SessionManager {
 			cols,
 			rows,
 		});
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sendSpawnAndWait returned", { channelId: spawnResult.channelId, errCode: spawnResult.errCode });
+		this.ctx.hubLogger?.log("debug", "handleSpawn: sendSpawnAndWait returned", {
+			channelId: spawnResult.channelId,
+			errCode: spawnResult.errCode,
+		});
 		return spawnResult.channelId;
 	}
 

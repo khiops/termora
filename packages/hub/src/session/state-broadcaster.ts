@@ -17,7 +17,7 @@ import type {
 	StateSyncMessage,
 } from "@nexterm/shared";
 import { DEFAULT_CHANNEL_NAME, resolveChannelDisplayName } from "@nexterm/shared";
-import type { ChannelState, SharedSessionContext, SessionState } from "./session-context.js";
+import type { ChannelState, SessionState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 
 const TITLE_DEBOUNCE_MS = 100;
@@ -85,7 +85,11 @@ export class StateBroadcaster {
 
 	// ─── Status updates (in-memory + DB + broadcast) ────────────────────────
 
-	updateSessionStatus(hostId: string, sessionId: string, status: import("@nexterm/shared").SessionStatus): void {
+	updateSessionStatus(
+		hostId: string,
+		sessionId: string,
+		status: import("@nexterm/shared").SessionStatus,
+	): void {
 		const state = this.ctx.sessions.get(hostId);
 		if (state && state.id === sessionId) {
 			state.status = status;
@@ -227,7 +231,11 @@ export class StateBroadcaster {
 	handleTitleChange(msg: AgentTitleChangeMessage): void {
 		const channel = this.ctx.channels.get(msg.channelId);
 		if (!channel) {
-			this.ctx.hubLogger?.log("warn", "state-broadcaster: TITLE_CHANGE for unknown channel, ignored", { channelId: msg.channelId });
+			this.ctx.hubLogger?.log(
+				"warn",
+				"state-broadcaster: TITLE_CHANGE for unknown channel, ignored",
+				{ channelId: msg.channelId },
+			);
 			return;
 		}
 
@@ -260,7 +268,11 @@ export class StateBroadcaster {
 	handleProcessTitle(msg: AgentProcessTitleMessage): void {
 		const channel = this.ctx.channels.get(msg.channelId);
 		if (!channel) {
-			this.ctx.hubLogger?.log("warn", "state-broadcaster: PROCESS_TITLE for unknown channel, ignored", { channelId: msg.channelId });
+			this.ctx.hubLogger?.log(
+				"warn",
+				"state-broadcaster: PROCESS_TITLE for unknown channel, ignored",
+				{ channelId: msg.channelId },
+			);
 			return;
 		}
 
@@ -296,11 +308,7 @@ export class StateBroadcaster {
 	 * Sliding-window rate limiter: returns true if the event is allowed.
 	 * Keeps at most `maxPerSecond` timestamps within the last 1000ms per channel.
 	 */
-	rateLimitCheck(
-		store: Map<string, number[]>,
-		channelId: string,
-		maxPerSecond: number,
-	): boolean {
+	rateLimitCheck(store: Map<string, number[]>, channelId: string, maxPerSecond: number): boolean {
 		const now = Date.now();
 		const cutoff = now - 1000;
 		let timestamps = store.get(channelId);

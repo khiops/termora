@@ -55,7 +55,7 @@ export interface AgentSpawnMessage {
 	elevationSecret?: string;
 	elevationMethod?: string;
 	customCommand?: string;
-	envMode?: 'minimal' | 'inherit';
+	envMode?: "minimal" | "inherit";
 }
 
 /** Agent → Hub: PTY spawned successfully */
@@ -202,7 +202,6 @@ export interface AgentNotificationMessage {
 	message: string;
 }
 
-
 /** Agent → Hub: structured log line (forwarded to hub log sink) */
 export interface AgentLogMessage {
 	type: "LOG";
@@ -210,7 +209,6 @@ export interface AgentLogMessage {
 	level: string;
 	msg: string;
 }
-
 
 // ---------------------------------------------------------------------------
 // Hub ↔ UI messages (WebSocket)

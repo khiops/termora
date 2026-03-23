@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { encodeMessage, decodeMessage } from "@nexterm/shared";
+import { decodeMessage, encodeMessage } from "@nexterm/shared";
 import type { ProtocolMessage } from "@nexterm/shared";
 
 const auth = JSON.parse(readFileSync(join(homedir(), ".config/nexterm/auth.json"), "utf8"));
@@ -11,7 +11,12 @@ const hostId = process.argv[2] || "local";
 
 const key = randomBytes(16).toString("base64");
 const req = request("http://localhost:4100/ws", {
-	headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" }
+	headers: {
+		Connection: "Upgrade",
+		Upgrade: "websocket",
+		"Sec-WebSocket-Key": key,
+		"Sec-WebSocket-Version": "13",
+	},
 });
 
 req.on("upgrade", (_, socket) => {
@@ -33,8 +38,15 @@ req.on("upgrade", (_, socket) => {
 			const firstByte = buf[0]!;
 			let payloadLen = buf[1]! & 0x7f;
 			let offset = 2;
-			if (payloadLen === 126) { if (buf.length < 4) return; payloadLen = (buf[2]! << 8) | buf[3]!; offset = 4; }
-			else if (payloadLen === 127) { offset = 10; if (buf.length < 10) return; payloadLen = buf.readUInt32BE(6); }
+			if (payloadLen === 126) {
+				if (buf.length < 4) return;
+				payloadLen = (buf[2]! << 8) | buf[3]!;
+				offset = 4;
+			} else if (payloadLen === 127) {
+				offset = 10;
+				if (buf.length < 10) return;
+				payloadLen = buf.readUInt32BE(6);
+			}
 			if (buf.length < offset + payloadLen) return;
 			const payload = buf.subarray(offset, offset + payloadLen);
 			buf = buf.subarray(offset + payloadLen);
@@ -44,21 +56,36 @@ req.on("upgrade", (_, socket) => {
 					const msg = decodeMessage(new Uint8Array(payload));
 					if (msg.type === "AUTH_OK") {
 						console.log("AUTH_OK — sending SPAWN for", hostId);
-						setTimeout(() => sendWs({ type: "SPAWN", hostId, cols: 80, rows: 24 } as ProtocolMessage), 500);
+						setTimeout(
+							() => sendWs({ type: "SPAWN", hostId, cols: 80, rows: 24 } as ProtocolMessage),
+							500,
+						);
 					} else if (msg.type === "SPAWN_OK") {
 						console.log("✅ SPAWN_OK! channelId:", (msg as any).channelId);
-						socket.end(); process.exit(0);
+						socket.end();
+						process.exit(0);
 					} else if (msg.type === "SPAWN_ERR" || msg.type === "ERROR") {
 						console.log("❌", msg.type, JSON.stringify(msg).slice(0, 300));
-					} else if (msg.type !== "STATE_SYNC" && msg.type !== "SESSION_STATE" && msg.type !== "CHANNEL_STATE") {
+					} else if (
+						msg.type !== "STATE_SYNC" &&
+						msg.type !== "SESSION_STATE" &&
+						msg.type !== "CHANNEL_STATE"
+					) {
 						console.log("←", msg.type);
 					}
-				} catch (e) { console.error("decode err:", (e as Error).message); }
+				} catch (e) {
+					console.error("decode err:", (e as Error).message);
+				}
 			}
 		}
 	});
 	sendWs({ type: "AUTH", token: auth.token } as ProtocolMessage);
 });
-req.on("error", e => { console.error("ERR:", e.message); });
+req.on("error", (e) => {
+	console.error("ERR:", e.message);
+});
 req.end();
-setTimeout(() => { console.log("❌ Timeout 15s"); process.exit(1); }, 15000);
+setTimeout(() => {
+	console.log("❌ Timeout 15s");
+	process.exit(1);
+}, 15000);

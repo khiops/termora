@@ -1,7 +1,6 @@
-
-import { ref, type Ref } from "vue";
-import { hubBaseUrl } from "../utils/hub-url.js";
+import { type Ref, ref } from "vue";
 import { useAuthStore } from "../stores/auth.js";
+import { hubBaseUrl } from "../utils/hub-url.js";
 
 export interface LogEntry {
 	t?: number; // channel log: offset in ms

@@ -102,7 +102,6 @@ export function validateCustomCommand(cmd: string): void {
 	}
 }
 
-
 /**
  * Validates a shell executable path for the SPAWN handler.
  * Returns an error message string, or null if valid.
@@ -164,4 +163,3 @@ export function validateShell(shell: unknown): string | null {
 
 	return null;
 }
-

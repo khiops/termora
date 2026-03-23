@@ -95,9 +95,7 @@ export function registerWallpaperRoutes(server: FastifyInstance, configDir: stri
 
 		// Directory containment check
 		if (!resolve(target).startsWith(resolve(wallpapersDir))) {
-			return reply
-				.code(400)
-				.send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
+			return reply.code(400).send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
 		}
 
 		await writeFile(target, buffer);

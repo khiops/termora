@@ -106,7 +106,8 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	//          by addCorsOrigins() in main.ts after startServer() returns the actual port.
 	const configDir = options?.configDir ?? getConfigDir();
 	// SEC-027: load auth config once and reuse across all call sites
-	const authConfig = options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+	const authConfig =
+		options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
 
 	// Determine origin patterns for this server instance.
 	// When corsOrigins is overridden (tests), use that list exclusively.

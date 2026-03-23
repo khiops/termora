@@ -15,7 +15,7 @@ export interface TerminalProfile {
 	wallpaperBlur?: number;
 	wallpaperDim?: number;
 	/** Controls how process.env is merged into PTY environment. Default: 'inherit'. */
-	envMode?: 'minimal' | 'inherit';
+	envMode?: "minimal" | "inherit";
 	[key: string]: unknown;
 }
 
@@ -200,14 +200,12 @@ export interface HostLaunchProfileOverride {
 	sortOrder?: number;
 }
 
-
 export interface PaginatedResponse<T> {
 	data: T[];
 	total: number;
 	limit: number;
 	offset: number;
 }
-
 
 export interface TestConnectionResult {
 	ok: boolean;
@@ -226,7 +224,6 @@ export interface FontFamily {
 	family: string;
 	files: FontFile[];
 }
-
 
 export interface LogConfig {
 	level: "trace" | "debug" | "info" | "warn" | "error";

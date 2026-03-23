@@ -15,9 +15,17 @@
  *   7. Print final binary size.
  */
 
-import { spawnSync, execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,7 +113,12 @@ export function buildSeaConfigJson(cfg: SeaBuildConfig, blobPath: string): Recor
  * Download a Node.js binary for a target platform (cross-build).
  * Returns the path to the downloaded binary.
  */
-function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir: string, nodeVersion?: string): string {
+function downloadNodeBinary(
+	targetPlatform: string,
+	targetArch: string,
+	destDir: string,
+	nodeVersion?: string,
+): string {
 	const version = nodeVersion ?? process.env.NEXTERM_NODE_VERSION ?? process.version; // e.g. "v22.14.0"
 	const platformMap: Record<string, string> = { win32: "win", linux: "linux", darwin: "darwin" };
 	const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
@@ -133,9 +146,13 @@ function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir:
 	console.log(`[build-sea] cross-build: extracting ${fileName}`);
 	if (isWindows) {
 		// unzip on Linux to extract node.exe
-		execSync(`unzip -qo "${archivePath}" "${dirName}/${nodeBinName}" -d "${destDir}"`, { stdio: "inherit" });
+		execSync(`unzip -qo "${archivePath}" "${dirName}/${nodeBinName}" -d "${destDir}"`, {
+			stdio: "inherit",
+		});
 	} else {
-		execSync(`tar -xzf "${archivePath}" -C "${destDir}" "${dirName}/bin/${nodeBinName}"`, { stdio: "inherit" });
+		execSync(`tar -xzf "${archivePath}" -C "${destDir}" "${dirName}/bin/${nodeBinName}"`, {
+			stdio: "inherit",
+		});
 	}
 
 	const finalPath = isWindows ? extractedBin : join(destDir, dirName, "bin", nodeBinName);

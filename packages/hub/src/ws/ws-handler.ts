@@ -87,8 +87,8 @@ export async function registerWsRoutes(
 		const authTimeout = authToken
 			? setTimeout(() => {
 					if (!authenticated) {
-						server.log.warn({ clientId }, 'WS connection closed: AUTH timeout')
-						socket.close(4001, 'AUTH_TIMEOUT')
+						server.log.warn({ clientId }, "WS connection closed: AUTH timeout");
+						socket.close(4001, "AUTH_TIMEOUT");
 					}
 				}, 10_000)
 			: null;
@@ -211,7 +211,10 @@ export async function registerWsRoutes(
 					handleTestConnect(msg as TestConnectMessage, ctx);
 					break;
 				default:
-					server.log.warn({ msgType: msg.type, keys: Object.keys(msg) }, "ws: unhandled message type");
+					server.log.warn(
+						{ msgType: msg.type, keys: Object.keys(msg) },
+						"ws: unhandled message type",
+					);
 					break;
 			}
 		});

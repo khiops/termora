@@ -145,17 +145,13 @@ export class LaunchProfilesDAL {
 							"SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC LIMIT ? OFFSET ?",
 						)
 						.all(limit, offset ?? 0)
-				: this.db
-						.prepare("SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC")
-						.all()
+				: this.db.prepare("SELECT * FROM launch_profiles ORDER BY sort_order ASC, name ASC").all()
 		) as LaunchProfileRow[];
 		return rows.map(rowToLaunchProfile);
 	}
 
 	countLaunchProfiles(): number {
-		const row = this.db
-			.prepare("SELECT COUNT(*) AS n FROM launch_profiles")
-			.get() as { n: number };
+		const row = this.db.prepare("SELECT COUNT(*) AS n FROM launch_profiles").get() as { n: number };
 		return row.n;
 	}
 

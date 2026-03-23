@@ -142,12 +142,17 @@ export function validateProfileJson(profileJson: string | object | undefined): s
 	if (profileJson === undefined) return null;
 	let profileObj: Record<string, unknown>;
 	try {
-		profileObj = typeof profileJson === "string" ? JSON.parse(profileJson) : (profileJson as Record<string, unknown>);
+		profileObj =
+			typeof profileJson === "string"
+				? JSON.parse(profileJson)
+				: (profileJson as Record<string, unknown>);
 	} catch {
 		return "Invalid profile_json format";
 	}
 	if (profileObj?.visualProfile) {
-		const colorError = validateAndClampVisualProfile(profileObj.visualProfile as Record<string, unknown>);
+		const colorError = validateAndClampVisualProfile(
+			profileObj.visualProfile as Record<string, unknown>,
+		);
 		if (colorError) return colorError;
 	}
 	return null;

@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
-import type Database from "better-sqlite3";
 import { generateId } from "@nexterm/shared";
+import type Database from "better-sqlite3";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createToken } from "../auth.js";
 import type { AuthConfig } from "../config.js";

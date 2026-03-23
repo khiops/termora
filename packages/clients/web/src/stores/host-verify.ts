@@ -35,7 +35,15 @@ export const useHostVerifyStore = defineStore("hostVerify", () => {
 		promptId: string,
 		firstConnect = false,
 	): void {
-		pendingPrompt.value = { hostId, hostname, fingerprint, algorithm, oldFingerprint, promptId, ...(firstConnect ? { firstConnect: true } : {}) };
+		pendingPrompt.value = {
+			hostId,
+			hostname,
+			fingerprint,
+			algorithm,
+			oldFingerprint,
+			promptId,
+			...(firstConnect ? { firstConnect: true } : {}),
+		};
 	}
 
 	function respond(action: "trust_permanent" | "trust_once" | "reject"): void {
