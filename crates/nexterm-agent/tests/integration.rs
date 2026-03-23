@@ -383,7 +383,6 @@ async fn test_multiple_heartbeats_in_order() {
     agent.kill().await.ok();
 }
 
-
 // ---------------------------------------------------------------------------
 // Windows ConPTY — verify no stdout leak
 // ---------------------------------------------------------------------------
@@ -442,8 +441,18 @@ async fn test_conpty_no_stdout_leak() {
             Ok(frame) => {
                 let ft = frame["type"].as_str().unwrap_or("(none)");
                 assert!(
-                    matches!(ft, "OUTPUT" | "TITLE_CHANGE" | "PROCESS_TITLE" | "BELL" | "NOTIFICATION" | "CHANNEL_EXIT"),
-                    "Frame {} has unexpected type {:?} — possible protocol corruption", i, ft
+                    matches!(
+                        ft,
+                        "OUTPUT"
+                            | "TITLE_CHANGE"
+                            | "PROCESS_TITLE"
+                            | "BELL"
+                            | "NOTIFICATION"
+                            | "CHANNEL_EXIT"
+                    ),
+                    "Frame {} has unexpected type {:?} — possible protocol corruption",
+                    i,
+                    ft
                 );
                 if ft == "CHANNEL_EXIT" {
                     break;

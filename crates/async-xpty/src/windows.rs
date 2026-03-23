@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use tokio::task;
 
+use windows_sys::Win32::Foundation::SetHandleInformation;
 use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, S_OK,
 };
@@ -44,7 +45,6 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOEXW,
 };
-use windows_sys::Win32::Foundation::SetHandleInformation;
 
 use crate::{CommandBuilder, ExitStatus, PtySize};
 
@@ -112,10 +112,7 @@ impl SendHpcon {
     /// Close the pseudo-console.  Idempotent — safe to call from any thread,
     /// any number of times.  The first call closes; subsequent calls are no-ops.
     fn close(&self) {
-        if !self
-            .closed
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
+        if !self.closed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             unsafe { ClosePseudoConsole(self.val) };
         }
     }
@@ -447,15 +444,7 @@ fn spawn_sync(cmd: &CommandBuilder) -> io::Result<WinPtyProcess> {
     let mut hpc: HPCON = 0;
     // flags=0: ConPTY blocks on DSR until reactive handler responds.
     // ConPTY CONSUMES the response (doesn't pass to child).
-    let hr = unsafe {
-        CreatePseudoConsole(
-            size,
-            stdin_read.0,
-            stdout_write.0,
-            0,
-            &mut hpc,
-        )
-    };
+    let hr = unsafe { CreatePseudoConsole(size, stdin_read.0, stdout_write.0, 0, &mut hpc) };
     if hr < S_OK {
         return Err(io::Error::from_raw_os_error(hr));
     }
@@ -754,7 +743,6 @@ fn quote_arg(s: &str) -> String {
 }
 
 /// Build a null-terminated, double-null-terminated UTF-16 environment block
-
 
 /// as required by `CreateProcessW` with `CREATE_UNICODE_ENVIRONMENT`.
 ///

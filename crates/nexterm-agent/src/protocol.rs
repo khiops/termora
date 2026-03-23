@@ -186,7 +186,6 @@ pub mod error_codes {
     pub const CHANNEL_EXISTS: &str = "CHANNEL_EXISTS";
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

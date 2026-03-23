@@ -1,4 +1,3 @@
-
 /// Get the daemon log file path.
 /// Linux/macOS: $XDG_STATE_HOME/nexterm/logs/agent-daemon.jsonl
 /// Windows: %LOCALAPPDATA%\nexterm\logs\agent-daemon.jsonl

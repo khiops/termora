@@ -146,12 +146,33 @@ pub(crate) async fn handle_message(
 
     let summary = match &msg {
         HubToAgent::Heartbeat { .. } => "HEARTBEAT".to_string(),
-        HubToAgent::Spawn { shell, cols, rows, .. } => format!("SPAWN shell={:?} {}x{}", shell, cols, rows),
-        HubToAgent::Input { channel_id, data } => format!("INPUT ch={} {} bytes", &channel_id[..8.min(channel_id.len())], data.len()),
-        HubToAgent::Resize { channel_id, cols, rows } => format!("RESIZE ch={} {}x{}", &channel_id[..8.min(channel_id.len())], cols, rows),
-        HubToAgent::Destroy { channel_id } => format!("DESTROY ch={}", &channel_id[..8.min(channel_id.len())]),
-        HubToAgent::SnapshotReq { channel_id } => format!("SNAPSHOT_REQ ch={}", &channel_id[..8.min(channel_id.len())]),
-        HubToAgent::Attach { channel_id } => format!("ATTACH ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::Spawn {
+            shell, cols, rows, ..
+        } => format!("SPAWN shell={:?} {}x{}", shell, cols, rows),
+        HubToAgent::Input { channel_id, data } => format!(
+            "INPUT ch={} {} bytes",
+            &channel_id[..8.min(channel_id.len())],
+            data.len()
+        ),
+        HubToAgent::Resize {
+            channel_id,
+            cols,
+            rows,
+        } => format!(
+            "RESIZE ch={} {}x{}",
+            &channel_id[..8.min(channel_id.len())],
+            cols,
+            rows
+        ),
+        HubToAgent::Destroy { channel_id } => {
+            format!("DESTROY ch={}", &channel_id[..8.min(channel_id.len())])
+        }
+        HubToAgent::SnapshotReq { channel_id } => {
+            format!("SNAPSHOT_REQ ch={}", &channel_id[..8.min(channel_id.len())])
+        }
+        HubToAgent::Attach { channel_id } => {
+            format!("ATTACH ch={}", &channel_id[..8.min(channel_id.len())])
+        }
         HubToAgent::Auth { .. } => "AUTH".to_string(),
         HubToAgent::Error { code, .. } => format!("ERROR {}", code),
     };
