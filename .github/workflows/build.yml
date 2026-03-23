@@ -4,208 +4,188 @@ on:
   workflow_call:
 
 jobs:
-  # Build the web UI once (architecture-independent)
+  matrix:
+    name: Load Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      agent: ${{ steps.filter.outputs.agent }}
+      hub: ${{ steps.filter.outputs.hub }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        run: |
+          jq -c '{include:[.targets[]|select(.enabled and .agent)]}' \
+            .github/build-matrix.json > /tmp/agent.json
+          jq -c '{include:[.targets[]|select(.enabled and .hub)]}' \
+            .github/build-matrix.json > /tmp/hub.json
+          jq -c '{include:[.targets[]|select(.enabled and .desktop)]}' \
+            .github/build-matrix.json > /tmp/desktop.json
+          echo "agent=$(cat /tmp/agent.json)" >> "$GITHUB_OUTPUT"
+          echo "hub=$(cat /tmp/hub.json)" >> "$GITHUB_OUTPUT"
+          echo "desktop=$(cat /tmp/desktop.json)" >> "$GITHUB_OUTPUT"
+
   build-web:
     name: Build Web UI
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build shared package
-        run: pnpm -F @nexterm/shared build
-
-      - name: Build web UI
-        run: pnpm -F @nexterm/web build
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/build-web.sh
         env:
           NEXTERM_BUILD_HASH: ${{ github.sha }}
-
-      - name: Embed web UI into hub static/
-        run: node scripts/embed-web.js
-
-      - name: Upload web artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: web-static
+          name: web-dist-raw
+          path: packages/clients/web/dist/
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-embedded
           path: packages/hub/static/
           retention-days: 1
 
-  # Build SEA binaries for each target platform
-  build-sea:
-    name: Build SEA (${{ matrix.target_os }}-${{ matrix.target_arch }})
-    needs: build-web
-
+  build-agent:
+    name: Build Agent (${{ matrix.triple }})
+    needs: [matrix]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target_os: linux
-            target_arch: x64
-            runner: ubuntu-latest
-          - target_os: windows
-            target_arch: x64
-            runner: windows-latest
-
+      matrix: ${{ fromJson(needs.matrix.outputs.agent) }}
     runs-on: ${{ matrix.runner }}
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages (excluding desktop)
-        run: pnpm -F @nexterm/shared -F @nexterm/agent -F @nexterm/hub build
-
-      - name: Download web artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: web-static
-          path: packages/hub/static/
-
-      - name: Build and package agent SEA
-        run: pnpm run package:sea-agent
-
-      - name: Build and package hub SEA
-        run: pnpm run package:sea-hub
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
+      - name: Build (bash)
+        if: matrix.shell_sh
+        run: ./scripts/build-agent.sh
         env:
-          NEXTERM_BUILD_HASH: ${{ github.sha }}
-
-      - name: Rename agent binary (Unix)
-        if: matrix.target_os != 'windows'
-        env:
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ARCH: ${{ matrix.target_arch }}
-        run: mv dist/sea/nexterm-agent dist/sea/nexterm-agent-${TARGET_OS}-${TARGET_ARCH}
-
-      - name: Rename hub binary (Unix)
-        if: matrix.target_os != 'windows'
-        env:
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ARCH: ${{ matrix.target_arch }}
-        run: mv dist/sea/nexterm-hub dist/sea/nexterm-hub-${TARGET_OS}-${TARGET_ARCH}
-
-      - name: Rename agent binary (Windows)
-        if: matrix.target_os == 'windows'
-        env:
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ARCH: ${{ matrix.target_arch }}
-        run: Move-Item dist/sea/nexterm-agent.exe dist/sea/nexterm-agent-$env:TARGET_OS-$env:TARGET_ARCH.exe
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+      - name: Build (pwsh)
+        if: ${{ !matrix.shell_sh }}
         shell: pwsh
-
-      - name: Rename hub binary (Windows)
-        if: matrix.target_os == 'windows'
+        run: .\scripts\build-agent.ps1
         env:
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ARCH: ${{ matrix.target_arch }}
-        run: Move-Item dist/sea/nexterm-hub.exe dist/sea/nexterm-hub-$env:TARGET_OS-$env:TARGET_ARCH.exe
-        shell: pwsh
-
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+      - uses: actions/upload-artifact@v4
         with:
-          name: sea-${{ matrix.target_os }}-${{ matrix.target_arch }}
-          path: |
-            dist/sea/nexterm-agent-${{ matrix.target_os }}-${{ matrix.target_arch }}*
-            dist/sea/nexterm-hub-${{ matrix.target_os }}-${{ matrix.target_arch }}*
+          name: agent-${{ matrix.triple }}
+          path: dist/sea/nexterm-agent*
           retention-days: 7
 
-  # Build Tauri desktop installer (Windows only for now)
-  build-tauri:
-    name: Build Tauri Desktop
-    needs: build-sea
-    runs-on: windows-latest
-
+  build-hub:
+    name: Build Hub (${{ matrix.triple }})
+    needs: [matrix, build-web]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.hub) }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "pnpm"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
         with:
-          targets: x86_64-pc-windows-msvc
+          name: web-dist-embedded
+          path: packages/hub/static/
+      - name: Build (bash)
+        if: matrix.shell_sh
+        run: ./scripts/build-hub.sh
+        env:
+          NEXTERM_SKIP_WEB: "true"
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
+      - name: Build (pwsh)
+        if: ${{ !matrix.shell_sh }}
+        shell: pwsh
+        run: .\scripts\build-hub.ps1
+        env:
+          NEXTERM_SKIP_WEB: "true"
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-${{ matrix.triple }}
+          path: dist/sea/nexterm-hub*
+          retention-days: 7
 
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
+  build-desktop:
+    name: Build Desktop (${{ matrix.triple }})
+    needs: [matrix, build-agent, build-hub, build-web]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.desktop) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages/clients/desktop/src-tauri
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Download SEA artifact
-        uses: actions/download-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
         with:
-          name: sea-windows-x64
-          path: sea-artifacts/
-
-      - name: Place sidecar binaries
+          name: agent-${{ matrix.triple }}
+          path: dist/sea/
+      - uses: actions/download-artifact@v4
+        with:
+          name: hub-${{ matrix.triple }}
+          path: dist/sea/
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist-raw
+          path: packages/clients/web/dist/
+      - name: Place sidecars + build (bash)
+        if: matrix.shell_sh
         run: |
-          Copy-Item sea-artifacts/nexterm-hub-windows-x64.exe `
-            packages/clients/desktop/src-tauri/nexterm-hub-x86_64-pc-windows-msvc.exe
-          Copy-Item sea-artifacts/nexterm-agent-windows-x64.exe `
-            packages/clients/desktop/src-tauri/nexterm-agent-x86_64-pc-windows-msvc.exe
+          TRIPLE="${{ matrix.triple }}"
+          cp dist/sea/nexterm-agent "packages/clients/desktop/src-tauri/nexterm-agent-${TRIPLE}"
+          cp dist/sea/nexterm-hub "packages/clients/desktop/src-tauri/nexterm-hub-${TRIPLE}"
+          pnpm -F @nexterm/shared build
+          pnpm -F @nexterm/desktop tauri build --config '{"build":{"beforeBuildCommand":""}}'
+      - name: Place sidecars + build (pwsh)
+        if: ${{ !matrix.shell_sh }}
         shell: pwsh
-
-      - name: Build shared package
-        run: pnpm -F @nexterm/shared build
-
-      - name: Build web UI
-        run: pnpm -F @nexterm/web build
-        env:
-          NEXTERM_BUILD_HASH: ${{ github.sha }}
-
-      - name: Disable beforeBuildCommand for CI
-        shell: bash
         run: |
-          # In CI, shared+web are already built and sidecars placed by previous steps.
-          # Override beforeBuildCommand to skip prepare-desktop.sh (which rebuilds everything).
-          node -e "
-            const fs = require('fs');
-            const p = 'packages/clients/desktop/src-tauri/tauri.conf.json';
-            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-            c.build.beforeBuildCommand = '';
-            fs.writeFileSync(p, JSON.stringify(c, null, '\t') + '\n');
-          "
-
-      - name: Build Tauri app
-        shell: bash
-        run: cd packages/clients/desktop && pnpm exec tauri build
-
-      - name: Upload Tauri installer artifacts
-        uses: actions/upload-artifact@v4
+          $triple = "${{ matrix.triple }}"
+          Copy-Item dist\sea\nexterm-agent.exe "packages\clients\desktop\src-tauri\nexterm-agent-$triple.exe"
+          Copy-Item dist\sea\nexterm-hub.exe "packages\clients\desktop\src-tauri\nexterm-hub-$triple.exe"
+          pnpm -F @nexterm/shared build
+          pnpm -F @nexterm/desktop tauri build --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'
+      - uses: actions/upload-artifact@v4
         with:
-          name: tauri-windows-x64
+          name: desktop-${{ matrix.triple }}
           path: |
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.msi
             packages/clients/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            packages/clients/desktop/src-tauri/target/release/bundle/**/*.dmg
+            packages/clients/desktop/src-tauri/target/release/bundle/**/*.deb
           retention-days: 7
