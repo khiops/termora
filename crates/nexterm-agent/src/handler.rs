@@ -144,6 +144,19 @@ pub(crate) async fn handle_message(
 ) -> std::io::Result<()> {
     use crate::protocol::HubToAgent;
 
+    let summary = match &msg {
+        HubToAgent::Heartbeat { .. } => "HEARTBEAT".to_string(),
+        HubToAgent::Spawn { shell, cols, rows, .. } => format!("SPAWN shell={:?} {}x{}", shell, cols, rows),
+        HubToAgent::Input { channel_id, data } => format!("INPUT ch={} {} bytes", &channel_id[..8.min(channel_id.len())], data.len()),
+        HubToAgent::Resize { channel_id, cols, rows } => format!("RESIZE ch={} {}x{}", &channel_id[..8.min(channel_id.len())], cols, rows),
+        HubToAgent::Destroy { channel_id } => format!("DESTROY ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::SnapshotReq { channel_id } => format!("SNAPSHOT_REQ ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::Attach { channel_id } => format!("ATTACH ch={}", &channel_id[..8.min(channel_id.len())]),
+        HubToAgent::Auth { .. } => "AUTH".to_string(),
+        HubToAgent::Error { code, .. } => format!("ERROR {}", code),
+    };
+    tracing::debug!(msg = %summary, "hub message received");
+
     match msg {
         HubToAgent::Heartbeat { ts } => {
             send_frame(&frame_tx, &AgentToHub::HeartbeatAck { ts })?;
@@ -238,6 +251,7 @@ pub(crate) async fn handle_message(
         }
 
         HubToAgent::Destroy { channel_id } => {
+            tracing::debug!("DESTROY received for channel {}", channel_id);
             let mut mgr = pty_manager.lock().await;
             if let Some(ch) = mgr.remove(&channel_id) {
                 let _ = ch.process.kill();
@@ -626,6 +640,12 @@ fn spawn_reader_task(
                 read_result = pty_reader.read(&mut rbuf) => {
                     match read_result {
                         Ok(0) | Err(_) => {
+                            let reason = match &read_result {
+                                Ok(0) => "EOF (0 bytes)".to_string(),
+                                Err(e) => format!("Error: {}", e),
+                                _ => "unexpected".to_string(),
+                            };
+                            tracing::debug!(channel_id = %channel_id, reason = %reason, "PTY reader EOF");
                             // Emit a LOG diagnostic before breaking
                             let log_msg = AgentToHub::Log {
                                 channel_id: channel_id.clone(),
@@ -639,7 +659,19 @@ fn spawn_reader_task(
                         }
                         Ok(n) => {
                             seq += 1;
-                            let data = rbuf[..n].to_vec();
+                            // Strip DSR queries (\x1b[6n) from output before
+                            // forwarding to the hub.  With PSEUDOCONSOLE_INHERIT_CURSOR,
+                            // ConPTY sends DSR but does not need a response.  If xterm.js
+                            // sees the DSR, it responds with \x1b[row;colR which travels
+                            // back as INPUT → ConPTY stdin → child console input buffer,
+                            // killing the shell with garbage keyboard events.
+                            let raw = &rbuf[..n];
+                            let data = strip_dsr(raw);
+
+                            // Skip empty chunks (e.g. all-DSR data after stripping)
+                            if data.is_empty() {
+                                continue;
+                            }
 
                             // Feed output to the headless mirror BEFORE sending to batch
                             mirror.process(&data);
@@ -781,6 +813,30 @@ fn map_spawn_error(e: &std::io::Error) -> &'static str {
 /// Encode and write a frame to the shared stdout.
 /// Encode a message and send it via the frame channel.
 /// Synchronous — no await needed. Errors are ignored if receiver is gone.
+/// Strip DSR query sequences (`\x1b[6n`) from ConPTY output.
+///
+/// ConPTY with `PSEUDOCONSOLE_INHERIT_CURSOR` sends DSR but doesn't need
+/// a response.  If we forward DSR to xterm.js, it responds with
+/// `\x1b[row;colR` which the hub sends back as INPUT.  ConPTY passes this
+/// to the child's console input buffer as keyboard events, killing the shell.
+fn strip_dsr(data: &[u8]) -> Vec<u8> {
+    const DSR: &[u8] = b"\x1b[6n";
+    if !data.windows(DSR.len()).any(|w| w == DSR) {
+        return data.to_vec(); // fast path: no DSR
+    }
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if i + DSR.len() <= data.len() && &data[i..i + DSR.len()] == DSR {
+            i += DSR.len(); // skip the DSR sequence
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 pub(crate) fn send_frame(tx: &FrameSender, msg: &AgentToHub) -> std::io::Result<()> {
     let frame = encode_frame(msg)?;
     // SendError means receiver dropped — treat as EOF, not a hard error
