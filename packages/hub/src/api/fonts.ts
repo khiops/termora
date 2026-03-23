@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import type { FontFamily, FontFile } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -291,4 +291,38 @@ export function registerFontRoutes(server: FastifyInstance, configDir: string): 
 		await writeFile(target, buffer);
 		return scanFonts(fontsDir);
 	});
+
+	// DELETE /api/fonts/:family — delete all files belonging to a font family
+	server.delete(
+		"/api/fonts/:family",
+		async (request: FastifyRequest<{ Params: { family: string } }>, reply: FastifyReply) => {
+			const { family } = request.params;
+
+			const families = scanFonts(fontsDir);
+			const match = families.find((f) => f.family === family);
+
+			if (!match) {
+				return reply.code(404).send({
+					error: { code: "FONT_FAMILY_NOT_FOUND", message: `Font family "${family}" not found` },
+				});
+			}
+
+			for (const fontFile of match.files) {
+				// Strip /public/fonts/ prefix to get bare filename
+				const filename = fontFile.url.replace(/^\/public\/fonts\//, "");
+				const target = join(fontsDir, filename);
+
+				// Containment check — never escape fontsDir
+				if (!resolve(target).startsWith(resolve(fontsDir))) continue;
+
+				try {
+					await unlink(target);
+				} catch (err: unknown) {
+					if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+				}
+			}
+
+			return reply.code(204).send();
+		},
+	);
 }

@@ -233,4 +233,45 @@ describe("Font endpoints", () => {
 			expect(res.json().error.code).toBe("DUPLICATE");
 		});
 	});
+
+	// ─── DELETE /api/fonts/:family ────────────────────────────────────────────
+
+	describe("DELETE /api/fonts/:family", () => {
+		it("should delete all files of a font family and return 204", async () => {
+			// Write two files belonging to the same family "My Font"
+			writeFileSync(join(configDir, "fonts", "MyFont-Regular.ttf"), TTF_MAGIC);
+			writeFileSync(join(configDir, "fonts", "MyFont-Bold.ttf"), TTF_MAGIC);
+
+			const res = await server.inject({
+				method: "DELETE",
+				url: `/api/fonts/${encodeURIComponent("My Font")}`,
+				headers: authHeader(),
+			});
+			expect(res.statusCode).toBe(204);
+
+			// Verify files are gone
+			const listRes = await server.inject({ method: "GET", url: "/api/fonts" });
+			expect(
+				listRes.json<{ family: string }[]>().find((f) => f.family === "My Font"),
+			).toBeUndefined();
+		});
+
+		it("should return 404 for an unknown family", async () => {
+			const res = await server.inject({
+				method: "DELETE",
+				url: `/api/fonts/${encodeURIComponent("Does Not Exist")}`,
+				headers: authHeader(),
+			});
+			expect(res.statusCode).toBe(404);
+			expect(res.json().error.code).toBe("FONT_FAMILY_NOT_FOUND");
+		});
+
+		it("should reject delete without auth", async () => {
+			const res = await server.inject({
+				method: "DELETE",
+				url: `/api/fonts/${encodeURIComponent("My Font")}`,
+			});
+			expect(res.statusCode).toBe(401);
+		});
+	});
 });
