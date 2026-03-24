@@ -457,11 +457,14 @@ export async function getRemoteSha256(
 	os: HostOs,
 ): Promise<string | null> {
 	try {
-		const escapedPath = os === "windows" ? remotePath.replace(/'/g, "''") : remotePath;
+		const escapedPath =
+			os === "windows"
+				? remotePath.replace(/'/g, "''")
+				: remotePath.replace(/'/g, "'\\''");
 		const cmd =
 			os === "windows"
 				? `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`
-				: `sha256sum "${remotePath}"`;
+				: `sha256sum '${escapedPath}'`;
 		const { stdout, exitCode } = await sshExec(client, cmd);
 		if (exitCode !== 0) return null;
 		const trimmed = stdout.trim();

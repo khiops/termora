@@ -127,7 +127,7 @@ function makeOptions(overrides: Partial<DeployOptions> = {}): DeployOptions {
 /**
  * Create a mock SSH client that:
  *  - returns `existingPath` from `which nexterm-agent`
- *  - returns `remoteSha` from `sha256sum <existingPath>`
+ *  - returns `remoteSha` from `sha256sum '<existingPath>'`
  *  - fails all other commands
  */
 function makeAgentFoundClient(existingPath: string, remoteSha: string | null): SshClient {
@@ -135,14 +135,14 @@ function makeAgentFoundClient(existingPath: string, remoteSha: string | null): S
 		"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
 	};
 	if (remoteSha !== null) {
-		responses[`sha256sum "${existingPath}"`] = {
+		responses[`sha256sum '${existingPath}'`] = {
 			stdout: `${remoteSha}  ${existingPath}\n`,
 			stderr: "",
 			exitCode: 0,
 		};
 	} else {
 		// sha256sum fails
-		responses[`sha256sum "${existingPath}"`] = { stdout: "", stderr: "error", exitCode: 1 };
+		responses[`sha256sum '${existingPath}'`] = { stdout: "", stderr: "error", exitCode: 1 };
 	}
 	return makeMockClient(responses);
 }
@@ -363,7 +363,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		// Remote returns the same hash
 		const client = makeMockClient({
 			"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
-			[`sha256sum "${existingPath}"`]: {
+			[`sha256sum '${existingPath}'`]: {
 				stdout: `${localSha}  ${existingPath}\n`,
 				stderr: "",
 				exitCode: 0,
@@ -387,7 +387,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		const client = makeMockClient(
 			{
 				"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
-				[`sha256sum "${existingPath}"`]: {
+				[`sha256sum '${existingPath}'`]: {
 					stdout: `${REMOTE_SHA_DIFFERENT}  ${existingPath}\n`,
 					stderr: "",
 					exitCode: 0,
@@ -420,7 +420,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		const client = makeMockClient(
 			{
 				"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
-				[`sha256sum "${existingPath}"`]: { stdout: "", stderr: "error", exitCode: 1 },
+				[`sha256sum '${existingPath}'`]: { stdout: "", stderr: "error", exitCode: 1 },
 			},
 			sftpImpl,
 		);
@@ -721,7 +721,7 @@ describe("getRemoteSha256", () => {
 	it("parses sha256sum output on Linux", async () => {
 		const hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 		const client = makeMockClient({
-			"sha256sum \"/usr/local/bin/nexterm-agent\"": {
+			"sha256sum '/usr/local/bin/nexterm-agent'": {
 				stdout: `${hash}  /usr/local/bin/nexterm-agent\n`,
 				stderr: "",
 				exitCode: 0,
@@ -827,7 +827,7 @@ describe("deploy + verify integration", () => {
 
 		const clientSecond = makeMockClient({
 			"which nexterm-agent": { stdout: `${deployedPath}\n`, stderr: "", exitCode: 0 },
-			[`sha256sum "${deployedPath}"`]: {
+			[`sha256sum '${deployedPath}'`]: {
 				stdout: `${localSha}  ${deployedPath}\n`,
 				stderr: "",
 				exitCode: 0,
@@ -857,7 +857,7 @@ describe("deploy + verify integration", () => {
 		const client = makeMockClient(
 			{
 				"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
-				[`sha256sum "${existingPath}"`]: {
+				[`sha256sum '${existingPath}'`]: {
 					stdout: `${REMOTE_SHA_DIFFERENT}  ${existingPath}\n`,
 					stderr: "",
 					exitCode: 0,
