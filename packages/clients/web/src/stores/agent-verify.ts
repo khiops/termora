@@ -1,6 +1,6 @@
 
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { AgentBinaryVerifyMessage } from "@nexterm/shared";
 import type { IWsClient } from "../services/ws-client.js";
 
@@ -14,16 +14,19 @@ import type { IWsClient } from "../services/ws-client.js";
 export interface AgentVerifyRequest extends AgentBinaryVerifyMessage {}
 
 export const useAgentVerifyStore = defineStore("agentVerify", () => {
-	const pendingPrompt = ref<AgentVerifyRequest | null>(null);
+	const pendingPrompts = ref<AgentVerifyRequest[]>([]);
 	const deployError = ref<{ message: string; hostId?: string } | null>(null);
 	let _wsClient: IWsClient | null = null;
+
+	// Current prompt is always the first in the queue
+	const currentPrompt = computed(() => pendingPrompts.value[0] ?? null);
 
 	function setWsClient(client: IWsClient): void {
 		_wsClient = client;
 	}
 
 	function handleAgentVerify(msg: AgentBinaryVerifyMessage): void {
-		pendingPrompt.value = { ...msg };
+		pendingPrompts.value = [...pendingPrompts.value, { ...msg }];
 	}
 
 	function handleDeployError(message: string, hostId?: string): void {
@@ -35,14 +38,15 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 	}
 
 	function respond(action: "trust_permanent" | "trust_once" | "reject"): void {
-		const req = pendingPrompt.value;
+		const req = pendingPrompts.value[0];
 		if (!req) return;
 		_wsClient?.send({
 			type: "AGENT_BINARY_VERIFY_RESPONSE",
 			promptId: req.promptId,
 			action,
 		});
-		pendingPrompt.value = null;
+		// Remove the first item from the queue — next one shows automatically
+		pendingPrompts.value = pendingPrompts.value.slice(1);
 	}
 
 	function trustPermanently(): void {
@@ -58,11 +62,11 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 	}
 
 	function dismiss(): void {
-		pendingPrompt.value = null;
+		pendingPrompts.value = pendingPrompts.value.slice(1);
 	}
 
 	return {
-		pendingPrompt,
+		currentPrompt,
 		deployError,
 		setWsClient,
 		handleAgentVerify,

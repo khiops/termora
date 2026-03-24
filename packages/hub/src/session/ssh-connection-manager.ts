@@ -22,8 +22,8 @@ import type { AgentConnectionManager } from "./agent-connection-manager.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
-import { type BinaryVerifyPromptFn } from "./agent-deployer.js";
-import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
+import { getBinaryCacheDir, type BinaryVerifyPromptFn } from "./agent-deployer.js";
+import { type AuthPromptFn, type SshAgentDeployOptions, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
@@ -197,7 +197,33 @@ export class SshConnectionManager {
 			}
 
 			try {
-				const sshAgent = new SshAgent(host);
+				const binaryCache = getBinaryCacheDir();
+				const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
+				const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
+				const sshHostname = host.sshHost?.includes("@")
+					? (host.sshHost.split("@")[1] ?? host.sshHost)
+					: (host.sshHost ?? host.label);
+
+				const deployOpts: SshAgentDeployOptions = {
+					binaryCache,
+					hostname: sshHostname,
+					...(pinnedSha256 != null ? { pinnedSha256 } : {}),
+					...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
+					onOsDetected: (hid, os, arch) => {
+						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
+					},
+					// No promptBinaryVerify — reconnect is non-interactive
+					// If binary is untrusted, deploy will throw AGENT_BINARY_UNTRUSTED
+					// and reconnect will retry or give up (existing retry logic)
+					onAgentPinned: (hid, sha256) => {
+						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
+					},
+					onAgentTrustOnce: (hid, sha256) => {
+						this.ctx.trustedAgentSha256.set(hid, sha256);
+					},
+				};
+
+				const sshAgent = new SshAgent(host, undefined, deployOpts);
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
 				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostId);
 				await sshAgent.start(storedFp, sessionFp);

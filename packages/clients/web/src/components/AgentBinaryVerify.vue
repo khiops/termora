@@ -80,7 +80,7 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { useAgentVerifyStore } from "../stores/agent-verify.js";
 
 const store = useAgentVerifyStore();
-const prompt = computed(() => store.pendingPrompt);
+const prompt = computed(() => store.currentPrompt);
 
 const copiedOld = ref(false);
 const copiedNew = ref(false);
@@ -90,7 +90,7 @@ let deadline = 0;
 let interval: ReturnType<typeof setInterval> | null = null;
 
 watch(
-	() => store.pendingPrompt,
+	() => store.currentPrompt,
 	(prompt) => {
 		if (prompt) {
 			deadline = Date.now() + TIMEOUT_MS;
