@@ -197,14 +197,14 @@ describe("checkRemoteAgent", () => {
 		const client = makeMockClient({
 			"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 			"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x ~/.local/bin/nexterm-agent && echo ok": {
-				stdout: "ok",
+			"test -x $HOME/.local/bin/nexterm-agent && echo $HOME/.local/bin/nexterm-agent": {
+				stdout: "/home/user/.local/bin/nexterm-agent\n",
 				stderr: "",
 				exitCode: 0,
 			},
 		});
 		const result = await checkRemoteAgent(client);
-		expect(result).toBe("~/.local/bin/nexterm-agent");
+		expect(result).toBe("/home/user/.local/bin/nexterm-agent");
 	});
 
 	it("returns null when agent is not found anywhere", async () => {

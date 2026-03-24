@@ -93,6 +93,8 @@ export const useChannelsStore = defineStore("channels", () => {
 	const unreadChannels = ref<Set<string>>(new Set());
 
 	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
+	/** Channel IDs from the last STATE_SYNC — used to mark absent channels as dead after fetchChannels. */
+	const lastSyncIds = ref<Set<string> | null>(null);
 	const pendingStatuses = ref<Map<string, { status: Channel["status"]; exitCode?: number }>>(
 		new Map(),
 	);
@@ -226,6 +228,21 @@ export const useChannelsStore = defineStore("channels", () => {
 					channels.value = merged;
 				}
 			}
+			// Mark channels absent from last STATE_SYNC as dead (hub restarted, lost track)
+			if (lastSyncIds.value !== null) {
+				const syncIds = lastSyncIds.value;
+				let deadMarked = false;
+				channels.value = channels.value.map((ch) => {
+					if (ch.status !== "dead" && !syncIds.has(ch.id)) {
+						deadMarked = true;
+						return { ...ch, status: "dead" as const };
+					}
+					return ch;
+				});
+				if (deadMarked) {
+					lastSyncIds.value = null;
+				}
+			}
 			// Clear selection if the previously selected channel is no longer
 			// present (e.g. host switched)
 			if (selectedChannelId.value !== null) {
@@ -352,6 +369,10 @@ export const useChannelsStore = defineStore("channels", () => {
 			exitCode?: number;
 		}>,
 	): void {
+		// Remember which channels the hub knows about — used after fetchChannels
+		// to mark unknown channels as dead.
+		lastSyncIds.value = new Set(syncChannels.map((s) => s.channelId));
+
 		if (channels.value.length === 0) {
 			// Channels not loaded yet — buffer all
 			const next = new Map(pendingStatuses.value);
@@ -364,7 +385,10 @@ export const useChannelsStore = defineStore("channels", () => {
 			pendingStatuses.value = next;
 			return;
 		}
-		// Channels loaded — apply directly
+		// Channels loaded — apply directly.
+		// Channels present in store but ABSENT from STATE_SYNC are dead
+		// (hub restarted, lost track of them).
+		const syncIds = new Set(syncChannels.map((s) => s.channelId));
 		let changed = false;
 		const updated = channels.value.map((ch) => {
 			const sc = syncChannels.find((s) => s.channelId === ch.id);
@@ -375,6 +399,11 @@ export const useChannelsStore = defineStore("channels", () => {
 					status: sc.status,
 					...(sc.exitCode !== undefined && { exitCode: sc.exitCode }),
 				};
+			}
+			if (!sc && ch.status !== "dead") {
+				// Channel not in STATE_SYNC — hub doesn't know about it anymore
+				changed = true;
+				return { ...ch, status: "dead" as const };
 			}
 			return ch;
 		});
