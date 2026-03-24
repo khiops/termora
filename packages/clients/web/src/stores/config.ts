@@ -16,6 +16,16 @@ import { ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "./auth.js";
 
+// ─── Profile change event bus ─────────────────────────────────────────────────
+
+export type ProfileChangeEvent = {
+	scope: "global" | "host" | "channel";
+	hostId?: string;
+	channelId?: string;
+};
+
+type ProfileChangeListener = (event: ProfileChangeEvent) => void;
+
 /**
  * Inject @font-face rules into the document head so the browser
  * can resolve custom font families referenced in the terminal profile.
@@ -82,6 +92,20 @@ export const useConfigStore = defineStore("config", () => {
 	const loaded = ref(false);
 	const uiConfig = ref<UiConfig>({ onChannelDead: "readonly" });
 
+	// ─── Profile change event bus ─────────────────────────────────────────
+	const profileChangeListeners = new Set<ProfileChangeListener>();
+
+	function onProfileChange(listener: ProfileChangeListener): () => void {
+		profileChangeListeners.add(listener);
+		return () => profileChangeListeners.delete(listener);
+	}
+
+	function emitProfileChange(event: ProfileChangeEvent): void {
+		for (const listener of profileChangeListeners) {
+			listener(event);
+		}
+	}
+
 	/**
 	 * Load fonts from the hub (no auth needed).
 	 * Call early — before terminals are created — so @font-face rules
@@ -113,8 +137,9 @@ export const useConfigStore = defineStore("config", () => {
 	}
 
 	/**
-	 * Load the resolved terminal profile from the hub (requires auth).
+	 * Load the global resolved terminal profile from the hub (requires auth).
 	 * Call after authentication is established.
+	 * Per-terminal resolution is handled by useResolvedProfile composable.
 	 */
 	async function loadProfile(): Promise<void> {
 		try {
@@ -157,5 +182,7 @@ export const useConfigStore = defineStore("config", () => {
 		loadFonts,
 		loadProfile,
 		loadUiConfig,
+		onProfileChange,
+		emitProfileChange,
 	};
 });

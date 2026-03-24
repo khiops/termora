@@ -101,6 +101,7 @@
 <script setup lang="ts">
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
+import { useResolvedProfile } from "../composables/useResolvedProfile.js";
 import { useTabTitle } from "../composables/useTabTitle.js";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
@@ -184,10 +185,15 @@ const hostThemeName = (() => {
 	}
 })();
 
+const { profile: resolvedProfile } = useResolvedProfile(
+	computed(() => props.hostId ?? undefined),
+	computed(() => props.channelId ?? undefined),
+);
+
 const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
-	configStore.profile,
+	resolvedProfile.value,
 	hostThemeName,
 );
 
@@ -350,7 +356,7 @@ onMounted(async () => {
 				await reattachChannel(props.channelId);
 			}
 			ready.value = true;
-			applyProfile(configStore.profile);
+			applyProfile(resolvedProfile.value);
 		}
 	} catch (err) {
 		error.value = err instanceof Error ? err.message : String(err);
@@ -395,15 +401,12 @@ watch(
 	},
 );
 
-// Re-apply profile when config store updates (covers initial load + reconnect reload).
-// loadProfile() runs async — terminal may already be initialized with DEFAULT_PROFILE.
-watch(
-	() => configStore.profile,
-	(p) => {
-		applyProfile(p);
-	},
-	{ deep: true },
-);
+// Re-apply profile when the per-terminal resolved profile updates.
+// useResolvedProfile fetches /api/config/resolved?host_id=X&channel_id=Y and
+// re-fetches on relevant ProfileChangeEvents so each terminal reacts to its own overrides.
+watch(resolvedProfile, (p) => {
+	applyProfile(p);
+}, { deep: true });
 
 onUnmounted(() => {
 	dispose();
