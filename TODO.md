@@ -63,7 +63,7 @@
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
 - [ ] 🔧 [Hub] `initSync()` deprecation warning — pass `{ module }` object to toml-edit-js — Priority: L
-- [ ] 💡 [Hub+Web] SSH key path file picker — server-side file browser API (GET /api/files?dir=~/.ssh) — Priority: M
+- [x] ✅ [Hub+Web] SSH key path file picker — Browse modal in HostModal + GET/POST/DELETE /api/ssh-keys (2026-03-24)
 - [ ] 💡 [Hub+Web] Host icon image upload + upload security bundle (MIME magic-byte validation, disk quota, image bomb detection) — Priority: M
 - [ ] 💡 [Web] Keybindings editor with conflict detection — Priority: M
 - [ ] 💡 [Web] Settings panel search/filter (VS Code style) — Priority: M
@@ -77,6 +77,9 @@
 - [ ] 🔧 [Hub] SessionManager: flip `if (agent != null)` guard to positive form for readability (review F-003) — Priority: L
 - [ ] 💡 [Docs] CORS: document that tauri://localhost custom port needs manual cors_origins entry (review F-004) — Priority: L
 - [ ] 🔧 [Hub] SSH reconnect: pass auth callback to SshAgent during reconnect (review F-005) — Priority: M
+- [ ] 💡 [Hub+Web] SSH passphrase "remember for session" — cache decrypted key in memory per session, checkbox in AUTH_PROMPT modal — Priority: M
+- [ ] 💡 [Hub] Remote agent auto-deploy — upload agent binary via SSH/SFTP on first connect to remote host — Priority: H
+- [ ] 🐛 [Agent-RS] BELL WS message not sent for WSL shells — contains_bell heuristic may miss BEL in some contexts — Priority: L
 
 ## Tier 2 — Quick Wins (batchable)
 
