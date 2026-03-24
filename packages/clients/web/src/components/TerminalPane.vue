@@ -167,6 +167,7 @@ const sessionStore = useSessionStore();
 const channelsStore = useChannelsStore();
 const writeLockStore = useWriteLockStore();
 const configStore = useConfigStore();
+const notificationStore = useNotificationStore();
 const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
@@ -360,6 +361,18 @@ onMounted(async () => {
 			applyProfile(resolvedProfile.value);
 			// Register xterm.js BEL handler — fires on \x07 from PTY output
 			terminal.value?.onBell(() => {
+				// Increment bell badge (agent BELL WS message not reliable for all shells)
+				if (resolvedProfile.value.bellBadge !== false) {
+					notificationStore.incrementBellCount(props.channelId);
+					// Auto-clear badge after 1s if this is the active channel
+					if (props.channelId === channelsStore.selectedChannelId) {
+						setTimeout(() => {
+							if (props.channelId === channelsStore.selectedChannelId) {
+								notificationStore.clearBellAndActivity(props.channelId);
+							}
+						}, 1000);
+					}
+				}
 				const p = resolvedProfile.value;
 				const sound = p.bellSound;
 				// Backward compat: boolean true → "system", false/undefined → "mute"

@@ -12,6 +12,7 @@ export interface TerminalProfile {
 	scrollback?: number;
 	bellSound?: BellSound | boolean;
 	bellCustomFile?: string;
+	bellBadge?: boolean;
 	/** Show search match markers in the scrollbar overview ruler (default: true). */
 	scrollbarMarkers?: boolean;
 	wallpaper?: string;

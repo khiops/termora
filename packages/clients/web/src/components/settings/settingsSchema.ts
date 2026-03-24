@@ -113,6 +113,15 @@ export const settingsSchema: SettingDefinition[] = [
 		description: "Audio file name in sounds directory (.wav, .mp3, .ogg)",
 		showWhen: { key: "bellSound", section: "terminal", value: "custom" },
 	},
+	{
+		key: "bellBadge",
+		label: "Bell Badge",
+		type: "toggle",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "Show notification badge on tab when terminal receives BEL",
+	},
 
 	// ─── Terminal category — title settings (global only) ──────────────
 	{
