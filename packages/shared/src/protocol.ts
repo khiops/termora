@@ -157,6 +157,7 @@ export interface ErrorMessage {
 	code: string;
 	message: string;
 	channelId?: string;
+	hostId?: string;
 }
 
 /** Agent → Hub (daemon mode): metadata for each alive channel on hub connect/reconnect */

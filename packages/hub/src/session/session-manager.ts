@@ -343,6 +343,7 @@ export class SessionManager {
 								err.code === "AGENT_NOT_AVAILABLE"
 									? `Remote agent not available on ${host.sshHost ?? host.label}`
 									: err.message,
+							hostId,
 						} satisfies ErrorMessage);
 						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
 						return null;
@@ -389,6 +390,7 @@ export class SessionManager {
 										retryErr.code === "AGENT_NOT_AVAILABLE"
 											? `Remote agent not available on ${host.sshHost ?? host.label}`
 											: retryErr.message,
+									hostId,
 								} satisfies ErrorMessage);
 							} else {
 								client.send({

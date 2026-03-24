@@ -15,7 +15,7 @@ export interface AgentVerifyRequest extends AgentBinaryVerifyMessage {}
 
 export const useAgentVerifyStore = defineStore("agentVerify", () => {
 	const pendingPrompt = ref<AgentVerifyRequest | null>(null);
-	const deployError = ref<{ message: string } | null>(null);
+	const deployError = ref<{ message: string; hostId?: string } | null>(null);
 	let _wsClient: IWsClient | null = null;
 
 	function setWsClient(client: IWsClient): void {
@@ -26,8 +26,8 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		pendingPrompt.value = { ...msg };
 	}
 
-	function handleDeployError(message: string): void {
-		deployError.value = { message };
+	function handleDeployError(message: string, hostId?: string): void {
+		deployError.value = { message, ...(hostId !== undefined ? { hostId } : {}) };
 	}
 
 	function clearDeployError(): void {

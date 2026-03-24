@@ -243,7 +243,7 @@ export const useSessionStore = defineStore("session", () => {
 		wsClient.on("ERROR", (msg) => {
 			if (msg.type === "ERROR") {
 				if (msg.code === "AGENT_NOT_AVAILABLE") {
-					agentVerifyStore.handleDeployError(msg.message);
+					agentVerifyStore.handleDeployError(msg.message, msg.hostId);
 					return;
 				}
 				if (msg.code === "AGENT_UPDATED") {
