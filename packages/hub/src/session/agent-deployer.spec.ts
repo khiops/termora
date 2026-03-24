@@ -9,6 +9,8 @@ import {
 	deployAgentIfNeeded,
 	detectRemoteOsArch,
 	getBinaryCacheDir,
+	getLocalSha256,
+	getRemoteSha256,
 	uploadAgentBinary,
 } from "./agent-deployer.js";
 
@@ -450,5 +452,77 @@ describe("getBinaryCacheDir", () => {
 		} finally {
 			if (orig !== undefined) process.env.XDG_STATE_HOME = orig;
 		}
+	});
+});
+
+// ---------- getRemoteSha256 --------------------------------------------------
+
+describe("getRemoteSha256", () => {
+	it("parses sha256sum output on Linux", async () => {
+		const hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+		const client = makeMockClient({
+			"sha256sum /usr/local/bin/nexterm-agent": {
+				stdout: `${hash}  /usr/local/bin/nexterm-agent\n`,
+				stderr: "",
+				exitCode: 0,
+			},
+		});
+		const result = await getRemoteSha256(client, "/usr/local/bin/nexterm-agent", "linux");
+		expect(result).toBe(hash);
+	});
+
+	it("parses PowerShell Get-FileHash output on Windows", async () => {
+		const hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+		const client = makeMockClient({
+			"powershell -c": {
+				stdout: `${hash}\n`,
+				stderr: "",
+				exitCode: 0,
+			},
+		});
+		const result = await getRemoteSha256(
+			client,
+			"C:\\nexterm\\nexterm-agent.exe",
+			"windows",
+		);
+		expect(result).toBe(hash);
+	});
+
+	it("returns null when command exits with non-zero", async () => {
+		const client = makeMockClient({
+			"sha256sum /missing/path": { stdout: "", stderr: "No such file", exitCode: 1 },
+		});
+		const result = await getRemoteSha256(client, "/missing/path", "linux");
+		expect(result).toBeNull();
+	});
+
+	it("returns null when sshExec throws", async () => {
+		const throwingClient = {
+			exec: vi.fn((_cmd: string, cb: (err: Error) => void) => {
+				cb(new Error("Connection reset"));
+			}),
+			sftp: vi.fn(),
+		} as unknown as SshClient;
+		const result = await getRemoteSha256(throwingClient, "/some/path", "linux");
+		expect(result).toBeNull();
+	});
+});
+
+// ---------- getLocalSha256 ---------------------------------------------------
+
+describe("getLocalSha256", () => {
+	it("computes SHA256 of a file", () => {
+		const filePath = join(cacheDir, "test-file.bin");
+		writeFileSync(filePath, "hello nexterm");
+		// sha256("hello nexterm") = known value
+		const result = getLocalSha256(filePath);
+		expect(result).toMatch(/^[a-f0-9]{64}$/);
+		// Verify determinism: same content → same hash
+		expect(result).toBe(getLocalSha256(filePath));
+	});
+
+	it("returns null for missing file", () => {
+		const result = getLocalSha256("/nonexistent/path/to/file");
+		expect(result).toBeNull();
 	});
 });

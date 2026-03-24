@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostArch, HostOs } from "@nexterm/shared";
@@ -289,4 +290,45 @@ export function getBinaryCacheDir(): string {
 	}
 	const stateBase = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
 	return join(stateBase, "nexterm", "binaries");
+}
+
+/**
+ * Compute the SHA256 hash of a remote file by running sha256sum (Linux/macOS)
+ * or PowerShell's Get-FileHash (Windows) over SSH.
+ * Returns the lowercase hex digest, or null on failure.
+ */
+export async function getRemoteSha256(
+	client: SshClient,
+	remotePath: string,
+	os: HostOs,
+): Promise<string | null> {
+	try {
+		const escapedPath = os === "windows" ? remotePath.replace(/'/g, "''") : remotePath;
+		const cmd =
+			os === "windows"
+				? `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`
+				: `sha256sum ${remotePath}`;
+		const { stdout, exitCode } = await sshExec(client, cmd);
+		if (exitCode !== 0) return null;
+		const trimmed = stdout.trim();
+		// sha256sum: "hash  filename" — take first 64 hex chars
+		// PowerShell: just the hash on one line
+		const match = trimmed.match(/^([a-f0-9]{64})/i);
+		return match ? match[1].toLowerCase() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Compute the SHA256 hash of a local file.
+ * Returns the lowercase hex digest, or null if the file cannot be read.
+ */
+export function getLocalSha256(localPath: string): string | null {
+	try {
+		const data = readFileSync(localPath);
+		return createHash("sha256").update(data).digest("hex");
+	} catch {
+		return null;
+	}
 }
