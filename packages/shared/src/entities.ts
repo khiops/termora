@@ -83,6 +83,8 @@ export interface Host {
 	arch: HostArch | null;
 	/** SHA256:<base64> fingerprint of the trusted SSH host key (null = not yet seen) */
 	sshFingerprint?: string | null;
+	/** SHA256 of the pinned remote agent binary (null = not yet verified). */
+	agentSha256?: string | null;
 	createdAt: string; // ISO 8601
 	updatedAt: string;
 }

@@ -7,7 +7,7 @@
 // Wire format: snake_case (codec handles conversion at boundaries)
 // TypeScript interfaces: camelCase
 
-import type { ChannelStatus, SessionStatus } from "./entities.js";
+import type { ChannelStatus, HostArch, HostOs, SessionStatus } from "./entities.js";
 
 // ---------------------------------------------------------------------------
 // Shared sub-types
@@ -408,6 +408,29 @@ export interface HostVerifyResponseMessage {
 	promptId: string;
 }
 
+/** Hub → Client: prompt user to verify an unknown remote agent binary. */
+export interface AgentBinaryVerifyMessage {
+	type: "AGENT_BINARY_VERIFY";
+	promptId: string;
+	hostId: string;
+	hostname: string;
+	remotePath: string;
+	remoteSha256: string;
+	os: HostOs;
+	arch: HostArch;
+	/** true if SHA256 changed vs previously pinned value */
+	mismatch: boolean;
+	/** Previous pinned SHA256 (only when mismatch=true) */
+	pinnedSha256?: string;
+}
+
+/** Client → Hub: user's trust decision for an unknown remote agent binary. */
+export interface AgentBinaryVerifyResponseMessage {
+	type: "AGENT_BINARY_VERIFY_RESPONSE";
+	promptId: string;
+	action: "trust_permanent" | "trust_once" | "reject";
+}
+
 /** Hub → UI: request a secret from the user during SSH connection */
 export interface AuthPromptMessage {
 	type: "AUTH_PROMPT";
@@ -497,6 +520,7 @@ export type UiMessage =
 	| PingMessage
 	| HostVerifyResponseMessage
 	| AuthPromptResponseMessage
+	| AgentBinaryVerifyResponseMessage
 	| TestConnectMessage
 	| ErrorMessage;
 
@@ -524,6 +548,7 @@ export type HubToUiMessage =
 	| AuthPromptMessage
 	| TestConnectOkMessage
 	| TestConnectFailMessage
+	| AgentBinaryVerifyMessage
 	| ErrorMessage;
 
 /** Master union of every distinct protocol message type */
