@@ -60,7 +60,7 @@ export interface DeployResult {
 
 /** Common paths to check when which/where are not available */
 const COMMON_AGENT_PATHS_UNIX = [
-	"~/.local/bin/nexterm-agent",
+	"$HOME/.local/bin/nexterm-agent",
 	"/usr/local/bin/nexterm-agent",
 	"/usr/bin/nexterm-agent",
 	"/opt/nexterm/nexterm-agent",
