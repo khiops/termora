@@ -41,7 +41,9 @@ import { OutputChunker } from "./output-chunker.js";
 import type { SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
+import { getBinaryCacheDir, DeployError } from "./agent-deployer.js";
 import { SshAgent } from "./ssh-agent.js";
+import type { SshAgentDeployOptions } from "./ssh-agent.js";
 import { SshConnectionManager } from "./ssh-connection-manager.js";
 import { StateBroadcaster } from "./state-broadcaster.js";
 
@@ -289,7 +291,6 @@ export class SessionManager {
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
 				const promptAuth = this.sshMgr.buildPromptAuth(client);
-				const sshAgent = new SshAgent(host, promptAuth);
 
 				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
 				const sshHostname = host.sshHost?.includes("@")
@@ -299,9 +300,54 @@ export class SessionManager {
 				const hostKey = `${sshHostname}:${sshPort}`;
 				const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 
+				// Build deploy options for SSH hosts
+				const binaryCache = getBinaryCacheDir();
+				const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
+				const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
+
+				const deployOpts: SshAgentDeployOptions = {
+					binaryCache,
+					hostname: sshHostname,
+					...(pinnedSha256 != null ? { pinnedSha256 } : {}),
+					...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
+					onOsDetected: (hid, os, arch) => {
+						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
+					},
+					promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client),
+					onAgentPinned: (hid, sha256) => {
+						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
+					},
+					onAgentTrustOnce: (hid, sha256) => {
+						this.ctx.trustedAgentSha256.set(hid, sha256);
+					},
+					onAgentUpdated: (_hid) => {
+						this.broadcaster.broadcastToAllClients({
+							type: "ERROR",
+							code: "AGENT_UPDATED",
+							message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
+						} satisfies ErrorMessage);
+					},
+				};
+
+				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+
 				try {
 					await sshAgent.start(storedFingerprint, sessionTrustedFp);
 				} catch (err) {
+					// Handle deploy errors (user rejection, binary not available)
+					if (err instanceof DeployError) {
+						client.send({
+							type: "ERROR",
+							code: err.code,
+							message:
+								err.code === "AGENT_NOT_AVAILABLE"
+									? `Remote agent not available on ${host.sshHost ?? host.label}`
+									: err.message,
+						} satisfies ErrorMessage);
+						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						return null;
+					}
+
 					const kv = sshAgent.lastKeyVerification;
 					if (kv.tofu || kv.mismatch) {
 						const action = await this.sshMgr.promptHostKeyVerify(
@@ -327,7 +373,7 @@ export class SessionManager {
 						} else {
 							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
 						}
-						const retryAgent = new SshAgent(host, promptAuth);
+						const retryAgent = new SshAgent(host, promptAuth, deployOpts);
 						try {
 							await retryAgent.start(
 								action === "trust_permanent" ? retryFp : null,
@@ -335,11 +381,22 @@ export class SessionManager {
 							);
 						} catch (retryErr) {
 							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
-							client.send({
-								type: "ERROR",
-								code: "SSH_CONNECT_FAILED",
-								message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
-							} satisfies ErrorMessage);
+							if (retryErr instanceof DeployError) {
+								client.send({
+									type: "ERROR",
+									code: retryErr.code,
+									message:
+										retryErr.code === "AGENT_NOT_AVAILABLE"
+											? `Remote agent not available on ${host.sshHost ?? host.label}`
+											: retryErr.message,
+								} satisfies ErrorMessage);
+							} else {
+								client.send({
+									type: "ERROR",
+									code: "SSH_CONNECT_FAILED",
+									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+								} satisfies ErrorMessage);
+							}
 							return null;
 						}
 						this.broadcaster.updateSessionStatus(hostId, session.id, "active");
