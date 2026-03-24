@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdirSync, openSync } from "node:fs";
 import { access, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -117,9 +119,16 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		? [agentPath, daemonArgs]
 		: [process.execPath, [agentPath, ...daemonArgs]];
 
+	const stateDir = process.platform === "win32"
+		? join(process.env.LOCALAPPDATA ?? homedir(), "nexterm")
+		: join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+	mkdirSync(stateDir, { recursive: true });
+	const logPath = join(stateDir, "agent-daemon.log");
+	const logFd = openSync(logPath, "a");
+
 	const child = spawn(cmd, args, {
 		detached: true,
-		stdio: "ignore",
+		stdio: ["ignore", logFd, logFd],
 		windowsHide: true,
 	});
 
