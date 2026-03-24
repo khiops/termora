@@ -7,7 +7,7 @@ import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
-import { type BinaryVerifyPromptFn, deployAgentIfNeeded } from "./agent-deployer.js";
+import { DeployError, type BinaryVerifyPromptFn, deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -338,10 +338,29 @@ export class SshAgent extends AgentConnection {
 					if (this.deployOptions) {
 						// Auto-deploy is best-effort: if it fails, we still try to run the agent
 						// (the user may have installed it manually in a non-standard path).
+						// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
 						deployAgentIfNeeded(client, this.host, {
 							binaryCache: this.deployOptions.binaryCache,
-							hostname: hostname,
+							hostname: this.deployOptions.hostname ?? hostname,
 							hostId: this.host.id,
+							...(this.deployOptions.pinnedSha256 !== undefined
+								? { pinnedSha256: this.deployOptions.pinnedSha256 }
+								: {}),
+							...(this.deployOptions.sessionTrustedSha256 !== undefined
+								? { sessionTrustedSha256: this.deployOptions.sessionTrustedSha256 }
+								: {}),
+							...(this.deployOptions.promptBinaryVerify !== undefined
+								? { promptBinaryVerify: this.deployOptions.promptBinaryVerify }
+								: {}),
+							...(this.deployOptions.onAgentPinned !== undefined
+								? { onAgentPinned: this.deployOptions.onAgentPinned }
+								: {}),
+							...(this.deployOptions.onAgentTrustOnce !== undefined
+								? { onAgentTrustOnce: this.deployOptions.onAgentTrustOnce }
+								: {}),
+							...(this.deployOptions.onAgentUpdated !== undefined
+								? { onAgentUpdated: this.deployOptions.onAgentUpdated }
+								: {}),
 						})
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
@@ -351,8 +370,15 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
+								// User-initiated rejections must propagate — no fallback
+								if (deployErr instanceof DeployError) {
+									rejectOnce(deployErr);
+									return;
+								}
+								// Infrastructure failures: fall back to nexterm-agent --stdio
+								const msg = deployErr instanceof Error ? deployErr.message : String(deployErr);
 								process.stderr.write(
-									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`,
+									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${msg}. Trying nexterm-agent --stdio anyway.\n`,
 								);
 								runAgent("nexterm-agent --stdio");
 							});
