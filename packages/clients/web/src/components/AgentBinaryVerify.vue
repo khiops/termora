@@ -85,21 +85,25 @@ const prompt = computed(() => store.pendingPrompt);
 const copiedOld = ref(false);
 const copiedNew = ref(false);
 const remaining = ref(30);
+const TIMEOUT_MS = 30_000;
+let deadline = 0;
 let interval: ReturnType<typeof setInterval> | null = null;
 
 watch(
 	() => store.pendingPrompt,
-	(p) => {
-		if (p) {
+	(prompt) => {
+		if (prompt) {
+			deadline = Date.now() + TIMEOUT_MS;
 			remaining.value = 30;
 			interval = setInterval(() => {
-				remaining.value--;
-				if (remaining.value <= 0) {
+				const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+				remaining.value = left;
+				if (left <= 0) {
 					clearInterval(interval!);
 					interval = null;
 					store.reject();
 				}
-			}, 1000);
+			}, 250);
 		} else if (interval) {
 			clearInterval(interval);
 			interval = null;

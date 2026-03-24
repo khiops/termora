@@ -251,6 +251,10 @@ export const useSessionStore = defineStore("session", () => {
 					// Intentionally not surfaced as a generic error.
 					return;
 				}
+				if (msg.code === "AGENT_BINARY_REJECTED") {
+					// User chose to reject the binary — no toast needed.
+					return;
+				}
 			}
 		});
 	}

@@ -7,7 +7,7 @@ import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
-import { DeployError, type BinaryVerifyPromptFn, deployAgentIfNeeded } from "./agent-deployer.js";
+import { DeployError, type BinaryVerifyPromptFn, type DeployOptions, deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -152,6 +152,28 @@ export interface SshAgentDeployOptions {
 	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
 	/** Called when remote agent was re-uploaded (SHA256 mismatch with local cache). */
 	onAgentUpdated?: (hostId: string) => void;
+}
+
+/**
+ * Map SshAgentDeployOptions + resolved hostname to the DeployOptions shape
+ * expected by deployAgentIfNeeded.
+ */
+function toDeployOptions(
+	opts: SshAgentDeployOptions,
+	host: Host,
+	resolvedHostname: string,
+): DeployOptions {
+	return {
+		binaryCache: opts.binaryCache,
+		hostname: opts.hostname ?? resolvedHostname,
+		hostId: host.id,
+		...(opts.pinnedSha256 != null ? { pinnedSha256: opts.pinnedSha256 } : {}),
+		...(opts.sessionTrustedSha256 != null ? { sessionTrustedSha256: opts.sessionTrustedSha256 } : {}),
+		...(opts.promptBinaryVerify !== undefined ? { promptBinaryVerify: opts.promptBinaryVerify } : {}),
+		...(opts.onAgentPinned !== undefined ? { onAgentPinned: opts.onAgentPinned } : {}),
+		...(opts.onAgentTrustOnce !== undefined ? { onAgentTrustOnce: opts.onAgentTrustOnce } : {}),
+		...(opts.onAgentUpdated !== undefined ? { onAgentUpdated: opts.onAgentUpdated } : {}),
+	};
 }
 
 export class SshAgent extends AgentConnection {
@@ -339,29 +361,7 @@ export class SshAgent extends AgentConnection {
 						// Auto-deploy is best-effort: if it fails, we still try to run the agent
 						// (the user may have installed it manually in a non-standard path).
 						// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
-						deployAgentIfNeeded(client, this.host, {
-							binaryCache: this.deployOptions.binaryCache,
-							hostname: this.deployOptions.hostname ?? hostname,
-							hostId: this.host.id,
-							...(this.deployOptions.pinnedSha256 !== undefined
-								? { pinnedSha256: this.deployOptions.pinnedSha256 }
-								: {}),
-							...(this.deployOptions.sessionTrustedSha256 !== undefined
-								? { sessionTrustedSha256: this.deployOptions.sessionTrustedSha256 }
-								: {}),
-							...(this.deployOptions.promptBinaryVerify !== undefined
-								? { promptBinaryVerify: this.deployOptions.promptBinaryVerify }
-								: {}),
-							...(this.deployOptions.onAgentPinned !== undefined
-								? { onAgentPinned: this.deployOptions.onAgentPinned }
-								: {}),
-							...(this.deployOptions.onAgentTrustOnce !== undefined
-								? { onAgentTrustOnce: this.deployOptions.onAgentTrustOnce }
-								: {}),
-							...(this.deployOptions.onAgentUpdated !== undefined
-								? { onAgentUpdated: this.deployOptions.onAgentUpdated }
-								: {}),
-						})
+						deployAgentIfNeeded(client, this.host, toDeployOptions(this.deployOptions, this.host, hostname))
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
 								if (result.os && result.arch) {

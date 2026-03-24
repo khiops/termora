@@ -461,7 +461,7 @@ export async function getRemoteSha256(
 		const cmd =
 			os === "windows"
 				? `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`
-				: `sha256sum ${remotePath}`;
+				: `sha256sum "${remotePath}"`;
 		const { stdout, exitCode } = await sshExec(client, cmd);
 		if (exitCode !== 0) return null;
 		const trimmed = stdout.trim();
