@@ -18,6 +18,7 @@ import { registerPairRoutes } from "./api/pair.js";
 import { registerSessionRoutes } from "./api/sessions.js";
 import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
+import { registerSshKeyRoutes } from "./api/ssh-keys.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
 import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH } from "./build-version.js";
@@ -305,6 +306,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerConfigRoutes(server, metaDal, configResolver, sessionManager);
 		registerFontRoutes(server, configDir);
 		registerWallpaperRoutes(server, configDir);
+		registerSshKeyRoutes(server);
 		const themeManager = new ThemeManager(configDir);
 		await themeManager.init();
 		registerThemeRoutes(server, themeManager);

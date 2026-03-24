@@ -235,3 +235,16 @@ export interface LogConfig {
 	maxAgeDays: number;
 	maxSizeMb: number;
 }
+
+
+export interface SshKeyEntry {
+	name: string;
+	type: "directory" | "key";
+	items?: number;
+	algorithm?: string;
+	bits?: number;
+	fingerprint?: string;
+	encrypted?: boolean;
+	mtime?: string;
+}
+
