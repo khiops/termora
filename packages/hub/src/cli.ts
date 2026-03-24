@@ -426,7 +426,15 @@ async function cmdHostRemove(args: ParsedArgs): Promise<void> {
 		process.exit(1);
 	}
 
-	await apiRequest("DELETE", `/api/hosts/${encodeURIComponent(args.label)}`);
+	// Resolve label → id (API uses ULID, not label)
+	const hosts = (await apiRequest("GET", "/api/hosts")) as Array<Record<string, unknown>>;
+	const match = hosts.find((h) => h.label === args.label);
+	if (!match?.id) {
+		console.error(`Host "${args.label}" not found.`);
+		process.exit(1);
+	}
+
+	await apiRequest("DELETE", `/api/hosts/${encodeURIComponent(String(match.id))}`);
 	console.log(`Host "${args.label}" removed.`);
 }
 
