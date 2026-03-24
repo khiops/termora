@@ -409,6 +409,39 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		expect(sftp.fastPut).toHaveBeenCalled();
 	});
 
+	it("2b. SHA256 mismatch (local cache) → re-upload, onAgentPinned called with local SHA", async () => {
+		const binaryName = "nexterm-agent-linux-x64";
+		writeFileSync(join(cacheDir, binaryName), "local-binary");
+		const localSha = getLocalSha256(join(cacheDir, binaryName));
+		if (!localSha) throw new Error("getLocalSha256 returned null");
+
+		const sftp = makeMockSftp();
+		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
+			cb(undefined, sftp);
+		};
+		const client = makeMockClient(
+			{
+				"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
+				[`sha256sum '${existingPath}'`]: {
+					stdout: `${REMOTE_SHA_DIFFERENT}  ${existingPath}\n`,
+					stderr: "",
+					exitCode: 0,
+				},
+			},
+			sftpImpl,
+		);
+
+		const onAgentPinned = vi.fn();
+		await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({ onAgentPinned }),
+		);
+
+		// Pin must be updated to the local (trusted) binary's hash after re-upload
+		expect(onAgentPinned).toHaveBeenCalledWith("host-1", localSha);
+	});
+
 	it("3. remoteSha null + local binary → re-upload (precaution)", async () => {
 		const binaryName = "nexterm-agent-linux-x64";
 		writeFileSync(join(cacheDir, binaryName), "local-binary");
@@ -728,6 +761,19 @@ describe("getRemoteSha256", () => {
 			},
 		});
 		const result = await getRemoteSha256(client, "/usr/local/bin/nexterm-agent", "linux");
+		expect(result).toBe(hash);
+	});
+
+	it("parses shasum -a 256 output on macOS (darwin)", async () => {
+		const hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+		const client = makeMockClient({
+			"shasum -a 256 '/usr/local/bin/nexterm-agent'": {
+				stdout: `${hash}  /usr/local/bin/nexterm-agent\n`,
+				stderr: "",
+				exitCode: 0,
+			},
+		});
+		const result = await getRemoteSha256(client, "/usr/local/bin/nexterm-agent", "darwin");
 		expect(result).toBe(hash);
 	});
 

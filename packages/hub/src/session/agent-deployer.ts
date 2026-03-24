@@ -340,6 +340,11 @@ export async function deployAgentIfNeeded(
 			// Mismatch (or remoteSha unavailable) — re-upload from trusted local copy
 			await uploadAgentBinary(client, localBinary, existingPath);
 			onAgentUpdated?.(hostId);
+			// Refresh the pin to the newly uploaded binary's hash so the next
+			// reconnect without local cache doesn't trigger another mismatch prompt.
+			if (localSha !== null) {
+				onAgentPinned?.(hostId, localSha);
+			}
 			return { deployed: true, remotePath: existingPath, os, arch };
 		}
 
@@ -461,10 +466,15 @@ export async function getRemoteSha256(
 			os === "windows"
 				? remotePath.replace(/'/g, "''")
 				: remotePath.replace(/'/g, "'\\''");
-		const cmd =
-			os === "windows"
-				? `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`
-				: `sha256sum '${escapedPath}'`;
+		let cmd: string;
+		if (os === "windows") {
+			cmd = `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`;
+		} else if (os === "darwin") {
+			// macOS ships shasum (not sha256sum); same output format: "hash  filename"
+			cmd = `shasum -a 256 '${escapedPath}'`;
+		} else {
+			cmd = `sha256sum '${escapedPath}'`;
+		}
 		const { stdout, exitCode } = await sshExec(client, cmd);
 		if (exitCode !== 0) return null;
 		const trimmed = stdout.trim();

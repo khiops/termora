@@ -267,23 +267,16 @@ export class SshAgent extends AgentConnection {
 
 		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>(
 			(resolve, reject) => {
-				const timeout = setTimeout(() => {
-					this.cleanup();
-					reject(new Error("Agent HELLO timeout"));
-				}, HELLO_TIMEOUT_MS);
-
 				let resolved = false;
 				const rejectOnce = (err: Error): void => {
 					if (resolved) return;
 					resolved = true;
-					clearTimeout(timeout);
 					reject(err);
 				};
 
 				const resolveOnce = (msg: HelloMessage): void => {
 					if (resolved) return;
 					resolved = true;
-					clearTimeout(timeout);
 					resolve({ hello: msg, keyVerification });
 				};
 
@@ -323,9 +316,18 @@ export class SshAgent extends AgentConnection {
 					if (connectConfig.passphrase) connectConfig.passphrase = "";
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
 					const runAgent = (agentPath: string): void => {
+						// Start HELLO timeout NOW — deploy phase is complete, agent is being exec'd.
+						// Timeout is intentionally NOT started earlier so that TOFU binary
+						// verification prompts (up to 30s) don't race against this 5s timer.
+						const helloTimeout = setTimeout(() => {
+							this.cleanup();
+							rejectOnce(new Error("Agent HELLO timeout"));
+						}, HELLO_TIMEOUT_MS);
+
 						// ssh2 Client — sends command over encrypted SSH channel to remote host
 						client.exec(agentPath, (err, stream) => {
 							if (err) {
+								clearTimeout(helloTimeout);
 								rejectOnce(err);
 								return;
 							}
@@ -338,6 +340,7 @@ export class SshAgent extends AgentConnection {
 							});
 
 							stream.on("close", () => {
+								clearTimeout(helloTimeout);
 								this.sendQueue.clear();
 								this.channel = null;
 								this.channelOpen = false;
@@ -352,6 +355,7 @@ export class SshAgent extends AgentConnection {
 
 							// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
 							this.once("ready", (msg: HelloMessage) => {
+								clearTimeout(helloTimeout);
 								resolveOnce(msg);
 							});
 						});

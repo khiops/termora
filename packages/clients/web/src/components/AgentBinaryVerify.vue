@@ -92,6 +92,13 @@ let interval: ReturnType<typeof setInterval> | null = null;
 watch(
 	() => store.currentPrompt,
 	(prompt) => {
+		// Always clear any previous interval first — handles the case where
+		// one prompt is immediately replaced by the next (promptA → promptB
+		// never goes through null, so the old interval would keep ticking).
+		if (interval) {
+			clearInterval(interval);
+			interval = null;
+		}
 		if (prompt) {
 			deadline = Date.now() + TIMEOUT_MS;
 			remaining.value = 30;
@@ -104,9 +111,6 @@ watch(
 					store.reject();
 				}
 			}, 250);
-		} else if (interval) {
-			clearInterval(interval);
-			interval = null;
 		}
 	},
 	{ immediate: true },
