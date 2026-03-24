@@ -782,3 +782,191 @@ describe("getLocalSha256", () => {
 		expect(result).toBeNull();
 	});
 });
+
+// ---------- deploy + verify integration ---------------------------------------
+
+describe("deploy + verify integration", () => {
+	it("deploys from cache, then skips on second connect (SHA256 match)", async () => {
+		// First connect: agent NOT found on remote, local binary exists → upload
+		const binaryName = "nexterm-agent-linux-x64";
+		const binaryContent = Buffer.from("fake-binary-content-for-integration");
+		const localBinaryPath = join(cacheDir, binaryName);
+		writeFileSync(localBinaryPath, binaryContent);
+
+		const sftp = makeMockSftp();
+		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
+			cb(undefined, sftp);
+		};
+		const clientFirst = makeMockClient(
+			{
+				"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
+				"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
+				"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				"echo $HOME": { stdout: "/home/user\n", stderr: "", exitCode: 0 },
+			},
+			sftpImpl,
+		);
+
+		const resultFirst = await deployAgentIfNeeded(
+			clientFirst,
+			{ os: "linux", arch: "x64" },
+			makeOptions(),
+		);
+
+		expect(resultFirst.deployed).toBe(true);
+		expect(resultFirst.remotePath).toBe("/home/user/.local/bin/nexterm-agent");
+		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
+
+		// Second connect: agent IS found at deployed path, SHA256 matches local cache
+		const deployedPath = resultFirst.remotePath;
+		const localSha = getLocalSha256(localBinaryPath);
+		if (!localSha) throw new Error("getLocalSha256 returned null");
+
+		const clientSecond = makeMockClient({
+			"which nexterm-agent": { stdout: `${deployedPath}\n`, stderr: "", exitCode: 0 },
+			[`sha256sum ${deployedPath}`]: {
+				stdout: `${localSha}  ${deployedPath}\n`,
+				stderr: "",
+				exitCode: 0,
+			},
+		});
+
+		const resultSecond = await deployAgentIfNeeded(
+			clientSecond,
+			{ os: "linux", arch: "x64" },
+			makeOptions(),
+		);
+
+		expect(resultSecond.deployed).toBe(false);
+		expect(resultSecond.remotePath).toBe(deployedPath);
+	});
+
+	it("re-uploads when remote SHA256 differs from local cache", async () => {
+		// Local binary exists; remote agent at existingPath has a different hash
+		const binaryName = "nexterm-agent-linux-x64";
+		writeFileSync(join(cacheDir, binaryName), "local-binary-content");
+
+		const sftp = makeMockSftp();
+		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
+			cb(undefined, sftp);
+		};
+		const existingPath = "/usr/local/bin/nexterm-agent";
+		const client = makeMockClient(
+			{
+				"which nexterm-agent": { stdout: `${existingPath}\n`, stderr: "", exitCode: 0 },
+				[`sha256sum ${existingPath}`]: {
+					stdout: `${REMOTE_SHA_DIFFERENT}  ${existingPath}\n`,
+					stderr: "",
+					exitCode: 0,
+				},
+			},
+			sftpImpl,
+		);
+
+		const onAgentUpdated = vi.fn();
+		const result = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({ onAgentUpdated }),
+		);
+
+		expect(result.deployed).toBe(true);
+		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
+		expect(onAgentUpdated).toHaveBeenCalledWith("host-1");
+	});
+
+	it("prompts user on first use (no pin, no cache), pins on trust_permanent", async () => {
+		// Remote agent found, no local binary, no pin — must prompt
+		const existingPath = "/usr/local/bin/nexterm-agent";
+		const client = makeAgentFoundClient(existingPath, REMOTE_SHA_DIFFERENT);
+
+		const onAgentPinned = vi.fn();
+		const promptBinaryVerify = vi.fn().mockResolvedValue("trust_permanent");
+
+		const result = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({ promptBinaryVerify, onAgentPinned }),
+		);
+
+		expect(promptBinaryVerify).toHaveBeenCalledWith(
+			"host-1",
+			"myhost.example.com",
+			existingPath,
+			REMOTE_SHA_DIFFERENT,
+			"linux",
+			"x64",
+			false, // mismatch=false — no prior pin
+			undefined,
+		);
+		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
+		expect(result.deployed).toBe(false);
+		expect(result.remotePath).toBe(existingPath);
+	});
+
+	it("skips prompt when session-trusted SHA matches remote", async () => {
+		// Remote agent found with hash REMOTE_SHA_DIFFERENT;
+		// sessionTrustedSha256 matches → no prompt needed
+		const existingPath = "/usr/local/bin/nexterm-agent";
+		const client = makeAgentFoundClient(existingPath, REMOTE_SHA_DIFFERENT);
+
+		// No promptBinaryVerify provided — would throw AGENT_BINARY_UNTRUSTED if reached
+		const result = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({ sessionTrustedSha256: REMOTE_SHA_DIFFERENT }),
+		);
+
+		expect(result.deployed).toBe(false);
+		expect(result.remotePath).toBe(existingPath);
+	});
+
+	it("prompts with mismatch=true when pinned SHA differs from remote", async () => {
+		// Remote agent exists with new hash; stored pin is the old LOCAL_SHA
+		const existingPath = "/usr/local/bin/nexterm-agent";
+		const client = makeAgentFoundClient(existingPath, REMOTE_SHA_DIFFERENT);
+
+		const onAgentPinned = vi.fn();
+		const promptBinaryVerify = vi.fn().mockResolvedValue("trust_permanent");
+
+		await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({
+				pinnedSha256: LOCAL_SHA, // old pin differs from REMOTE_SHA_DIFFERENT
+				promptBinaryVerify,
+				onAgentPinned,
+			}),
+		);
+
+		expect(promptBinaryVerify).toHaveBeenCalledWith(
+			"host-1",
+			"myhost.example.com",
+			existingPath,
+			REMOTE_SHA_DIFFERENT,
+			"linux",
+			"x64",
+			true, // mismatch=true — pin differs from remote
+			LOCAL_SHA,
+		);
+		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
+	});
+
+	it("throws AGENT_NOT_AVAILABLE when no agent on remote and no local binary", async () => {
+		// All remote lookups fail, cacheDir is empty — no binary to upload
+		const sftp = makeMockSftp();
+		const client = makeAgentNotFoundClient(sftp);
+
+		const error = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions(),
+		).catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(DeployError);
+		expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+	});
+});
