@@ -1453,7 +1453,7 @@ describe("SessionManager", () => {
 			expect(tracking?.count).toBe(1);
 		});
 
-		it("marks channel dead on SPAWN timeout during warm restart", async () => {
+		it("SSH channels are dead at startup — no warm restart attempted", async () => {
 			vi.useFakeTimers();
 			try {
 				const { MetaDAL } = await import("../storage/meta.js");
@@ -1475,7 +1475,7 @@ describe("SessionManager", () => {
 					shell: "/bin/sh",
 				});
 
-				// startup() restores the channel as orphan for SSH hosts
+				// startup() marks SSH channels dead immediately (no remote daemon)
 				await sm.startup();
 
 				const channelsMap = (
@@ -1483,55 +1483,11 @@ describe("SessionManager", () => {
 						channels: Map<string, { status: string }>;
 					}
 				).channels;
-				expect(channelsMap.get("timeout-ch-1")?.status).toBe("orphan");
+				expect(channelsMap.get("timeout-ch-1")?.status).toBe("dead");
 
-				// Now simulate SSH reconnect: create a non-responding mock agent
-				// that accepts SPAWN but never replies with SPAWN_OK or SPAWN_ERR
-				const silentAgent = {
-					connected: true,
-					send: vi.fn(),
-					start: vi.fn().mockResolvedValue(undefined),
-					close: vi.fn(),
-					on: vi.fn().mockReturnThis(),
-					off: vi.fn().mockReturnThis(),
-					once: vi.fn().mockReturnThis(),
-				};
-
-				// Manually wire _spawnChannelsForHost via the private method
-				const smAny = sm as unknown as {
-					_spawnChannelsForHost: (
-						hostId: string,
-						agent: unknown,
-						onOk: (id: string, ch: unknown) => void,
-						onErr: (id: string, ch: unknown) => void,
-					) => void;
-				};
-
-				let errChannelId: string | null = null;
-				smAny._spawnChannelsForHost(
-					host.id,
-					silentAgent,
-					() => {
-						/* not called */
-					},
-					(chId) => {
-						errChannelId = chId;
-					},
-				);
-
-				// Agent got the SPAWN but never replies
-				expect(silentAgent.send).toHaveBeenCalledTimes(1);
-				expect(errChannelId).toBeFalsy();
-
-				// Advance past the 10s SPAWN timeout
-				vi.advanceTimersByTime(10_001);
-
-				// onSpawnErr should have been called with the timed-out channel
-				expect(errChannelId).toBe("timeout-ch-1");
-				// Pending request should have been cleaned up (no per-channel listeners)
-				const pendingMap = (sm as unknown as { pendingRequests: Map<string, unknown> })
-					.pendingRequests;
-				expect(pendingMap.size).toBe(0);
+				// No agent should have been created for SSH hosts
+				const agentsMap = (sm as unknown as { agents: Map<string, unknown> }).agents;
+				expect(agentsMap.has(host.id)).toBe(false);
 			} finally {
 				vi.useRealTimers();
 			}
@@ -1700,9 +1656,9 @@ describe("SessionManager", () => {
 			const agentsMap = (sm as unknown as { agents: Map<string, unknown> }).agents;
 			expect(agentsMap.has(host.id)).toBe(false);
 
-			// Channel is in memory as orphan
+			// SSH channels are dead (PTYs don't survive SSH disconnect — no remote daemon)
 			const channelsMap = (sm as unknown as { channels: Map<string, { status: string }> }).channels;
-			expect(channelsMap.get("ssh-warm-ch-1")?.status).toBe("orphan");
+			expect(channelsMap.get("ssh-warm-ch-1")?.status).toBe("dead");
 		});
 	});
 

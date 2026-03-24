@@ -134,6 +134,16 @@ export class AgentConnectionManager {
 				} catch {
 					await this.warmRestartLocal(hostId, session.id);
 				}
+			} else {
+				// SSH hosts in stdio mode: PTYs don't survive SSH disconnect.
+				// Mark channels dead — orphan state is unreachable without a remote daemon.
+				// TODO: when remote agent daemon over UDS/SSH tunnel is implemented,
+				// attempt reconnect here instead (like local daemon).
+				for (const ch of channels) {
+					const chState = this.ctx.channels.get(ch.id);
+					if (chState) chState.status = "dead";
+					this.ctx.metaDal.updateChannelStatus(ch.id, "dead");
+				}
 			}
 		}
 	}
