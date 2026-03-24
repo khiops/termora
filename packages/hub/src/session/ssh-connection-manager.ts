@@ -43,6 +43,17 @@ export class SshConnectionManager {
 
 	buildPromptAuth(client: WsClient): AuthPromptFn {
 		return async (hostId, promptType, message) => {
+			// Cache hit: return cached passphrase without prompting the UI
+			if (promptType === "passphrase") {
+				const cached = this.ctx.passphraseCache.get(hostId);
+				if (cached) {
+					if (cached.expiresAt > Date.now()) {
+						return cached.secret;
+					}
+					// Expired — evict and fall through to prompt
+					this.ctx.passphraseCache.delete(hostId);
+				}
+			}
 			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
@@ -51,13 +62,25 @@ export class SshConnectionManager {
 		};
 	}
 
-	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
+	handleAuthPromptResponse(
+		clientId: string,
+		hostId: string,
+		secret: string | null,
+		rememberSession?: boolean,
+	): void {
 		const pending = this.ctx.pendingAuthPrompts.get(hostId);
 		if (!pending) return;
 		// SEC-003: only the client that triggered the prompt may respond
 		if (pending.clientId !== clientId) return;
 		if (pending.timer !== null) clearTimeout(pending.timer);
 		this.ctx.pendingAuthPrompts.delete(hostId);
+		// Opt-in passphrase caching (15 min TTL)
+		if (rememberSession === true && secret !== null) {
+			this.ctx.passphraseCache.set(hostId, {
+				secret,
+				expiresAt: Date.now() + 15 * 60 * 1000,
+			});
+		}
 		pending.resolve(secret);
 	}
 

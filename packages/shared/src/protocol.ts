@@ -445,6 +445,8 @@ export interface AuthPromptResponseMessage {
 	type: "AUTH_PROMPT_RESPONSE";
 	hostId: string;
 	secret: string | null; // null = user cancelled
+	/** Opt-in: cache secret in hub memory for this session (15 min TTL). */
+	rememberSession?: boolean;
 }
 
 /** UI → Hub: test SSH connectivity (with optional auth prompting) */

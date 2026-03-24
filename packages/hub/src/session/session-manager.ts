@@ -104,6 +104,7 @@ export class SessionManager {
 			bellTimestamps: new Map(),
 			notificationTimestamps: new Map(),
 			elevationCache: new Map(),
+			passphraseCache: new Map(),
 			agentCapabilities: new Map(),
 			titleDebounceTimers: new Map(),
 			processTitleDebounceTimers: new Map(),
@@ -812,8 +813,8 @@ export class SessionManager {
 		this.ctx.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
-	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
-		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret);
+	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null, rememberSession?: boolean): void {
+		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret, rememberSession);
 	}
 
 	handleHostVerifyResponse(

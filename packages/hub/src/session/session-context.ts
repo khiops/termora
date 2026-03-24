@@ -80,6 +80,8 @@ export interface SharedSessionContext {
 	notificationTimestamps: Map<string, number[]>;
 	/** hostId → cached elevation secret + expiry (TTL 15 min) */
 	elevationCache: Map<string, { secret: string; expiresAt: number }>;
+	/** Per-host cached passphrase (opt-in "remember for session"). Cleared on hub restart. */
+	passphraseCache: Map<string, { secret: string; expiresAt: number }>;
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	agentCapabilities: Map<string, string[]>;
 	/** channelId → pending title debounce timer for DB writes */
