@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import FontCard from "./FontCard.vue";
-import { useFontDrop } from "../../composables/useFontDrop.js";
+import { useFileDrop } from "../../composables/useFileDrop.js";
 import { useConfigStore } from "../../stores/config.js";
 import { hubBaseUrl } from "../../utils/hub-url.js";
 
@@ -120,7 +120,10 @@ async function uploadFiles(files: File[]): Promise<void> {
 	uploading.value = false;
 }
 
-const { isDragging, onDragEnter, onDragOver, onDragLeave, onDrop } = useFontDrop(uploadFiles);
+const { isDragging, onDragEnter, onDragOver, onDragLeave, onDrop } = useFileDrop(
+	uploadFiles,
+	new Set([".ttf", ".otf", ".woff", ".woff2"]),
+);
 
 async function onDelete(family: string): Promise<void> {
 	error.value = null;

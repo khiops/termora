@@ -1,9 +1,11 @@
 
 import { ref, type Ref } from "vue";
 
-const ACCEPTED_EXTENSIONS = new Set([".ttf", ".otf", ".woff", ".woff2"]);
 
-export function useFontDrop(onFiles: (files: File[]) => void): {
+export function useFileDrop(
+	onFiles: (files: File[]) => void,
+	acceptedExtensions?: Set<string>,
+): {
 	isDragging: Ref<boolean>;
 	onDragEnter: (e: DragEvent) => void;
 	onDragOver: (e: DragEvent) => void;
@@ -38,10 +40,12 @@ export function useFontDrop(onFiles: (files: File[]) => void): {
 		isDragging.value = false;
 
 		const files = Array.from(e.dataTransfer?.files ?? []);
-		const accepted = files.filter((f) => {
-			const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
-			return ACCEPTED_EXTENSIONS.has(ext);
-		});
+		const accepted = acceptedExtensions
+			? files.filter((f) => {
+					const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
+					return acceptedExtensions.has(ext);
+				})
+			: files;
 
 		if (accepted.length > 0) {
 			onFiles(accepted);
