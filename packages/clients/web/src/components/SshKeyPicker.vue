@@ -116,15 +116,15 @@ function authHeader(): Record<string, string> {
 async function loadEntries(): Promise<void> {
 	loading.value = true;
 	try {
-		const url = new URL(`${hubBaseUrl()}/api/ssh-keys`);
-		if (currentDir.value) url.searchParams.set("dir", currentDir.value);
-		const resp = await fetch(url.toString(), { headers: authHeader() });
+		const params = currentDir.value ? `?dir=${encodeURIComponent(currentDir.value)}` : "";
+		const resp = await fetch(`${hubBaseUrl()}/api/ssh-keys${params}`, { headers: authHeader() });
 		if (!resp.ok) {
 			const msg = await resp.text().catch(() => resp.statusText);
 			toastStore.show("error", `Failed to load SSH keys: ${msg}`);
 			return;
 		}
-		entries.value = (await resp.json()) as SshKeyEntry[];
+		const data = (await resp.json()) as { path: string; entries: SshKeyEntry[] };
+		entries.value = data.entries;
 	} catch (e) {
 		toastStore.show("error", `Failed to load SSH keys: ${e instanceof Error ? e.message : String(e)}`);
 	} finally {
@@ -168,10 +168,9 @@ function onSelect(entry: SshKeyEntry): void {
 
 async function onDelete(entry: SshKeyEntry): Promise<void> {
 	try {
-		const url = new URL(`${hubBaseUrl()}/api/ssh-keys`);
-		url.searchParams.set("name", entry.name);
-		if (currentDir.value) url.searchParams.set("dir", currentDir.value);
-		const resp = await fetch(url.toString(), {
+		const deleteParams = new URLSearchParams({ name: entry.name });
+		if (currentDir.value) deleteParams.set("dir", currentDir.value);
+		const resp = await fetch(`${hubBaseUrl()}/api/ssh-keys?${deleteParams.toString()}`, {
 			method: "DELETE",
 			headers: authHeader(),
 		});

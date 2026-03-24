@@ -140,6 +140,8 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 			}
 			const entries: SshKeyEntry[] = [];
 			for (const name of names) {
+				// Skip public key files and common non-key files
+				if (name.endsWith(".pub") || name === "known_hosts" || name === "known_hosts.old" || name === "config" || name === "authorized_keys") continue;
 				const fullPath = join(targetDir, name);
 				let lstat: ReturnType<typeof lstatSync>;
 				try {
