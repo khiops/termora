@@ -92,11 +92,26 @@ export const settingsSchema: SettingDefinition[] = [
 	{
 		key: "bellSound",
 		label: "Bell Sound",
-		type: "toggle",
+		type: "select",
 		category: "terminal",
 		section: "terminal",
 		scopes: ["global", "host", "channel"],
-		description: "Play sound on terminal bell",
+		description: "Sound when terminal receives BEL character",
+		options: [
+			{ label: "Mute", value: "mute" },
+			{ label: "System", value: "system" },
+			{ label: "Custom", value: "custom" },
+		],
+	},
+	{
+		key: "bellCustomFile",
+		label: "Custom Bell Sound",
+		type: "text",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "Audio file name in sounds directory (.wav, .mp3, .ogg)",
+		showWhen: { key: "bellSound", section: "terminal", value: "custom" },
 	},
 
 	// ─── Terminal category — title settings (global only) ──────────────

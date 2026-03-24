@@ -1,7 +1,6 @@
 import { DEFAULT_CHANNEL_NAME, DEFAULT_NOTIFICATION_CONFIG, generateId } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { markRaw, ref } from "vue";
-import { playBellSound } from "../composables/useBellSound.js";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
 import { hubWsUrl } from "../utils/hub-url.js";
@@ -277,13 +276,8 @@ export const useSessionStore = defineStore("session", () => {
 			if (msg.type === "BELL") {
 				const bellCfg =
 					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
-				// Play bell sound regardless of active/inactive tab
-				playBellSound({
-					sound: bellCfg.sound ?? DEFAULT_NOTIFICATION_CONFIG.bell.sound,
-					...(bellCfg.customSoundFile !== undefined && {
-						customSoundFile: bellCfg.customSoundFile,
-					}),
-				});
+				// Note: bell sound is handled by TerminalPane's xterm.js onBell handler
+				// (reads resolved per-channel profile). We only handle badge + desktop notification here.
 				// Always show badge (brief flash on active tab, persistent on background)
 				notificationStore.incrementBellCount(msg.channelId);
 				if (msg.channelId === channelsStore.selectedChannelId) {

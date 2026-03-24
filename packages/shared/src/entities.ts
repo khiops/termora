@@ -1,6 +1,8 @@
 // In-memory TypeScript entity types for nexterm
 // These represent the domain model; DB types are defined in hub/storage
 
+import type { BellSound } from "./config.js";
+
 export interface TerminalProfile {
 	fontFamily?: string;
 	fontSize?: number;
@@ -8,7 +10,8 @@ export interface TerminalProfile {
 	themeOverrides?: Record<string, string>;
 	cursorStyle?: "block" | "underline" | "bar";
 	scrollback?: number;
-	bellSound?: boolean;
+	bellSound?: BellSound | boolean;
+	bellCustomFile?: string;
 	/** Show search match markers in the scrollbar overview ruler (default: true). */
 	scrollbarMarkers?: boolean;
 	wallpaper?: string;

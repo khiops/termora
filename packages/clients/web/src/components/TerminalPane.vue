@@ -119,6 +119,7 @@ import { useScrollBehavior } from "../composables/useScrollBehavior.js";
 import { useVisualProfile } from "../composables/useVisualProfile.js";
 import { useWallpaper } from "../composables/useWallpaper.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { playBellSound } from "../composables/useBellSound.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 import SearchOverlay from "./SearchOverlay.vue";
 import UnreadLinesBar from "./UnreadLinesBar.vue";
@@ -357,6 +358,19 @@ onMounted(async () => {
 			}
 			ready.value = true;
 			applyProfile(resolvedProfile.value);
+			// Register xterm.js BEL handler — fires on \x07 from PTY output
+			terminal.value?.onBell(() => {
+				const p = resolvedProfile.value;
+				const sound = p.bellSound;
+				// Backward compat: boolean true → "system", false/undefined → "mute"
+				const resolved =
+					typeof sound === "boolean" ? (sound ? "system" : "mute") : (sound ?? "mute");
+				if (resolved === "mute") return;
+				playBellSound({
+					sound: resolved,
+					...(p.bellCustomFile && { customSoundFile: p.bellCustomFile }),
+				});
+			});
 		}
 	} catch (err) {
 		error.value = err instanceof Error ? err.message : String(err);
