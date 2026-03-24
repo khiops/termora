@@ -83,7 +83,7 @@ describe("useResolvedProfile", () => {
 	it("fetches resolved profile on mount with no context", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
-			json: async () => ({ ...DEFAULT_PROFILE, fontSize: 18 }),
+			json: async () => ({ terminal: { resolved: { ...DEFAULT_PROFILE, fontSize: 18 } } }),
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -98,7 +98,7 @@ describe("useResolvedProfile", () => {
 		await nextTick();
 
 		expect(fetchMock).toHaveBeenCalledWith(
-			"http://hub/api/config/resolved",
+			"http://hub/api/config/cascade",
 			expect.objectContaining({ headers: { Authorization: "Bearer test-token" } }),
 		);
 		expect(result.profile.value.fontSize).toBe(18);
@@ -108,7 +108,7 @@ describe("useResolvedProfile", () => {
 	it("fetches resolved profile on mount with host_id and channel_id", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
-			json: async () => ({ ...DEFAULT_PROFILE, fontSize: 20 }),
+			json: async () => ({ terminal: { resolved: { ...DEFAULT_PROFILE, fontSize: 20 } } }),
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -123,7 +123,7 @@ describe("useResolvedProfile", () => {
 		await nextTick();
 
 		expect(fetchMock).toHaveBeenCalledWith(
-			"http://hub/api/config/resolved?host_id=host-1&channel_id=ch-1",
+			"http://hub/api/config/cascade?host_id=host-1&channel_id=ch-1",
 			expect.anything(),
 		);
 		expect(result.profile.value.fontSize).toBe(20);
@@ -134,7 +134,7 @@ describe("useResolvedProfile", () => {
 		let callCount = 0;
 		const fetchMock = vi.fn().mockImplementation(async () => ({
 			ok: true,
-			json: async () => ({ ...DEFAULT_PROFILE, fontSize: 14 + callCount++ }),
+			json: async () => ({ terminal: { resolved: { ...DEFAULT_PROFILE, fontSize: 14 + callCount++ } } }),
 		}));
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -161,7 +161,7 @@ describe("useResolvedProfile", () => {
 	it("re-fetches on matching host profile change event", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
-			json: async () => DEFAULT_PROFILE,
+			json: async () => ({ terminal: { resolved: DEFAULT_PROFILE } }),
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -192,7 +192,7 @@ describe("useResolvedProfile", () => {
 	it("re-fetches on matching channel profile change event", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
-			json: async () => DEFAULT_PROFILE,
+			json: async () => ({ terminal: { resolved: DEFAULT_PROFILE } }),
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -223,7 +223,7 @@ describe("useResolvedProfile", () => {
 	it("unsubscribes from profile change events on unmount", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
-			json: async () => DEFAULT_PROFILE,
+			json: async () => ({ terminal: { resolved: DEFAULT_PROFILE } }),
 		});
 		vi.stubGlobal("fetch", fetchMock);
 

@@ -138,17 +138,19 @@ export const useConfigStore = defineStore("config", () => {
 
 	/**
 	 * Load the global resolved terminal profile from the hub (requires auth).
+	 * Fetches /api/config/cascade and extracts terminal.resolved.
 	 * Call after authentication is established.
 	 * Per-terminal resolution is handled by useResolvedProfile composable.
 	 */
 	async function loadProfile(): Promise<void> {
 		try {
 			const authStore = useAuthStore();
-			const resp = await fetch(`${hubBaseUrl()}/api/config/resolved`, {
+			const resp = await fetch(`${hubBaseUrl()}/api/config/cascade`, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (resp.ok) {
-				profile.value = await resp.json();
+				const cascade = (await resp.json()) as { terminal: { resolved: unknown } };
+				profile.value = cascade.terminal.resolved;
 			}
 		} catch (err) {
 			console.warn("[config] failed to load resolved config:", err);

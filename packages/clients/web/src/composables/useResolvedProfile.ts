@@ -8,9 +8,10 @@ import { hubBaseUrl } from "../utils/hub-url.js";
 /**
  * Per-terminal profile resolution via the cascade API.
  *
- * Fetches /api/config/resolved?host_id=X&channel_id=Y on mount and
- * re-fetches whenever a relevant profile-change event fires (global,
- * host-scoped matching hostId, or channel-scoped matching channelId).
+ * Fetches /api/config/cascade?host_id=X&channel_id=Y on mount and
+ * extracts terminal.resolved, then re-fetches whenever a relevant
+ * profile-change event fires (global, host-scoped matching hostId,
+ * or channel-scoped matching channelId).
  *
  * Falls back to DEFAULT_PROFILE while the first fetch is in-flight or
  * if the request fails.
@@ -30,11 +31,12 @@ export function useResolvedProfile(
 			if (channelId.value) params.set("channel_id", channelId.value);
 			const qs = params.toString();
 			const resp = await fetch(
-				`${hubBaseUrl()}/api/config/resolved${qs ? `?${qs}` : ""}`,
+				`${hubBaseUrl()}/api/config/cascade${qs ? `?${qs}` : ""}`,
 				{ headers: { Authorization: `Bearer ${authStore.token}` } },
 			);
 			if (resp.ok) {
-				profile.value = (await resp.json()) as TerminalProfile;
+				const cascade = (await resp.json()) as { terminal: { resolved: TerminalProfile } };
+				profile.value = cascade.terminal.resolved;
 			}
 		} catch (err) {
 			console.warn("[useResolvedProfile] failed to load:", err);

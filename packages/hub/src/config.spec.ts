@@ -387,7 +387,7 @@ describe("GET /api/config/defaults", () => {
 	});
 });
 
-describe("GET /api/config/resolved", () => {
+describe("GET /api/config/cascade (resolved layer)", () => {
 	let server: FastifyInstance;
 	let dbs: DatabaseManager;
 
@@ -407,14 +407,14 @@ describe("GET /api/config/resolved", () => {
 		dbs.close();
 	});
 
-	it("no params → returns defaults", async () => {
-		const res = await server.inject({ method: "GET", url: "/api/config/resolved" });
+	it("no params → terminal.resolved matches defaults", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/config/cascade" });
 		expect(res.statusCode).toBe(200);
-		const body = res.json<typeof DEFAULT_PROFILE>();
-		expect(body).toMatchObject(DEFAULT_PROFILE);
+		const body = res.json<{ terminal: { resolved: typeof DEFAULT_PROFILE } }>();
+		expect(body.terminal.resolved).toMatchObject(DEFAULT_PROFILE);
 	});
 
-	it("with host_id → merges host profile", async () => {
+	it("with host_id → terminal.resolved merges host profile", async () => {
 		const createRes = await server.inject({
 			method: "POST",
 			url: "/api/hosts",
@@ -432,11 +432,11 @@ describe("GET /api/config/resolved", () => {
 
 		const res = await server.inject({
 			method: "GET",
-			url: `/api/config/resolved?host_id=${id}`,
+			url: `/api/config/cascade?host_id=${id}`,
 		});
 		expect(res.statusCode).toBe(200);
-		const profile = res.json<{ fontSize: number }>();
-		expect(profile.fontSize).toBe(22);
+		const body = res.json<{ terminal: { resolved: { fontSize: number } } }>();
+		expect(body.terminal.resolved.fontSize).toBe(22);
 	});
 });
 
@@ -479,13 +479,13 @@ describe("PATCH /api/hosts/:id/profile", () => {
 		expect(res.statusCode).toBe(200);
 		expect(res.json()).toEqual({ ok: true });
 
-		const resolved = await server.inject({
+		const cascadeRes = await server.inject({
 			method: "GET",
-			url: `/api/config/resolved?host_id=${id}`,
+			url: `/api/config/cascade?host_id=${id}`,
 		});
-		const profile = resolved.json<{ fontSize: number; cursorStyle: string }>();
-		expect(profile.fontSize).toBe(18);
-		expect(profile.cursorStyle).toBe("bar");
+		const body = cascadeRes.json<{ terminal: { resolved: { fontSize: number; cursorStyle: string } } }>();
+		expect(body.terminal.resolved.fontSize).toBe(18);
+		expect(body.terminal.resolved.cursorStyle).toBe("bar");
 	});
 
 	it("returns 400 when profile field is missing from body", async () => {
