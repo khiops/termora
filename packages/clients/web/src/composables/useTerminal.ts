@@ -341,6 +341,7 @@ export function useTerminal(
 		const markers = p.scrollbarMarkers !== false;
 		term.options.overviewRulerWidth = markers ? 15 : 0;
 		search.setScrollbarMarkers(markers);
+		term.options.bellStyle = p.bellSound ? "sound" : "none";
 		fitAddon.fit();
 	}
 

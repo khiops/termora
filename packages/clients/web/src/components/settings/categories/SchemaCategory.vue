@@ -128,7 +128,7 @@ function controlBindings(def: SettingDefinition): Record<string, unknown> {
 			<SettingControl
 				:model-value="displayValue(def)"
 				:type="def.type"
-				:disabled="scope !== 'global' && !isOverriddenForDef(def)"
+				:disabled="false"
 				v-bind="controlBindings(def)"
 				@update:model-value="handleUpdate(def, $event)"
 			/>
