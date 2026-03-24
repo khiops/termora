@@ -41,6 +41,7 @@ interface HostRow {
 	custom_command: string | null;
 	os: string | null;
 	arch: string | null;
+	agent_sha256: string | null;
 	ssh_fingerprint: string | null;
 	created_at: string;
 	updated_at: string;
@@ -95,6 +96,7 @@ function rowToHost(row: HostRow): Host {
 	if (row.discovered_shells_at != null) host.discoveredShellsAt = row.discovered_shells_at;
 	if (row.elevation_method != null) host.elevationMethod = row.elevation_method as ElevationMethod;
 	if (row.custom_command != null) host.customCommand = row.custom_command;
+	if (row.agent_sha256 != null) host.agentSha256 = row.agent_sha256;
 	// ssh_fingerprint is always set (null = not yet seen)
 	host.sshFingerprint = row.ssh_fingerprint;
 	return host;
@@ -270,6 +272,20 @@ export class HostsDAL {
 		this.db
 			.prepare("UPDATE hosts SET os = ?, arch = ?, updated_at = ? WHERE id = ?")
 			.run(os, arch, now, id);
+	}
+
+	updateHostAgentSha256(id: string, sha256: string | null): void {
+		const now = new Date().toISOString();
+		this.db
+			.prepare("UPDATE hosts SET agent_sha256 = ?, updated_at = ? WHERE id = ?")
+			.run(sha256, now, id);
+	}
+
+	getHostAgentSha256(id: string): string | null {
+		const row = this.db
+			.prepare("SELECT agent_sha256 FROM hosts WHERE id = ?")
+			.get(id) as { agent_sha256: string | null } | undefined;
+		return row?.agent_sha256 ?? null;
 	}
 
 	/** Return the stored SSH host key fingerprint for a host, or null if never seen. */
