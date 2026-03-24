@@ -1,8 +1,9 @@
 import { readdir, unlink, writeFile } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { WALLPAPER_EXTENSIONS } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { fileTypeFromBuffer } from "file-type";
+import { sanitizeFilename } from "./upload-utils.js";
 
 const ALLOWED_MIMES = new Set([
 	"image/png",
@@ -16,17 +17,6 @@ const ALLOWED_MIMES = new Set([
 function isValidExtension(filename: string): boolean {
 	const ext = extname(filename).toLowerCase().slice(1);
 	return WALLPAPER_EXTENSIONS.includes(ext);
-}
-
-function sanitizeFilename(raw: string): string | null {
-	const name = basename(raw);
-	if (name !== raw || name.includes("..") || name.includes("/") || name.includes("\\")) {
-		return null;
-	}
-	if (!name || name === "." || name === "..") {
-		return null;
-	}
-	return name;
 }
 
 export function registerWallpaperRoutes(server: FastifyInstance, configDir: string): void {

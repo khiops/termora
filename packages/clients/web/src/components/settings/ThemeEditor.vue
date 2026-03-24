@@ -308,6 +308,10 @@ const uiColorFields = [
 	{ key: "scrollbarTrack", label: "Scrollbar Track" },
 	{ key: "searchHighlight", label: "Search Highlight" },
 	{ key: "searchHighlightActive", label: "Search Active" },
+	{ key: "badgeInfo", label: "Badge Info" },
+	{ key: "badgeWarning", label: "Badge Warning" },
+	{ key: "badgeSuccess", label: "Badge Success" },
+	{ key: "badgeDanger", label: "Badge Danger" },
 ] as const;
 
 // ── Color getters/setters ───────────────────────────────────────────

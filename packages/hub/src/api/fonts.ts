@@ -4,6 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import type { FontFamily, FontFile } from "@nexterm/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { fileTypeFromBuffer } from "file-type";
+import { sanitizeFilename } from "./upload-utils.js";
 
 /** Supported font file extensions */
 const FONT_EXTENSIONS = new Set([".woff2", ".woff", ".ttf", ".otf"]);
@@ -25,16 +26,6 @@ const ALLOWED_FONT_MIMES = new Set([
  * Strip directory components and reject names with traversal sequences.
  * Returns null for any invalid filename.
  */
-function sanitizeFilename(raw: string): string | null {
-	const name = basename(raw);
-	if (name !== raw || name.includes("..") || name.includes("/") || name.includes("\\")) {
-		return null;
-	}
-	if (!name || name === "." || name === "..") {
-		return null;
-	}
-	return name;
-}
 
 /** Map common filename suffixes to CSS weight/style */
 const WEIGHT_MAP: Record<string, { weight: number; style: string }> = {

@@ -41,6 +41,10 @@ export interface NexTermThemeUi {
 	scrollbarTrack: string;
 	searchHighlight: string;
 	searchHighlightActive: string;
+	badgeInfo?: string;
+	badgeWarning?: string;
+	badgeSuccess?: string;
+	badgeDanger?: string;
 }
 
 export interface NexTermTheme {
