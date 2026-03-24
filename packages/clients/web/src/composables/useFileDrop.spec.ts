@@ -19,10 +19,10 @@ describe("useFileDrop", () => {
 		onDrop(makeDragEvent([makeFile("font.ttf"), makeFile("image.png"), makeFile("font.woff2")]));
 
 		expect(onFiles).toHaveBeenCalledOnce();
-		const accepted = onFiles.mock.calls[0][0] as File[];
+		const accepted = onFiles.mock.calls[0]![0] as File[];
 		expect(accepted).toHaveLength(2);
-		expect(accepted[0].name).toBe("font.ttf");
-		expect(accepted[1].name).toBe("font.woff2");
+		expect(accepted[0]!.name).toBe("font.ttf");
+		expect(accepted[1]!.name).toBe("font.woff2");
 	});
 
 	it("tracks isDragging state via dragenter/dragleave", () => {
@@ -52,7 +52,7 @@ describe("useFileDrop", () => {
 		);
 
 		expect(onFiles).toHaveBeenCalledOnce();
-		const accepted = onFiles.mock.calls[0][0] as File[];
+		const accepted = onFiles.mock.calls[0]![0] as File[];
 		expect(accepted).toHaveLength(4);
 	});
 
@@ -100,7 +100,7 @@ describe("useFileDrop", () => {
 		onDrop(makeDragEvent([makeFile("key.pem"), makeFile("id_rsa"), makeFile("config.json")]));
 
 		expect(onFiles).toHaveBeenCalledOnce();
-		const accepted = onFiles.mock.calls[0][0] as File[];
+		const accepted = onFiles.mock.calls[0]![0] as File[];
 		expect(accepted).toHaveLength(3);
 	});
 });

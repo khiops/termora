@@ -149,7 +149,7 @@ export const useConfigStore = defineStore("config", () => {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (resp.ok) {
-				const cascade = (await resp.json()) as { terminal: { resolved: unknown } };
+				const cascade = (await resp.json()) as { terminal: { resolved: TerminalProfile } };
 				profile.value = cascade.terminal.resolved;
 			}
 		} catch (err) {

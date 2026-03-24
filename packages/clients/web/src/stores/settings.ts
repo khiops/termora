@@ -317,8 +317,8 @@ export const useSettingsStore = defineStore("settings", () => {
 					if (section === "terminal") {
 						configStore.emitProfileChange({
 							scope,
-							hostId: currentHostId.value ?? undefined,
-							channelId: currentChannelId.value ?? undefined,
+							...(currentHostId.value != null && { hostId: currentHostId.value }),
+							...(currentChannelId.value != null && { channelId: currentChannelId.value }),
 						});
 					}
 					if (scope === "global" && section === "terminal") {

@@ -361,14 +361,15 @@ onMounted(async () => {
 			applyProfile(resolvedProfile.value);
 			// Register xterm.js BEL handler — fires on \x07 from PTY output
 			terminal.value?.onBell(() => {
+				const chId = props.channelId;
 				// Increment bell badge (agent BELL WS message not reliable for all shells)
-				if (resolvedProfile.value.bellBadge !== false) {
-					notificationStore.incrementBellCount(props.channelId);
+				if (chId != null && resolvedProfile.value.bellBadge !== false) {
+					notificationStore.incrementBellCount(chId);
 					// Auto-clear badge after 1s if this is the active channel
-					if (props.channelId === channelsStore.selectedChannelId) {
+					if (chId === channelsStore.selectedChannelId) {
 						setTimeout(() => {
 							if (props.channelId === channelsStore.selectedChannelId) {
-								notificationStore.clearBellAndActivity(props.channelId);
+								notificationStore.clearBellAndActivity(props.channelId!);
 							}
 						}, 1000);
 					}

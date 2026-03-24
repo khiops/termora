@@ -342,7 +342,8 @@ export function useTerminal(
 		term.options.overviewRulerWidth = markers ? 15 : 0;
 		search.setScrollbarMarkers(markers);
 		// Bell audio handled by playBellSound() via onBell handler — not xterm.js
-		term.options.bellStyle = "none";
+		// bellStyle is not in the shipped @xterm/xterm type definition; cast to suppress
+		(term.options as Record<string, unknown>).bellStyle = "none";
 		fitAddon.fit();
 	}
 
