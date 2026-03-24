@@ -8,6 +8,7 @@ import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
+import { useAgentVerifyStore } from "./agent-verify.js";
 import { useHostVerifyStore } from "./host-verify.js";
 import { useHostsStore } from "./hosts.js";
 import { useNotificationStore } from "./notifications.js";
@@ -67,6 +68,10 @@ export const useSessionStore = defineStore("session", () => {
 		const hostVerifyStore = useHostVerifyStore();
 		hostVerifyStore.setWsClient(wsClient);
 		_registerHostVerifyHandlers(hostVerifyStore);
+
+		const agentVerifyStore = useAgentVerifyStore();
+		agentVerifyStore.setWsClient(wsClient);
+		_registerAgentVerifyHandlers(agentVerifyStore);
 
 		const hostsStore = useHostsStore();
 		_registerSessionHandlers(hostsStore);
@@ -218,6 +223,34 @@ export const useSessionStore = defineStore("session", () => {
 					msg.promptId,
 					msg.firstConnect ?? false,
 				);
+			}
+		});
+	}
+
+
+	/**
+	 * Wire up AGENT_BINARY_VERIFY and agent-related ERROR message handlers.
+	 */
+	function _registerAgentVerifyHandlers(
+		agentVerifyStore: ReturnType<typeof useAgentVerifyStore>,
+	): void {
+		wsClient.on("AGENT_BINARY_VERIFY", (msg) => {
+			if (msg.type === "AGENT_BINARY_VERIFY") {
+				agentVerifyStore.handleAgentVerify(msg);
+			}
+		});
+
+		wsClient.on("ERROR", (msg) => {
+			if (msg.type === "ERROR") {
+				if (msg.code === "AGENT_NOT_AVAILABLE") {
+					agentVerifyStore.handleDeployError(msg.message);
+					return;
+				}
+				if (msg.code === "AGENT_UPDATED") {
+					// Informational — agent binary was updated; no user action required.
+					// Intentionally not surfaced as a generic error.
+					return;
+				}
 			}
 		});
 	}
