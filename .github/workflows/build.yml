@@ -64,7 +64,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
+      - name: Install aarch64 cross-compile tools
+        if: matrix.triple == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -76,6 +82,7 @@ jobs:
         run: ./scripts/build-agent.sh
         env:
           NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
