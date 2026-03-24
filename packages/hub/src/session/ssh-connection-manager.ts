@@ -7,8 +7,11 @@
  */
 
 import type {
+	AgentBinaryVerifyMessage,
 	AuthPromptMessage,
 	ErrorMessage,
+	HostArch,
+	HostOs,
 	HostVerifyMessage,
 	ProtocolMessage,
 	TestConnectMessage,
@@ -19,6 +22,7 @@ import type { AgentConnectionManager } from "./agent-connection-manager.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
+import { type BinaryVerifyPromptFn } from "./agent-deployer.js";
 import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
@@ -110,6 +114,56 @@ export class SshConnectionManager {
 		if (!pending) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingHostVerify.delete(promptId);
+		pending.resolve(action);
+	}
+
+	// ─── Agent binary verify ──────────────────────────────────────────────────
+
+	buildBinaryVerifyPrompt(client: WsClient): BinaryVerifyPromptFn {
+		return async (
+			hostId: string,
+			hostname: string,
+			remotePath: string,
+			remoteSha256: string,
+			os: HostOs,
+			arch: HostArch,
+			mismatch: boolean,
+			pinnedSha256?: string,
+		): Promise<"trust_permanent" | "trust_once" | "reject"> => {
+			const promptId = generateId();
+			const msg: AgentBinaryVerifyMessage = {
+				type: "AGENT_BINARY_VERIFY",
+				promptId,
+				hostId,
+				hostname,
+				remotePath,
+				remoteSha256,
+				os,
+				arch,
+				mismatch,
+				...(pinnedSha256 ? { pinnedSha256 } : {}),
+			};
+			client.send(msg);
+
+			return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
+				const timer = setTimeout(() => {
+					this.ctx.pendingAgentVerify.delete(promptId);
+					this.ctx.hubLogger?.log("warn", "ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting", {
+						hostname,
+					});
+					resolve("reject");
+				}, 30_000);
+
+				this.ctx.pendingAgentVerify.set(promptId, { resolve, timer });
+			});
+		};
+	}
+
+	handleAgentVerifyResponse(promptId: string, action: "trust_permanent" | "trust_once" | "reject"): void {
+		const pending = this.ctx.pendingAgentVerify.get(promptId);
+		if (!pending) return;
+		clearTimeout(pending.timer);
+		this.ctx.pendingAgentVerify.delete(promptId);
 		pending.resolve(action);
 	}
 

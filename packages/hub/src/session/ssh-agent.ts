@@ -7,7 +7,7 @@ import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
-import { deployAgentIfNeeded } from "./agent-deployer.js";
+import { type BinaryVerifyPromptFn, deployAgentIfNeeded } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -134,13 +134,24 @@ export async function buildSshConnectConfig(
  * if nexterm-agent is not found on the remote host after SSH connect.
  */
 export interface SshAgentDeployOptions {
-	/** Path to the local binary cache directory (~/.local/state/nexterm/binaries). */
+	/** Path to the local binary cache directory. */
 	binaryCache: string;
-	/**
-	 * Called when OS/arch is detected on the remote host so the caller can
-	 * persist it to the DB without SshAgent depending on MetaDAL.
-	 */
+	/** Hostname for display in prompts. */
+	hostname?: string;
+	/** Pinned SHA256 from host record (null = no pin). */
+	pinnedSha256?: string | null;
+	/** Session-trusted SHA256 (trust_once from earlier connect). */
+	sessionTrustedSha256?: string | null;
+	/** Called when OS/arch is detected on the remote host. */
 	onOsDetected?: (hostId: string, os: HostOs, arch: HostArch) => void;
+	/** Called to prompt user for binary trust decision. */
+	promptBinaryVerify?: BinaryVerifyPromptFn;
+	/** Called when user chose trust_permanent — persist SHA256 to DB. */
+	onAgentPinned?: (hostId: string, sha256: string) => void;
+	/** Called when user chose trust_once — store in session map. */
+	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
+	/** Called when remote agent was re-uploaded (SHA256 mismatch with local cache). */
+	onAgentUpdated?: (hostId: string) => void;
 }
 
 export class SshAgent extends AgentConnection {

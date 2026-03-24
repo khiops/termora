@@ -97,6 +97,8 @@ export class SessionManager {
 			pendingAuthPrompts: new Map(),
 			pendingHostVerify: new Map(),
 			trustedOnceFingerprints: new Map(),
+			trustedAgentSha256: new Map(),
+			pendingAgentVerify: new Map(),
 			bellTimestamps: new Map(),
 			notificationTimestamps: new Map(),
 			elevationCache: new Map(),

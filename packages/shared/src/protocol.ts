@@ -602,4 +602,6 @@ export type ProtocolMessage =
 	| TestConnectMessage
 	| TestConnectOkMessage
 	| TestConnectFailMessage
+	| AgentBinaryVerifyMessage
+	| AgentBinaryVerifyResponseMessage
 	| ErrorMessage;
