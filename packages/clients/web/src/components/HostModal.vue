@@ -256,11 +256,23 @@
 
 							<div v-if="form.sshAuth === 'key'" class="field">
 								<label class="field-label">Key Path</label>
-								<input
-									v-model="form.sshKeyPath"
-									type="text"
-									class="field-input"
-									placeholder="~/.ssh/id_ed25519"
+								<div style="display: flex; gap: 6px;">
+									<input
+										v-model="form.sshKeyPath"
+										type="text"
+										class="field-input"
+										placeholder="~/.ssh/id_ed25519"
+										style="flex: 1;"
+									/>
+									<button class="browse-btn" type="button" @click="showKeyPicker = true">
+										Browse
+									</button>
+								</div>
+								<SshKeyPicker
+									:show="showKeyPicker"
+									:model-value="form.sshKeyPath"
+									@update:model-value="form.sshKeyPath = $event"
+									@close="showKeyPicker = false"
 								/>
 							</div>
 
@@ -514,6 +526,7 @@ import { DEFAULT_VISUAL_PROFILE } from "../utils/visual-presets.js";
 import { resolveEmojiShortcode } from "../utils/emoji-shortcodes.js";
 import VisualProfileSettings from "./VisualProfileSettings.vue";
 import EmojiPicker from "./EmojiPicker.vue";
+import SshKeyPicker from "./SshKeyPicker.vue";
 
 const props = defineProps({
 	visible: { type: Boolean, required: true },
@@ -568,6 +581,7 @@ const visualProfile = ref<VisualProfile>((() => {
 const activeTab = ref<"connection" | "terminal" | "appearance">("connection");
 
 const showEmojiPicker = ref(false);
+const showKeyPicker = ref(false);
 const emojiPickerRef = ref<InstanceType<typeof EmojiPicker> | null>(null);
 
 // INV-16: real-time validation error indicator for Connection tab
@@ -870,6 +884,25 @@ async function onSave(): Promise<void> {
 .btn-test {
 	background: var(--nt-tab-hover);
 	color: var(--nt-fg);
+}
+
+.browse-btn {
+	padding: 6px 10px;
+	font-size: 12px;
+	font-family: inherit;
+	font-weight: 500;
+	background: var(--nt-tab-hover);
+	border: 1px solid var(--nt-border);
+	border-radius: 4px;
+	color: var(--nt-fg);
+	cursor: pointer;
+	white-space: nowrap;
+	flex-shrink: 0;
+	transition: background 0.12s;
+}
+
+.browse-btn:hover {
+	background: rgba(var(--nt-fg-rgb), 0.12);
 }
 
 .warning-banner {
