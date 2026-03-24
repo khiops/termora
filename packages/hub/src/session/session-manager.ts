@@ -821,6 +821,13 @@ export class SessionManager {
 		this.sshMgr.handleHostVerifyResponse(promptId, action);
 	}
 
+	handleAgentVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
+	): void {
+		this.sshMgr.handleAgentVerifyResponse(promptId, action);
+	}
+
 	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
 		return this.sshMgr.handleTestConnect(clientId, msg);
 	}
