@@ -3,7 +3,7 @@ export interface SettingDefinition {
 	key: string;
 	label: string;
 	description?: string;
-	type: "text" | "number" | "select" | "toggle" | "range" | "color";
+	type: "text" | "number" | "select" | "toggle" | "range" | "color" | "font";
 	/** UI category for navigation (e.g. "terminal", "tabs") */
 	category: string;
 	/**
@@ -48,11 +48,11 @@ export const settingsSchema: SettingDefinition[] = [
 	{
 		key: "fontFamily",
 		label: "Font Family",
-		type: "text",
+		type: "font",
 		category: "terminal",
 		section: "terminal",
 		scopes: ["global", "host", "channel"],
-		description: "CSS font stack for the terminal",
+		description: "Font family for terminal rendering",
 	},
 	{
 		key: "fontSize",
@@ -92,11 +92,35 @@ export const settingsSchema: SettingDefinition[] = [
 	{
 		key: "bellSound",
 		label: "Bell Sound",
+		type: "select",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "Sound when terminal receives BEL character",
+		options: [
+			{ label: "Mute", value: "mute" },
+			{ label: "System", value: "system" },
+			{ label: "Custom", value: "custom" },
+		],
+	},
+	{
+		key: "bellCustomFile",
+		label: "Custom Bell Sound",
+		type: "text",
+		category: "terminal",
+		section: "terminal",
+		scopes: ["global", "host", "channel"],
+		description: "Audio file name in sounds directory (.wav, .mp3, .ogg)",
+		showWhen: { key: "bellSound", section: "terminal", value: "custom" },
+	},
+	{
+		key: "bellBadge",
+		label: "Bell Badge",
 		type: "toggle",
 		category: "terminal",
 		section: "terminal",
 		scopes: ["global", "host", "channel"],
-		description: "Play sound on terminal bell",
+		description: "Show notification badge on tab when terminal receives BEL",
 	},
 
 	// ─── Terminal category — title settings (global only) ──────────────

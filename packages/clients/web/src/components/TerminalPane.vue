@@ -101,6 +101,7 @@
 <script setup lang="ts">
 import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
 import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
+import { useResolvedProfile } from "../composables/useResolvedProfile.js";
 import { useTabTitle } from "../composables/useTabTitle.js";
 import { useSessionStore } from "../stores/session.js";
 import { useChannelsStore } from "../stores/channels.js";
@@ -118,6 +119,7 @@ import { useScrollBehavior } from "../composables/useScrollBehavior.js";
 import { useVisualProfile } from "../composables/useVisualProfile.js";
 import { useWallpaper } from "../composables/useWallpaper.js";
 import { useHostsStore } from "../stores/hosts.js";
+import { playBellSound } from "../composables/useBellSound.js";
 import WriteLockIndicator from "./WriteLockIndicator.vue";
 import SearchOverlay from "./SearchOverlay.vue";
 import UnreadLinesBar from "./UnreadLinesBar.vue";
@@ -165,6 +167,7 @@ const sessionStore = useSessionStore();
 const channelsStore = useChannelsStore();
 const writeLockStore = useWriteLockStore();
 const configStore = useConfigStore();
+const notificationStore = useNotificationStore();
 const terminalContainer = ref<HTMLElement | null>(null);
 const ready = ref(false);
 const error = ref<string | null>(null);
@@ -184,10 +187,15 @@ const hostThemeName = (() => {
 	}
 })();
 
+const { profile: resolvedProfile } = useResolvedProfile(
+	computed(() => props.hostId ?? undefined),
+	computed(() => props.channelId ?? undefined),
+);
+
 const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
 	terminalContainer,
 	sessionStore.wsClient,
-	configStore.profile,
+	resolvedProfile.value,
 	hostThemeName,
 );
 
@@ -350,7 +358,32 @@ onMounted(async () => {
 				await reattachChannel(props.channelId);
 			}
 			ready.value = true;
-			applyProfile(configStore.profile);
+			applyProfile(resolvedProfile.value);
+			// Register xterm.js BEL handler — fires on \x07 from PTY output
+			terminal.value?.onBell(() => {
+				// Increment bell badge (agent BELL WS message not reliable for all shells)
+				if (resolvedProfile.value.bellBadge !== false) {
+					notificationStore.incrementBellCount(props.channelId);
+					// Auto-clear badge after 1s if this is the active channel
+					if (props.channelId === channelsStore.selectedChannelId) {
+						setTimeout(() => {
+							if (props.channelId === channelsStore.selectedChannelId) {
+								notificationStore.clearBellAndActivity(props.channelId);
+							}
+						}, 1000);
+					}
+				}
+				const p = resolvedProfile.value;
+				const sound = p.bellSound;
+				// Backward compat: boolean true → "system", false/undefined → "mute"
+				const resolved =
+					typeof sound === "boolean" ? (sound ? "system" : "mute") : (sound ?? "mute");
+				if (resolved === "mute") return;
+				playBellSound({
+					sound: resolved,
+					...(p.bellCustomFile && { customSoundFile: p.bellCustomFile }),
+				});
+			});
 		}
 	} catch (err) {
 		error.value = err instanceof Error ? err.message : String(err);
@@ -395,15 +428,12 @@ watch(
 	},
 );
 
-// Re-apply profile when config store updates (covers initial load + reconnect reload).
-// loadProfile() runs async — terminal may already be initialized with DEFAULT_PROFILE.
-watch(
-	() => configStore.profile,
-	(p) => {
-		applyProfile(p);
-	},
-	{ deep: true },
-);
+// Re-apply profile when the per-terminal resolved profile updates.
+// useResolvedProfile fetches /api/config/resolved?host_id=X&channel_id=Y and
+// re-fetches on relevant ProfileChangeEvents so each terminal reacts to its own overrides.
+watch(resolvedProfile, (p) => {
+	applyProfile(p);
+}, { deep: true });
 
 onUnmounted(() => {
 	dispose();

@@ -65,7 +65,7 @@ describe("settingsSchema", () => {
 
 	describe("schema integrity", () => {
 		it("all settings have valid types", () => {
-			const validTypes = ["text", "number", "select", "toggle", "range", "color"];
+			const validTypes = ["text", "number", "select", "toggle", "range", "color", "font"];
 			for (const def of settingsSchema) {
 				expect(validTypes).toContain(def.type);
 			}

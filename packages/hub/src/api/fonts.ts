@@ -1,10 +1,40 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { unlink, writeFile } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 import type { FontFamily, FontFile } from "@nexterm/shared";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { fileTypeFromBuffer } from "file-type";
 
 /** Supported font file extensions */
 const FONT_EXTENSIONS = new Set([".woff2", ".woff", ".ttf", ".otf"]);
+
+/** Max upload size for font files: 10 MB */
+const MAX_FONT_SIZE = 10 * 1024 * 1024;
+
+/** Allowed MIME types for font files */
+const ALLOWED_FONT_MIMES = new Set([
+	"font/sfnt",
+	"font/otf",
+	"font/woff",
+	"font/woff2",
+	"application/font-woff",
+	"application/font-woff2",
+]);
+
+/**
+ * Strip directory components and reject names with traversal sequences.
+ * Returns null for any invalid filename.
+ */
+function sanitizeFilename(raw: string): string | null {
+	const name = basename(raw);
+	if (name !== raw || name.includes("..") || name.includes("/") || name.includes("\\")) {
+		return null;
+	}
+	if (!name || name === "." || name === "..") {
+		return null;
+	}
+	return name;
+}
 
 /** Map common filename suffixes to CSS weight/style */
 const WEIGHT_MAP: Record<string, { weight: number; style: string }> = {
@@ -195,4 +225,104 @@ export function registerFontRoutes(server: FastifyInstance, configDir: string): 
 	server.get("/api/fonts", async () => {
 		return scanFonts(fontsDir);
 	});
+
+	// POST /api/fonts — upload a font file
+	server.post("/api/fonts", async (request: FastifyRequest, reply: FastifyReply) => {
+		const file = await request.file();
+		if (!file) {
+			return reply.code(400).send({ error: { code: "NO_FILE", message: "No file uploaded" } });
+		}
+
+		const sanitized = sanitizeFilename(file.filename);
+		if (!sanitized) {
+			return reply
+				.code(400)
+				.send({ error: { code: "INVALID_FILENAME", message: "Invalid filename" } });
+		}
+
+		if (!FONT_EXTENSIONS.has(extname(sanitized).toLowerCase())) {
+			return reply
+				.code(400)
+				.send({ error: { code: "UNSUPPORTED_TYPE", message: "Unsupported file type" } });
+		}
+
+		const buffer = await file.toBuffer();
+
+		// Defense-in-depth size check (plugin limit fires first for large uploads)
+		if (buffer.length > MAX_FONT_SIZE) {
+			return reply.code(413).send({
+				error: { code: "FILE_TOO_LARGE", message: "Font file exceeds 10 MB limit" },
+			});
+		}
+
+		// Magic-byte MIME validation
+		const detectedType = await fileTypeFromBuffer(buffer);
+
+		// TTF/OTF fallback: file-type may not detect these; check OpenType magic bytes directly
+		// TrueType: 0x00010000, CFF/OTF: 0x4F54544F ("OTTO")
+		const isTtfMagic =
+			buffer.length >= 4 &&
+			((buffer[0] === 0x00 && buffer[1] === 0x01 && buffer[2] === 0x00 && buffer[3] === 0x00) ||
+				(buffer[0] === 0x4f && buffer[1] === 0x54 && buffer[2] === 0x54 && buffer[3] === 0x4f));
+
+		if (!isTtfMagic && (!detectedType || !ALLOWED_FONT_MIMES.has(detectedType.mime))) {
+			return reply.code(400).send({
+				error: {
+					code: "INVALID_FILE_TYPE",
+					message: `File content does not match an allowed font type (detected: ${detectedType?.mime ?? "unknown"})`,
+				},
+			});
+		}
+
+		const target = join(fontsDir, sanitized);
+
+		// Directory containment check
+		if (!resolve(target).startsWith(resolve(fontsDir))) {
+			return reply.code(400).send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
+		}
+
+		// Duplicate check — fonts are deduplicated by filename
+		if (existsSync(target)) {
+			return reply.code(409).send({
+				error: { code: "DUPLICATE", message: "A font with this filename already exists" },
+			});
+		}
+
+		await writeFile(target, buffer);
+		return scanFonts(fontsDir);
+	});
+
+	// DELETE /api/fonts/:family — delete all files belonging to a font family
+	server.delete(
+		"/api/fonts/:family",
+		async (request: FastifyRequest<{ Params: { family: string } }>, reply: FastifyReply) => {
+			const { family } = request.params;
+
+			const families = scanFonts(fontsDir);
+			const match = families.find((f) => f.family === family);
+
+			if (!match) {
+				return reply.code(404).send({
+					error: { code: "FONT_FAMILY_NOT_FOUND", message: `Font family "${family}" not found` },
+				});
+			}
+
+			for (const fontFile of match.files) {
+				// Strip /public/fonts/ prefix to get bare filename
+				const filename = fontFile.url.replace(/^\/public\/fonts\//, "");
+				const target = join(fontsDir, filename);
+
+				// Containment check — never escape fontsDir
+				if (!resolve(target).startsWith(resolve(fontsDir))) continue;
+
+				try {
+					await unlink(target);
+				} catch (err: unknown) {
+					if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+				}
+			}
+
+			return reply.code(204).send();
+		},
+	);
 }

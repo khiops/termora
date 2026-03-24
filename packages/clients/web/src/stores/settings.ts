@@ -312,8 +312,15 @@ export const useSettingsStore = defineStore("settings", () => {
 					}
 					// On success, clear dirty state for this key
 					dirty.value = new Set([...dirty.value].filter((k) => k !== debounceKey));
-					// Refresh the configStore so components react without a page reload
+					// Notify per-terminal composables and refresh global config
 					const configStore = useConfigStore();
+					if (section === "terminal") {
+						configStore.emitProfileChange({
+							scope,
+							hostId: currentHostId.value ?? undefined,
+							channelId: currentChannelId.value ?? undefined,
+						});
+					}
 					if (scope === "global" && section === "terminal") {
 						await configStore.loadProfile();
 					} else if (scope === "global" && section !== "appearance" && section !== "elevation") {

@@ -72,13 +72,28 @@
 			:disabled="disabled"
 			@input="onInput"
 		/>
+
+		<div v-else-if="type === 'font'" class="control-font">
+			<button class="control-font-trigger" :disabled="disabled" @click="showFontPicker = true">
+				{{ modelValue || 'Default' }}
+			</button>
+			<FontPicker
+				:show="showFontPicker"
+				:model-value="modelValue as string | undefined"
+				@update:model-value="onFontSelect"
+				@close="showFontPicker = false"
+			/>
+		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref } from "vue";
+import FontPicker from "./FontPicker.vue";
+
+const props = defineProps<{
 	modelValue: unknown;
-	type: "text" | "number" | "select" | "toggle" | "range" | "color";
+	type: "text" | "number" | "select" | "toggle" | "range" | "color" | "font";
 	options?: { label: string; value: string | number }[];
 	min?: number;
 	max?: number;
@@ -110,6 +125,13 @@ function onSelectChange(event: Event): void {
 function onToggleChange(event: Event): void {
 	const target = event.target as HTMLInputElement;
 	emit("update:modelValue", target.checked);
+}
+
+const showFontPicker = ref(false);
+
+function onFontSelect(value: string | undefined): void {
+	emit("update:modelValue", value ?? "");
+	showFontPicker.value = false;
 }
 </script>
 
@@ -232,13 +254,43 @@ function onToggleChange(event: Event): void {
 	background: transparent;
 }
 
+/* ── Font picker trigger ───────────────────────────────────────────── */
+
+.control-font {
+	display: inline-flex;
+	align-items: center;
+}
+
+.control-font-trigger {
+	padding: 4px 10px;
+	font-size: 12px;
+	font-family: inherit;
+	background: var(--nt-border);
+	color: var(--nt-fg);
+	border: 1px solid var(--nt-border);
+	border-radius: 4px;
+	cursor: pointer;
+	min-width: 120px;
+	text-align: left;
+	transition: border-color 0.15s ease;
+}
+
+.control-font-trigger:hover:not(:disabled) {
+	border-color: var(--nt-fg-muted);
+}
+
+.control-font-trigger:focus {
+	outline: 1px solid var(--nt-accent);
+}
+
 /* ── Disabled state ────────────────────────────────────────────────── */
 
 .control-text:disabled,
 .control-number:disabled,
 .control-select:disabled,
 .control-range:disabled,
-.control-color:disabled {
+.control-color:disabled,
+.control-font-trigger:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
 }
