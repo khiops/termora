@@ -327,7 +327,11 @@ export class SshAgent extends AgentConnection {
 					if (this.deployOptions) {
 						// Auto-deploy is best-effort: if it fails, we still try to run the agent
 						// (the user may have installed it manually in a non-standard path).
-						deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
+						deployAgentIfNeeded(client, this.host, {
+							binaryCache: this.deployOptions.binaryCache,
+							hostname: hostname,
+							hostId: this.host.id,
+						})
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
 								if (result.os && result.arch) {
