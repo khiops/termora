@@ -126,6 +126,10 @@ export const useThemeStore = defineStore("theme", () => {
 		root.setProperty("--nt-scrollbar-track", theme.ui.scrollbarTrack);
 		root.setProperty("--nt-search-highlight", theme.ui.searchHighlight);
 		root.setProperty("--nt-search-highlight-active", theme.ui.searchHighlightActive);
+		root.setProperty("--nt-badge-info", theme.ui.badgeInfo ?? "#89b4fa");
+		root.setProperty("--nt-badge-warning", theme.ui.badgeWarning ?? "#f9e2af");
+		root.setProperty("--nt-badge-success", theme.ui.badgeSuccess ?? "#a6e3a1");
+		root.setProperty("--nt-badge-danger", theme.ui.badgeDanger ?? "#f38ba8");
 
 		// Tier 3: computed
 		root.setProperty("--nt-text-secondary", theme.colors.brightBlack);

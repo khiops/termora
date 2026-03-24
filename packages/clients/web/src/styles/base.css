@@ -1,9 +1,9 @@
 /*
  * nexterm — CSS custom property system
  *
- * 42 variables total, organized in 3 tiers:
+ * 46 variables total, organized in 3 tiers:
  *   Tier 1: Terminal colors (from theme.colors)  — 22 vars
- *   Tier 2: UI chrome (from theme.ui)            — 15 vars
+ *   Tier 2: UI chrome (from theme.ui)            — 19 vars (incl. 4 badge semantic)
  *   Tier 3: Computed / derived                    — 11 vars (incl. 6 RGB triplets)
  *
  * Default values match catppuccin-mocha so the app renders
@@ -58,6 +58,10 @@
 	--nt-scrollbar-track: #00000000;
 	--nt-search-highlight: #f9e2af40;
 	--nt-search-highlight-active: #f9e2afaa;
+	--nt-badge-info: #89b4fa;
+	--nt-badge-warning: #f9e2af;
+	--nt-badge-success: #a6e3a1;
+	--nt-badge-danger: #f38ba8;
 
 	/* ── Tier 3 — Computed / derived ─────────────────────────────────── */
 
