@@ -101,8 +101,8 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 	// 3. Try common Unix paths via test -x
 	for (const rawPath of COMMON_AGENT_PATHS_UNIX) {
 		try {
-			const { exitCode } = await sshExec(client, `test -x ${rawPath} && echo ok`);
-			if (exitCode === 0) return rawPath;
+			const { stdout: resolved, exitCode } = await sshExec(client, `test -x ${rawPath} && echo ${rawPath}`);
+			if (exitCode === 0 && resolved.trim()) return resolved.trim();
 		} catch {
 			// ignore
 		}
