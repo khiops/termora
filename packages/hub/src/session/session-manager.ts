@@ -470,6 +470,10 @@ export class SessionManager {
 				if (resolvedArgs.length === 0 && firstProfile.args) {
 					resolvedArgs = firstProfile.args;
 				}
+				// Also apply env from the fallback profile (e.g. TERM=xterm-256color)
+				if (Object.keys(resolvedEnv).length === 0 && firstProfile.env) {
+					resolvedEnv = { ...firstProfile.env };
+				}
 			}
 		}
 
@@ -503,6 +507,7 @@ export class SessionManager {
 			: null;
 		const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
 
+	
 		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
 			type: "SPAWN",

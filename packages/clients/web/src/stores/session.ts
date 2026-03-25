@@ -313,17 +313,10 @@ export const useSessionStore = defineStore("session", () => {
 			if (msg.type === "BELL") {
 				const bellCfg =
 					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
-				// Note: bell sound is handled by TerminalPane's xterm.js onBell handler
-				// (reads resolved per-channel profile). We only handle badge + desktop notification here.
-				// Always show badge (brief flash on active tab, persistent on background)
-				notificationStore.incrementBellCount(msg.channelId);
-				if (msg.channelId === channelsStore.selectedChannelId) {
-					setTimeout(() => {
-						if (msg.channelId === channelsStore.selectedChannelId) {
-							notificationStore.clearBellAndActivity(msg.channelId);
-						}
-					}, 1000);
-				}
+				// Note: bell badge + sound are BOTH handled by TerminalPane's xterm.js
+				// onBell handler (per-channel profile). The WS BELL message is kept
+				// only for desktop notifications (below) — do NOT increment the badge
+				// here to avoid double-counting with onBell.
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
 					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
