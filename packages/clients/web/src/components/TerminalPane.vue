@@ -471,6 +471,8 @@ async function onRestart(): Promise<void> {
 		await channelsStore.spawnChannel(props.hostId, {
 			...(term !== null ? { cols: term.cols, rows: term.rows } : {}),
 		});
+		// Remove the dead pane — the new channel opens in a fresh pane
+		emit("close-pane", chId);
 		return;
 	}
 
