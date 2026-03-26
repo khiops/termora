@@ -46,6 +46,9 @@ export interface SendSpawnOpts {
 }
 
 export class ChannelLifecycleManager {
+	/** Optional callback to reconnect an SSH agent when restartChannel finds no connected agent. */
+	onReconnectAgent?: (hostId: string) => Promise<boolean>;
+
 	constructor(
 		private readonly ctx: SharedSessionContext,
 		private readonly broadcaster: StateBroadcaster,
@@ -232,14 +235,24 @@ export class ChannelLifecycleManager {
 		const { channel, hostId } = info;
 		const ch = this.ctx.channels.get(channelId);
 
-		const agent = this.ctx.agents.get(hostId);
+		let agent = this.ctx.agents.get(hostId);
 		if (agent?.connected && ch && ch.status !== "dead") {
 			agent.send({ type: "DESTROY", channelId } as DestroyMessage);
 		}
 
-		const sessionEntry = this.ctx.sessions.get(hostId);
+		let sessionEntry = this.ctx.sessions.get(hostId);
+
+		// If agent not connected, try to reconnect (SSH hosts need a fresh connection)
+		if (!agent?.connected && this.onReconnectAgent) {
+			const reconnected = await this.onReconnectAgent(hostId);
+			if (!reconnected) return false;
+			// Refresh references after reconnection
+			sessionEntry = this.ctx.sessions.get(hostId);
+		}
+
 		if (!sessionEntry || (sessionEntry.status !== "active" && sessionEntry.status !== "detached"))
 			return false;
+		agent = this.ctx.agents.get(hostId);
 		if (!agent?.connected) return false;
 
 		const shell = channel.shell ?? process.env.SHELL ?? "/bin/sh";

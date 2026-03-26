@@ -27,7 +27,7 @@ import type {
 	UiAttachOkMessage,
 	UiSpawnMessage,
 } from "@nexterm/shared";
-import type { AgentConfig, ElevationMethod } from "@nexterm/shared";
+import type { AgentConfig, ElevationMethod, Host } from "@nexterm/shared";
 import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ConfigResolver, GcConfig } from "../config.js";
 import type { HubLogger } from "../logging/hub-logger.js";
@@ -127,6 +127,41 @@ export class SessionManager {
 		this.sshMgr = new SshConnectionManager(ctx, this.broadcaster, this.lifecycle, this.agentMgr);
 		// Break the circular reference: AgentConnectionManager needs SshConnectionManager
 		this.agentMgr.sshMgr = this.sshMgr;
+
+		// Wire reconnect callback for restartChannel on SSH hosts
+		this.lifecycle.onReconnectAgent = async (hostId: string): Promise<boolean> => {
+			const host = ctx.metaDal.getHost(hostId);
+			if (!host || host.type !== "ssh") return false;
+
+			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
+			const firstClient = ctx.clients.values().next().value;
+			if (!firstClient) return false;
+
+			try {
+				const promptAuth = this.sshMgr.buildPromptAuth(firstClient);
+				const deployOpts = this._buildDeployOpts(hostId, host, firstClient);
+				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+
+				const storedFp = ctx.metaDal.getHostFingerprint(hostId);
+				const sshHostname = host.sshHost?.includes("@")
+					? (host.sshHost.split("@")[1] ?? host.sshHost)
+					: (host.sshHost ?? host.label);
+				const sshPort = host.sshPort ?? 22;
+				const hostKey = `${sshHostname}:${sshPort}`;
+				const sessionTrustedFp = ctx.trustedOnceFingerprints.get(hostKey);
+
+				await sshAgent.start(storedFp, sessionTrustedFp);
+
+				// Ensure session exists
+				const session = await this.agentMgr.getOrCreateSession(hostId, true);
+				this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+				this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
+				ctx.agents.set(hostId, sshAgent);
+				return true;
+			} catch {
+				return false;
+			}
+		};
 
 		this.gc = new SpoolGarbageCollector(spoolDal, metaDal, gcConfig);
 		this.gc.start();
@@ -252,6 +287,39 @@ export class SessionManager {
 
 	// ─── WS message handlers ──────────────────────────────────────────────────
 
+	/** Build SshAgentDeployOptions for a given host + WS client. */
+	private _buildDeployOpts(hostId: string, host: Host, client: WsClient): SshAgentDeployOptions {
+		const sshHostname = host.sshHost?.includes("@")
+			? (host.sshHost.split("@")[1] ?? host.sshHost)
+			: (host.sshHost ?? host.label);
+		const binaryCache = getBinaryCacheDir();
+		const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
+		const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
+		return {
+			binaryCache,
+			hostname: sshHostname,
+			...(pinnedSha256 != null ? { pinnedSha256 } : {}),
+			...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
+			onOsDetected: (hid, os, arch) => {
+				this.ctx.metaDal.updateHostOsArch(hid, os, arch);
+			},
+			promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client),
+			onAgentPinned: (hid, sha256) => {
+				this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
+			},
+			onAgentTrustOnce: (hid, sha256) => {
+				this.ctx.trustedAgentSha256.set(hid, sha256);
+			},
+			onAgentUpdated: (_hid) => {
+				this.broadcaster.broadcastToAllClients({
+					type: "ERROR",
+					code: "AGENT_UPDATED",
+					message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
+				} satisfies ErrorMessage);
+			},
+		};
+	}
+
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
 		this.ctx.hubLogger?.log("debug", "handleSpawn: start", { clientId, hostId: msg.hostId });
 		const client = this.ctx.clients.get(clientId);
@@ -301,34 +369,7 @@ export class SessionManager {
 				const hostKey = `${sshHostname}:${sshPort}`;
 				const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 
-				// Build deploy options for SSH hosts
-				const binaryCache = getBinaryCacheDir();
-				const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
-				const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
-
-				const deployOpts: SshAgentDeployOptions = {
-					binaryCache,
-					hostname: sshHostname,
-					...(pinnedSha256 != null ? { pinnedSha256 } : {}),
-					...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
-					onOsDetected: (hid, os, arch) => {
-						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
-					},
-					promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client),
-					onAgentPinned: (hid, sha256) => {
-						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
-					},
-					onAgentTrustOnce: (hid, sha256) => {
-						this.ctx.trustedAgentSha256.set(hid, sha256);
-					},
-					onAgentUpdated: (_hid) => {
-						this.broadcaster.broadcastToAllClients({
-							type: "ERROR",
-							code: "AGENT_UPDATED",
-							message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
-						} satisfies ErrorMessage);
-					},
-				};
+				const deployOpts = this._buildDeployOpts(hostId, host, client);
 
 				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
 

@@ -462,16 +462,15 @@ async function onRestart(): Promise<void> {
 	const chId = effectiveChannelId.value;
 	if (chId === null) return;
 
-	// SSH hosts: the agent connection is gone when the channel is dead.
-	// Calling POST /restart returns 503 (no agent connected). Instead,
-	// spawn a new channel on the same host — the SPAWN flow handles
-	// SSH reconnect, key auth, and agent deploy automatically.
+	// SSH hosts: restart goes through WS SPAWN flow (supports async prompts
+	// for passphrase/TOFU/deploy). REST restart can't handle interactive auth.
 	if (paneHost.value?.type === "ssh" && props.hostId) {
 		const term = terminal.value;
 		await channelsStore.spawnChannel(props.hostId, {
 			...(term !== null ? { cols: term.cols, rows: term.rows } : {}),
 		});
-		// Remove the dead pane — the new channel opens in a fresh pane
+		// Remove the dead channel entirely and close its pane
+		await channelsStore.deleteChannel(chId);
 		emit("close-pane", chId);
 		return;
 	}
