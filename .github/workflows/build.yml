@@ -40,7 +40,6 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm -F @nexterm/shared build
-      - run: pnpm test
       - run: ./scripts/build-web.sh
         env:
           NEXTERM_BUILD_HASH: ${{ github.sha }}

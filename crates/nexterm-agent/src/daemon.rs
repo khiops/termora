@@ -485,7 +485,7 @@ fn create_secure_pipe(
     }
     let _guard = PsdGuard(psd);
 
-    let sa = SECURITY_ATTRIBUTES {
+    let mut sa = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: psd,
         bInheritHandle: 0,
@@ -511,7 +511,7 @@ fn create_secure_pipe(
             65536,
             65536,
             0,
-            std::ptr::addr_of_mut!(sa),
+            (&mut sa) as *mut SECURITY_ATTRIBUTES,
         )
     };
 
