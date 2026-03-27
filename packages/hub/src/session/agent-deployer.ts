@@ -101,7 +101,10 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 	// 3. Try common Unix paths via test -x
 	for (const rawPath of COMMON_AGENT_PATHS_UNIX) {
 		try {
-			const { stdout: resolved, exitCode } = await sshExec(client, `test -x ${rawPath} && echo ${rawPath}`);
+			const { stdout: resolved, exitCode } = await sshExec(
+				client,
+				`test -x ${rawPath} && echo ${rawPath}`,
+			);
 			if (exitCode === 0 && resolved.trim()) return resolved.trim();
 		} catch {
 			// ignore
@@ -463,9 +466,7 @@ export async function getRemoteSha256(
 ): Promise<string | null> {
 	try {
 		const escapedPath =
-			os === "windows"
-				? remotePath.replace(/'/g, "''")
-				: remotePath.replace(/'/g, "'\\''");
+			os === "windows" ? remotePath.replace(/'/g, "''") : remotePath.replace(/'/g, "'\\''");
 		let cmd: string;
 		if (os === "windows") {
 			cmd = `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`;

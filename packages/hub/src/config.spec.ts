@@ -483,7 +483,9 @@ describe("PATCH /api/hosts/:id/profile", () => {
 			method: "GET",
 			url: `/api/config/cascade?host_id=${id}`,
 		});
-		const body = cascadeRes.json<{ terminal: { resolved: { fontSize: number; cursorStyle: string } } }>();
+		const body = cascadeRes.json<{
+			terminal: { resolved: { fontSize: number; cursorStyle: string } };
+		}>();
 		expect(body.terminal.resolved.fontSize).toBe(18);
 		expect(body.terminal.resolved.cursorStyle).toBe("bar");
 	});
@@ -2005,17 +2007,23 @@ describe("ConfigResolver.resolveCustomCommand", () => {
 		expect(cmd).toBe("/host/custom/cmd");
 	});
 
-	it.skipIf(process.platform === "win32")("falls back to global custom_command_linux when host not set (Linux)", () => {
-		const dir = join(tmpdir(), `nexterm-custom-cmd-${Date.now()}`);
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "config.toml"), '[elevation]\ncustom_command_linux = "/global/cmd"\n');
+	it.skipIf(process.platform === "win32")(
+		"falls back to global custom_command_linux when host not set (Linux)",
+		() => {
+			const dir = join(tmpdir(), `nexterm-custom-cmd-${Date.now()}`);
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, "config.toml"),
+				'[elevation]\ncustom_command_linux = "/global/cmd"\n',
+			);
 
-		const resolver = new ConfigResolver(metaDal);
-		resolver.loadFromFile(dir);
-		const cmd = resolver.resolveCustomCommand(null);
-		// On Linux CI, resolveCustomCommand falls back to customCommandLinux
-		expect(cmd).toBe("/global/cmd");
-	});
+			const resolver = new ConfigResolver(metaDal);
+			resolver.loadFromFile(dir);
+			const cmd = resolver.resolveCustomCommand(null);
+			// On Linux CI, resolveCustomCommand falls back to customCommandLinux
+			expect(cmd).toBe("/global/cmd");
+		},
+	);
 
 	it("returns undefined when neither host nor global custom command set", () => {
 		const resolver = new ConfigResolver(metaDal);

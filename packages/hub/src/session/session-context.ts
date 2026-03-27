@@ -73,7 +73,13 @@ export interface SharedSessionContext {
 	/** Per-host SHA256 of agent binary trusted for this session only (trust_once). */
 	trustedAgentSha256: Map<string, string>;
 	/** Pending agent binary verification prompts, keyed by promptId. */
-	pendingAgentVerify: Map<string, { resolve: (action: "trust_permanent" | "trust_once" | "reject") => void; timer: ReturnType<typeof setTimeout> }>;
+	pendingAgentVerify: Map<
+		string,
+		{
+			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
+			timer: ReturnType<typeof setTimeout>;
+		}
+	>;
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */

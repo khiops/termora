@@ -1,4 +1,3 @@
-
 /**
  * Cross-platform socket path helper for tests.
  *

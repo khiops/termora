@@ -7,7 +7,12 @@ import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
-import { DeployError, type BinaryVerifyPromptFn, type DeployOptions, deployAgentIfNeeded } from "./agent-deployer.js";
+import {
+	type BinaryVerifyPromptFn,
+	DeployError,
+	type DeployOptions,
+	deployAgentIfNeeded,
+} from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -168,8 +173,12 @@ function toDeployOptions(
 		hostname: opts.hostname ?? resolvedHostname,
 		hostId: host.id,
 		...(opts.pinnedSha256 != null ? { pinnedSha256: opts.pinnedSha256 } : {}),
-		...(opts.sessionTrustedSha256 != null ? { sessionTrustedSha256: opts.sessionTrustedSha256 } : {}),
-		...(opts.promptBinaryVerify !== undefined ? { promptBinaryVerify: opts.promptBinaryVerify } : {}),
+		...(opts.sessionTrustedSha256 != null
+			? { sessionTrustedSha256: opts.sessionTrustedSha256 }
+			: {}),
+		...(opts.promptBinaryVerify !== undefined
+			? { promptBinaryVerify: opts.promptBinaryVerify }
+			: {}),
 		...(opts.onAgentPinned !== undefined ? { onAgentPinned: opts.onAgentPinned } : {}),
 		...(opts.onAgentTrustOnce !== undefined ? { onAgentTrustOnce: opts.onAgentTrustOnce } : {}),
 		...(opts.onAgentUpdated !== undefined ? { onAgentUpdated: opts.onAgentUpdated } : {}),
@@ -365,7 +374,11 @@ export class SshAgent extends AgentConnection {
 						// Auto-deploy is best-effort: if it fails, we still try to run the agent
 						// (the user may have installed it manually in a non-standard path).
 						// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
-						deployAgentIfNeeded(client, this.host, toDeployOptions(this.deployOptions, this.host, hostname))
+						deployAgentIfNeeded(
+							client,
+							this.host,
+							toDeployOptions(this.deployOptions, this.host, hostname),
+						)
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
 								if (result.os && result.arch) {

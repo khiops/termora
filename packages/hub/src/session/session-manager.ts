@@ -36,12 +36,12 @@ import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
 import { AgentConnectionManager } from "./agent-connection-manager.js";
+import { DeployError, getBinaryCacheDir } from "./agent-deployer.js";
 import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import { OutputChunker } from "./output-chunker.js";
 import type { SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
-import { getBinaryCacheDir, DeployError } from "./agent-deployer.js";
 import { SshAgent } from "./ssh-agent.js";
 import type { SshAgentDeployOptions } from "./ssh-agent.js";
 import { SshConnectionManager } from "./ssh-connection-manager.js";
@@ -548,7 +548,6 @@ export class SessionManager {
 			: null;
 		const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
 
-	
 		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
 			type: "SPAWN",
@@ -859,7 +858,12 @@ export class SessionManager {
 		this.ctx.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
-	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null, rememberSession?: boolean): void {
+	handleAuthPromptResponse(
+		clientId: string,
+		hostId: string,
+		secret: string | null,
+		rememberSession?: boolean,
+	): void {
 		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret, rememberSession);
 	}
 

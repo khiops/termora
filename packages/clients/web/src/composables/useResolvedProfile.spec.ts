@@ -1,8 +1,7 @@
-
-import { createApp, defineComponent, ref, nextTick } from "vue";
-import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROFILE } from "@nexterm/shared";
+import { createPinia, setActivePinia } from "pinia";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp, defineComponent, nextTick, ref } from "vue";
 import type { ProfileChangeEvent } from "../stores/config.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -90,9 +89,7 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>(undefined);
 		const channelId = ref<string | undefined>(undefined);
 
-		const { result, unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { result, unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -115,9 +112,7 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>("host-1");
 		const channelId = ref<string | undefined>("ch-1");
 
-		const { result, unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { result, unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -134,16 +129,16 @@ describe("useResolvedProfile", () => {
 		let callCount = 0;
 		const fetchMock = vi.fn().mockImplementation(async () => ({
 			ok: true,
-			json: async () => ({ terminal: { resolved: { ...DEFAULT_PROFILE, fontSize: 14 + callCount++ } } }),
+			json: async () => ({
+				terminal: { resolved: { ...DEFAULT_PROFILE, fontSize: 14 + callCount++ } },
+			}),
 		}));
 		vi.stubGlobal("fetch", fetchMock);
 
 		const hostId = ref<string | undefined>("host-1");
 		const channelId = ref<string | undefined>(undefined);
 
-		const { unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -168,9 +163,7 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>("host-1");
 		const channelId = ref<string | undefined>(undefined);
 
-		const { unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -199,9 +192,7 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>("host-1");
 		const channelId = ref<string | undefined>("ch-1");
 
-		const { unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -230,9 +221,7 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>(undefined);
 		const channelId = ref<string | undefined>(undefined);
 
-		const { unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
@@ -255,19 +244,14 @@ describe("useResolvedProfile", () => {
 		const hostId = ref<string | undefined>(undefined);
 		const channelId = ref<string | undefined>(undefined);
 
-		const { result, unmount } = withSetup(() =>
-			useResolvedProfile(hostId, channelId),
-		);
+		const { result, unmount } = withSetup(() => useResolvedProfile(hostId, channelId));
 
 		await nextTick();
 		await nextTick();
 
 		// Should fall back to DEFAULT_PROFILE
 		expect(result.profile.value.fontSize).toBe(DEFAULT_PROFILE.fontSize);
-		expect(warnSpy).toHaveBeenCalledWith(
-			"[useResolvedProfile] failed to load:",
-			expect.any(Error),
-		);
+		expect(warnSpy).toHaveBeenCalledWith("[useResolvedProfile] failed to load:", expect.any(Error));
 		unmount();
 	});
 });

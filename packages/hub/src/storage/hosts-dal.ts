@@ -282,9 +282,9 @@ export class HostsDAL {
 	}
 
 	getHostAgentSha256(id: string): string | null {
-		const row = this.db
-			.prepare("SELECT agent_sha256 FROM hosts WHERE id = ?")
-			.get(id) as { agent_sha256: string | null } | undefined;
+		const row = this.db.prepare("SELECT agent_sha256 FROM hosts WHERE id = ?").get(id) as
+			| { agent_sha256: string | null }
+			| undefined;
 		return row?.agent_sha256 ?? null;
 	}
 

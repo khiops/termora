@@ -19,11 +19,16 @@ import type {
 import { generateId } from "@nexterm/shared";
 import { Client as SshClient } from "ssh2";
 import type { AgentConnectionManager } from "./agent-connection-manager.js";
+import { type BinaryVerifyPromptFn, getBinaryCacheDir } from "./agent-deployer.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
-import { getBinaryCacheDir, type BinaryVerifyPromptFn } from "./agent-deployer.js";
-import { type AuthPromptFn, type SshAgentDeployOptions, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
+import {
+	type AuthPromptFn,
+	SshAgent,
+	type SshAgentDeployOptions,
+	buildSshConnectConfig,
+} from "./ssh-agent.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
@@ -171,9 +176,13 @@ export class SshConnectionManager {
 			return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
 				const timer = setTimeout(() => {
 					this.ctx.pendingAgentVerify.delete(promptId);
-					this.ctx.hubLogger?.log("warn", "ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting", {
-						hostname,
-					});
+					this.ctx.hubLogger?.log(
+						"warn",
+						"ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting",
+						{
+							hostname,
+						},
+					);
 					resolve("reject");
 				}, 30_000);
 
@@ -182,7 +191,10 @@ export class SshConnectionManager {
 		};
 	}
 
-	handleAgentVerifyResponse(promptId: string, action: "trust_permanent" | "trust_once" | "reject"): void {
+	handleAgentVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
+	): void {
 		const pending = this.ctx.pendingAgentVerify.get(promptId);
 		if (!pending) return;
 		clearTimeout(pending.timer);
@@ -231,7 +243,9 @@ export class SshConnectionManager {
 					binaryCache,
 					hostname: sshHostname,
 					...(pinnedSha256 != null ? { pinnedSha256 } : {}),
-					...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
+					...(sessionTrustedAgentSha != null
+						? { sessionTrustedSha256: sessionTrustedAgentSha }
+						: {}),
 					onOsDetected: (hid, os, arch) => {
 						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
 					},

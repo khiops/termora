@@ -238,7 +238,6 @@ export interface LogConfig {
 	maxSizeMb: number;
 }
 
-
 export interface SshKeyEntry {
 	name: string;
 	type: "directory" | "key";
@@ -249,4 +248,3 @@ export interface SshKeyEntry {
 	encrypted?: boolean;
 	mtime?: string;
 }
-

@@ -1,7 +1,6 @@
-
+import type { AgentBinaryVerifyMessage } from "@nexterm/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type { AgentBinaryVerifyMessage } from "@nexterm/shared";
 import type { IWsClient } from "../services/ws-client.js";
 
 /**

@@ -4,11 +4,11 @@ import { markRaw, ref } from "vue";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
 import { hubWsUrl } from "../utils/hub-url.js";
+import { useAgentVerifyStore } from "./agent-verify.js";
 import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
-import { useAgentVerifyStore } from "./agent-verify.js";
 import { useHostVerifyStore } from "./host-verify.js";
 import { useHostsStore } from "./hosts.js";
 import { useNotificationStore } from "./notifications.js";
@@ -226,7 +226,6 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 	}
-
 
 	/**
 	 * Wire up AGENT_BINARY_VERIFY and agent-related ERROR message handlers.

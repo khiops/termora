@@ -432,11 +432,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		const onAgentPinned = vi.fn();
-		await deployAgentIfNeeded(
-			client,
-			{ os: "linux", arch: "x64" },
-			makeOptions({ onAgentPinned }),
-		);
+		await deployAgentIfNeeded(client, { os: "linux", arch: "x64" }, makeOptions({ onAgentPinned }));
 
 		// Pin must be updated to the local (trusted) binary's hash after re-upload
 		expect(onAgentPinned).toHaveBeenCalledWith("host-1", localSha);
@@ -792,7 +788,7 @@ describe("getRemoteSha256", () => {
 
 	it("returns null when command exits with non-zero", async () => {
 		const client = makeMockClient({
-			"sha256sum \"/missing/path\"": { stdout: "", stderr: "No such file", exitCode: 1 },
+			'sha256sum "/missing/path"': { stdout: "", stderr: "No such file", exitCode: 1 },
 		});
 		const result = await getRemoteSha256(client, "/missing/path", "linux");
 		expect(result).toBeNull();

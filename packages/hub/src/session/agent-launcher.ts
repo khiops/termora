@@ -119,9 +119,10 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		? [agentPath, daemonArgs]
 		: [process.execPath, [agentPath, ...daemonArgs]];
 
-	const stateDir = process.platform === "win32"
-		? join(process.env.LOCALAPPDATA ?? homedir(), "nexterm")
-		: join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+	const stateDir =
+		process.platform === "win32"
+			? join(process.env.LOCALAPPDATA ?? homedir(), "nexterm")
+			: join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
 	mkdirSync(stateDir, { recursive: true });
 	const logPath = join(stateDir, "agent-daemon.log");
 	const logFd = openSync(logPath, "a");

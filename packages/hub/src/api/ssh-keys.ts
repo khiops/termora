@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	statSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { chmod, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -105,10 +98,7 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 
 	server.get(
 		"/api/ssh-keys",
-		async (
-			request: FastifyRequest<{ Querystring: { dir?: string } }>,
-			reply: FastifyReply,
-		) => {
+		async (request: FastifyRequest<{ Querystring: { dir?: string } }>, reply: FastifyReply) => {
 			if (!existsSync(dir)) {
 				mkdirSync(dir, { recursive: true, mode: 0o700 });
 			}
@@ -141,7 +131,14 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 			const entries: SshKeyEntry[] = [];
 			for (const name of names) {
 				// Skip public key files and common non-key files
-				if (name.endsWith(".pub") || name === "known_hosts" || name === "known_hosts.old" || name === "config" || name === "authorized_keys") continue;
+				if (
+					name.endsWith(".pub") ||
+					name === "known_hosts" ||
+					name === "known_hosts.old" ||
+					name === "config" ||
+					name === "authorized_keys"
+				)
+					continue;
 				const fullPath = join(targetDir, name);
 				let lstat: ReturnType<typeof lstatSync>;
 				try {
@@ -173,84 +170,77 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 		},
 	);
 
-	server.post(
-		"/api/ssh-keys",
-		async (request: FastifyRequest, reply: FastifyReply) => {
-			const file = await request.file();
-			if (!file) {
+	server.post("/api/ssh-keys", async (request: FastifyRequest, reply: FastifyReply) => {
+		const file = await request.file();
+		if (!file) {
+			return reply.code(400).send({ error: { code: "NO_FILE", message: "No file uploaded" } });
+		}
+		const sanitized = sanitizeFilename(file.filename);
+		if (!sanitized) {
+			return reply
+				.code(400)
+				.send({ error: { code: "INVALID_FILENAME", message: "Invalid filename" } });
+		}
+		let relDir = "";
+		const fields = (request.body as Record<string, { value?: string }> | null) ?? {};
+		if (fields["dir"]?.value) {
+			relDir = fields["dir"].value;
+		}
+		const buffer = await file.toBuffer();
+		if (buffer.byteLength > MAX_KEY_UPLOAD_SIZE) {
+			return reply.code(413).send({
+				error: { code: "FILE_TOO_LARGE", message: "Key file exceeds 100 KB limit" },
+			});
+		}
+		const result = ssh2.utils.parseKey(buffer);
+		const isEncryptedKey =
+			result instanceof Error && result.message.toLowerCase().includes("encrypted");
+		const isValidKey = !(result instanceof Error);
+		if (!isValidKey && !isEncryptedKey) {
+			return reply.code(400).send({
+				error: { code: "INVALID_KEY", message: "File is not a valid SSH private key" },
+			});
+		}
+		let targetDir: string;
+		if (relDir === "") {
+			targetDir = resolve(dir);
+		} else {
+			const safe = containedPath(dir, relDir);
+			if (!safe) {
 				return reply
 					.code(400)
-					.send({ error: { code: "NO_FILE", message: "No file uploaded" } });
+					.send({ error: { code: "INVALID_PATH", message: "Path traversal rejected" } });
 			}
-			const sanitized = sanitizeFilename(file.filename);
-			if (!sanitized) {
-				return reply
-					.code(400)
-					.send({ error: { code: "INVALID_FILENAME", message: "Invalid filename" } });
-			}
-			let relDir = "";
-			const fields = (request.body as Record<string, { value?: string }> | null) ?? {};
-			if (fields["dir"]?.value) {
-				relDir = fields["dir"].value;
-			}
-			const buffer = await file.toBuffer();
-			if (buffer.byteLength > MAX_KEY_UPLOAD_SIZE) {
-				return reply.code(413).send({
-					error: { code: "FILE_TOO_LARGE", message: "Key file exceeds 100 KB limit" },
-				});
-			}
-			const result = ssh2.utils.parseKey(buffer);
-			const isEncryptedKey =
-				result instanceof Error && result.message.toLowerCase().includes("encrypted");
-			const isValidKey = !(result instanceof Error);
-			if (!isValidKey && !isEncryptedKey) {
-				return reply.code(400).send({
-					error: { code: "INVALID_KEY", message: "File is not a valid SSH private key" },
-				});
-			}
-			let targetDir: string;
-			if (relDir === "") {
-				targetDir = resolve(dir);
-			} else {
-				const safe = containedPath(dir, relDir);
-				if (!safe) {
-					return reply
-						.code(400)
-						.send({ error: { code: "INVALID_PATH", message: "Path traversal rejected" } });
-				}
-				targetDir = safe;
-			}
-			if (!existsSync(targetDir)) {
-				mkdirSync(targetDir, { recursive: true, mode: 0o700 });
-			}
-			const safeTarget = containedPath(dir, relDir, sanitized);
-			if (!safeTarget) {
-				return reply
-					.code(400)
-					.send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
-			}
-			if (existsSync(safeTarget)) {
-				return reply.code(409).send({
-					error: { code: "DUPLICATE", message: "A key with this filename already exists" },
-				});
-			}
-			await writeFile(safeTarget, buffer);
-			await chmod(safeTarget, 0o600);
-			if (isEncryptedKey) {
-				const mtime = statSync(safeTarget).mtime.toISOString();
-				return { name: sanitized, encrypted: true, mtime };
-			}
-			const parsed = Array.isArray(result) ? result[0] : result;
-			if (!parsed || parsed instanceof Error) {
-				return { name: sanitized };
-			}
-			const algorithm = mapAlgorithm(parsed.type);
-			const bits = deriveBits(parsed);
-			const fingerprint = `SHA256:${createHash("sha256").update(parsed.getPublicSSH()).digest("base64")}`;
+			targetDir = safe;
+		}
+		if (!existsSync(targetDir)) {
+			mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+		}
+		const safeTarget = containedPath(dir, relDir, sanitized);
+		if (!safeTarget) {
+			return reply.code(400).send({ error: { code: "INVALID_PATH", message: "Invalid filename" } });
+		}
+		if (existsSync(safeTarget)) {
+			return reply.code(409).send({
+				error: { code: "DUPLICATE", message: "A key with this filename already exists" },
+			});
+		}
+		await writeFile(safeTarget, buffer);
+		await chmod(safeTarget, 0o600);
+		if (isEncryptedKey) {
 			const mtime = statSync(safeTarget).mtime.toISOString();
-			return { name: sanitized, algorithm, bits, fingerprint, encrypted: false, mtime };
-		},
-	);
+			return { name: sanitized, encrypted: true, mtime };
+		}
+		const parsed = Array.isArray(result) ? result[0] : result;
+		if (!parsed || parsed instanceof Error) {
+			return { name: sanitized };
+		}
+		const algorithm = mapAlgorithm(parsed.type);
+		const bits = deriveBits(parsed);
+		const fingerprint = `SHA256:${createHash("sha256").update(parsed.getPublicSSH()).digest("base64")}`;
+		const mtime = statSync(safeTarget).mtime.toISOString();
+		return { name: sanitized, algorithm, bits, fingerprint, encrypted: false, mtime };
+	});
 
 	server.delete(
 		"/api/ssh-keys",
@@ -281,9 +271,7 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 				await unlink(safeTarget);
 			} catch (err: unknown) {
 				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-					return reply
-						.code(404)
-						.send({ error: { code: "NOT_FOUND", message: "Key not found" } });
+					return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Key not found" } });
 				}
 				throw err;
 			}

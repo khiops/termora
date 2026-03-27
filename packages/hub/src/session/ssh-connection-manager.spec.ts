@@ -1,4 +1,3 @@
-
 import { describe, expect, it, vi } from "vitest";
 import type { SharedSessionContext } from "./session-context.js";
 import { SshConnectionManager } from "./ssh-connection-manager.js";

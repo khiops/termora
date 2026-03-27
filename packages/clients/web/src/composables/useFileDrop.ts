@@ -1,6 +1,4 @@
-
-import { ref, type Ref } from "vue";
-
+import { type Ref, ref } from "vue";
 
 export function useFileDrop(
 	onFiles: (files: File[]) => void,

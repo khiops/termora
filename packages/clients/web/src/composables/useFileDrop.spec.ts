@@ -1,5 +1,4 @@
-
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useFileDrop } from "./useFileDrop.js";
 
 function makeFile(name: string): File {
@@ -26,10 +25,16 @@ describe("useFileDrop", () => {
 	});
 
 	it("tracks isDragging state via dragenter/dragleave", () => {
-		const { isDragging, onDragEnter, onDragLeave } = useFileDrop(vi.fn(), new Set([".ttf", ".otf", ".woff", ".woff2"]));
+		const { isDragging, onDragEnter, onDragLeave } = useFileDrop(
+			vi.fn(),
+			new Set([".ttf", ".otf", ".woff", ".woff2"]),
+		);
 
 		expect(isDragging.value).toBe(false);
-		onDragEnter({ preventDefault: vi.fn(), dataTransfer: { types: ["Files"] } } as unknown as DragEvent);
+		onDragEnter({
+			preventDefault: vi.fn(),
+			dataTransfer: { types: ["Files"] },
+		} as unknown as DragEvent);
 		expect(isDragging.value).toBe(true);
 		onDragLeave({} as DragEvent);
 		expect(isDragging.value).toBe(false);
@@ -48,7 +53,12 @@ describe("useFileDrop", () => {
 		const { onDrop } = useFileDrop(onFiles, new Set([".ttf", ".otf", ".woff", ".woff2"]));
 
 		onDrop(
-			makeDragEvent([makeFile("a.ttf"), makeFile("b.otf"), makeFile("c.woff"), makeFile("d.woff2")]),
+			makeDragEvent([
+				makeFile("a.ttf"),
+				makeFile("b.otf"),
+				makeFile("c.woff"),
+				makeFile("d.woff2"),
+			]),
 		);
 
 		expect(onFiles).toHaveBeenCalledOnce();
@@ -57,8 +67,14 @@ describe("useFileDrop", () => {
 	});
 
 	it("handles nested dragenter/dragleave pairs (counter)", () => {
-		const { isDragging, onDragEnter, onDragLeave } = useFileDrop(vi.fn(), new Set([".ttf", ".otf", ".woff", ".woff2"]));
-		const evt = { preventDefault: vi.fn(), dataTransfer: { types: ["Files"] } } as unknown as DragEvent;
+		const { isDragging, onDragEnter, onDragLeave } = useFileDrop(
+			vi.fn(),
+			new Set([".ttf", ".otf", ".woff", ".woff2"]),
+		);
+		const evt = {
+			preventDefault: vi.fn(),
+			dataTransfer: { types: ["Files"] },
+		} as unknown as DragEvent;
 
 		onDragEnter(evt);
 		onDragEnter(evt); // nested child element
@@ -70,8 +86,14 @@ describe("useFileDrop", () => {
 	});
 
 	it("resets isDragging on drop", () => {
-		const { isDragging, onDragEnter, onDrop } = useFileDrop(vi.fn(), new Set([".ttf", ".otf", ".woff", ".woff2"]));
-		const enterEvt = { preventDefault: vi.fn(), dataTransfer: { types: ["Files"] } } as unknown as DragEvent;
+		const { isDragging, onDragEnter, onDrop } = useFileDrop(
+			vi.fn(),
+			new Set([".ttf", ".otf", ".woff", ".woff2"]),
+		);
+		const enterEvt = {
+			preventDefault: vi.fn(),
+			dataTransfer: { types: ["Files"] },
+		} as unknown as DragEvent;
 
 		onDragEnter(enterEvt);
 		expect(isDragging.value).toBe(true);
@@ -80,9 +102,15 @@ describe("useFileDrop", () => {
 	});
 
 	it("ignores dragenter when no Files in types", () => {
-		const { isDragging, onDragEnter } = useFileDrop(vi.fn(), new Set([".ttf", ".otf", ".woff", ".woff2"]));
+		const { isDragging, onDragEnter } = useFileDrop(
+			vi.fn(),
+			new Set([".ttf", ".otf", ".woff", ".woff2"]),
+		);
 
-		onDragEnter({ preventDefault: vi.fn(), dataTransfer: { types: ["text/plain"] } } as unknown as DragEvent);
+		onDragEnter({
+			preventDefault: vi.fn(),
+			dataTransfer: { types: ["text/plain"] },
+		} as unknown as DragEvent);
 		expect(isDragging.value).toBe(false);
 	});
 

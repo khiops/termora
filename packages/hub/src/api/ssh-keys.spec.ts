@@ -144,7 +144,15 @@ describe("SSH key endpoints", () => {
 				headers: authHeader(),
 			});
 			expect(res.statusCode).toBe(200);
-			const body = res.json<{ entries: Array<{ name: string; type: string; algorithm?: string; bits?: number; fingerprint?: string }> }>();
+			const body = res.json<{
+				entries: Array<{
+					name: string;
+					type: string;
+					algorithm?: string;
+					bits?: number;
+					fingerprint?: string;
+				}>;
+			}>();
 			expect(body.entries).toHaveLength(1);
 			const entry = body.entries[0];
 			expect(entry.name).toBe("id_ed25519");
@@ -278,7 +286,13 @@ describe("SSH key endpoints", () => {
 				payload,
 			});
 			expect(res.statusCode).toBe(200);
-			const body = res.json<{ name: string; algorithm: string; bits: number; fingerprint: string; encrypted: boolean }>();
+			const body = res.json<{
+				name: string;
+				algorithm: string;
+				bits: number;
+				fingerprint: string;
+				encrypted: boolean;
+			}>();
 			expect(body.name).toBe("id_ed25519");
 			expect(body.algorithm).toBe("ED25519");
 			expect(body.bits).toBe(256);
