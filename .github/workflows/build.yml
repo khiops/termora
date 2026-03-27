@@ -39,6 +39,7 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - run: pnpm test
       - run: ./scripts/build-web.sh
         env:
@@ -120,6 +121,7 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - uses: actions/download-artifact@v4
         with:
           name: web-dist-embedded
@@ -168,6 +170,7 @@ jobs:
         with:
           workspaces: packages/clients/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - uses: actions/download-artifact@v4
         with:
           name: agent-${{ matrix.triple }}
