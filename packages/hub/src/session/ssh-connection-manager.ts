@@ -262,7 +262,8 @@ export class SshConnectionManager {
 
 				const sshAgent = new SshAgent(host, undefined, deployOpts);
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
-				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostId);
+				const hostKey = `${sshHostname}:${host.sshPort ?? 22}`;
+				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 				await sshAgent.start(storedFp, sessionFp);
 				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);

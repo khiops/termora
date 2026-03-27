@@ -159,10 +159,10 @@ function makeAgentNotFoundClient(sftp: SFTPWrapper): SshClient {
 		{
 			"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 			"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/usr/local/bin/nexterm-agent" && echo "/usr/local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/usr/bin/nexterm-agent" && echo "/usr/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/opt/nexterm/nexterm-agent" && echo "/opt/nexterm/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
 			"echo $HOME": { stdout: "/home/user\n", stderr: "", exitCode: 0 },
 		},
 		sftpImpl,
@@ -197,7 +197,7 @@ describe("checkRemoteAgent", () => {
 		const client = makeMockClient({
 			"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 			"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x $HOME/.local/bin/nexterm-agent && echo $HOME/.local/bin/nexterm-agent": {
+			'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': {
 				stdout: "/home/user/.local/bin/nexterm-agent\n",
 				stderr: "",
 				exitCode: 0,
@@ -646,10 +646,10 @@ describe("deployAgentIfNeeded — agent not found", () => {
 			{
 				"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 				"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/local/bin/nexterm-agent" && echo "/usr/local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/bin/nexterm-agent" && echo "/usr/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/opt/nexterm/nexterm-agent" && echo "/opt/nexterm/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
 				"uname -sm": { stdout: "Linux aarch64\n", stderr: "", exitCode: 0 },
 				"echo $HOME": { stdout: "/home/user\n", stderr: "", exitCode: 0 },
 			},
@@ -667,10 +667,10 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const client = makeMockClient({
 			"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 			"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-			"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/usr/local/bin/nexterm-agent" && echo "/usr/local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/usr/bin/nexterm-agent" && echo "/usr/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+			'test -x "/opt/nexterm/nexterm-agent" && echo "/opt/nexterm/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
 			"uname -sm": { stdout: "", stderr: "", exitCode: 1 },
 			"echo %PROCESSOR_ARCHITECTURE%": { stdout: "", stderr: "", exitCode: 1 },
 		});
@@ -692,10 +692,10 @@ describe("deployAgentIfNeeded — agent not found", () => {
 			{
 				"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 				"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/local/bin/nexterm-agent" && echo "/usr/local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/bin/nexterm-agent" && echo "/usr/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/opt/nexterm/nexterm-agent" && echo "/opt/nexterm/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
 			},
 			sftpImpl,
 		);
@@ -843,10 +843,10 @@ describe("deploy + verify integration", () => {
 			{
 				"which nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
 				"where nexterm-agent": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x ~/.local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/local/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /usr/bin/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
-				"test -x /opt/nexterm/nexterm-agent && echo ok": { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "$HOME/.local/bin/nexterm-agent" && echo "$HOME/.local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/local/bin/nexterm-agent" && echo "/usr/local/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/usr/bin/nexterm-agent" && echo "/usr/bin/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
+				'test -x "/opt/nexterm/nexterm-agent" && echo "/opt/nexterm/nexterm-agent"': { stdout: "", stderr: "", exitCode: 1 },
 				"echo $HOME": { stdout: "/home/user\n", stderr: "", exitCode: 0 },
 			},
 			sftpImpl,

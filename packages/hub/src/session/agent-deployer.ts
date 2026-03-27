@@ -103,7 +103,7 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 		try {
 			const { stdout: resolved, exitCode } = await sshExec(
 				client,
-				`test -x ${rawPath} && echo ${rawPath}`,
+				`test -x "${rawPath}" && echo "${rawPath}"`,
 			);
 			if (exitCode === 0 && resolved.trim()) return resolved.trim();
 		} catch {

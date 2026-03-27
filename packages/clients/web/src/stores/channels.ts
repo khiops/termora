@@ -231,17 +231,13 @@ export const useChannelsStore = defineStore("channels", () => {
 			// Mark channels absent from last STATE_SYNC as dead (hub restarted, lost track)
 			if (lastSyncIds.value !== null) {
 				const syncIds = lastSyncIds.value;
-				let deadMarked = false;
 				channels.value = channels.value.map((ch) => {
 					if (ch.status !== "dead" && !syncIds.has(ch.id)) {
-						deadMarked = true;
 						return { ...ch, status: "dead" as const };
 					}
 					return ch;
 				});
-				if (deadMarked) {
-					lastSyncIds.value = null;
-				}
+				lastSyncIds.value = null; // Always clear — one-shot reconciliation
 			}
 			// Clear selection if the previously selected channel is no longer
 			// present (e.g. host switched)

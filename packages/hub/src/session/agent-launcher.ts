@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import { access, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -140,6 +140,7 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 	});
 
 	child.unref();
+	try { closeSync(logFd); } catch { /* ignore */ }
 }
 
 /**
