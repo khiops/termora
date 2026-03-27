@@ -9,47 +9,176 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
-
-  release:
-    name: Create GitHub Release
-    needs: build
+  matrix:
+    name: Load Build Matrix
     runs-on: ubuntu-latest
+    outputs:
+      agent: ${{ steps.filter.outputs.agent }}
+      hub: ${{ steps.filter.outputs.hub }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        run: |
+          jq -c '{include:[.targets[]|select(.enabled and .agent)]}' \
+            .github/build-matrix.json > /tmp/agent.json
+          jq -c '{include:[.targets[]|select(.enabled and .hub)]}' \
+            .github/build-matrix.json > /tmp/hub.json
+          jq -c '{include:[.targets[]|select(.enabled and .desktop)]}' \
+            .github/build-matrix.json > /tmp/desktop.json
+          echo "agent=$(cat /tmp/agent.json)" >> "$GITHUB_OUTPUT"
+          echo "hub=$(cat /tmp/hub.json)" >> "$GITHUB_OUTPUT"
+          echo "desktop=$(cat /tmp/desktop.json)" >> "$GITHUB_OUTPUT"
 
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Download agent artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: agent-*
-          path: release-staging/
-          merge-multiple: true
-
-      - name: Download hub artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: hub-*
-          path: release-staging/
-          merge-multiple: true
-
-      - name: Download desktop artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*
-          path: release-staging/
-          merge-multiple: true
-
-      - name: List release assets
-        run: ls -lh release-staging/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: release-staging/*
+      - name: Create release (draft)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
+
+  build-web:
+    name: Build Web UI
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
+      - name: Build web
+        env:
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
+        run: ./scripts/build-web.sh
+      - name: Upload web assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          tar czf web-dist.tar.gz -C packages/clients/web/dist .
+          tar czf web-embedded.tar.gz -C packages/hub/static .
+          gh release upload "$TAG_NAME" web-dist.tar.gz web-embedded.tar.gz
+
+  build-agent:
+    name: Build Agent (${{ matrix.triple }})
+    needs: [matrix, create-release]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.agent) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install aarch64 cross-compile tools
+        if: matrix.triple == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        if: matrix.shell_sh
+        run: cargo test
+      - name: Build (bash)
+        if: matrix.shell_sh
+        env:
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: ./scripts/build-agent.sh
+      - name: Build (pwsh)
+        if: ${{ !matrix.shell_sh }}
+        shell: pwsh
+        env:
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+        run: .\scripts\build-agent.ps1
+      - name: Upload agent to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          for f in dist/sea/nexterm-agent*; do
+            gh release upload "$TAG_NAME" "$f"
+          done
+
+  build-hub:
+    name: Build Hub (${{ matrix.triple }})
+    needs: [matrix, build-web]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.hub) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
+      - name: Download web-embedded from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG_NAME" --pattern web-embedded.tar.gz --dir /tmp
+          mkdir -p packages/hub/static
+          tar xzf /tmp/web-embedded.tar.gz -C packages/hub/static
+      - name: Build (bash)
+        if: matrix.shell_sh
+        env:
+          NEXTERM_SKIP_WEB: "true"
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
+        run: ./scripts/build-hub.sh
+      - name: Build (pwsh)
+        if: ${{ !matrix.shell_sh }}
+        shell: pwsh
+        env:
+          NEXTERM_SKIP_WEB: "true"
+          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          NEXTERM_BUILD_HASH: ${{ github.sha }}
+        run: .\scripts\build-hub.ps1
+      - name: Upload hub to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          for f in dist/sea/nexterm-hub*; do
+            gh release upload "$TAG_NAME" "$f"
+          done
+
+  publish-release:
+    name: Publish Release
+    needs: [build-agent, build-hub]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove intermediate assets and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release delete-asset "$TAG_NAME" web-dist.tar.gz --yes || true
+          gh release delete-asset "$TAG_NAME" web-embedded.tar.gz --yes || true
+          gh release edit "$TAG_NAME" --draft=false
