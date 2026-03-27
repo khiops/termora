@@ -485,7 +485,7 @@ fn create_secure_pipe(
     }
     let _guard = PsdGuard(psd);
 
-    let mut sa = SECURITY_ATTRIBUTES {
+    let sa = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: psd,
         bInheritHandle: 0,
@@ -511,7 +511,7 @@ fn create_secure_pipe(
             65536,
             65536,
             0,
-            (&mut sa) as *mut SECURITY_ATTRIBUTES,
+            std::ptr::from_ref(&sa).cast_mut(),
         )
     };
 
@@ -1056,7 +1056,7 @@ mod tests {
         );
 
         // Create server
-        let mut server = ServerOptions::new()
+        let server = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&pipe_name)
             .expect("server creation must succeed");
@@ -1389,7 +1389,7 @@ mod tests {
             ulid::Ulid::new().to_string().to_lowercase()
         );
 
-        let mut server =
+        let server =
             create_secure_pipe(&pipe_name, true).expect("secure pipe creation must succeed");
 
         let pipe_name_c = pipe_name.clone();

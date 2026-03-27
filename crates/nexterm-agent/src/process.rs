@@ -53,7 +53,7 @@ async fn get_title_linux(pid: u32) -> Option<String> {
 #[cfg(target_os = "macos")]
 async fn get_title_macos(pid: u32) -> Option<String> {
     let output = tokio::process::Command::new("ps")
-        .args(&["-p", &pid.to_string(), "-o", "comm="])
+        .args(["-p", &pid.to_string(), "-o", "comm="])
         .output()
         .await
         .ok()?;
@@ -74,7 +74,7 @@ async fn get_title_macos(pid: u32) -> Option<String> {
 #[cfg(target_os = "windows")]
 async fn get_title_windows(pid: u32) -> Option<String> {
     let output = tokio::process::Command::new("wmic")
-        .args(&[
+        .args([
             "process",
             "where",
             &format!("ProcessId={}", pid),

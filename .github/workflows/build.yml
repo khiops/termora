@@ -81,6 +81,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
+        if: matrix.shell_sh
         run: cargo test
       - name: Build (bash)
         if: matrix.shell_sh

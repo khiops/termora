@@ -1,7 +1,7 @@
 #[cfg(windows)]
 #[tokio::test]
 async fn conpty_cmd_survives_3s() {
-    use async_xpty::{CommandBuilder, PtyProcess};
+    use async_xpty::CommandBuilder;
     use tokio::io::AsyncReadExt;
     use tokio::time::{timeout, Duration};
     let cmd = CommandBuilder::new("cmd.exe").arg("/k").size(80, 24);
@@ -22,7 +22,7 @@ async fn conpty_cmd_survives_3s() {
     let s: String = all_output
         .iter()
         .map(|&b| {
-            if b >= 0x20 && b < 0x7f {
+            if (0x20..0x7f).contains(&b) {
                 b as char
             } else {
                 '.'
