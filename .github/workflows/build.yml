@@ -11,7 +11,7 @@ jobs:
       agent: ${{ steps.filter.outputs.agent }}
       hub: ${{ steps.filter.outputs.hub }}
       desktop: ${{ steps.filter.outputs.desktop }}
-      is_main: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+      is_release: ${{ startsWith(github.ref, 'refs/tags/') }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -45,13 +45,13 @@ jobs:
           NEXTERM_BUILD_HASH: ${{ github.sha }}
       # Artifacts only on main/tags — PRs just verify build + tests
       - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: web-dist-raw
           path: packages/clients/web/dist/
           retention-days: 1
       - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: web-dist-embedded
           path: packages/hub/static/
@@ -96,7 +96,7 @@ jobs:
         env:
           NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
       - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: agent-${{ matrix.triple }}
           path: dist/sea/nexterm-agent*
@@ -105,7 +105,7 @@ jobs:
   build-hub:
     name: Build Hub (${{ matrix.triple }})
     # Only on main/tags — needs web-dist artifact
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [matrix, build-web]
     strategy:
       fail-fast: false
@@ -150,7 +150,7 @@ jobs:
   build-desktop:
     name: Build Desktop (${{ matrix.triple }})
     # Only on main/tags — needs agent + hub + web artifacts
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [matrix, build-agent, build-hub, build-web]
     strategy:
       fail-fast: false
