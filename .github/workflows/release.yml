@@ -112,9 +112,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
+          TRIPLE: ${{ matrix.triple }}
         run: |
           for f in dist/sea/nexterm-agent*; do
-            gh release upload "$TAG_NAME" "$f"
+            ext="${f##*.}"
+            if [ "$ext" = "$f" ]; then ext=""; else ext=".$ext"; fi
+            base="nexterm-agent-${TRIPLE}${ext}"
+            cp "$f" "$base"
+            gh release upload "$TAG_NAME" "$base"
           done
 
   build-hub:
@@ -136,13 +141,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -F @nexterm/shared build
       - name: Download web-embedded from release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          gh release download "$TAG_NAME" --pattern web-embedded.tar.gz --dir /tmp
+          gh release download "$TAG_NAME" --pattern web-embedded.tar.gz --dir "$RUNNER_TEMP"
           mkdir -p packages/hub/static
-          tar xzf /tmp/web-embedded.tar.gz -C packages/hub/static
+          tar xzf "$RUNNER_TEMP/web-embedded.tar.gz" -C packages/hub/static
       - name: Build (bash)
         if: matrix.shell_sh
         env:
@@ -163,9 +169,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
+          TRIPLE: ${{ matrix.triple }}
         run: |
           for f in dist/sea/nexterm-hub*; do
-            gh release upload "$TAG_NAME" "$f"
+            ext="${f##*.}"
+            if [ "$ext" = "$f" ]; then ext=""; else ext=".$ext"; fi
+            base="nexterm-hub-${TRIPLE}${ext}"
+            cp "$f" "$base"
+            gh release upload "$TAG_NAME" "$base"
           done
 
   publish-release:
