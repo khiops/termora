@@ -180,9 +180,70 @@ jobs:
             gh release upload "$TAG_NAME" "$base"
           done
 
+  build-desktop:
+    name: Build Desktop (${{ matrix.triple }})
+    needs: [matrix, build-agent, build-hub, build-web]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.desktop) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/clients/desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
+      - name: Download assets from release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          mkdir -p _tmp dist/sea
+          gh release download "$TAG_NAME" --pattern "nexterm-agent-${TRIPLE}*" --dir dist/sea/
+          gh release download "$TAG_NAME" --pattern "nexterm-hub-${TRIPLE}*" --dir dist/sea/
+          gh release download "$TAG_NAME" --pattern web-dist.tar.gz --dir _tmp
+          mkdir -p packages/clients/web/dist
+          tar xzf _tmp/web-dist.tar.gz -C packages/clients/web/dist
+      - name: Place sidecars + build (bash)
+        if: matrix.shell_sh
+        run: |
+          TRIPLE="${{ matrix.triple }}"
+          cp dist/sea/nexterm-agent-${TRIPLE} "packages/clients/desktop/src-tauri/nexterm-agent-${TRIPLE}"
+          cp dist/sea/nexterm-hub-${TRIPLE} "packages/clients/desktop/src-tauri/nexterm-hub-${TRIPLE}"
+          pnpm -F @nexterm/desktop tauri build --config '{"build":{"beforeBuildCommand":""}}'
+      - name: Place sidecars + build (pwsh)
+        if: ${{ !matrix.shell_sh }}
+        shell: pwsh
+        env:
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          Copy-Item "dist\sea\nexterm-agent-${env:TRIPLE}.exe" "packages\clients\desktop\src-tauri\nexterm-agent-${env:TRIPLE}.exe"
+          Copy-Item "dist\sea\nexterm-hub-${env:TRIPLE}.exe" "packages\clients\desktop\src-tauri\nexterm-hub-${env:TRIPLE}.exe"
+          pnpm -F @nexterm/desktop tauri build --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'
+      - name: Upload desktop installers to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          find packages/clients/desktop/src-tauri/target/release/bundle -type f \
+            \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) \
+            -exec gh release upload "$TAG_NAME" {} \;
+
   publish-release:
     name: Publish Release
-    needs: [build-agent, build-hub]
+    needs: [build-agent, build-hub, build-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
