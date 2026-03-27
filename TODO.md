@@ -80,6 +80,13 @@
 - [ ] 💡 [Hub+Web] SSH passphrase "remember for session" — cache decrypted key in memory per session, checkbox in AUTH_PROMPT modal — Priority: M
 - [ ] 💡 [Hub] Remote agent auto-deploy — upload agent binary via SSH/SFTP on first connect to remote host — Priority: H
 - [ ] 🐛 [Agent-RS] BELL WS message not sent for WSL shells — contains_bell heuristic may miss BEL in some contexts — Priority: L
+- [ ] 🐛 [Hub] launchDaemon: agent detached process dies silently under WSL — stdio:"ignore" + detached + unref; manual launch works fine — Priority: H
+- [ ] 🔧 [Web] Restart dead channel: must reuse same pane/tab, not spawn+delete (non-atomic creates ghost channels) — same behavior local + SSH — Priority: H
+- [ ] 🐛 [Web] Multi-client sync: new channels not visible on other clients without refresh (WS broadcast missing or not handled) — Priority: H
+- [ ] 🐛 [Web] STATE_SYNC timing: not all channels marked dead on refresh (race between STATE_SYNC and fetchChannels) — Priority: M
+- [ ] 🐛 [Web] Channel status icon stays grey after becoming live (CHANNEL_STATE not triggering UI update) — Priority: M
+- [ ] 🐛 [Web] Write-lock takeover not visible on other client (WRITE_LOCK WS message not received/rendered) — Priority: M
+- [ ] 🔧 [Web] Terminal pane v-show keep-alive: avoid full replay on tab switch (keep xterm.js in DOM) — Priority: H
 
 ## Tier 2 — Quick Wins (batchable)
 
