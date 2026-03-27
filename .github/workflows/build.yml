@@ -93,7 +93,7 @@ jobs:
         with:
           name: agent-${{ matrix.triple }}
           path: dist/sea/nexterm-agent*
-          retention-days: 7
+          retention-days: 1
 
   build-hub:
     name: Build Hub (${{ matrix.triple }})
@@ -135,7 +135,7 @@ jobs:
         with:
           name: hub-${{ matrix.triple }}
           path: dist/sea/nexterm-hub*
-          retention-days: 7
+          retention-days: 1
 
   build-desktop:
     name: Build Desktop (${{ matrix.triple }})
@@ -195,4 +195,4 @@ jobs:
             packages/clients/desktop/src-tauri/target/release/bundle/nsis/*.exe
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.dmg
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.deb
-          retention-days: 7
+          retention-days: 1
