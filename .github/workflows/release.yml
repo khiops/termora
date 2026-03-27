@@ -146,9 +146,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          gh release download "$TAG_NAME" --pattern web-embedded.tar.gz --dir "$RUNNER_TEMP"
+          mkdir -p _tmp
+          gh release download "$TAG_NAME" --pattern web-embedded.tar.gz --dir _tmp
           mkdir -p packages/hub/static
-          tar xzf "$RUNNER_TEMP/web-embedded.tar.gz" -C packages/hub/static
+          tar xzf _tmp/web-embedded.tar.gz -C packages/hub/static
       - name: Build (bash)
         if: matrix.shell_sh
         env:
