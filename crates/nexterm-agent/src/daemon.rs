@@ -511,7 +511,7 @@ fn create_secure_pipe(
             65536,
             65536,
             0,
-            &mut sa,
+            std::ptr::addr_of_mut!(sa),
         )
     };
 

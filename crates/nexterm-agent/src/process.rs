@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::path::Path;
 
 /// Poll the foreground process name for a given PID.

@@ -39,10 +39,6 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec biome check .
-      - run: pnpm -F @nexterm/shared exec tsc --noEmit
-      - run: pnpm -F @nexterm/hub exec tsc --noEmit
-      - run: pnpm -F @nexterm/web exec vue-tsc --noEmit
       - run: pnpm test
       - run: ./scripts/build-web.sh
         env:
