@@ -70,12 +70,24 @@ export interface SharedSessionContext {
 	>;
 	/** '${hostname}:${port}' → fingerprint trusted for this session only (trust_once, not persisted) */
 	trustedOnceFingerprints: Map<string, string>;
+	/** Per-host SHA256 of agent binary trusted for this session only (trust_once). */
+	trustedAgentSha256: Map<string, string>;
+	/** Pending agent binary verification prompts, keyed by promptId. */
+	pendingAgentVerify: Map<
+		string,
+		{
+			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
+			timer: ReturnType<typeof setTimeout>;
+		}
+	>;
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
 	notificationTimestamps: Map<string, number[]>;
 	/** hostId → cached elevation secret + expiry (TTL 15 min) */
 	elevationCache: Map<string, { secret: string; expiresAt: number }>;
+	/** Per-host cached passphrase (opt-in "remember for session"). Cleared on hub restart. */
+	passphraseCache: Map<string, { secret: string; expiresAt: number }>;
 	/** hostId → capabilities string[] reported in the agent HELLO message */
 	agentCapabilities: Map<string, string[]>;
 	/** channelId → pending title debounce timer for DB writes */

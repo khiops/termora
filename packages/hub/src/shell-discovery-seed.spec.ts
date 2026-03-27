@@ -70,27 +70,33 @@ describe("seedShellProfiles", () => {
 		expect(bash).toBeDefined();
 	});
 
-	it.skipIf(process.platform === "win32")("returns zero when no shells are discovered", async () => {
-		vi.stubEnv("SHELL", "");
-		mockExistsSync.mockReturnValue(false);
+	it.skipIf(process.platform === "win32")(
+		"returns zero when no shells are discovered",
+		async () => {
+			vi.stubEnv("SHELL", "");
+			mockExistsSync.mockReturnValue(false);
 
-		const result = await seedShellProfiles(dal);
-		expect(result.profilesCreated).toBe(0);
-		expect(dal.listLaunchProfiles()).toHaveLength(0);
-	});
+			const result = await seedShellProfiles(dal);
+			expect(result.profilesCreated).toBe(0);
+			expect(dal.listLaunchProfiles()).toHaveLength(0);
+		},
+	);
 
-	it.skipIf(process.platform === "win32")("assigns sequential sort_order to created profiles", async () => {
-		vi.stubEnv("SHELL", "/bin/zsh");
-		mockExistsSync.mockImplementation((p) => p === "/bin/zsh" || p === "/bin/bash");
+	it.skipIf(process.platform === "win32")(
+		"assigns sequential sort_order to created profiles",
+		async () => {
+			vi.stubEnv("SHELL", "/bin/zsh");
+			mockExistsSync.mockImplementation((p) => p === "/bin/zsh" || p === "/bin/bash");
 
-		await seedShellProfiles(dal);
+			await seedShellProfiles(dal);
 
-		const profiles = dal.listLaunchProfiles();
-		expect(profiles.length).toBeGreaterThanOrEqual(2);
-		const orders = profiles.map((p) => p.sortOrder).sort((a, b) => a - b);
-		expect(orders[0]).toBe(0);
-		expect(orders[1]).toBe(1);
-	});
+			const profiles = dal.listLaunchProfiles();
+			expect(profiles.length).toBeGreaterThanOrEqual(2);
+			const orders = profiles.map((p) => p.sortOrder).sort((a, b) => a - b);
+			expect(orders[0]).toBe(0);
+			expect(orders[1]).toBe(1);
+		},
+	);
 
 	it.skipIf(process.platform === "win32")("sets correct mode and elevated defaults", async () => {
 		vi.stubEnv("SHELL", "/bin/bash");

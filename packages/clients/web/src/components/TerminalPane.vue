@@ -350,6 +350,13 @@ onMounted(async () => {
 				attachChannel(realId);
 				emit("channel-spawned", props.channelId, realId);
 			} else {
+				// Dead channels must not send ATTACH — the hub rejects with
+				// CHANNEL_DEAD and the error state would obscure the dead
+				// overlay. Mark ready so the overlay renders immediately.
+				if (isDead.value) {
+					ready.value = true;
+					return;
+				}
 				// Existing channel — reattach (fetch snapshot + tail).
 				// Write-lock state is set by the WRITE_LOCK WS message handler
 				// (fired by WriteLockManager.attach on the hub side), not from
@@ -387,7 +394,14 @@ onMounted(async () => {
 			});
 		}
 	} catch (err) {
-		error.value = err instanceof Error ? err.message : String(err);
+		const msg = err instanceof Error ? err.message : String(err);
+		// CHANNEL_DEAD from hub means the channel died between page load and ATTACH.
+		// Treat as dead channel (show overlay) rather than an error state.
+		if (msg.includes("is dead") || msg.includes("CHANNEL_DEAD")) {
+			ready.value = true;
+			return;
+		}
+		error.value = msg;
 		console.error("[TerminalPane] Initialization failed:", err);
 	}
 });
@@ -446,19 +460,32 @@ onUnmounted(() => {
 
 async function onRestart(): Promise<void> {
 	const chId = effectiveChannelId.value;
-	if (chId !== null) {
-		const ok = await channelsStore.restartChannel(chId);
-		if (ok) {
-			const result = await reattachChannel(chId, { preserveContent: true });
-			if (result.writeLockHolder) {
-				writeLockStore.handleWriteLock(chId, result.writeLockHolder);
-			}
-			// Restore write permission — isDead watcher set canWrite=false
-			// when the channel died. If isWriter never changed (write-lock
-			// persists across restart for same channel ID), the isWriter
-			// watcher won't re-fire, so we must restore explicitly.
-			canWrite.value = isWriter.value;
+	if (chId === null) return;
+
+	// SSH hosts: restart goes through WS SPAWN flow (supports async prompts
+	// for passphrase/TOFU/deploy). REST restart can't handle interactive auth.
+	if (paneHost.value?.type === "ssh" && props.hostId) {
+		const term = terminal.value;
+		await channelsStore.spawnChannel(props.hostId, {
+			...(term !== null ? { cols: term.cols, rows: term.rows } : {}),
+		});
+		// Remove the dead channel entirely and close its pane
+		await channelsStore.deleteChannel(chId);
+		emit("close-pane", chId);
+		return;
+	}
+
+	const ok = await channelsStore.restartChannel(chId);
+	if (ok) {
+		const result = await reattachChannel(chId, { preserveContent: true });
+		if (result.writeLockHolder) {
+			writeLockStore.handleWriteLock(chId, result.writeLockHolder);
 		}
+		// Restore write permission — isDead watcher set canWrite=false
+		// when the channel died. If isWriter never changed (write-lock
+		// persists across restart for same channel ID), the isWriter
+		// watcher won't re-fire, so we must restore explicitly.
+		canWrite.value = isWriter.value;
 	}
 }
 

@@ -4,6 +4,7 @@ import { markRaw, ref } from "vue";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
 import { hubWsUrl } from "../utils/hub-url.js";
+import { useAgentVerifyStore } from "./agent-verify.js";
 import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
 import { useChannelsStore } from "./channels.js";
@@ -67,6 +68,10 @@ export const useSessionStore = defineStore("session", () => {
 		const hostVerifyStore = useHostVerifyStore();
 		hostVerifyStore.setWsClient(wsClient);
 		_registerHostVerifyHandlers(hostVerifyStore);
+
+		const agentVerifyStore = useAgentVerifyStore();
+		agentVerifyStore.setWsClient(wsClient);
+		_registerAgentVerifyHandlers(agentVerifyStore);
 
 		const hostsStore = useHostsStore();
 		_registerSessionHandlers(hostsStore);
@@ -223,6 +228,37 @@ export const useSessionStore = defineStore("session", () => {
 	}
 
 	/**
+	 * Wire up AGENT_BINARY_VERIFY and agent-related ERROR message handlers.
+	 */
+	function _registerAgentVerifyHandlers(
+		agentVerifyStore: ReturnType<typeof useAgentVerifyStore>,
+	): void {
+		wsClient.on("AGENT_BINARY_VERIFY", (msg) => {
+			if (msg.type === "AGENT_BINARY_VERIFY") {
+				agentVerifyStore.handleAgentVerify(msg);
+			}
+		});
+
+		wsClient.on("ERROR", (msg) => {
+			if (msg.type === "ERROR") {
+				if (msg.code === "AGENT_NOT_AVAILABLE") {
+					agentVerifyStore.handleDeployError(msg.message, msg.hostId);
+					return;
+				}
+				if (msg.code === "AGENT_UPDATED") {
+					// Informational — agent binary was updated; no user action required.
+					// Intentionally not surfaced as a generic error.
+					return;
+				}
+				if (msg.code === "AGENT_BINARY_REJECTED") {
+					// User chose to reject the binary — no toast needed.
+					return;
+				}
+			}
+		});
+	}
+
+	/**
 	 * Wire up SESSION_STATE messages to the hosts store for rail status dots.
 	 */
 	function _registerSessionHandlers(hostsStore: ReturnType<typeof useHostsStore>): void {
@@ -276,17 +312,10 @@ export const useSessionStore = defineStore("session", () => {
 			if (msg.type === "BELL") {
 				const bellCfg =
 					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
-				// Note: bell sound is handled by TerminalPane's xterm.js onBell handler
-				// (reads resolved per-channel profile). We only handle badge + desktop notification here.
-				// Always show badge (brief flash on active tab, persistent on background)
-				notificationStore.incrementBellCount(msg.channelId);
-				if (msg.channelId === channelsStore.selectedChannelId) {
-					setTimeout(() => {
-						if (msg.channelId === channelsStore.selectedChannelId) {
-							notificationStore.clearBellAndActivity(msg.channelId);
-						}
-					}, 1000);
-				}
+				// Note: bell badge + sound are BOTH handled by TerminalPane's xterm.js
+				// onBell handler (per-channel profile). The WS BELL message is kept
+				// only for desktop notifications (below) — do NOT increment the badge
+				// here to avoid double-counting with onBell.
 				// Desktop notification when document is hidden
 				if (bellCfg.desktopNotification !== false && document.hidden) {
 					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);

@@ -1,4 +1,5 @@
 import type {
+	AgentBinaryVerifyResponseMessage,
 	AuthMessage,
 	AuthPromptResponseMessage,
 	DetachMessage,
@@ -23,6 +24,7 @@ import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
 import {
 	type WsHandlerContext,
+	handleAgentBinaryVerifyResponse,
 	handleAttach,
 	handleAuthPromptResponse,
 	handleDetach,
@@ -206,6 +208,9 @@ export async function registerWsRoutes(
 					break;
 				case "HOST_VERIFY_RESPONSE":
 					handleHostVerifyResponse(msg as HostVerifyResponseMessage, ctx);
+					break;
+				case "AGENT_BINARY_VERIFY_RESPONSE":
+					handleAgentBinaryVerifyResponse(msg as AgentBinaryVerifyResponseMessage, ctx);
 					break;
 				case "TEST_CONNECT":
 					handleTestConnect(msg as TestConnectMessage, ctx);

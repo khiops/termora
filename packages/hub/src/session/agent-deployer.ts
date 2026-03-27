@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostArch, HostOs } from "@nexterm/shared";
@@ -8,6 +9,43 @@ import type { OsDetectResult } from "./os-detect.js";
 import { sshExec } from "./ssh-exec.js";
 
 export type { OsDetectResult };
+
+export class DeployError extends Error {
+	constructor(
+		public readonly code:
+			| "AGENT_BINARY_REJECTED"
+			| "AGENT_BINARY_UNTRUSTED"
+			| "AGENT_NOT_AVAILABLE",
+		message: string,
+	) {
+		super(message);
+		this.name = "DeployError";
+	}
+}
+
+/** Callback to prompt user for binary trust decision. */
+export type BinaryVerifyPromptFn = (
+	hostId: string,
+	hostname: string,
+	remotePath: string,
+	remoteSha256: string,
+	os: HostOs,
+	arch: HostArch,
+	mismatch: boolean,
+	pinnedSha256?: string,
+) => Promise<"trust_permanent" | "trust_once" | "reject">;
+
+export interface DeployOptions {
+	binaryCache: string;
+	hostname: string;
+	hostId: string;
+	pinnedSha256?: string | null;
+	sessionTrustedSha256?: string | null;
+	promptBinaryVerify?: BinaryVerifyPromptFn;
+	onAgentPinned?: (hostId: string, sha256: string) => void;
+	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
+	onAgentUpdated?: (hostId: string) => void;
+}
 
 export interface DeployResult {
 	/** true if a binary was uploaded (false = agent was already present) */
@@ -22,7 +60,7 @@ export interface DeployResult {
 
 /** Common paths to check when which/where are not available */
 const COMMON_AGENT_PATHS_UNIX = [
-	"~/.local/bin/nexterm-agent",
+	"$HOME/.local/bin/nexterm-agent",
 	"/usr/local/bin/nexterm-agent",
 	"/usr/bin/nexterm-agent",
 	"/opt/nexterm/nexterm-agent",
@@ -63,8 +101,11 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 	// 3. Try common Unix paths via test -x
 	for (const rawPath of COMMON_AGENT_PATHS_UNIX) {
 		try {
-			const { exitCode } = await sshExec(client, `test -x ${rawPath} && echo ok`);
-			if (exitCode === 0) return rawPath;
+			const { stdout: resolved, exitCode } = await sshExec(
+				client,
+				`test -x "${rawPath}" && echo "${rawPath}"`,
+			);
+			if (exitCode === 0 && resolved.trim()) return resolved.trim();
 		} catch {
 			// ignore
 		}
@@ -233,16 +274,138 @@ async function resolveRemotePath(client: SshClient, os: HostOs): Promise<string>
  * Auto-deploy is best-effort — callers should catch errors and fall back
  * to attempting nexterm-agent --stdio directly.
  */
+/**
+ * Full auto-deploy flow with SHA256 integrity verification and TOFU support.
+ *
+ * Branch A — agent found on remote:
+ *   If we have a local binary: compare SHA256 hashes, re-upload on mismatch.
+ *   If no local binary: run TOFU flow (pin check / prompt / session trust).
+ *
+ * Branch B — agent not found:
+ *   Upload from local cache, or throw DeployError("AGENT_NOT_AVAILABLE").
+ *
+ * Auto-deploy is best-effort — callers should catch DeployError and surface
+ * it appropriately (prompt, modal, fallback).
+ */
 export async function deployAgentIfNeeded(
 	client: SshClient,
 	host: { os: HostOs | null; arch: HostArch | null },
-	binaryCache: string,
+	options: DeployOptions,
 ): Promise<DeployResult> {
-	// 1. Check if agent is already present
+	const {
+		binaryCache,
+		hostname,
+		hostId,
+		pinnedSha256,
+		sessionTrustedSha256,
+		promptBinaryVerify,
+		onAgentPinned,
+		onAgentTrustOnce,
+		onAgentUpdated,
+	} = options;
+
+	// 1. Check if agent is already present on the remote host
 	const existingPath = await checkRemoteAgent(client);
+
 	if (existingPath) {
-		return { deployed: false, remotePath: existingPath, os: null, arch: null };
+		// --- Branch A: agent already exists ---
+
+		// 1a. Detect OS/arch if not known (needed for SHA256 + binary name)
+		let os = host.os;
+		let arch = host.arch;
+		if (!os || !arch) {
+			const detected = await detectRemoteOsArch(client);
+			if (!detected) {
+				throw new Error(
+					"Cannot detect remote OS/arch for agent deployment. " +
+						"Set os/arch on the host manually or check SSH connectivity.",
+				);
+			}
+			os = detected.os;
+			arch = detected.arch;
+		}
+
+		// 1b. Compute remote SHA256
+		const remoteSha = await getRemoteSha256(client, existingPath, os);
+
+		// 1c. Do we have a local binary for this OS/arch?
+		const binaryName =
+			os === "windows" ? `nexterm-agent-${os}-${arch}.exe` : `nexterm-agent-${os}-${arch}`;
+		const localBinary = join(binaryCache, binaryName);
+
+		if (existsSync(localBinary)) {
+			// Compare local vs remote SHA256 — re-upload on mismatch or unknown remote hash
+			const localSha = getLocalSha256(localBinary);
+			if (remoteSha !== null && localSha !== null && remoteSha === localSha) {
+				// Hashes match — nothing to do
+				return { deployed: false, remotePath: existingPath, os, arch };
+			}
+			// Mismatch (or remoteSha unavailable) — re-upload from trusted local copy
+			await uploadAgentBinary(client, localBinary, existingPath);
+			onAgentUpdated?.(hostId);
+			// Refresh the pin to the newly uploaded binary's hash so the next
+			// reconnect without local cache doesn't trigger another mismatch prompt.
+			if (localSha !== null) {
+				onAgentPinned?.(hostId, localSha);
+			}
+			return { deployed: true, remotePath: existingPath, os, arch };
+		}
+
+		// 1d. No local binary — TOFU flow
+		if (remoteSha === null) {
+			// Cannot verify, treat as untrusted
+			throw new DeployError(
+				"AGENT_BINARY_UNTRUSTED",
+				`Cannot compute SHA256 for remote agent at ${existingPath}. Upload a known-good binary or verify the remote agent manually.`,
+			);
+		}
+
+		// Session trust: already trusted this exact hash this session
+		if (sessionTrustedSha256 && sessionTrustedSha256 === remoteSha) {
+			return { deployed: false, remotePath: existingPath, os, arch };
+		}
+
+		// Pinned trust: pinned hash matches remote — all good
+		if (pinnedSha256 && pinnedSha256 === remoteSha) {
+			return { deployed: false, remotePath: existingPath, os, arch };
+		}
+
+		// Need to prompt
+		if (!promptBinaryVerify) {
+			throw new DeployError(
+				"AGENT_BINARY_UNTRUSTED",
+				`Remote agent at ${existingPath} (sha256: ${remoteSha}) cannot be verified — no verification prompt registered.`,
+			);
+		}
+
+		const mismatch = pinnedSha256 != null && pinnedSha256 !== remoteSha;
+		const action = await promptBinaryVerify(
+			hostId,
+			hostname,
+			existingPath,
+			remoteSha,
+			os,
+			arch,
+			mismatch,
+			pinnedSha256 ?? undefined,
+		);
+
+		if (action === "trust_permanent") {
+			onAgentPinned?.(hostId, remoteSha);
+			return { deployed: false, remotePath: existingPath, os, arch };
+		}
+		if (action === "trust_once") {
+			onAgentTrustOnce?.(hostId, remoteSha);
+			return { deployed: false, remotePath: existingPath, os, arch };
+		}
+		// action === "reject"
+		throw new DeployError(
+			"AGENT_BINARY_REJECTED",
+			`User rejected remote agent binary at ${existingPath} (sha256: ${remoteSha}).`,
+		);
 	}
+
+	// --- Branch B: agent not found — fresh deploy ---
 
 	// 2. Detect OS/arch if not already known from the host record
 	let os = host.os;
@@ -264,9 +427,9 @@ export async function deployAgentIfNeeded(
 		os === "windows" ? `nexterm-agent-${os}-${arch}.exe` : `nexterm-agent-${os}-${arch}`;
 	const localBinary = join(binaryCache, binaryName);
 	if (!existsSync(localBinary)) {
-		throw new Error(
-			`Agent binary not found in cache: ${localBinary}. ` +
-				"Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).",
+		throw new DeployError(
+			"AGENT_NOT_AVAILABLE",
+			`Agent binary not found in cache: ${localBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
 		);
 	}
 
@@ -289,4 +452,51 @@ export function getBinaryCacheDir(): string {
 	}
 	const stateBase = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
 	return join(stateBase, "nexterm", "binaries");
+}
+
+/**
+ * Compute the SHA256 hash of a remote file by running sha256sum (Linux/macOS)
+ * or PowerShell's Get-FileHash (Windows) over SSH.
+ * Returns the lowercase hex digest, or null on failure.
+ */
+export async function getRemoteSha256(
+	client: SshClient,
+	remotePath: string,
+	os: HostOs,
+): Promise<string | null> {
+	try {
+		const escapedPath =
+			os === "windows" ? remotePath.replace(/'/g, "''") : remotePath.replace(/'/g, "'\\''");
+		let cmd: string;
+		if (os === "windows") {
+			cmd = `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`;
+		} else if (os === "darwin") {
+			// macOS ships shasum (not sha256sum); same output format: "hash  filename"
+			cmd = `shasum -a 256 '${escapedPath}'`;
+		} else {
+			cmd = `sha256sum '${escapedPath}'`;
+		}
+		const { stdout, exitCode } = await sshExec(client, cmd);
+		if (exitCode !== 0) return null;
+		const trimmed = stdout.trim();
+		// sha256sum: "hash  filename" — take first 64 hex chars
+		// PowerShell: just the hash on one line
+		const match = trimmed.match(/^([a-f0-9]{64})/i);
+		return match?.[1]?.toLowerCase() ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Compute the SHA256 hash of a local file.
+ * Returns the lowercase hex digest, or null if the file cannot be read.
+ */
+export function getLocalSha256(localPath: string): string | null {
+	try {
+		const data = readFileSync(localPath);
+		return createHash("sha256").update(data).digest("hex");
+	} catch {
+		return null;
+	}
 }

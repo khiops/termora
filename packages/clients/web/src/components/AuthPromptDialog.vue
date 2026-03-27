@@ -22,6 +22,18 @@
 					@keydown.escape="handleCancel"
 				/>
 
+				<label
+					v-if="prompt?.promptType === 'passphrase'"
+					class="apd-remember"
+				>
+					<input
+						v-model="authPromptStore.rememberSession"
+						type="checkbox"
+						class="apd-remember-checkbox"
+					/>
+					<span>Remember for this session</span>
+				</label>
+
 				<div class="apd-actions">
 					<button class="apd-btn apd-cancel" @click="handleCancel">Cancel</button>
 					<button class="apd-btn apd-submit" @click="handleSubmit">Submit</button>
@@ -193,5 +205,26 @@ function handleCancel(): void {
 
 .apd-submit:hover {
 	opacity: 0.85;
+}
+
+.apd-remember {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.apd-remember-checkbox {
+	width: 14px;
+	height: 14px;
+	cursor: pointer;
+	accent-color: var(--nt-accent);
+	flex-shrink: 0;
+}
+
+.apd-remember span {
+	font-size: 12px;
+	color: var(--nt-text-muted);
 }
 </style>

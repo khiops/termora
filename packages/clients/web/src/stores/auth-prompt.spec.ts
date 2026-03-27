@@ -54,8 +54,29 @@ describe("useAuthPromptStore", () => {
 			type: "AUTH_PROMPT_RESPONSE",
 			hostId: "host-1",
 			secret: "mysecret",
+			rememberSession: false,
 		});
 		expect(store.pendingPrompt).toBeNull();
+	});
+
+	it("respond(secret) sends rememberSession=true when opted in", () => {
+		const store = useAuthPromptStore();
+		const wsClient = makeMockWsClient();
+		store.setWsClient(wsClient);
+		store.handleAuthPrompt("host-1", "passphrase", "Enter passphrase");
+		store.rememberSession = true;
+
+		store.respond("my-passphrase");
+
+		expect(wsClient.send).toHaveBeenCalledWith({
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: "host-1",
+			secret: "my-passphrase",
+			rememberSession: true,
+		});
+		expect(store.pendingPrompt).toBeNull();
+		// rememberSession is reset after respond
+		expect(store.rememberSession).toBe(false);
 	});
 
 	it("dismiss() sends AUTH_PROMPT_RESPONSE with secret=null", () => {
@@ -70,6 +91,7 @@ describe("useAuthPromptStore", () => {
 			type: "AUTH_PROMPT_RESPONSE",
 			hostId: "host-1",
 			secret: null,
+			rememberSession: false,
 		});
 		expect(store.pendingPrompt).toBeNull();
 	});

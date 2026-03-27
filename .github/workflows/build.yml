@@ -11,6 +11,7 @@ jobs:
       agent: ${{ steps.filter.outputs.agent }}
       hub: ${{ steps.filter.outputs.hub }}
       desktop: ${{ steps.filter.outputs.desktop }}
+      is_main: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -38,15 +39,19 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - run: ./scripts/build-web.sh
         env:
           NEXTERM_BUILD_HASH: ${{ github.sha }}
+      # Artifacts only on main/tags — PRs just verify build + tests
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         with:
           name: web-dist-raw
           path: packages/clients/web/dist/
           retention-days: 1
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         with:
           name: web-dist-embedded
           path: packages/hub/static/
@@ -64,18 +69,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
+      - name: Install aarch64 cross-compile tools
+        if: matrix.triple == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
+        if: matrix.shell_sh
         run: cargo test
       - name: Build (bash)
         if: matrix.shell_sh
         run: ./scripts/build-agent.sh
         env:
           NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
@@ -83,13 +96,16 @@ jobs:
         env:
           NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         with:
           name: agent-${{ matrix.triple }}
           path: dist/sea/nexterm-agent*
-          retention-days: 7
+          retention-days: 1
 
   build-hub:
     name: Build Hub (${{ matrix.triple }})
+    # Only on main/tags — needs web-dist artifact
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     needs: [matrix, build-web]
     strategy:
       fail-fast: false
@@ -105,6 +121,7 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - uses: actions/download-artifact@v4
         with:
           name: web-dist-embedded
@@ -128,10 +145,12 @@ jobs:
         with:
           name: hub-${{ matrix.triple }}
           path: dist/sea/nexterm-hub*
-          retention-days: 7
+          retention-days: 1
 
   build-desktop:
     name: Build Desktop (${{ matrix.triple }})
+    # Only on main/tags — needs agent + hub + web artifacts
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     needs: [matrix, build-agent, build-hub, build-web]
     strategy:
       fail-fast: false
@@ -151,6 +170,7 @@ jobs:
         with:
           workspaces: packages/clients/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @nexterm/shared build
       - uses: actions/download-artifact@v4
         with:
           name: agent-${{ matrix.triple }}
@@ -188,4 +208,4 @@ jobs:
             packages/clients/desktop/src-tauri/target/release/bundle/nsis/*.exe
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.dmg
             packages/clients/desktop/src-tauri/target/release/bundle/**/*.deb
-          retention-days: 7
+          retention-days: 1

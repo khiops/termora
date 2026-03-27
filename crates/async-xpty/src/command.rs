@@ -114,7 +114,7 @@ impl CommandBuilder {
         #[cfg(windows)]
         {
             let inner = crate::windows::spawn(self).await?;
-            return Ok(PtyProcess { inner });
+            Ok(PtyProcess { inner })
         }
 
         #[cfg(not(any(unix, windows)))]

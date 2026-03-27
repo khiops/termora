@@ -92,6 +92,14 @@ export class MetaDAL {
 		return this.hosts.updateHostOsArch(id, os, arch);
 	}
 
+	getHostAgentSha256(id: string): string | null {
+		return this.hosts.getHostAgentSha256(id);
+	}
+
+	updateHostAgentSha256(id: string, sha256: string | null): void {
+		return this.hosts.updateHostAgentSha256(id, sha256);
+	}
+
 	getHostFingerprint(hostId: string): string | null {
 		return this.hosts.getHostFingerprint(hostId);
 	}

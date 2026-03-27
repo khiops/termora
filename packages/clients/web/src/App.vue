@@ -10,6 +10,12 @@
 		<!-- Host key warning dialog — SSH host key mismatch (TOFU), rendered via Teleport -->
 		<HostKeyWarning />
 
+		<!-- Agent binary verify dialog — remote agent SHA256 TOFU, rendered via Teleport -->
+		<AgentBinaryVerify />
+
+		<!-- Agent deploy failed dialog — AGENT_NOT_AVAILABLE error with retry, rendered via Teleport -->
+		<AgentDeployFailed />
+
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
@@ -310,6 +316,8 @@ import PairingScreen from "./components/PairingScreen.vue";
 import WriteRequestDialog from "./components/WriteRequestDialog.vue";
 import AuthPromptDialog from "./components/AuthPromptDialog.vue";
 import HostKeyWarning from "./components/HostKeyWarning.vue";
+import AgentBinaryVerify from "./components/AgentBinaryVerify.vue";
+import AgentDeployFailed from "./components/AgentDeployFailed.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import SettingsPanel from "./components/settings/SettingsPanel.vue";
 import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";

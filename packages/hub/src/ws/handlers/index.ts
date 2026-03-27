@@ -1,3 +1,4 @@
+export { handleAgentBinaryVerifyResponse } from "./agent-binary-verify-response.js";
 export { handleAuthPromptResponse } from "./auth-prompt-response.js";
 export { handleAttach } from "./attach.js";
 export { handleDetach } from "./detach.js";

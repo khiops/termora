@@ -92,4 +92,3 @@ describe("buildSeaConfigJson generates valid sea-config.json structure", () => {
 		expect(result.assets).toEqual({});
 	});
 });
-

@@ -7,8 +7,11 @@
  */
 
 import type {
+	AgentBinaryVerifyMessage,
 	AuthPromptMessage,
 	ErrorMessage,
+	HostArch,
+	HostOs,
 	HostVerifyMessage,
 	ProtocolMessage,
 	TestConnectMessage,
@@ -16,10 +19,16 @@ import type {
 import { generateId } from "@nexterm/shared";
 import { Client as SshClient } from "ssh2";
 import type { AgentConnectionManager } from "./agent-connection-manager.js";
+import { type BinaryVerifyPromptFn, getBinaryCacheDir } from "./agent-deployer.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
-import { type AuthPromptFn, SshAgent, buildSshConnectConfig } from "./ssh-agent.js";
+import {
+	type AuthPromptFn,
+	SshAgent,
+	type SshAgentDeployOptions,
+	buildSshConnectConfig,
+} from "./ssh-agent.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
@@ -39,6 +48,17 @@ export class SshConnectionManager {
 
 	buildPromptAuth(client: WsClient): AuthPromptFn {
 		return async (hostId, promptType, message) => {
+			// Cache hit: return cached passphrase without prompting the UI
+			if (promptType === "passphrase") {
+				const cached = this.ctx.passphraseCache.get(hostId);
+				if (cached) {
+					if (cached.expiresAt > Date.now()) {
+						return cached.secret;
+					}
+					// Expired — evict and fall through to prompt
+					this.ctx.passphraseCache.delete(hostId);
+				}
+			}
 			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
@@ -47,13 +67,25 @@ export class SshConnectionManager {
 		};
 	}
 
-	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
+	handleAuthPromptResponse(
+		clientId: string,
+		hostId: string,
+		secret: string | null,
+		rememberSession?: boolean,
+	): void {
 		const pending = this.ctx.pendingAuthPrompts.get(hostId);
 		if (!pending) return;
 		// SEC-003: only the client that triggered the prompt may respond
 		if (pending.clientId !== clientId) return;
 		if (pending.timer !== null) clearTimeout(pending.timer);
 		this.ctx.pendingAuthPrompts.delete(hostId);
+		// Opt-in passphrase caching (15 min TTL)
+		if (rememberSession === true && secret !== null) {
+			this.ctx.passphraseCache.set(hostId, {
+				secret,
+				expiresAt: Date.now() + 15 * 60 * 1000,
+			});
+		}
 		pending.resolve(secret);
 	}
 
@@ -113,6 +145,63 @@ export class SshConnectionManager {
 		pending.resolve(action);
 	}
 
+	// ─── Agent binary verify ──────────────────────────────────────────────────
+
+	buildBinaryVerifyPrompt(client: WsClient): BinaryVerifyPromptFn {
+		return async (
+			hostId: string,
+			hostname: string,
+			remotePath: string,
+			remoteSha256: string,
+			os: HostOs,
+			arch: HostArch,
+			mismatch: boolean,
+			pinnedSha256?: string,
+		): Promise<"trust_permanent" | "trust_once" | "reject"> => {
+			const promptId = generateId();
+			const msg: AgentBinaryVerifyMessage = {
+				type: "AGENT_BINARY_VERIFY",
+				promptId,
+				hostId,
+				hostname,
+				remotePath,
+				remoteSha256,
+				os,
+				arch,
+				mismatch,
+				...(pinnedSha256 ? { pinnedSha256 } : {}),
+			};
+			client.send(msg);
+
+			return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
+				const timer = setTimeout(() => {
+					this.ctx.pendingAgentVerify.delete(promptId);
+					this.ctx.hubLogger?.log(
+						"warn",
+						"ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting",
+						{
+							hostname,
+						},
+					);
+					resolve("reject");
+				}, 30_000);
+
+				this.ctx.pendingAgentVerify.set(promptId, { resolve, timer });
+			});
+		};
+	}
+
+	handleAgentVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
+	): void {
+		const pending = this.ctx.pendingAgentVerify.get(promptId);
+		if (!pending) return;
+		clearTimeout(pending.timer);
+		this.ctx.pendingAgentVerify.delete(promptId);
+		pending.resolve(action);
+	}
+
 	// ─── Reconnect ────────────────────────────────────────────────────────────
 
 	scheduleReconnect(
@@ -143,9 +232,38 @@ export class SshConnectionManager {
 			}
 
 			try {
-				const sshAgent = new SshAgent(host);
+				const binaryCache = getBinaryCacheDir();
+				const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
+				const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
+				const sshHostname = host.sshHost?.includes("@")
+					? (host.sshHost.split("@")[1] ?? host.sshHost)
+					: (host.sshHost ?? host.label);
+
+				const deployOpts: SshAgentDeployOptions = {
+					binaryCache,
+					hostname: sshHostname,
+					...(pinnedSha256 != null ? { pinnedSha256 } : {}),
+					...(sessionTrustedAgentSha != null
+						? { sessionTrustedSha256: sessionTrustedAgentSha }
+						: {}),
+					onOsDetected: (hid, os, arch) => {
+						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
+					},
+					// No promptBinaryVerify — reconnect is non-interactive
+					// If binary is untrusted, deploy will throw AGENT_BINARY_UNTRUSTED
+					// and reconnect will retry or give up (existing retry logic)
+					onAgentPinned: (hid, sha256) => {
+						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
+					},
+					onAgentTrustOnce: (hid, sha256) => {
+						this.ctx.trustedAgentSha256.set(hid, sha256);
+					},
+				};
+
+				const sshAgent = new SshAgent(host, undefined, deployOpts);
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
-				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostId);
+				const hostKey = `${sshHostname}:${host.sshPort ?? 22}`;
+				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 				await sshAgent.start(storedFp, sessionFp);
 				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);

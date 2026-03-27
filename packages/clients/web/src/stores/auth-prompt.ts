@@ -15,6 +15,7 @@ export interface AuthPromptRequest {
  */
 export const useAuthPromptStore = defineStore("authPrompt", () => {
 	const pendingPrompt = ref<AuthPromptRequest | null>(null);
+	const rememberSession = ref(false);
 	let _wsClient: IWsClient | null = null;
 
 	function setWsClient(client: IWsClient): void {
@@ -36,8 +37,10 @@ export const useAuthPromptStore = defineStore("authPrompt", () => {
 			type: "AUTH_PROMPT_RESPONSE",
 			hostId: req.hostId,
 			secret,
+			rememberSession: rememberSession.value,
 		});
 		pendingPrompt.value = null;
+		rememberSession.value = false;
 	}
 
 	function dismiss(): void {
@@ -46,6 +49,7 @@ export const useAuthPromptStore = defineStore("authPrompt", () => {
 
 	return {
 		pendingPrompt,
+		rememberSession,
 		setWsClient,
 		handleAuthPrompt,
 		respond,

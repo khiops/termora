@@ -23,13 +23,18 @@ function snakeToCamel(key: string): string {
 }
 
 /** Recursively convert all object keys from camelCase to snake_case. */
-export function toSnakeCase(value: unknown): unknown {
+/** Keys whose values are maps with user-defined keys (not protocol fields). */
+const RAW_VALUE_KEYS = new Set(["env"]);
+
+export function toSnakeCase(value: unknown, rawValue = false): unknown {
 	if (value instanceof Uint8Array) return value;
-	if (Array.isArray(value)) return value.map(toSnakeCase);
+	if (Array.isArray(value)) return value.map((v) => toSnakeCase(v, false));
 	if (isPlainObject(value)) {
+		if (rawValue) return value; // preserve user-defined keys as-is
 		const out: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(value)) {
-			out[camelToSnake(k)] = toSnakeCase(v);
+			const snakeKey = camelToSnake(k);
+			out[snakeKey] = toSnakeCase(v, RAW_VALUE_KEYS.has(snakeKey));
 		}
 		return out;
 	}
@@ -37,13 +42,15 @@ export function toSnakeCase(value: unknown): unknown {
 }
 
 /** Recursively convert all object keys from snake_case to camelCase. */
-export function toCamelCase(value: unknown): unknown {
+export function toCamelCase(value: unknown, rawValue = false): unknown {
 	if (value instanceof Uint8Array) return value;
-	if (Array.isArray(value)) return value.map(toCamelCase);
+	if (Array.isArray(value)) return value.map((v) => toCamelCase(v, false));
 	if (isPlainObject(value)) {
+		if (rawValue) return value; // preserve user-defined keys as-is
 		const out: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(value)) {
-			out[snakeToCamel(k)] = toCamelCase(v);
+			const camelKey = snakeToCamel(k);
+			out[camelKey] = toCamelCase(v, RAW_VALUE_KEYS.has(k));
 		}
 		return out;
 	}

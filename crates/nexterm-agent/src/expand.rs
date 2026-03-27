@@ -82,9 +82,9 @@ fn lookup_var(name: &str, env: Option<&HashMap<String, String>>) -> Option<Strin
             }
         }
         let lower = name.to_lowercase();
-        return std::env::vars()
+        std::env::vars()
             .find(|(k, _)| k.to_lowercase() == lower)
-            .map(|(_, v)| v);
+            .map(|(_, v)| v)
     }
 
     #[cfg(not(windows))]

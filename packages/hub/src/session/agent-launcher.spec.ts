@@ -194,10 +194,14 @@ describe("connectOrLaunch", () => {
 				expect(cliArgs).toContain("--buffer-global");
 				expect(cliArgs).toContain(String(config.bufferGlobal));
 
-				// Verify detached + stdio: ignore
+				// Verify detached + stdio: stdin=ignore, stdout+stderr=log fd
 				const opts = capturedArgs[2] as Record<string, unknown>;
 				expect(opts.detached).toBe(true);
-				expect(opts.stdio).toBe("ignore");
+				const stdio = opts.stdio as unknown[];
+				expect(Array.isArray(stdio)).toBe(true);
+				expect(stdio[0]).toBe("ignore");
+				expect(typeof stdio[1]).toBe("number"); // log fd
+				expect(stdio[1]).toBe(stdio[2]); // stdout and stderr share the same fd
 			},
 			TEST_TIMEOUT,
 		);

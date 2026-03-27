@@ -123,6 +123,7 @@ export interface ParsedArgs {
 	sshPort?: number;
 	user?: string;
 	authMethod?: string;
+	keyPath?: string;
 	// pair verify
 	code?: string;
 	// json output flag
@@ -175,6 +176,9 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 
 	const authVal = flagValue("--auth");
 	if (authVal !== undefined) result.authMethod = authVal;
+
+	const keyPathVal = flagValue("--key-path");
+	if (keyPathVal !== undefined) result.keyPath = keyPathVal;
 
 	const codeVal = flagValue("--code");
 	if (codeVal !== undefined) result.code = codeVal;
@@ -372,18 +376,19 @@ async function cmdStatus(args: ParsedArgs): Promise<void> {
 async function cmdHostAdd(args: ParsedArgs): Promise<void> {
 	if (!args.label || !args.host) {
 		console.error(
-			"Usage: nexterm host add --label <label> --host <hostname> [--ssh-port 22] [--user <user>] [--auth agent|key]",
+			"Usage: nexterm host add --label <label> --host <user@hostname> [--ssh-port 22] [--auth agent|key] [--key-path ~/.ssh/id_ed25519]",
 		);
 		process.exit(1);
 	}
 
 	const body: Record<string, unknown> = {
+		type: "ssh",
 		label: args.label,
-		hostname: args.host,
+		ssh_host: args.host,
 	};
-	if (args.sshPort !== undefined) body.port = args.sshPort;
-	if (args.user) body.username = args.user;
-	if (args.authMethod) body.auth_method = args.authMethod;
+	if (args.sshPort !== undefined) body.ssh_port = args.sshPort;
+	if (args.authMethod) body.ssh_auth = args.authMethod;
+	if (args.keyPath) body.ssh_key_path = args.keyPath;
 
 	const result = await apiRequest("POST", "/api/hosts", body);
 	if (args.json) {
@@ -421,7 +426,15 @@ async function cmdHostRemove(args: ParsedArgs): Promise<void> {
 		process.exit(1);
 	}
 
-	await apiRequest("DELETE", `/api/hosts/${encodeURIComponent(args.label)}`);
+	// Resolve label → id (API uses ULID, not label)
+	const hosts = (await apiRequest("GET", "/api/hosts")) as Array<Record<string, unknown>>;
+	const match = hosts.find((h) => h.label === args.label);
+	if (!match?.id) {
+		console.error(`Host "${args.label}" not found.`);
+		process.exit(1);
+	}
+
+	await apiRequest("DELETE", `/api/hosts/${encodeURIComponent(String(match.id))}`);
 	console.log(`Host "${args.label}" removed.`);
 }
 
@@ -493,9 +506,9 @@ Usage:
   nexterm stop                                  Stop running hub
   nexterm status [--json]                       Show hub status
 
-  nexterm host add --label X --host Y           Add a host
-              [--ssh-port 22] [--user Z]
-              [--auth agent|key]
+  nexterm host add --label X --host user@Y      Add an SSH host
+              [--ssh-port 22] [--auth agent|key]
+              [--key-path ~/.ssh/id_ed25519]
   nexterm host list [--json]                    List all hosts
   nexterm host remove <label>                   Remove a host
 

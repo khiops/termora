@@ -21,5 +21,5 @@ export function handleAuthPromptResponse(
 		return;
 	}
 
-	sessionManager.handleAuthPromptResponse(clientId, msg.hostId, msg.secret);
+	sessionManager.handleAuthPromptResponse(clientId, msg.hostId, msg.secret, msg.rememberSession);
 }

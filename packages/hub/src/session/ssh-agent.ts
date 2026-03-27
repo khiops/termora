@@ -7,7 +7,12 @@ import type { Host } from "@nexterm/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
-import { deployAgentIfNeeded } from "./agent-deployer.js";
+import {
+	type BinaryVerifyPromptFn,
+	DeployError,
+	type DeployOptions,
+	deployAgentIfNeeded,
+} from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
@@ -134,13 +139,50 @@ export async function buildSshConnectConfig(
  * if nexterm-agent is not found on the remote host after SSH connect.
  */
 export interface SshAgentDeployOptions {
-	/** Path to the local binary cache directory (~/.local/state/nexterm/binaries). */
+	/** Path to the local binary cache directory. */
 	binaryCache: string;
-	/**
-	 * Called when OS/arch is detected on the remote host so the caller can
-	 * persist it to the DB without SshAgent depending on MetaDAL.
-	 */
+	/** Hostname for display in prompts. */
+	hostname?: string;
+	/** Pinned SHA256 from host record (null = no pin). */
+	pinnedSha256?: string | null;
+	/** Session-trusted SHA256 (trust_once from earlier connect). */
+	sessionTrustedSha256?: string | null;
+	/** Called when OS/arch is detected on the remote host. */
 	onOsDetected?: (hostId: string, os: HostOs, arch: HostArch) => void;
+	/** Called to prompt user for binary trust decision. */
+	promptBinaryVerify?: BinaryVerifyPromptFn;
+	/** Called when user chose trust_permanent — persist SHA256 to DB. */
+	onAgentPinned?: (hostId: string, sha256: string) => void;
+	/** Called when user chose trust_once — store in session map. */
+	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
+	/** Called when remote agent was re-uploaded (SHA256 mismatch with local cache). */
+	onAgentUpdated?: (hostId: string) => void;
+}
+
+/**
+ * Map SshAgentDeployOptions + resolved hostname to the DeployOptions shape
+ * expected by deployAgentIfNeeded.
+ */
+function toDeployOptions(
+	opts: SshAgentDeployOptions,
+	host: Host,
+	resolvedHostname: string,
+): DeployOptions {
+	return {
+		binaryCache: opts.binaryCache,
+		hostname: opts.hostname ?? resolvedHostname,
+		hostId: host.id,
+		...(opts.pinnedSha256 != null ? { pinnedSha256: opts.pinnedSha256 } : {}),
+		...(opts.sessionTrustedSha256 != null
+			? { sessionTrustedSha256: opts.sessionTrustedSha256 }
+			: {}),
+		...(opts.promptBinaryVerify !== undefined
+			? { promptBinaryVerify: opts.promptBinaryVerify }
+			: {}),
+		...(opts.onAgentPinned !== undefined ? { onAgentPinned: opts.onAgentPinned } : {}),
+		...(opts.onAgentTrustOnce !== undefined ? { onAgentTrustOnce: opts.onAgentTrustOnce } : {}),
+		...(opts.onAgentUpdated !== undefined ? { onAgentUpdated: opts.onAgentUpdated } : {}),
+	};
 }
 
 export class SshAgent extends AgentConnection {
@@ -234,23 +276,16 @@ export class SshAgent extends AgentConnection {
 
 		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>(
 			(resolve, reject) => {
-				const timeout = setTimeout(() => {
-					this.cleanup();
-					reject(new Error("Agent HELLO timeout"));
-				}, HELLO_TIMEOUT_MS);
-
 				let resolved = false;
 				const rejectOnce = (err: Error): void => {
 					if (resolved) return;
 					resolved = true;
-					clearTimeout(timeout);
 					reject(err);
 				};
 
 				const resolveOnce = (msg: HelloMessage): void => {
 					if (resolved) return;
 					resolved = true;
-					clearTimeout(timeout);
 					resolve({ hello: msg, keyVerification });
 				};
 
@@ -290,9 +325,18 @@ export class SshAgent extends AgentConnection {
 					if (connectConfig.passphrase) connectConfig.passphrase = "";
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
 					const runAgent = (agentPath: string): void => {
+						// Start HELLO timeout NOW — deploy phase is complete, agent is being exec'd.
+						// Timeout is intentionally NOT started earlier so that TOFU binary
+						// verification prompts (up to 30s) don't race against this 5s timer.
+						const helloTimeout = setTimeout(() => {
+							this.cleanup();
+							rejectOnce(new Error("Agent HELLO timeout"));
+						}, HELLO_TIMEOUT_MS);
+
 						// ssh2 Client — sends command over encrypted SSH channel to remote host
 						client.exec(agentPath, (err, stream) => {
 							if (err) {
+								clearTimeout(helloTimeout);
 								rejectOnce(err);
 								return;
 							}
@@ -305,6 +349,7 @@ export class SshAgent extends AgentConnection {
 							});
 
 							stream.on("close", () => {
+								clearTimeout(helloTimeout);
 								this.sendQueue.clear();
 								this.channel = null;
 								this.channelOpen = false;
@@ -319,6 +364,7 @@ export class SshAgent extends AgentConnection {
 
 							// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
 							this.once("ready", (msg: HelloMessage) => {
+								clearTimeout(helloTimeout);
 								resolveOnce(msg);
 							});
 						});
@@ -327,7 +373,12 @@ export class SshAgent extends AgentConnection {
 					if (this.deployOptions) {
 						// Auto-deploy is best-effort: if it fails, we still try to run the agent
 						// (the user may have installed it manually in a non-standard path).
-						deployAgentIfNeeded(client, this.host, this.deployOptions.binaryCache)
+						// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
+						deployAgentIfNeeded(
+							client,
+							this.host,
+							toDeployOptions(this.deployOptions, this.host, hostname),
+						)
 							.then((result) => {
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
 								if (result.os && result.arch) {
@@ -336,8 +387,15 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
+								// User-initiated rejections must propagate — no fallback
+								if (deployErr instanceof DeployError) {
+									rejectOnce(deployErr);
+									return;
+								}
+								// Infrastructure failures: fall back to nexterm-agent --stdio
+								const msg = deployErr instanceof Error ? deployErr.message : String(deployErr);
 								process.stderr.write(
-									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}. Trying nexterm-agent --stdio anyway.\n`,
+									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${msg}. Trying nexterm-agent --stdio anyway.\n`,
 								);
 								runAgent("nexterm-agent --stdio");
 							});

@@ -1,8 +1,7 @@
-
-import { ref, onMounted, onUnmounted, type Ref } from "vue";
 import { DEFAULT_PROFILE, type TerminalProfile } from "@nexterm/shared";
-import { useConfigStore } from "../stores/config.js";
+import { type Ref, onMounted, onUnmounted, ref } from "vue";
 import { useAuthStore } from "../stores/auth.js";
+import { useConfigStore } from "../stores/config.js";
 import { hubBaseUrl } from "../utils/hub-url.js";
 
 /**
@@ -30,10 +29,9 @@ export function useResolvedProfile(
 			if (hostId.value) params.set("host_id", hostId.value);
 			if (channelId.value) params.set("channel_id", channelId.value);
 			const qs = params.toString();
-			const resp = await fetch(
-				`${hubBaseUrl()}/api/config/cascade${qs ? `?${qs}` : ""}`,
-				{ headers: { Authorization: `Bearer ${authStore.token}` } },
-			);
+			const resp = await fetch(`${hubBaseUrl()}/api/config/cascade${qs ? `?${qs}` : ""}`, {
+				headers: { Authorization: `Bearer ${authStore.token}` },
+			});
 			if (resp.ok) {
 				const cascade = (await resp.json()) as { terminal: { resolved: TerminalProfile } };
 				profile.value = cascade.terminal.resolved;

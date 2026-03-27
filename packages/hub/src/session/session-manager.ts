@@ -27,7 +27,7 @@ import type {
 	UiAttachOkMessage,
 	UiSpawnMessage,
 } from "@nexterm/shared";
-import type { AgentConfig, ElevationMethod } from "@nexterm/shared";
+import type { AgentConfig, ElevationMethod, Host } from "@nexterm/shared";
 import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@nexterm/shared";
 import type { ConfigResolver, GcConfig } from "../config.js";
 import type { HubLogger } from "../logging/hub-logger.js";
@@ -36,12 +36,14 @@ import type { DatabaseManager } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 import { SpoolDAL } from "../storage/spool.js";
 import { AgentConnectionManager } from "./agent-connection-manager.js";
+import { DeployError, getBinaryCacheDir } from "./agent-deployer.js";
 import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import { OutputChunker } from "./output-chunker.js";
 import type { SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
 import { SshAgent } from "./ssh-agent.js";
+import type { SshAgentDeployOptions } from "./ssh-agent.js";
 import { SshConnectionManager } from "./ssh-connection-manager.js";
 import { StateBroadcaster } from "./state-broadcaster.js";
 
@@ -97,9 +99,12 @@ export class SessionManager {
 			pendingAuthPrompts: new Map(),
 			pendingHostVerify: new Map(),
 			trustedOnceFingerprints: new Map(),
+			trustedAgentSha256: new Map(),
+			pendingAgentVerify: new Map(),
 			bellTimestamps: new Map(),
 			notificationTimestamps: new Map(),
 			elevationCache: new Map(),
+			passphraseCache: new Map(),
 			agentCapabilities: new Map(),
 			titleDebounceTimers: new Map(),
 			processTitleDebounceTimers: new Map(),
@@ -122,6 +127,41 @@ export class SessionManager {
 		this.sshMgr = new SshConnectionManager(ctx, this.broadcaster, this.lifecycle, this.agentMgr);
 		// Break the circular reference: AgentConnectionManager needs SshConnectionManager
 		this.agentMgr.sshMgr = this.sshMgr;
+
+		// Wire reconnect callback for restartChannel on SSH hosts
+		this.lifecycle.onReconnectAgent = async (hostId: string): Promise<boolean> => {
+			const host = ctx.metaDal.getHost(hostId);
+			if (!host || host.type !== "ssh") return false;
+
+			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
+			const firstClient = ctx.clients.values().next().value;
+			if (!firstClient) return false;
+
+			try {
+				const promptAuth = this.sshMgr.buildPromptAuth(firstClient);
+				const deployOpts = this._buildDeployOpts(hostId, host, firstClient);
+				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+
+				const storedFp = ctx.metaDal.getHostFingerprint(hostId);
+				const sshHostname = host.sshHost?.includes("@")
+					? (host.sshHost.split("@")[1] ?? host.sshHost)
+					: (host.sshHost ?? host.label);
+				const sshPort = host.sshPort ?? 22;
+				const hostKey = `${sshHostname}:${sshPort}`;
+				const sessionTrustedFp = ctx.trustedOnceFingerprints.get(hostKey);
+
+				await sshAgent.start(storedFp, sessionTrustedFp);
+
+				// Ensure session exists
+				const session = await this.agentMgr.getOrCreateSession(hostId, true);
+				this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+				this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
+				ctx.agents.set(hostId, sshAgent);
+				return true;
+			} catch {
+				return false;
+			}
+		};
 
 		this.gc = new SpoolGarbageCollector(spoolDal, metaDal, gcConfig);
 		this.gc.start();
@@ -247,6 +287,39 @@ export class SessionManager {
 
 	// ─── WS message handlers ──────────────────────────────────────────────────
 
+	/** Build SshAgentDeployOptions for a given host + WS client. */
+	private _buildDeployOpts(hostId: string, host: Host, client: WsClient): SshAgentDeployOptions {
+		const sshHostname = host.sshHost?.includes("@")
+			? (host.sshHost.split("@")[1] ?? host.sshHost)
+			: (host.sshHost ?? host.label);
+		const binaryCache = getBinaryCacheDir();
+		const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
+		const sessionTrustedAgentSha = this.ctx.trustedAgentSha256.get(hostId);
+		return {
+			binaryCache,
+			hostname: sshHostname,
+			...(pinnedSha256 != null ? { pinnedSha256 } : {}),
+			...(sessionTrustedAgentSha != null ? { sessionTrustedSha256: sessionTrustedAgentSha } : {}),
+			onOsDetected: (hid, os, arch) => {
+				this.ctx.metaDal.updateHostOsArch(hid, os, arch);
+			},
+			promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client),
+			onAgentPinned: (hid, sha256) => {
+				this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
+			},
+			onAgentTrustOnce: (hid, sha256) => {
+				this.ctx.trustedAgentSha256.set(hid, sha256);
+			},
+			onAgentUpdated: (_hid) => {
+				this.broadcaster.broadcastToAllClients({
+					type: "ERROR",
+					code: "AGENT_UPDATED",
+					message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
+				} satisfies ErrorMessage);
+			},
+		};
+	}
+
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
 		this.ctx.hubLogger?.log("debug", "handleSpawn: start", { clientId, hostId: msg.hostId });
 		const client = this.ctx.clients.get(clientId);
@@ -287,7 +360,6 @@ export class SessionManager {
 		if (!agent?.connected) {
 			if (host.type === "ssh") {
 				const promptAuth = this.sshMgr.buildPromptAuth(client);
-				const sshAgent = new SshAgent(host, promptAuth);
 
 				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
 				const sshHostname = host.sshHost?.includes("@")
@@ -297,9 +369,28 @@ export class SessionManager {
 				const hostKey = `${sshHostname}:${sshPort}`;
 				const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
 
+				const deployOpts = this._buildDeployOpts(hostId, host, client);
+
+				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+
 				try {
 					await sshAgent.start(storedFingerprint, sessionTrustedFp);
 				} catch (err) {
+					// Handle deploy errors (user rejection, binary not available)
+					if (err instanceof DeployError) {
+						client.send({
+							type: "ERROR",
+							code: err.code,
+							message:
+								err.code === "AGENT_NOT_AVAILABLE"
+									? `Remote agent not available on ${host.sshHost ?? host.label}`
+									: err.message,
+							hostId,
+						} satisfies ErrorMessage);
+						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						return null;
+					}
+
 					const kv = sshAgent.lastKeyVerification;
 					if (kv.tofu || kv.mismatch) {
 						const action = await this.sshMgr.promptHostKeyVerify(
@@ -325,7 +416,7 @@ export class SessionManager {
 						} else {
 							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
 						}
-						const retryAgent = new SshAgent(host, promptAuth);
+						const retryAgent = new SshAgent(host, promptAuth, deployOpts);
 						try {
 							await retryAgent.start(
 								action === "trust_permanent" ? retryFp : null,
@@ -333,11 +424,23 @@ export class SessionManager {
 							);
 						} catch (retryErr) {
 							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
-							client.send({
-								type: "ERROR",
-								code: "SSH_CONNECT_FAILED",
-								message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
-							} satisfies ErrorMessage);
+							if (retryErr instanceof DeployError) {
+								client.send({
+									type: "ERROR",
+									code: retryErr.code,
+									message:
+										retryErr.code === "AGENT_NOT_AVAILABLE"
+											? `Remote agent not available on ${host.sshHost ?? host.label}`
+											: retryErr.message,
+									hostId,
+								} satisfies ErrorMessage);
+							} else {
+								client.send({
+									type: "ERROR",
+									code: "SSH_CONNECT_FAILED",
+									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+								} satisfies ErrorMessage);
+							}
 							return null;
 						}
 						this.broadcaster.updateSessionStatus(hostId, session.id, "active");
@@ -407,6 +510,10 @@ export class SessionManager {
 				resolvedShell = firstProfile.shell;
 				if (resolvedArgs.length === 0 && firstProfile.args) {
 					resolvedArgs = firstProfile.args;
+				}
+				// Also apply env from the fallback profile (e.g. TERM=xterm-256color)
+				if (Object.keys(resolvedEnv).length === 0 && firstProfile.env) {
+					resolvedEnv = { ...firstProfile.env };
 				}
 			}
 		}
@@ -751,8 +858,13 @@ export class SessionManager {
 		this.ctx.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
-	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null): void {
-		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret);
+	handleAuthPromptResponse(
+		clientId: string,
+		hostId: string,
+		secret: string | null,
+		rememberSession?: boolean,
+	): void {
+		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret, rememberSession);
 	}
 
 	handleHostVerifyResponse(
@@ -760,6 +872,13 @@ export class SessionManager {
 		action: "trust_permanent" | "trust_once" | "reject",
 	): void {
 		this.sshMgr.handleHostVerifyResponse(promptId, action);
+	}
+
+	handleAgentVerifyResponse(
+		promptId: string,
+		action: "trust_permanent" | "trust_once" | "reject",
+	): void {
+		this.sshMgr.handleAgentVerifyResponse(promptId, action);
 	}
 
 	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
