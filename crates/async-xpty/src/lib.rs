@@ -132,60 +132,36 @@ impl PtyProcess {
     ///
     /// Multiple calls return independent reader handles backed by the same fd.
     pub fn reader(&self) -> PtyReader {
-        #[cfg(unix)]
-        return PtyReader {
+        PtyReader {
             inner: self.inner.reader(),
-        };
-
-        #[cfg(windows)]
-        return PtyReader {
-            inner: self.inner.reader(),
-        };
+        }
     }
 
     /// Returns an [`AsyncWrite`](tokio::io::AsyncWrite) half that writes to
     /// the PTY master (i.e. the child's stdin).
     pub fn writer(&self) -> PtyWriter {
-        #[cfg(unix)]
-        return PtyWriter {
+        PtyWriter {
             inner: self.inner.writer(),
-        };
-
-        #[cfg(windows)]
-        return PtyWriter {
-            inner: self.inner.writer(),
-        };
+        }
     }
 
     /// Resize the PTY window. Sends `SIGWINCH` to the process group on Unix so
     /// the running program can adapt its layout. On Windows, calls
     /// `ResizePseudoConsole`.
     pub async fn resize(&self, size: PtySize) -> io::Result<()> {
-        #[cfg(unix)]
-        return self.inner.resize(size).await;
-
-        #[cfg(windows)]
-        return self.inner.resize(size).await;
+        self.inner.resize(size).await
     }
 
     /// Wait for the child process to exit and return its [`ExitStatus`].
     ///
     /// This consumes the mutable reference and should be called at most once.
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
-        #[cfg(unix)]
-        return self.inner.wait().await;
-
-        #[cfg(windows)]
-        return self.inner.wait().await;
+        self.inner.wait().await
     }
 
     /// Returns the OS process ID of the child.
     pub fn pid(&self) -> u32 {
-        #[cfg(unix)]
-        return self.inner.pid();
-
-        #[cfg(windows)]
-        return self.inner.pid();
+        self.inner.pid()
     }
 
     /// Send `SIGKILL` to the child process on Unix, or `TerminateProcess` on
@@ -194,11 +170,7 @@ impl PtyProcess {
     /// Prefer [`wait`](Self::wait) after writing an EOF or shell exit command
     /// for a graceful shutdown.
     pub fn kill(&self) -> io::Result<()> {
-        #[cfg(unix)]
-        return self.inner.kill();
-
-        #[cfg(windows)]
-        return self.inner.kill();
+        self.inner.kill()
     }
 }
 
@@ -227,7 +199,7 @@ impl tokio::io::AsyncRead for PtyReader {
         #[cfg(windows)]
         {
             let inner = unsafe { self.map_unchecked_mut(|s| &mut s.inner) };
-            return inner.poll_read(cx, buf);
+            inner.poll_read(cx, buf)
         }
     }
 }
@@ -257,7 +229,7 @@ impl tokio::io::AsyncWrite for PtyWriter {
         #[cfg(windows)]
         {
             let inner = unsafe { self.map_unchecked_mut(|s| &mut s.inner) };
-            return inner.poll_write(cx, buf);
+            inner.poll_write(cx, buf)
         }
     }
 
