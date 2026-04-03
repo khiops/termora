@@ -7,7 +7,7 @@ use std::path::Path;
 /// Platform-specific:
 /// - Linux: reads /proc/{pid}/comm (preferred) or /proc/{pid}/cmdline
 /// - macOS: uses `ps -p {pid} -o comm=`
-/// - Windows: uses `wmic process where ProcessId={pid} get Name`
+/// - Windows: uses `QueryFullProcessImageNameW` (native Win32 API, no subprocess)
 pub async fn get_process_title(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     return get_title_linux(pid).await;
@@ -72,30 +72,34 @@ async fn get_title_macos(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-async fn get_title_windows(pid: u32) -> Option<String> {
-    let output = tokio::process::Command::new("wmic")
-        .args([
-            "process",
-            "where",
-            &format!("ProcessId={}", pid),
-            "get",
-            "Name",
-        ])
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .output()
-        .await
-        .ok()?;
-    if output.status.success() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        // Output format: "Name\r\ncmd.exe\r\n\r\n"
-        for line in text.lines().skip(1) {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+fn get_title_windows_native(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            return None;
         }
+        let mut buf = [0u16; 260]; // MAX_PATH
+        let mut size = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size);
+        CloseHandle(handle);
+        if ok == 0 {
+            return None;
+        }
+        let path = String::from_utf16_lossy(&buf[..size as usize]);
+        // Extract filename from full path
+        // e.g. "C:\Program Files\PowerShell\7\pwsh.exe" → "pwsh.exe"
+        path.rsplit('\\').next().map(|s| s.to_string())
     }
-    None
+}
+
+#[cfg(target_os = "windows")]
+async fn get_title_windows(pid: u32) -> Option<String> {
+    get_title_windows_native(pid)
 }
 
 #[cfg(test)]

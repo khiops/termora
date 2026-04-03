@@ -57,9 +57,10 @@
 - [x] ✅ [Hub] Windows Terminal import — POST /api/launch-profiles/import-windows-terminal (2026-03-19)
 
 ### Other
+- [x] ✅ [Agent-RS] Replace wmic.exe with QueryFullProcessImageNameW for process title polling — move poller to separate task (2026-04-03)
 - [ ] 💡 [Agent-RS] MessagePack alloc optimization — pool/arena if profiling shows overhead — Priority: L (from /adversarial, deferred: optimize only if measured)
 - [ ] 💡 [Web] Dead channel UX: show last snapshot behind exit overlay, restart resumes on same terminal (seamless) — Priority: H
-- [ ] 🟡 [All] Build versioning — git commit hash in /api/health, title bar, package.json — Priority: H
+- [x] ✅ [All] Build versioning — /api/health version+build, About modal, agent version mismatch warning (2026-04-03)
 - [ ] 🔧 [Desktop] Generate Tauri updater signing key and set pubkey in tauri.conf.json — Priority: M
 - [ ] 🔧 [Desktop] Auto-create "local" host on first launch if none exists — Priority: H
 - [ ] 🔧 [Hub] `initSync()` deprecation warning — pass `{ module }` object to toml-edit-js — Priority: L
@@ -83,7 +84,7 @@
 - [ ] 🐛 [Hub] launchDaemon: agent detached process dies silently under WSL — stdio:"ignore" + detached + unref; manual launch works fine — Priority: H
 - [ ] 🔧 [Web] Restart dead channel: must reuse same pane/tab, not spawn+delete (non-atomic creates ghost channels) — same behavior local + SSH — Priority: H
 - [ ] 🐛 [Web] Multi-client sync: new channels not visible on other clients without refresh (WS broadcast missing or not handled) — Priority: H
-- [ ] 🐛 [Web] STATE_SYNC timing: not all channels marked dead on refresh (race between STATE_SYNC and fetchChannels) — Priority: M
+- [x] ✅ [Web] STATE_SYNC timing: not all channels marked dead on refresh (race between STATE_SYNC and fetchChannels) — Priority: M (2026-04-03)
 - [ ] 🐛 [Web] Channel status icon stays grey after becoming live (CHANNEL_STATE not triggering UI update) — Priority: M
 - [ ] 🐛 [Web] Write-lock takeover not visible on other client (WRITE_LOCK WS message not received/rendered) — Priority: M
 - [ ] 🔧 [Web] Terminal pane v-show keep-alive: avoid full replay on tab switch (keep xterm.js in DOM) — Priority: H
@@ -110,8 +111,15 @@
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops — Priority: P1
 - [ ] 💡 [Hub] Search in scrollback (FTS5 full-text index + search UI) — Priority: P1
 - [ ] 💡 [Hub] OS keychain for auth token (keytar) — Priority: P1
-- [ ] 💡 [Web] File browser / transfer panel — explore remote filesystem, upload/download via SFTP (inspired by Antoinecarle/Termora) — Priority: P1
-- [ ] 💡 [All] Study gnmyt/Termora for feature ideas: VNC/RDP support, server monitoring, snippet manager — Priority: L
+- [ ] 💡 [Web] File browser / transfer panel — SFTP browse + upload/download + CodeMirror editor (ref: gnmyt/Nexterm SFTP, Antoinecarle/Nexterm FileExplorer) — Priority: P1
+- [ ] 💡 [Hub] Session recording + Asciinema playback — record terminal output, replay in UI (ref: gnmyt/Nexterm recording service) — Priority: P1
+- [ ] 💡 [Hub+Web] Welcome tab — auto-launch configurable command per host on connect (btop, htop, k9s...), host profile param — Priority: P1
+- [ ] 💡 [Web+Hub] VNC viewer — noVNC (pure JS, zero native deps) in pane layout, WebSocket proxy through hub (ref: gnmyt/Nexterm Guacamole) — Priority: P1
+- [ ] 💡 [Web+Hub] RDP viewer — requires guacd (C) or FreeRDP native proxy, complex but covers Windows remotes — Priority: P2
+- [ ] 💡 [Web] X11 forwarding — Xpra HTML5 client (server-side install on remote host), lightweight X display — Priority: P2
+- [ ] 💡 [Web] Popout windows — detach terminal/VNC to separate browser window (web: window.open, Tauri: WebviewWindow) — Priority: M
+- [ ] 💡 [Web] Responsive/mobile UX — touch-friendly terminal controls, responsive layout for PWA — Priority: M
+- [ ] 💡 [Web] Connected clients presence — show who is connected in sidebar, complement write-lock system — Priority: M
 
 ## Tier 4 — Deferred (revisit in 3 months)
 
@@ -120,7 +128,8 @@
 - [ ] 💡 [Hub] WebSocket events for config changes (reactive settings across clients) — Priority: P2
 - [ ] 💡 [Hub] Workspace export/import with blobs — Priority: P2
 - [ ] 💡 [Hub] SQLCipher encryption at rest — Priority: P2
-- [ ] 💡 [Hub] OIDC / mTLS — Priority: P2
+- [ ] 💡 [Hub] OIDC / mTLS + WebAuthn passkeys (ref: gnmyt/Nexterm multi-auth) — Priority: P2
+- [ ] 💡 [Hub] Audit log — user actions, session connects, admin trail (ref: gnmyt/Nexterm audit) — Priority: P2
 - [ ] 💡 [Hub] Multi-writer collaboration (CRDT) — Priority: P2
 - [ ] 💡 [Agent] Peer UID verification via SO_PEERCRED on Unix socket — Priority: P2
 - [ ] 💡 [Agent] Windows named pipe ACL hardening (restrict to current user) — Priority: P2

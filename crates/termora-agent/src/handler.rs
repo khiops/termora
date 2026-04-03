@@ -650,11 +650,27 @@ fn spawn_reader_task(
         let mut seq: u64 = 0;
         let mut mirror = mirror;
 
-        // Process title polling state
-        let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(2));
-        // Skip the immediate first tick so we don't poll before the shell is ready
-        poll_interval.tick().await;
-        let mut last_process_title = String::new();
+        // Spawn a dedicated title-polling task so it never blocks PTY I/O.
+        // The task sends the new title whenever it changes; the main loop
+        // receives it via the channel arm in select!.
+        let (title_tx, mut title_rx) = mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            // Wait one tick before the first poll so the shell is ready.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let mut last_title = String::new();
+            loop {
+                if let Some(title) = crate::process::get_process_title(pty_pid).await {
+                    if title != last_title {
+                        last_title = title.clone();
+                        if title_tx.send(title).is_err() {
+                            // Main task dropped — channel is gone, stop polling.
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        });
 
         loop {
             tokio::select! {
@@ -758,20 +774,15 @@ fn spawn_reader_task(
                     }
                 }
 
-                // Periodic process title polling
-                _ = poll_interval.tick() => {
-                    if let Some(title) = crate::process::get_process_title(pty_pid).await {
-                        if title != last_process_title {
-                            last_process_title = title.clone();
-                            let msg = AgentToHub::ProcessTitle {
-                                channel_id: channel_id.clone(),
-                                title,
-                                display_title: None,
-                            };
-                            if let Ok(frame) = encode_frame(&msg) {
-                                let _ = frame_tx.send(frame);
-                            }
-                        }
+                // Process title update from polling task
+                Some(title) = title_rx.recv() => {
+                    let msg = AgentToHub::ProcessTitle {
+                        channel_id: channel_id.clone(),
+                        title,
+                        display_title: None,
+                    };
+                    if let Ok(frame) = encode_frame(&msg) {
+                        let _ = frame_tx.send(frame);
                     }
                 }
             }
