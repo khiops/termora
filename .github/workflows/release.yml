@@ -229,7 +229,7 @@ jobs:
         run: |
           VERSION="${TAG_NAME#v}"
           CONF="packages/clients/desktop/src-tauri/tauri.conf.json"
-          node -e "const f=require('fs'); const c=JSON.parse(f.readFileSync('$CONF','utf8')); c.version='$VERSION'; f.writeFileSync('$CONF', JSON.stringify(c,null,'\t')+'\n');"
+          jq --arg v "$VERSION" '.version = $v' "$CONF" > "${CONF}.tmp" && mv "${CONF}.tmp" "$CONF"
           echo "Set tauri.conf.json version to $VERSION"
       - name: Download assets from release
         shell: bash
