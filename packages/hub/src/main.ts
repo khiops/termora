@@ -10,11 +10,11 @@ import { addCorsOrigins, createServer, startServer } from "./server.js";
 import { openDatabases } from "./storage/db.js";
 
 async function main() {
-	const envPort = process.env.NEXTERM_PORT;
+	const envPort = process.env.TERMORA_PORT;
 	if (envPort !== undefined) {
 		const parsedEnvPort = Number(envPort);
 		if (!Number.isInteger(parsedEnvPort) || parsedEnvPort < 1 || parsedEnvPort > 65535) {
-			throw new Error(`Invalid NEXTERM_PORT: ${envPort} — must be an integer between 1 and 65535`);
+			throw new Error(`Invalid TERMORA_PORT: ${envPort} — must be an integer between 1 and 65535`);
 		}
 	}
 	const port = envPort !== undefined ? Number(envPort) : 4100;
@@ -70,8 +70,8 @@ async function main() {
 		});
 	});
 
-	// Open browser if requested via NEXTERM_OPEN env (set by CLI daemon spawner)
-	if (process.env.NEXTERM_OPEN === "1") {
+	// Open browser if requested via TERMORA_OPEN env (set by CLI daemon spawner)
+	if (process.env.TERMORA_OPEN === "1") {
 		openBrowser(`http://127.0.0.1:${actualPort}`);
 	}
 

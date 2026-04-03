@@ -252,7 +252,7 @@ describe("PUT /api/config/ui — broadcastDisplayTitles integration", () => {
 	let tempDir: string;
 
 	beforeEach(async () => {
-		tempDir = join(tmpdir(), `nexterm-bdt-${Date.now()}`);
+		tempDir = join(tmpdir(), `termora-bdt-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 		testDbs = openTestDatabases();
 		miniServer = Fastify({ logger: false });

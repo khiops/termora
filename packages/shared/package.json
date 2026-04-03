@@ -1,11 +1,11 @@
 {
-	"name": "@nexterm/shared",
+	"name": "@termora/shared",
 	"version": "0.1.0",
-	"description": "Shared TypeScript types and codec for nexterm (wire protocol, entities)",
+	"description": "Shared TypeScript types and codec for termora (wire protocol, entities)",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/nexterm/nexterm.git"
+		"url": "https://github.com/khiops/termora.git"
 	},
 	"engines": {
 		"node": ">=20"

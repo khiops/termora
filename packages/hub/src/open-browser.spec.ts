@@ -57,7 +57,7 @@ describe("buildOpenArgs", () => {
 
 	it("accepts https URLs", () => {
 		setPlatform("linux");
-		expect(() => buildOpenArgs("https://nexterm.io")).not.toThrow();
+		expect(() => buildOpenArgs("https://termora.io")).not.toThrow();
 	});
 });
 

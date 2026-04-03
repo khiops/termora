@@ -1,4 +1,4 @@
-import { DEFAULT_PROFILE } from "@nexterm/shared";
+import { DEFAULT_PROFILE } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, nextTick, ref } from "vue";

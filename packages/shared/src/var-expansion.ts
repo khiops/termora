@@ -1,5 +1,5 @@
 /**
- * Variable expansion for nexterm launch profiles.
+ * Variable expansion for termora launch profiles.
  *
  * Grammar (one-pass, left-to-right):
  *   ${VAR_NAME}   → replaced with env[VAR_NAME] (or process.env fallback)

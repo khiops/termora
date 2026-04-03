@@ -108,7 +108,7 @@ describe("useSearchHistory", () => {
 		add("two", true);
 		clear();
 		expect(history.value).toEqual([]);
-		expect(localStorageMock.removeItem).toHaveBeenCalledWith("nexterm:search-history");
+		expect(localStorageMock.removeItem).toHaveBeenCalledWith("termora:search-history");
 	});
 
 	it("loads from localStorage on init", () => {
@@ -116,14 +116,14 @@ describe("useSearchHistory", () => {
 			{ query: "saved", regex: false },
 			{ query: "another", regex: true },
 		];
-		storage.set("nexterm:search-history", JSON.stringify(entries));
+		storage.set("termora:search-history", JSON.stringify(entries));
 
 		const { history } = useSearchHistory();
 		expect(history.value).toEqual(entries);
 	});
 
 	it("returns empty array for invalid localStorage data", () => {
-		storage.set("nexterm:search-history", "not-valid-json{{{");
+		storage.set("termora:search-history", "not-valid-json{{{");
 
 		const { history } = useSearchHistory();
 		expect(history.value).toEqual([]);
@@ -133,10 +133,10 @@ describe("useSearchHistory", () => {
 		const { add } = useSearchHistory();
 		add("persist-me", false);
 		expect(localStorageMock.setItem).toHaveBeenCalledWith(
-			"nexterm:search-history",
+			"termora:search-history",
 			expect.any(String),
 		);
-		const stored = JSON.parse(storage.get("nexterm:search-history") ?? "[]");
+		const stored = JSON.parse(storage.get("termora:search-history") ?? "[]");
 		expect(stored).toEqual([{ query: "persist-me", regex: false }]);
 	});
 });

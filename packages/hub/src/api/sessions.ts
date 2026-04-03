@@ -1,4 +1,4 @@
-import { toSnakeCase } from "@nexterm/shared";
+import { toSnakeCase } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../session/session-manager.js";
 import type { MetaDAL } from "../storage/meta.js";

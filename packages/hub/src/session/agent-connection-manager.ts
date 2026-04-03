@@ -22,12 +22,12 @@ import type {
 	OutputMessage,
 	ProtocolMessage,
 	SessionStatus,
-} from "@nexterm/shared";
-import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from "@nexterm/shared";
+} from "@termora/shared";
+import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from "@termora/shared";
 import type { AgentConnection } from "./agent-connection.js";
 import { connectOrLaunch } from "./agent-launcher.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
-import { NextermAgent } from "./nexterm-agent.js";
+import { TermoraAgent } from "./termora-agent.js";
 import type { SessionState, SharedSessionContext } from "./session-context.js";
 import type { SshConnectionManager } from "./ssh-connection-manager.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
@@ -281,7 +281,7 @@ export class AgentConnectionManager {
 
 			if (!session) return;
 
-			if (agent instanceof NextermAgent) {
+			if (agent instanceof TermoraAgent) {
 				this.broadcaster.updateSessionStatus(hostId, session.id, "disconnected");
 				this.reconnectDaemon(hostId, session.id).catch(() => {
 					this.lifecycle.closeSession(hostId, session.id);
@@ -302,7 +302,7 @@ export class AgentConnectionManager {
 
 	// ─── Daemon agent ─────────────────────────────────────────────────────────
 
-	private async attachDaemon(hostId: string, sessionId: string): Promise<NextermAgent> {
+	private async attachDaemon(hostId: string, sessionId: string): Promise<TermoraAgent> {
 		const socketPath = getSocketPath(this.ctx.agentConfig.socketPath);
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", {
 			hostId,
@@ -339,7 +339,7 @@ export class AgentConnectionManager {
 		return agent;
 	}
 
-	async connectDaemonAgent(hostId: string, sessionId: string): Promise<NextermAgent> {
+	async connectDaemonAgent(hostId: string, sessionId: string): Promise<TermoraAgent> {
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectDaemonAgent", {
 			hostId,
 			sessionId,
@@ -369,7 +369,7 @@ export class AgentConnectionManager {
 			return;
 		}
 
-		let agent: NextermAgent;
+		let agent: TermoraAgent;
 		try {
 			agent = await this.attachDaemon(hostId, sessionId);
 		} catch {

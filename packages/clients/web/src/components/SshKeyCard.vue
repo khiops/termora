@@ -55,7 +55,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import type { SshKeyEntry } from "@nexterm/shared";
+import type { SshKeyEntry } from "@termora/shared";
 
 const props = defineProps<{
 	entry: SshKeyEntry;

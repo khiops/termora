@@ -1,4 +1,4 @@
-import type { BellSound } from "@nexterm/shared";
+import type { BellSound } from "@termora/shared";
 
 let audioContext: AudioContext | null = null;
 let userInteracted = false;

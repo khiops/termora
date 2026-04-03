@@ -1,4 +1,4 @@
-// nexterm Protocol message types
+// termora Protocol message types
 //
 // Naming strategy for ambiguous messages:
 // - Messages that differ between agent and UI contexts use a prefix: Agent* / Ui*

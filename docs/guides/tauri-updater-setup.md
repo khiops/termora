@@ -17,11 +17,11 @@ Use this guide when configuring or rotating the cryptographic key pair used to s
 bash scripts/generate-updater-key.sh
 ```
 
-The script generates an Ed25519 key pair at `~/.tauri/nexterm-updater.key`. It will prompt for a password — choose a strong one and record it securely.
+The script generates an Ed25519 key pair at `~/.tauri/termora-updater.key`. It will prompt for a password — choose a strong one and record it securely.
 
 The terminal output includes two values:
 - **Public key** — a base64 string starting with `dW50cnVzdGVk...`
-- **Private key file** — `~/.tauri/nexterm-updater.key`
+- **Private key file** — `~/.tauri/termora-updater.key`
 
 ### 2. Configure tauri.conf.json
 
@@ -32,7 +32,7 @@ Open `packages/clients/desktop/src-tauri/tauri.conf.json` and set the public key
   "plugins": {
     "updater": {
       "pubkey": "<paste public key here>",
-      "endpoints": ["https://releases.nexterm.dev/{{target}}/{{arch}}/{{current_version}}"]
+      "endpoints": ["https://releases.termora.dev/{{target}}/{{arch}}/{{current_version}}"]
     }
   }
 }
@@ -46,7 +46,7 @@ In GitHub: **Settings > Secrets and variables > Actions > New repository secret*
 
 | Secret name | Value |
 |-------------|-------|
-| `TAURI_SIGNING_PRIVATE_KEY` | Full contents of `~/.tauri/nexterm-updater.key` |
+| `TAURI_SIGNING_PRIVATE_KEY` | Full contents of `~/.tauri/termora-updater.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password entered during key generation |
 
 ### 4. Configure the CI workflow
@@ -58,7 +58,7 @@ In the Tauri build job (e.g. `.github/workflows/release-sea.yml`), add these env
   env:
     TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-  run: pnpm -F @nexterm/desktop build
+  run: pnpm -F @termora/desktop build
 ```
 
 Tauri CLI picks up these env vars automatically and signs all update artifacts (`.sig` files alongside installers).
@@ -77,9 +77,9 @@ When rotating the key pair (e.g. suspected compromise):
 To verify signing works locally before pushing to CI:
 
 ```bash
-export TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/nexterm-updater.key)
+export TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/termora-updater.key)
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=<your password>
-pnpm -F @nexterm/desktop build
+pnpm -F @termora/desktop build
 ```
 
 Check that the output directory contains `.sig` files alongside the installer artifacts. A missing `.sig` means signing did not occur.
@@ -88,7 +88,7 @@ Check that the output directory contains `.sig` files alongside the installer ar
 
 - `packages/clients/desktop/src-tauri/tauri.conf.json` — contains `plugins.updater.pubkey`
 - `scripts/generate-updater-key.sh` — key generation helper
-- `~/.tauri/nexterm-updater.key` — private key (local only, never commit)
+- `~/.tauri/termora-updater.key` — private key (local only, never commit)
 
 ## Gotchas
 

@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onUnmounted } from "vue";
-import type { ChannelGroup } from "@nexterm/shared";
+import type { ChannelGroup } from "@termora/shared";
 
 const props = defineProps<{
 	group: ChannelGroup;

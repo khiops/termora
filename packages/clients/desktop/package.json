@@ -1,8 +1,8 @@
 {
-	"name": "@nexterm/desktop",
+	"name": "@termora/desktop",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Nexterm desktop app (Tauri v2)",
+	"description": "Termora desktop app (Tauri v2)",
 	"scripts": {
 		"tauri": "tauri",
 		"dev": "tauri dev",

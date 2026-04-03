@@ -66,8 +66,8 @@ describe("expandVars", () => {
 	// env undefined (no overrides — only process.env)
 	it("handles undefined env (only process.env fallback)", () => {
 		// Use a var that is NOT in process.env (extremely unlikely name)
-		expect(expandVars("${__NEXTERM_NONEXISTENT_VAR_XYZ__}")).toBe(
-			"${__NEXTERM_NONEXISTENT_VAR_XYZ__}",
+		expect(expandVars("${__TERMORA_NONEXISTENT_VAR_XYZ__}")).toBe(
+			"${__TERMORA_NONEXISTENT_VAR_XYZ__}",
 		);
 	});
 

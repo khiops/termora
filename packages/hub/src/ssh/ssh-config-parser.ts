@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { SshConfigEntry } from "@nexterm/shared";
+import type { SshConfigEntry } from "@termora/shared";
 
 const GIT_HOSTS = new Set([
 	"github.com",

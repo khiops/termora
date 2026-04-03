@@ -171,25 +171,25 @@ describe("parseArgs", () => {
 describe("path helpers", () => {
 	it("getStateDir returns a non-empty string", () => {
 		expect(getStateDir().length).toBeGreaterThan(0);
-		expect(getStateDir()).toContain("nexterm");
+		expect(getStateDir()).toContain("termora");
 	});
 
 	it("getConfigDir returns a non-empty string", () => {
 		expect(getConfigDir().length).toBeGreaterThan(0);
-		expect(getConfigDir()).toContain("nexterm");
+		expect(getConfigDir()).toContain("termora");
 	});
 
 	it.skipIf(process.platform === "win32")("getStateDir uses XDG_STATE_HOME when set", () => {
 		const orig = process.env.XDG_STATE_HOME;
 		process.env.XDG_STATE_HOME = "/tmp/xdg-state";
-		expect(getStateDir()).toBe("/tmp/xdg-state/nexterm");
+		expect(getStateDir()).toBe("/tmp/xdg-state/termora");
 		process.env.XDG_STATE_HOME = orig;
 	});
 
 	it.skipIf(process.platform === "win32")("getConfigDir uses XDG_CONFIG_HOME when set", () => {
 		const orig = process.env.XDG_CONFIG_HOME;
 		process.env.XDG_CONFIG_HOME = "/tmp/xdg-cfg";
-		expect(getConfigDir()).toBe("/tmp/xdg-cfg/nexterm");
+		expect(getConfigDir()).toBe("/tmp/xdg-cfg/termora");
 		process.env.XDG_CONFIG_HOME = orig;
 	});
 });

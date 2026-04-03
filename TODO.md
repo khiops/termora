@@ -1,4 +1,4 @@
-# nexterm — Backlog
+# termora — Backlog
 
 ## Recently Completed: LOGGING-DAEMON (2026-03-21)
 
@@ -18,13 +18,13 @@
 
 - [x] ✅ Block 1: async-xpty — Unix PTY (spawn, I/O, resize, exit) (2026-03-21)
 - [x] ✅ Block 2: async-xpty — Windows ConPTY + \x1b[6n fix (2026-03-21) — code only, Windows CI needed
-- [x] ✅ Block 3: nexterm-agent — Scaffold + framing + HELLO + shell detection (2026-03-21)
-- [x] ✅ Block 4: nexterm-agent — SPAWN + INPUT/OUTPUT/RESIZE + batching + var expansion (2026-03-21)
-- [x] ✅ Block 5: nexterm-agent — Terminal mirror (vt100) + snapshots + title/bell/notification (2026-03-21)
-- [x] ✅ Block 6: nexterm-agent — Process title polling (2026-03-21)
-- [x] ✅ Block 7: nexterm-agent — Elevation wrapping (2026-03-21)
-- [x] ✅ Block 8: nexterm-agent — Daemon mode (UDS, connection displacement, output buffer) (2026-03-21)
-- [x] ✅ Block 9: nexterm-agent — HEARTBEAT, ATTACH, backpressure, graceful shutdown (2026-03-21)
+- [x] ✅ Block 3: termora-agent — Scaffold + framing + HELLO + shell detection (2026-03-21)
+- [x] ✅ Block 4: termora-agent — SPAWN + INPUT/OUTPUT/RESIZE + batching + var expansion (2026-03-21)
+- [x] ✅ Block 5: termora-agent — Terminal mirror (vt100) + snapshots + title/bell/notification (2026-03-21)
+- [x] ✅ Block 6: termora-agent — Process title polling (2026-03-21)
+- [x] ✅ Block 7: termora-agent — Elevation wrapping (2026-03-21)
+- [x] ✅ Block 8: termora-agent — Daemon mode (UDS, connection displacement, output buffer) (2026-03-21)
+- [x] ✅ Block 9: termora-agent — HEARTBEAT, ATTACH, backpressure, graceful shutdown (2026-03-21)
 - [x] ✅ Block 10: Integration tests + CI (2026-03-21)
 
 ### Review findings (all resolved)
@@ -110,6 +110,8 @@
 - [ ] 💡 [Agent] Remote agent daemon via SSH tunnel — PTYs survive SSH drops — Priority: P1
 - [ ] 💡 [Hub] Search in scrollback (FTS5 full-text index + search UI) — Priority: P1
 - [ ] 💡 [Hub] OS keychain for auth token (keytar) — Priority: P1
+- [ ] 💡 [Web] File browser / transfer panel — explore remote filesystem, upload/download via SFTP (inspired by Antoinecarle/Termora) — Priority: P1
+- [ ] 💡 [All] Study gnmyt/Termora for feature ideas: VNC/RDP support, server monitoring, snippet manager — Priority: L
 
 ## Tier 4 — Deferred (revisit in 3 months)
 

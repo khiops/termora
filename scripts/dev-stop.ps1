@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# Stop nexterm dev servers and clean up orphan processes.
+# Stop termora dev servers and clean up orphan processes.
 # Usage: .\scripts\dev-stop.ps1 [-Target hub|agent|all]   (default: all)
 param(
     [ValidateSet("hub", "agent", "all")]
@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$LogDir = "$env:TEMP\nexterm-dev"
+$LogDir = "$env:TEMP\termora-dev"
 $PidFile = "$LogDir\dev.pid"
 $AgentPidFile = "$LogDir\agent.pid"
 
@@ -68,12 +68,12 @@ function Stop-Agent {
         Remove-Item $AgentPidFile -Force -ErrorAction SilentlyContinue
         Write-Host "v Agent stopped (PID $savedPid)" -ForegroundColor Green
     } else {
-        # Fallback: find nexterm-agent process by name
-        $agents = Get-Process -Name "nexterm-agent" -ErrorAction SilentlyContinue
+        # Fallback: find termora-agent process by name
+        $agents = Get-Process -Name "termora-agent" -ErrorAction SilentlyContinue
         if ($agents) {
             foreach ($a in $agents) {
                 Stop-Process -Id $a.Id -Force -ErrorAction SilentlyContinue
-                Write-Host "  Killed nexterm-agent PID $($a.Id)" -ForegroundColor DarkGray
+                Write-Host "  Killed termora-agent PID $($a.Id)" -ForegroundColor DarkGray
             }
         } else {
             Write-Host "No agent daemon running." -ForegroundColor DarkGray

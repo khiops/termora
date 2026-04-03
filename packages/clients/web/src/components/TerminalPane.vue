@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
 import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
 import { useResolvedProfile } from "../composables/useResolvedProfile.js";
 import { useTabTitle } from "../composables/useTabTitle.js";
@@ -789,7 +789,7 @@ function onDragStart(event: DragEvent): void {
 	const hostId = channelsStore.activeHostId ?? null;
 
 	event.dataTransfer.setData(
-		"text/x-nexterm-pane",
+		"text/x-termora-pane",
 		JSON.stringify({
 			channelId: chId,
 			paneId: props.paneId,
@@ -797,11 +797,11 @@ function onDragStart(event: DragEvent): void {
 		}),
 	);
 
-	document.body.classList.add("nexterm-dragging");
+	document.body.classList.add("termora-dragging");
 }
 
 function onDragEnd(): void {
-	document.body.classList.remove("nexterm-dragging");
+	document.body.classList.remove("termora-dragging");
 }
 </script>
 

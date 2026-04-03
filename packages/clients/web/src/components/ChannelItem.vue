@@ -90,8 +90,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
-import type { Channel, ChannelGroup } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
+import type { Channel, ChannelGroup } from "@termora/shared";
 import { useRename } from "../composables/useRename.js";
 import { useNotificationStore } from "../stores/notifications.js";
 

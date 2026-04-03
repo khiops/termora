@@ -27,8 +27,8 @@ fn read_hub_auth_token() -> Option<String> {
         }
     };
 
-    let auth_path = config_dir.join("nexterm").join("auth.json");
-    eprintln!("[nexterm] checking auth.json at: {}", auth_path.display());
+    let auth_path = config_dir.join("termora").join("auth.json");
+    eprintln!("[termora] checking auth.json at: {}", auth_path.display());
     let contents = std::fs::read_to_string(&auth_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let token = parsed.get("token")?.as_str()?.to_string();
@@ -38,13 +38,13 @@ fn read_hub_auth_token() -> Option<String> {
     if valid { Some(token) } else { None }
 }
 
-/// Resolves the nexterm state directory:
-/// - Linux/macOS: $XDG_STATE_HOME/nexterm or ~/.local/state/nexterm
-/// - Windows: %LOCALAPPDATA%\nexterm
+/// Resolves the termora state directory:
+/// - Linux/macOS: $XDG_STATE_HOME/termora or ~/.local/state/termora
+/// - Windows: %LOCALAPPDATA%\termora
 fn get_state_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("nexterm"))
+        std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("termora"))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -52,7 +52,7 @@ fn get_state_dir() -> Option<std::path::PathBuf> {
             .ok()
             .map(std::path::PathBuf::from)
             .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
-            .map(|p| p.join("nexterm"))
+            .map(|p| p.join("termora"))
     }
 }
 
@@ -82,8 +82,8 @@ fn is_hub_alive(port: u16) -> bool {
 fn get_hub_auth_token() -> Option<String> {
     let result = read_hub_auth_token();
     match &result {
-        Some(_) => eprintln!("[nexterm] auto-auth: token found in auth.json"),
-        None => eprintln!("[nexterm] auto-auth: no valid token in auth.json"),
+        Some(_) => eprintln!("[termora] auto-auth: token found in auth.json"),
+        None => eprintln!("[termora] auto-auth: no valid token in auth.json"),
     }
     result
 }
@@ -99,7 +99,7 @@ fn get_hub_port() -> u16 {
 /// In dev builds, the hub is already running externally — just show the window.
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // System tray
-    let show = MenuItemBuilder::with_id("show", "Show Nexterm").build(app)?;
+    let show = MenuItemBuilder::with_id("show", "Show Termora").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
 
@@ -131,14 +131,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(port) = read_runtime_port() {
             if is_hub_alive(port) {
-                eprintln!("[nexterm] found existing hub on port {} (from runtime.json)", port);
+                eprintln!("[termora] found existing hub on port {} (from runtime.json)", port);
                 hub_port = port;
                 need_spawn = false;
             }
         }
 
         if need_spawn {
-            let sidecar = app.shell().sidecar("nexterm-hub").unwrap()
+            let sidecar = app.shell().sidecar("termora-hub").unwrap()
                 .args(["start"]);
             let (mut rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
 
@@ -149,7 +149,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             // Capture sidecar stdout/stderr to a log file
             let log_dir = dirs::data_local_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("nexterm");
+                .join("termora");
             let _ = std::fs::create_dir_all(&log_dir);
             let log_path = log_dir.join("hub.log");
 
@@ -214,7 +214,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         HUB_PORT.store(hub_port, Ordering::Relaxed);
-        eprintln!("[nexterm] hub port resolved to {}", hub_port);
+        eprintln!("[termora] hub port resolved to {}", hub_port);
     }
 
     // Show the main window (hidden by default in config)
@@ -237,5 +237,5 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_hub_auth_token, get_hub_port])
         .setup(setup_app)
         .run(tauri::generate_context!())
-        .expect("error while running nexterm");
+        .expect("error while running termora");
 }

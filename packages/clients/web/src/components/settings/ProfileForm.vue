@@ -287,8 +287,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from "vue";
-import type { LaunchProfile, LaunchProfileMode, SupportedOs, IconType } from "@nexterm/shared";
-import type { TerminalProfile } from "@nexterm/shared";
+import type { LaunchProfile, LaunchProfileMode, SupportedOs, IconType } from "@termora/shared";
+import type { TerminalProfile } from "@termora/shared";
 import HostOverridesTable from "./HostOverridesTable.vue";
 import { useProfilesStore } from "../../stores/profiles.js";
 

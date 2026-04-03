@@ -1,5 +1,5 @@
 /**
- * nexterm CLI
+ * termora CLI
  *
  * Parses process.argv and dispatches to hub commands.
  * No heavy deps — manual argv parsing only.
@@ -15,16 +15,16 @@ import { fileURLToPath } from "node:url";
 
 export function getStateDir(): string {
 	if (process.platform === "win32") {
-		return join(process.env.LOCALAPPDATA ?? "", "nexterm");
+		return join(process.env.LOCALAPPDATA ?? "", "termora");
 	}
-	return join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+	return join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "termora");
 }
 
 export function getConfigDir(): string {
 	if (process.platform === "win32") {
-		return join(process.env.APPDATA ?? "", "nexterm");
+		return join(process.env.APPDATA ?? "", "termora");
 	}
-	return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "nexterm");
+	return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "termora");
 }
 
 // ─── Runtime state ─────────────────────────────────────────────────────────────
@@ -253,8 +253,8 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 			stdio: "ignore",
 			env: {
 				...process.env,
-				NEXTERM_PORT: String(port),
-				...(args.open ? { NEXTERM_OPEN: "1" } : {}),
+				TERMORA_PORT: String(port),
+				...(args.open ? { TERMORA_OPEN: "1" } : {}),
 			},
 		});
 		child.unref();
@@ -285,12 +285,12 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
 	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
-	console.log(`nexterm hub listening on ${address} (build: ${BUILD_HASH})`);
+	console.log(`termora hub listening on ${address} (build: ${BUILD_HASH})`);
 	console.log(`Config dir : ${configDir}`);
 	console.log(`State dir  : ${stateDir}`);
 
-	// Open browser if requested via --open flag or NEXTERM_OPEN env (set by daemon spawner)
-	const shouldOpen = args.open === true || process.env.NEXTERM_OPEN === "1";
+	// Open browser if requested via --open flag or TERMORA_OPEN env (set by daemon spawner)
+	const shouldOpen = args.open === true || process.env.TERMORA_OPEN === "1";
 	if (shouldOpen) {
 		const url = `http://127.0.0.1:${actualPort}`;
 		console.log(`Opening browser: ${url}`);
@@ -376,7 +376,7 @@ async function cmdStatus(args: ParsedArgs): Promise<void> {
 async function cmdHostAdd(args: ParsedArgs): Promise<void> {
 	if (!args.label || !args.host) {
 		console.error(
-			"Usage: nexterm host add --label <label> --host <user@hostname> [--ssh-port 22] [--auth agent|key] [--key-path ~/.ssh/id_ed25519]",
+			"Usage: termora host add --label <label> --host <user@hostname> [--ssh-port 22] [--auth agent|key] [--key-path ~/.ssh/id_ed25519]",
 		);
 		process.exit(1);
 	}
@@ -422,7 +422,7 @@ async function cmdHostList(args: ParsedArgs): Promise<void> {
 
 async function cmdHostRemove(args: ParsedArgs): Promise<void> {
 	if (!args.label) {
-		console.error("Usage: nexterm host remove <label>");
+		console.error("Usage: termora host remove <label>");
 		process.exit(1);
 	}
 
@@ -498,26 +498,26 @@ async function cmdConfigEdit(): Promise<void> {
 // ─── Help ──────────────────────────────────────────────────────────────────────
 
 function printHelp(): void {
-	console.log(`nexterm — local-first session terminal platform
+	console.log(`termora — local-first session terminal platform
 
 Usage:
-  nexterm start [--port 4100] [--daemon]       Start hub (foreground or daemon)
+  termora start [--port 4100] [--daemon]       Start hub (foreground or daemon)
               [--open]                          Open browser after start
-  nexterm stop                                  Stop running hub
-  nexterm status [--json]                       Show hub status
+  termora stop                                  Stop running hub
+  termora status [--json]                       Show hub status
 
-  nexterm host add --label X --host user@Y      Add an SSH host
+  termora host add --label X --host user@Y      Add an SSH host
               [--ssh-port 22] [--auth agent|key]
               [--key-path ~/.ssh/id_ed25519]
-  nexterm host list [--json]                    List all hosts
-  nexterm host remove <label>                   Remove a host
+  termora host list [--json]                    List all hosts
+  termora host remove <label>                   Remove a host
 
-  nexterm session list [--json]                 List active sessions
+  termora session list [--json]                 List active sessions
 
-  nexterm pair                                  Generate pairing code
-  nexterm pair --code XXXXXX                    Verify pairing code
+  termora pair                                  Generate pairing code
+  termora pair --code XXXXXX                    Verify pairing code
 
-  nexterm config edit                           Open config.toml in $EDITOR
+  termora config edit                           Open config.toml in $EDITOR
 `);
 }
 
@@ -533,7 +533,7 @@ export async function main(argv: string[]): Promise<void> {
 
 	if (!parsed) {
 		console.error(`Unknown command: ${argv.join(" ")}`);
-		console.error("Run 'nexterm --help' for usage.");
+		console.error("Run 'termora --help' for usage.");
 		process.exit(1);
 	}
 

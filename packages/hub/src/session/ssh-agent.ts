@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
-import type { HelloMessage, HostArch, HostOs } from "@nexterm/shared";
-import type { Host } from "@nexterm/shared";
+import { type ProtocolMessage, encodeFrame } from "@termora/shared";
+import type { HelloMessage, HostArch, HostOs } from "@termora/shared";
+import type { Host } from "@termora/shared";
 import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import ssh2 from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
@@ -56,7 +56,7 @@ function parseSshHost(sshHost: string): { username: string; hostname: string } {
 }
 
 /**
- * SshAgent connects to a remote host over SSH, launches `nexterm-agent --stdio`
+ * SshAgent connects to a remote host over SSH, launches `termora-agent --stdio`
  * on the remote side, and communicates via length-prefixed MessagePack frames
  * over the SSH channel's stdin/stdout.
  *
@@ -136,7 +136,7 @@ export async function buildSshConnectConfig(
 /**
  * Options for auto-deploying the agent binary to a remote host.
  * When provided, SshAgent will attempt to upload the binary via SFTP
- * if nexterm-agent is not found on the remote host after SSH connect.
+ * if termora-agent is not found on the remote host after SSH connect.
  */
 export interface SshAgentDeployOptions {
 	/** Path to the local binary cache directory. */
@@ -209,7 +209,7 @@ export class SshAgent extends AgentConnection {
 	}
 
 	/**
-	 * Connect to the remote host over SSH, exec `nexterm-agent --stdio`,
+	 * Connect to the remote host over SSH, exec `termora-agent --stdio`,
 	 * and wait for the HELLO handshake.
 	 * Rejects if HELLO is not received within 5 seconds.
 	 *
@@ -392,15 +392,15 @@ export class SshAgent extends AgentConnection {
 									rejectOnce(deployErr);
 									return;
 								}
-								// Infrastructure failures: fall back to nexterm-agent --stdio
+								// Infrastructure failures: fall back to termora-agent --stdio
 								const msg = deployErr instanceof Error ? deployErr.message : String(deployErr);
 								process.stderr.write(
-									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${msg}. Trying nexterm-agent --stdio anyway.\n`,
+									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${msg}. Trying termora-agent --stdio anyway.\n`,
 								);
-								runAgent("nexterm-agent --stdio");
+								runAgent("termora-agent --stdio");
 							});
 					} else {
-						runAgent("nexterm-agent --stdio");
+						runAgent("termora-agent --stdio");
 					}
 				});
 

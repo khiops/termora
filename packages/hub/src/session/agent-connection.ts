@@ -4,10 +4,10 @@ import {
 	type HelloMessage,
 	PROTOCOL_VERSION,
 	type ProtocolMessage,
-} from "@nexterm/shared";
+} from "@termora/shared";
 
 /**
- * Abstract base class for communicating with a nexterm agent (local or remote SSH).
+ * Abstract base class for communicating with a termora agent (local or remote SSH).
  *
  * Events:
  *   "ready"   — emitted once when the HELLO handshake completes

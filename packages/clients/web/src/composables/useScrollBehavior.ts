@@ -1,4 +1,4 @@
-import type { ScrollMode } from "@nexterm/shared";
+import type { ScrollMode } from "@termora/shared";
 import { type ComputedRef, type Ref, computed, ref, watch } from "vue";
 import { useNotificationStore } from "../stores/notifications.js";
 

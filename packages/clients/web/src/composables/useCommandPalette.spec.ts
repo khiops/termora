@@ -1,4 +1,4 @@
-import type { Host, LaunchProfile } from "@nexterm/shared";
+import type { Host, LaunchProfile } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChannelsStore } from "../stores/channels.js";

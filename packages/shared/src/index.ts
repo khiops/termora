@@ -1,4 +1,4 @@
-// @nexterm/shared — barrel export
+// @termora/shared — barrel export
 
 export * from "./constants.js";
 export * from "./entities.js";
@@ -16,4 +16,4 @@ export * from "./appearance.js";
 export * from "./themes/index.js";
 export * from "./var-expansion.js";
 // sea-addon-loader: Node-only (uses createRequire), not re-exported from barrel.
-// Import directly: import { ... } from '@nexterm/shared/dist/sea-addon-loader.js'
+// Import directly: import { ... } from '@termora/shared/dist/sea-addon-loader.js'

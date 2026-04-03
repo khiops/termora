@@ -1,5 +1,5 @@
-import type { ProtocolMessage } from "@nexterm/shared";
-import type { AuthPromptMessage } from "@nexterm/shared";
+import type { ProtocolMessage } from "@termora/shared";
+import type { AuthPromptMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigResolver } from "../config.js";
 import { openTestDatabases } from "../storage/db.js";
@@ -1993,7 +1993,7 @@ describe("SessionManager — handleAuthPromptResponse", () => {
 
 // Mock ssh2 Client for _testSshConnectivity
 import { EventEmitter } from "node:events";
-import type { TestConnectMessage } from "@nexterm/shared";
+import type { TestConnectMessage } from "@termora/shared";
 
 let mockSsh2Client: EventEmitter & {
 	connect: ReturnType<typeof vi.fn>;
@@ -2493,13 +2493,13 @@ describe("SessionManager — title broadcast wiring", () => {
 		agent.emit("message", {
 			type: "TITLE_CHANGE",
 			channelId,
-			title: "zsh — ~/projects/nexterm",
+			title: "zsh — ~/projects/termora",
 		});
 
 		const titleMsg = received.find((m) => m.type === "TITLE_CHANGE") as
 			| (ProtocolMessage & { displayTitle?: string })
 			| undefined;
-		expect(titleMsg?.displayTitle).toBe("zsh — ~/projects/nexterm");
+		expect(titleMsg?.displayTitle).toBe("zsh — ~/projects/termora");
 	});
 
 	it("notifyChannelRenamed broadcasts updated displayTitle to channel clients", async () => {
@@ -2766,7 +2766,7 @@ describe("SessionManager — elevation support", () => {
 		// The agent should have received a SPAWN without elevated flag
 		const spawnMsg = mockSshAgentInstance?.send.mock.calls.find(
 			(c) => (c[0] as ProtocolMessage).type === "SPAWN",
-		)?.[0] as import("@nexterm/shared").AgentSpawnMessage | undefined;
+		)?.[0] as import("@termora/shared").AgentSpawnMessage | undefined;
 		expect(spawnMsg?.elevated).toBeFalsy();
 		expect(spawnMsg?.elevationSecret).toBeUndefined();
 	});

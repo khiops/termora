@@ -1,5 +1,5 @@
-import type { DetachMessage } from "@nexterm/shared";
-import { isValidUlid } from "@nexterm/shared";
+import type { DetachMessage } from "@termora/shared";
+import { isValidUlid } from "@termora/shared";
 import type { WsHandlerContext } from "./types.js";
 
 export function handleDetach(msg: DetachMessage, ctx: WsHandlerContext): void {

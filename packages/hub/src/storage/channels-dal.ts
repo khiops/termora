@@ -1,4 +1,4 @@
-import type { Channel, ChannelStatus } from "@nexterm/shared";
+import type { Channel, ChannelStatus } from "@termora/shared";
 import type Database from "better-sqlite3";
 
 import type { CreateChannelInput } from "./meta-types.js";

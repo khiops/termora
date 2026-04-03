@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { NexTermTheme } from "@nexterm/shared";
+import type { TermoraTheme } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";
@@ -26,7 +26,7 @@ vi.mock("../session/ssh-agent.js", () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_CUSTOM_THEME: NexTermTheme = {
+const VALID_CUSTOM_THEME: TermoraTheme = {
 	name: "test-custom",
 	type: "dark",
 	colors: {
@@ -75,7 +75,7 @@ let server: FastifyInstance;
 let tempDir: string;
 
 beforeEach(async () => {
-	tempDir = await mkdtemp(join(tmpdir(), "nexterm-theme-api-test-"));
+	tempDir = await mkdtemp(join(tmpdir(), "termora-theme-api-test-"));
 	dbs = openTestDatabases();
 	server = await createServer({
 		logger: false,
@@ -96,7 +96,7 @@ describe("GET /api/themes", () => {
 	it("returns list of themes including bundled", async () => {
 		const res = await server.inject({ method: "GET", url: "/api/themes" });
 		expect(res.statusCode).toBe(200);
-		const body = res.json<NexTermTheme[]>();
+		const body = res.json<TermoraTheme[]>();
 		expect(Array.isArray(body)).toBe(true);
 		// Should have at least the bundled themes
 		expect(body.length).toBeGreaterThanOrEqual(9);
@@ -108,7 +108,7 @@ describe("GET /api/themes/:name", () => {
 	it("returns specific theme", async () => {
 		const res = await server.inject({ method: "GET", url: "/api/themes/dracula" });
 		expect(res.statusCode).toBe(200);
-		const body = res.json<NexTermTheme>();
+		const body = res.json<TermoraTheme>();
 		expect(body.name).toBe("dracula");
 		expect(body.type).toBe("dark");
 		expect(body.colors).toBeTruthy();
@@ -147,7 +147,7 @@ describe("POST /api/themes", () => {
 		// Verify it can be retrieved
 		const get = await server.inject({ method: "GET", url: "/api/themes/test-custom" });
 		expect(get.statusCode).toBe(200);
-		expect(get.json<NexTermTheme>().name).toBe("test-custom");
+		expect(get.json<TermoraTheme>().name).toBe("test-custom");
 	});
 
 	it("rejects duplicate (409)", async () => {
@@ -203,7 +203,7 @@ describe("PUT /api/themes/:name", () => {
 
 		// Verify the update
 		const get = await server.inject({ method: "GET", url: "/api/themes/test-custom" });
-		expect(get.json<NexTermTheme>().author).toBe("Updated Author");
+		expect(get.json<TermoraTheme>().author).toBe("Updated Author");
 	});
 });
 

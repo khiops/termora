@@ -103,7 +103,7 @@ describe("Wallpaper endpoints", () => {
 		// Use a unique temp subdir per test to avoid cross-test pollution
 		configDir = join(
 			tmpdir(),
-			`nexterm-wallpaper-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`termora-wallpaper-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(join(configDir, "wallpapers"), { recursive: true });
 		dbs = openTestDatabases();

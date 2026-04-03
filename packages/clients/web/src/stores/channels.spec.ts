@@ -20,7 +20,7 @@ vi.stubGlobal("localStorage", {
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-const COLLAPSED_KEY = "nexterm:collapsed-groups";
+const COLLAPSED_KEY = "termora:collapsed-groups";
 
 function makeGroupRow(id: string, name = "Group"): Record<string, unknown> {
 	return {
@@ -57,8 +57,8 @@ beforeEach(() => {
 	localStorageMap.clear();
 	mockFetch.mockReset();
 	setActivePinia(createPinia());
-	// Seed auth token so fetchGroups doesn't early-return (TOKEN_KEY = "nexterm_token")
-	localStorageMap.set("nexterm_token", "test-token");
+	// Seed auth token so fetchGroups doesn't early-return (TOKEN_KEY = "termora_token")
+	localStorageMap.set("termora_token", "test-token");
 });
 
 afterEach(() => {
@@ -242,7 +242,7 @@ describe("useChannelsStore — spawnChannel autoGroup", () => {
 	}
 
 	beforeEach(() => {
-		localStorageMap.set("nexterm_token", "test-token");
+		localStorageMap.set("termora_token", "test-token");
 	});
 
 	it("sends SPAWN without groupId when autoGroup is none", async () => {

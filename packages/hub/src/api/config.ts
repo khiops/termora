@@ -7,8 +7,8 @@ import {
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	UI_SECTION_KEYS,
-} from "@nexterm/shared";
-import type { TerminalProfile } from "@nexterm/shared";
+} from "@termora/shared";
+import type { TerminalProfile } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import type { ConfigResolver } from "../config.js";
 import type { MetaDAL } from "../storage/meta.js";

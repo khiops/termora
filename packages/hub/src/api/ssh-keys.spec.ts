@@ -86,7 +86,7 @@ describe("SSH key endpoints", () => {
 	beforeEach(async () => {
 		sshDir = join(
 			tmpdir(),
-			`nexterm-ssh-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			`termora-ssh-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
 		mkdirSync(sshDir, { recursive: true, mode: 0o700 });
 	});

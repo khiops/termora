@@ -1,4 +1,4 @@
-# nexterm — Protocol Specification
+# termora — Protocol Specification
 
 > Version: 1 (MVP)
 > Status: draft
@@ -40,10 +40,10 @@ All messages (hub↔agent and hub↔UI) use the same framing:
 
 ```bash
 # Decode frames from a capture file
-npx nexterm decode < capture.bin
+npx termora decode < capture.bin
 
 # Pipe SSH stdio through decoder
-ssh user@host "nexterm-agent --stdio" | npx nexterm decode --hex
+ssh user@host "termora-agent --stdio" | npx termora decode --hex
 ```
 
 ## 2. Transport Layers
@@ -71,7 +71,7 @@ Hub ──── Unix domain socket / named pipe ──── Agent (daemon)
                     │ (MessagePack, same framing)   │
 ```
 
-- Agent runs as a standalone daemon: `nexterm-agent --daemon --socket <path>`
+- Agent runs as a standalone daemon: `termora-agent --daemon --socket <path>`
 - Hub connects to the UDS via `connectOrLaunch(socketPath, config, binaryPath)`
 - Same length-prefixed MessagePack framing as stdio
 - Connection displacement: new hub connection immediately replaces the previous one (last-writer-wins)
@@ -797,9 +797,9 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 
 | Prefix | Source | Notes |
 |--------|--------|-------|
-| `/public/fonts/` | `~/.config/nexterm/fonts/` | User custom fonts (unauthenticated) |
-| `/public/sounds/` | `~/.config/nexterm/sounds/` | User custom bell sounds (unauthenticated) |
-| `/public/wallpapers/` | `~/.config/nexterm/wallpapers/` | User wallpapers (unauthenticated) |
+| `/public/fonts/` | `~/.config/termora/fonts/` | User custom fonts (unauthenticated) |
+| `/public/sounds/` | `~/.config/termora/sounds/` | User custom bell sounds (unauthenticated) |
+| `/public/wallpapers/` | `~/.config/termora/wallpapers/` | User wallpapers (unauthenticated) |
 | `/` (fallback) | `static/` dir or SEA blob | Web UI bundle (unauthenticated) |
 
 ### Request/Response Body Schemas

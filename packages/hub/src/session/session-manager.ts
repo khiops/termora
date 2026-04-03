@@ -26,9 +26,9 @@ import type {
 	TestConnectMessage,
 	UiAttachOkMessage,
 	UiSpawnMessage,
-} from "@nexterm/shared";
-import type { AgentConfig, ElevationMethod, Host } from "@nexterm/shared";
-import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@nexterm/shared";
+} from "@termora/shared";
+import type { AgentConfig, ElevationMethod, Host } from "@termora/shared";
+import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@termora/shared";
 import type { ConfigResolver, GcConfig } from "../config.js";
 import type { HubLogger } from "../logging/hub-logger.js";
 import type { LoggerRegistry } from "../logging/index.js";

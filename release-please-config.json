@@ -3,7 +3,7 @@
 	"packages": {
 		".": {
 			"release-type": "node",
-			"component": "nexterm",
+			"component": "termora",
 			"changelog-path": "CHANGELOG.md",
 			"bump-minor-pre-major": true,
 			"bump-patch-for-minor-pre-major": true,
@@ -14,7 +14,7 @@
 				"packages/clients/desktop/package.json",
 				{
 					"type": "toml",
-					"path": "crates/nexterm-agent/Cargo.toml",
+					"path": "crates/termora-agent/Cargo.toml",
 					"jsonpath": "$.package.version"
 				},
 				{

@@ -1,5 +1,5 @@
-import type { AppearanceConfig, NexTermTheme, NexTermThemeColors } from "@nexterm/shared";
-import { BUNDLED_THEMES, DEFAULT_APPEARANCE, DEFAULT_THEME_NAME } from "@nexterm/shared";
+import type { AppearanceConfig, TermoraTheme, TermoraThemeColors } from "@termora/shared";
+import { BUNDLED_THEMES, DEFAULT_APPEARANCE, DEFAULT_THEME_NAME } from "@termora/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
@@ -10,15 +10,15 @@ import { useAuthStore } from "./auth.js";
  * and applies CSS custom properties to :root.
  */
 export const useThemeStore = defineStore("theme", () => {
-	const availableThemes = ref<NexTermTheme[]>([]);
-	const currentTheme = ref<NexTermTheme | null>(null);
-	const previewTheme = ref<NexTermTheme | null>(null);
+	const availableThemes = ref<TermoraTheme[]>([]);
+	const currentTheme = ref<TermoraTheme | null>(null);
+	const previewTheme = ref<TermoraTheme | null>(null);
 
 	/**
 	 * Scope-level theme override (host or channel).
 	 * When set, clearPreview reverts to this instead of the global currentTheme.
 	 */
-	const scopeOverride = ref<NexTermTheme | null>(null);
+	const scopeOverride = ref<TermoraTheme | null>(null);
 
 	/** The active theme (preview if hovering, otherwise current). */
 	const activeTheme = computed(() => previewTheme.value ?? currentTheme.value);
@@ -38,10 +38,10 @@ export const useThemeStore = defineStore("theme", () => {
 	}
 
 	/**
-	 * Convert NexTermThemeColors to a plain object suitable for xterm.js ITheme.
+	 * Convert TermoraThemeColors to a plain object suitable for xterm.js ITheme.
 	 * Strips undefined optional fields so xterm.js falls back to its own defaults.
 	 */
-	function toXtermTheme(colors: NexTermThemeColors): Record<string, string> {
+	function toXtermTheme(colors: TermoraThemeColors): Record<string, string> {
 		const result: Record<string, string> = {};
 		for (const [key, value] of Object.entries(colors)) {
 			if (value !== undefined) {
@@ -67,7 +67,7 @@ export const useThemeStore = defineStore("theme", () => {
 				},
 			});
 			if (response.ok) {
-				availableThemes.value = (await response.json()) as NexTermTheme[];
+				availableThemes.value = (await response.json()) as TermoraTheme[];
 			}
 		} catch {
 			// API may not exist yet — fall back to bundled themes
@@ -81,7 +81,7 @@ export const useThemeStore = defineStore("theme", () => {
 
 	// ── Apply theme: set CSS variables on :root ─────────────────────────
 
-	function applyTheme(theme: NexTermTheme): void {
+	function applyTheme(theme: TermoraTheme): void {
 		const root = document.documentElement.style;
 
 		// Tier 1: terminal colors
@@ -166,7 +166,7 @@ export const useThemeStore = defineStore("theme", () => {
 
 	// ── Set current theme and apply ─────────────────────────────────────
 
-	async function setTheme(theme: NexTermTheme): Promise<void> {
+	async function setTheme(theme: TermoraTheme): Promise<void> {
 		currentTheme.value = theme;
 		applyTheme(theme);
 
@@ -199,7 +199,7 @@ export const useThemeStore = defineStore("theme", () => {
 
 	let rafId: number | null = null;
 
-	function previewHover(theme: NexTermTheme): void {
+	function previewHover(theme: TermoraTheme): void {
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		rafId = requestAnimationFrame(() => {
 			previewTheme.value = theme;
@@ -218,7 +218,7 @@ export const useThemeStore = defineStore("theme", () => {
 		});
 	}
 
-	function setScopeOverride(theme: NexTermTheme | null): void {
+	function setScopeOverride(theme: TermoraTheme | null): void {
 		scopeOverride.value = theme;
 	}
 

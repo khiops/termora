@@ -2,7 +2,7 @@ import * as path from "node:path";
 import cors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import websocket from "@fastify/websocket";
-import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@nexterm/shared";
+import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@termora/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
@@ -74,7 +74,7 @@ export interface ServerOptions {
 	skipShellDiscovery?: boolean; // disable auto-shell-seeding (useful for tests)
 	hubLogger?: HubLogger; // global hub log sink
 	loggerRegistry?: LoggerRegistry; // per-channel log registry
-	logsDir?: string; // base logs directory (e.g. ~/.local/state/nexterm/logs)
+	logsDir?: string; // base logs directory (e.g. ~/.local/state/termora/logs)
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {

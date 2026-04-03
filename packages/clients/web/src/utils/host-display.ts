@@ -1,4 +1,4 @@
-import type { Host } from "@nexterm/shared";
+import type { Host } from "@termora/shared";
 
 export function formatConnectionString(host: Host): string {
 	let conn = "";

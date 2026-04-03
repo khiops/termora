@@ -1,15 +1,15 @@
 [package]
-name = "nexterm-desktop"
+name = "termora-desktop"
 version = "0.1.0"
-description = "Nexterm desktop app (Tauri v2)"
-authors = ["Nexterm contributors"]
+description = "Termora desktop app (Tauri v2)"
+authors = ["Termora contributors"]
 license = "MIT"
-repository = "https://github.com/khiops/nexterm"
+repository = "https://github.com/khiops/termora"
 edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "nexterm_desktop_lib"
+name = "termora_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

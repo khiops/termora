@@ -1,4 +1,4 @@
-import { DEFAULT_CHANNEL_NAME, generateId } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME, generateId } from "@termora/shared";
 import { type Ref, computed } from "vue";
 import { useChannelsStore } from "../stores/channels.js";
 import type { Tab } from "./useTabManager.js";

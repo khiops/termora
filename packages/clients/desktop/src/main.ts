@@ -11,7 +11,7 @@ async function init(): Promise<void> {
 		const mainWindow = getCurrentWindow();
 		// The window URL is set in tauri.conf.json, but we can also
 		// programmatically navigate after hub is ready
-		console.log("[nexterm-desktop] hub ready, webview loading...");
+		console.log("[termora-desktop] hub ready, webview loading...");
 
 		// Handle window close — stop hub gracefully
 		await mainWindow.onCloseRequested(async (event) => {
@@ -20,7 +20,7 @@ async function init(): Promise<void> {
 			await mainWindow.destroy();
 		});
 	} catch (err) {
-		console.error("[nexterm-desktop] failed to start:", err);
+		console.error("[termora-desktop] failed to start:", err);
 	}
 }
 

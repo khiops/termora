@@ -7,9 +7,9 @@ import {
 	DEFAULT_AGENT_CONFIG,
 	PROTOCOL_VERSION,
 	encodeFrame,
-} from "@nexterm/shared";
+} from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NextermAgent } from "./nexterm-agent.js";
+import type { TermoraAgent } from "./termora-agent.js";
 import { getTestSocketPath } from "./test-socket-path.js";
 
 /**
@@ -35,7 +35,7 @@ const { connectOrLaunch } = await import("./agent-launcher.js");
 const TEST_TIMEOUT = 15_000;
 
 /**
- * Create a mock agent daemon that speaks the nexterm protocol.
+ * Create a mock agent daemon that speaks the termora protocol.
  * On each connection it sends HELLO + CHANNEL_STATE_END immediately.
  */
 function createMockDaemon(socketPath: string): Promise<{
@@ -76,12 +76,12 @@ describe("connectOrLaunch", () => {
 	let tmpDir: string;
 	let socketPath: string;
 	let daemon: { server: net.Server; connections: net.Socket[] } | null = null;
-	let agent: NextermAgent | null = null;
+	let agent: TermoraAgent | null = null;
 
 	const config: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
 
 	beforeEach(async () => {
-		tmpDir = await mkdtemp(path.join(os.tmpdir(), "nexterm-launcher-test-"));
+		tmpDir = await mkdtemp(path.join(os.tmpdir(), "termora-launcher-test-"));
 		socketPath = getTestSocketPath();
 
 		// Reset spawn mock to default (no-op)
@@ -254,7 +254,7 @@ describe("connectOrLaunch", () => {
 				};
 
 				// Create a fake SEA binary (no .js extension)
-				const seaBinary = path.join(tmpDir, "nexterm-agent");
+				const seaBinary = path.join(tmpDir, "termora-agent");
 				await writeFile(seaBinary, "#!/bin/sh\n");
 
 				agent = await connectOrLaunch(socketPath, config, seaBinary);

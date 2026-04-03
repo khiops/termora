@@ -15,8 +15,8 @@ import type {
 	ProtocolMessage,
 	SessionStateMessage,
 	StateSyncMessage,
-} from "@nexterm/shared";
-import { DEFAULT_CHANNEL_NAME, resolveChannelDisplayName } from "@nexterm/shared";
+} from "@termora/shared";
+import { DEFAULT_CHANNEL_NAME, resolveChannelDisplayName } from "@termora/shared";
 import type { ChannelState, SessionState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 
@@ -88,7 +88,7 @@ export class StateBroadcaster {
 	updateSessionStatus(
 		hostId: string,
 		sessionId: string,
-		status: import("@nexterm/shared").SessionStatus,
+		status: import("@termora/shared").SessionStatus,
 	): void {
 		const state = this.ctx.sessions.get(hostId);
 		if (state && state.id === sessionId) {
@@ -108,7 +108,7 @@ export class StateBroadcaster {
 	updateChannelStatus(
 		channelId: string,
 		sessionId: string,
-		status: import("@nexterm/shared").ChannelStatus,
+		status: import("@termora/shared").ChannelStatus,
 		exitCode?: number,
 	): void {
 		const ch = this.ctx.channels.get(channelId);

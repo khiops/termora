@@ -1,4 +1,4 @@
-import { isValidUlid, toSnakeCase } from "@nexterm/shared";
+import { isValidUlid, toSnakeCase } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../session/session-manager.js";
 import type { MetaDAL } from "../storage/meta.js";

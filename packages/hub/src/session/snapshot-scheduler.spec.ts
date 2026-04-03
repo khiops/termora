@@ -1,4 +1,4 @@
-import type { ProtocolMessage } from "@nexterm/shared";
+import type { ProtocolMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";

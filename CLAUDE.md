@@ -1,4 +1,4 @@
-# nexterm — CLAUDE.md
+# termora — CLAUDE.md
 
 ## Vision
 
@@ -45,20 +45,20 @@ Sessions survive client disconnects, SSH drops, and device switches.
 ## Monorepo Structure
 
 ```
-nexterm (root)        → npm: nexterm (CLI entrypoint, `npx nexterm`)
+termora (root)        → npm: termora (CLI entrypoint, `npx termora`)
 packages/
-├── shared/           → npm: @nexterm/shared (published)
-├── agent/            → npm: @nexterm/agent  (published)
-├── hub/              → npm: @nexterm/hub    (published)
+├── shared/           → npm: @termora/shared (published)
+├── agent/            → npm: @termora/agent  (published)
+├── hub/              → npm: @termora/hub    (published)
 └── clients/
-    ├── web/          → @nexterm/web (NOT published, embedded by hub)
-    └── desktop/      → @nexterm/desktop (P1, Tauri)
+    ├── web/          → @termora/web (NOT published, embedded by hub)
+    └── desktop/      → @termora/desktop (P1, Tauri)
 ```
 
 Dependencies: shared ← agent, shared ← hub, shared ← web.
 hub depends on agent (spawns it locally via child_process for local sessions).
 hub embeds web build output as static files.
-Root `nexterm` CLI wraps `@nexterm/hub`.
+Root `termora` CLI wraps `@termora/hub`.
 Hub does NOT depend on node-pty — all PTY management is in the agent.
 
 ## Commands
@@ -70,8 +70,8 @@ pnpm build                # Build all packages
 pnpm test                 # Run all tests (vitest)
 pnpm lint                 # Lint + format check (biome)
 pnpm lint:fix             # Auto-fix lint issues
-pnpm -F @nexterm/hub test # Test single package
-pnpm -F @nexterm/web dev  # Dev single package
+pnpm -F @termora/hub test # Test single package
+pnpm -F @termora/web dev  # Dev single package
 ```
 
 ## Conventions
@@ -136,7 +136,7 @@ Workspace (layout persistence)
 3.5. Agent visual hints (from HELLO, ephemeral)
 4. `channels.profile_json` (per-channel, meta.db)
 
-**Port:** default 4100, configurable via CLI flag > `NEXTERM_PORT` env > config.toml > default.
+**Port:** default 4100, configurable via CLI flag > `TERMORA_PORT` env > config.toml > default.
 `zero_conf` mode: auto-increment 4100→4199 if port taken, write `runtime.json` in state dir.
 
 ## Common Pitfalls

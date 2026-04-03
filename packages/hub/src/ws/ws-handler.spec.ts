@@ -1,6 +1,6 @@
-import { decodeMessage, encodeMessage } from "@nexterm/shared";
-import type { AuthPromptResponseMessage, ProtocolMessage } from "@nexterm/shared";
-import { isValidDimensions, isValidEnv, isValidInputData, isValidUlid } from "@nexterm/shared";
+import { decodeMessage, encodeMessage } from "@termora/shared";
+import type { AuthPromptResponseMessage, ProtocolMessage } from "@termora/shared";
+import { isValidDimensions, isValidEnv, isValidInputData, isValidUlid } from "@termora/shared";
 import { describe, expect, it, vi } from "vitest";
 
 /** Known token used across auth tests */

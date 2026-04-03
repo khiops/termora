@@ -1,6 +1,6 @@
-// Theme type system and validation for nexterm
+// Theme type system and validation for termora
 
-export interface NexTermThemeColors {
+export interface TermoraThemeColors {
 	foreground: string;
 	background: string;
 	cursor: string;
@@ -25,7 +25,7 @@ export interface NexTermThemeColors {
 	brightWhite: string;
 }
 
-export interface NexTermThemeUi {
+export interface TermoraThemeUi {
 	tabBar: string;
 	tabActive: string;
 	tabInactive: string;
@@ -47,12 +47,12 @@ export interface NexTermThemeUi {
 	badgeDanger?: string;
 }
 
-export interface NexTermTheme {
+export interface TermoraTheme {
 	name: string;
 	author?: string;
 	type: "dark" | "light";
-	colors: NexTermThemeColors;
-	ui: NexTermThemeUi;
+	colors: TermoraThemeColors;
+	ui: TermoraThemeUi;
 }
 
 export const THEME_NAME_REGEX = /^[a-z0-9-]+$/;

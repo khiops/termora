@@ -1,5 +1,5 @@
-import type { Channel, ChannelGroup } from "@nexterm/shared";
-import { generateId } from "@nexterm/shared";
+import type { Channel, ChannelGroup } from "@termora/shared";
+import { generateId } from "@termora/shared";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
@@ -7,7 +7,7 @@ import { useAuthStore } from "./auth.js";
 import { useConfigStore } from "./config.js";
 import { useSessionStore } from "./session.js";
 
-const COLLAPSED_KEY = "nexterm:collapsed-groups";
+const COLLAPSED_KEY = "termora:collapsed-groups";
 
 function loadCollapsedMap(): Record<string, boolean> {
 	try {

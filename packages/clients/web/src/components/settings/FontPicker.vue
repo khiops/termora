@@ -88,7 +88,7 @@ const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 function authHeader(): Record<string, string> {
-	const token = localStorage.getItem("nexterm-token");
+	const token = localStorage.getItem("termora-token");
 	return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

@@ -21,7 +21,7 @@
 //! the output stream. If the reader doesn't respond with `\x1b[{row};{col}R`,
 //! ConPTY will stall all I/O. The reader in this module detects this sequence
 //! in output chunks and immediately writes a static `\x1b[1;1R` back to the
-//! input pipe as a best-effort response. The nexterm agent's vt100 state mirror
+//! input pipe as a best-effort response. The termora agent's vt100 state mirror
 //! provides accurate responses at a higher level.
 
 use std::io;

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    nexterm_desktop_lib::run();
+    termora_desktop_lib::run();
 }

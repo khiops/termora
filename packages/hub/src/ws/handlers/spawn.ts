@@ -1,5 +1,5 @@
-import type { UiSpawnMessage } from "@nexterm/shared";
-import { isValidDimensions, isValidEnv, isValidUlid, validateShell } from "@nexterm/shared";
+import type { UiSpawnMessage } from "@termora/shared";
+import { isValidDimensions, isValidEnv, isValidUlid, validateShell } from "@termora/shared";
 import type { WsHandlerContext } from "./types.js";
 
 export function handleSpawn(msg: UiSpawnMessage, ctx: WsHandlerContext): void {

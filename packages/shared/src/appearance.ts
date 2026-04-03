@@ -1,4 +1,4 @@
-// Appearance configuration for nexterm UI chrome
+// Appearance configuration for termora UI chrome
 
 export interface AppearanceConfig {
 	theme: string;

@@ -127,7 +127,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import type { LaunchProfile, SupportedOs } from "@nexterm/shared";
+import type { LaunchProfile, SupportedOs } from "@termora/shared";
 import ProfileForm from "./ProfileForm.vue";
 import { useProfilesStore } from "../../stores/profiles.js";
 

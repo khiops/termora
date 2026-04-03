@@ -113,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { MAX_WALLPAPER_SIZE, WALLPAPER_EXTENSIONS } from "@nexterm/shared";
+import { MAX_WALLPAPER_SIZE, WALLPAPER_EXTENSIONS } from "@termora/shared";
 import { computed, onMounted, ref } from "vue";
 import { hubBaseUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";

@@ -7,7 +7,7 @@ import { runLogGc } from "./log-gc.js";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeTmpDir(): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-log-gc-"));
+	return fs.mkdtempSync(path.join(os.tmpdir(), "termora-log-gc-"));
 }
 
 function makeChannelsDir(logsDir: string): string {

@@ -1,5 +1,5 @@
-import type { ErrorMessage, InputMessage } from "@nexterm/shared";
-import { isValidInputData, isValidUlid } from "@nexterm/shared";
+import type { ErrorMessage, InputMessage } from "@termora/shared";
+import { isValidInputData, isValidUlid } from "@termora/shared";
 import type { WsHandlerContext } from "./types.js";
 
 export function handleInput(msg: InputMessage, ctx: WsHandlerContext): void {

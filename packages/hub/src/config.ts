@@ -22,9 +22,9 @@ import {
 	UI_CONFIG_SECTIONS,
 	deepMerge,
 	validateCustomCommand,
-} from "@nexterm/shared";
-import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@nexterm/shared";
-import { DEFAULT_LAYOUT_CONFIG } from "@nexterm/shared";
+} from "@termora/shared";
+import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@termora/shared";
+import { DEFAULT_LAYOUT_CONFIG } from "@termora/shared";
 import type {
 	AppearanceConfig,
 	CascadeResponse,
@@ -40,7 +40,7 @@ import type {
 	TerminalProfile,
 	TitleConfig,
 	UiConfig,
-} from "@nexterm/shared";
+} from "@termora/shared";
 import { edit, initSync } from "@rainbowatcher/toml-edit-js";
 import type { MetaDAL } from "./storage/meta.js";
 
@@ -141,8 +141,8 @@ export function loadCorsOrigins(configDir: string): string[] {
 
 // ─── UI configuration ───────────────────────────────────────────────────────
 
-// UiConfig interface is now in @nexterm/shared — re-exported here for backward compat
-export type { UiConfig } from "@nexterm/shared";
+// UiConfig interface is now in @termora/shared — re-exported here for backward compat
+export type { UiConfig } from "@termora/shared";
 
 export const DEFAULT_TABS_CONFIG: TabsConfig = {
 	closeButton: true,
@@ -170,7 +170,7 @@ export const DEFAULT_TITLE_CONFIG: TitleConfig = {
 	maxLength: 50,
 	truncation: "end",
 	windowTitle: true,
-	windowFormat: "nexterm - {prefix}{host} - {title}",
+	windowFormat: "termora - {prefix}{host} - {title}",
 };
 
 export const DEFAULT_SEARCH_CONFIG: SearchConfig = {

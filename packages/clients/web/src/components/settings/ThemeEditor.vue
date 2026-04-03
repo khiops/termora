@@ -187,18 +187,18 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onUnmounted } from "vue";
-import type { NexTermTheme, NexTermThemeColors, NexTermThemeUi } from "@nexterm/shared";
-import { THEME_NAME_REGEX } from "@nexterm/shared";
+import type { TermoraTheme, TermoraThemeColors, TermoraThemeUi } from "@termora/shared";
+import { THEME_NAME_REGEX } from "@termora/shared";
 import { useThemeStore } from "../../stores/theme.js";
 import { useAuthStore } from "../../stores/auth.js";
 
 const props = defineProps<{
-	theme?: NexTermTheme;
-	baseTheme?: NexTermTheme;
+	theme?: TermoraTheme;
+	baseTheme?: TermoraTheme;
 }>();
 
 const emit = defineEmits<{
-	saved: [theme: NexTermTheme];
+	saved: [theme: TermoraTheme];
 	close: [];
 }>();
 
@@ -209,7 +209,7 @@ const isNew = computed(() => props.theme === undefined);
 
 // ── Draft state ─────────────────────────────────────────────────────
 
-function getSourceTheme(): NexTermTheme {
+function getSourceTheme(): TermoraTheme {
 	const fallback = themeStore.availableThemes[0];
 	if (fallback === undefined) {
 		throw new Error("No themes available to base editor on");
@@ -217,12 +217,12 @@ function getSourceTheme(): NexTermTheme {
 	return props.theme ?? props.baseTheme ?? fallback;
 }
 
-function cloneTheme(t: NexTermTheme): {
+function cloneTheme(t: TermoraTheme): {
 	name: string;
 	author: string;
 	type: "dark" | "light";
-	colors: NexTermThemeColors;
-	ui: NexTermThemeUi;
+	colors: TermoraThemeColors;
+	ui: TermoraThemeUi;
 } {
 	return {
 		name: t.name,
@@ -253,7 +253,7 @@ const nameError = computed(() => {
 
 function handleBasedOnChange(event: Event) {
 	const name = (event.target as HTMLSelectElement).value;
-	const base = themeStore.availableThemes.find((t: NexTermTheme) => t.name === name);
+	const base = themeStore.availableThemes.find((t: TermoraTheme) => t.name === name);
 	if (!base) return;
 	basedOnName.value = name;
 	const cloned = cloneTheme(base);
@@ -338,7 +338,7 @@ function setUiValue(key: string, value: string) {
 
 // ── Live preview ────────────────────────────────────────────────────
 
-function buildThemeFromDraft(): NexTermTheme {
+function buildThemeFromDraft(): TermoraTheme {
 	return {
 		name: draft.name,
 		...(draft.author !== "" && { author: draft.author }),

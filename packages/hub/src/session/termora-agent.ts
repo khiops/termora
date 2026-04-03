@@ -1,5 +1,5 @@
 import net from "node:net";
-import { type AgentChannelStateMessage, type ProtocolMessage, encodeFrame } from "@nexterm/shared";
+import { type AgentChannelStateMessage, type ProtocolMessage, encodeFrame } from "@termora/shared";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
@@ -11,9 +11,9 @@ const HELLO_TIMEOUT_MS = 5_000;
  * Connects to a running agent daemon via Unix domain socket or Windows named pipe.
  * The agent remains alive independently — close() disconnects without killing it.
  *
- * Factory method: NextermAgent.connectLocal(socketPath)
+ * Factory method: TermoraAgent.connectLocal(socketPath)
  */
-export class NextermAgent extends AgentConnection {
+export class TermoraAgent extends AgentConnection {
 	private socket: net.Socket;
 	private sendQueue: SendQueue;
 
@@ -27,7 +27,7 @@ export class NextermAgent extends AgentConnection {
 	constructor(socket: net.Socket) {
 		super();
 		this.socket = socket;
-		this.sendQueue = new SendQueue("nexterm-agent");
+		this.sendQueue = new SendQueue("termora-agent");
 		this.sendQueue.attach(socket);
 
 		socket.on("data", (data: Buffer) => {
@@ -111,13 +111,13 @@ export class NextermAgent extends AgentConnection {
 	 * Resolves after HELLO is received (agent is ready).
 	 * Rejects on connection error or HELLO timeout (5s).
 	 */
-	static connectLocal(socketPath: string): Promise<NextermAgent> {
+	static connectLocal(socketPath: string): Promise<TermoraAgent> {
 		return new Promise((resolve, reject) => {
 			const socket = net.connect(socketPath);
 			let settled = false;
 
 			socket.once("connect", () => {
-				const agent = new NextermAgent(socket);
+				const agent = new TermoraAgent(socket);
 
 				const timer = setTimeout(() => {
 					if (!settled) {

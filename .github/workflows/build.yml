@@ -39,10 +39,10 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -F @nexterm/shared build
+      - run: pnpm -F @termora/shared build
       - run: ./scripts/build-web.sh
         env:
-          NEXTERM_BUILD_HASH: ${{ github.sha }}
+          TERMORA_BUILD_HASH: ${{ github.sha }}
       # Artifacts only on main/tags — PRs just verify build + tests
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/')
@@ -87,19 +87,19 @@ jobs:
         if: matrix.shell_sh
         run: ./scripts/build-agent.sh
         env:
-          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
         run: .\scripts\build-agent.ps1
         env:
-          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
+          TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: agent-${{ matrix.triple }}
-          path: dist/sea/nexterm-agent*
+          path: dist/sea/termora-agent*
           retention-days: 1
 
   build-hub:
@@ -121,7 +121,7 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -F @nexterm/shared build
+      - run: pnpm -F @termora/shared build
       - uses: actions/download-artifact@v4
         with:
           name: web-dist-embedded
@@ -130,21 +130,21 @@ jobs:
         if: matrix.shell_sh
         run: ./scripts/build-hub.sh
         env:
-          NEXTERM_SKIP_WEB: "true"
-          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
-          NEXTERM_BUILD_HASH: ${{ github.sha }}
+          TERMORA_SKIP_WEB: "true"
+          TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
+          TERMORA_BUILD_HASH: ${{ github.sha }}
       - name: Build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
         run: .\scripts\build-hub.ps1
         env:
-          NEXTERM_SKIP_WEB: "true"
-          NEXTERM_TARGET_TRIPLE: ${{ matrix.triple }}
-          NEXTERM_BUILD_HASH: ${{ github.sha }}
+          TERMORA_SKIP_WEB: "true"
+          TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
+          TERMORA_BUILD_HASH: ${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: hub-${{ matrix.triple }}
-          path: dist/sea/nexterm-hub*
+          path: dist/sea/termora-hub*
           retention-days: 1
 
   build-desktop:
@@ -170,7 +170,7 @@ jobs:
         with:
           workspaces: packages/clients/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -F @nexterm/shared build
+      - run: pnpm -F @termora/shared build
       - uses: actions/download-artifact@v4
         with:
           name: agent-${{ matrix.triple }}
@@ -187,19 +187,19 @@ jobs:
         if: matrix.shell_sh
         run: |
           TRIPLE="${{ matrix.triple }}"
-          cp dist/sea/nexterm-agent "packages/clients/desktop/src-tauri/nexterm-agent-${TRIPLE}"
-          cp dist/sea/nexterm-hub "packages/clients/desktop/src-tauri/nexterm-hub-${TRIPLE}"
-          pnpm -F @nexterm/shared build
-          pnpm -F @nexterm/desktop tauri build --config '{"build":{"beforeBuildCommand":""}}'
+          cp dist/sea/termora-agent "packages/clients/desktop/src-tauri/termora-agent-${TRIPLE}"
+          cp dist/sea/termora-hub "packages/clients/desktop/src-tauri/termora-hub-${TRIPLE}"
+          pnpm -F @termora/shared build
+          pnpm -F @termora/desktop tauri build --config '{"build":{"beforeBuildCommand":""}}'
       - name: Place sidecars + build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
         run: |
           $triple = "${{ matrix.triple }}"
-          Copy-Item dist\sea\nexterm-agent.exe "packages\clients\desktop\src-tauri\nexterm-agent-$triple.exe"
-          Copy-Item dist\sea\nexterm-hub.exe "packages\clients\desktop\src-tauri\nexterm-hub-$triple.exe"
-          pnpm -F @nexterm/shared build
-          pnpm -F @nexterm/desktop tauri build --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'
+          Copy-Item dist\sea\termora-agent.exe "packages\clients\desktop\src-tauri\termora-agent-$triple.exe"
+          Copy-Item dist\sea\termora-hub.exe "packages\clients\desktop\src-tauri\termora-hub-$triple.exe"
+          pnpm -F @termora/shared build
+          pnpm -F @termora/desktop tauri build --config '{\"build\":{\"beforeBuildCommand\":\"\"}}'
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.triple }}

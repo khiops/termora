@@ -1,8 +1,8 @@
-import type { Host } from "@nexterm/shared";
+import type { Host } from "@termora/shared";
 import { computed, ref } from "vue";
 import { useHostsStore } from "../stores/hosts.js";
 
-const COLLAPSED_KEY = "nexterm:collapsed-host-groups";
+const COLLAPSED_KEY = "termora:collapsed-host-groups";
 
 export interface HostGroupSection {
 	type: "group";

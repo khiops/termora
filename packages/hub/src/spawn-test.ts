@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { decodeMessage, encodeMessage } from "@nexterm/shared";
-import type { ProtocolMessage } from "@nexterm/shared";
+import { decodeMessage, encodeMessage } from "@termora/shared";
+import type { ProtocolMessage } from "@termora/shared";
 
-const auth = JSON.parse(readFileSync(join(homedir(), ".config/nexterm/auth.json"), "utf8"));
+const auth = JSON.parse(readFileSync(join(homedir(), ".config/termora/auth.json"), "utf8"));
 const hostId = process.argv[2] || "local";
 
 const key = randomBytes(16).toString("base64");

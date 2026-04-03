@@ -3,7 +3,7 @@ doc-meta:
   status: canonical
   scope: web,hub,shared
   type: specification
-  target_project: /mnt/wsl/shared/dev/nexterm
+  target_project: /mnt/wsl/shared/dev/termora
   created: 2026-03-08
   updated: 2026-03-08
   complexity: COMPLEX

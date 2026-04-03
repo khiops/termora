@@ -5,8 +5,8 @@ import {
 	BUNDLED_THEME_NAMES,
 	THEME_NAME_REGEX,
 	validateTheme,
-} from "@nexterm/shared";
-import type { NexTermTheme } from "@nexterm/shared";
+} from "@termora/shared";
+import type { TermoraTheme } from "@termora/shared";
 
 export class ThemeManager {
 	private readonly configDir: string;
@@ -38,8 +38,8 @@ export class ThemeManager {
 	 * List all valid themes from the themes directory.
 	 * Invalid JSON files are silently skipped with a warning log.
 	 */
-	async list(): Promise<NexTermTheme[]> {
-		const themes: NexTermTheme[] = [];
+	async list(): Promise<TermoraTheme[]> {
+		const themes: TermoraTheme[] = [];
 
 		let entries: string[];
 		try {
@@ -56,7 +56,7 @@ export class ThemeManager {
 				const parsed: unknown = JSON.parse(raw);
 				const result = validateTheme(parsed);
 				if (result.valid) {
-					themes.push(parsed as NexTermTheme);
+					themes.push(parsed as TermoraTheme);
 				}
 			} catch {
 				// skip invalid files
@@ -70,14 +70,14 @@ export class ThemeManager {
 	 * Get a specific theme by name.
 	 * Returns null if the file is missing or invalid.
 	 */
-	async get(name: string): Promise<NexTermTheme | null> {
+	async get(name: string): Promise<TermoraTheme | null> {
 		if (!THEME_NAME_REGEX.test(name)) return null;
 		try {
 			const raw = await readFile(join(this.themesDir, `${name}.json`), "utf-8");
 			const parsed: unknown = JSON.parse(raw);
 			const result = validateTheme(parsed);
 			if (!result.valid) return null;
-			return parsed as NexTermTheme;
+			return parsed as TermoraTheme;
 		} catch {
 			return null;
 		}
@@ -87,7 +87,7 @@ export class ThemeManager {
 	 * Save a theme to disk. Validates before writing.
 	 * Throws on invalid theme or invalid name.
 	 */
-	async save(theme: NexTermTheme): Promise<void> {
+	async save(theme: TermoraTheme): Promise<void> {
 		if (!THEME_NAME_REGEX.test(theme.name)) {
 			throw new ThemeError("INVALID_NAME", `Theme name must match ${THEME_NAME_REGEX}`);
 		}

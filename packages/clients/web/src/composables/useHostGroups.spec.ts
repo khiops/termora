@@ -1,4 +1,4 @@
-import type { Host, HostGroup } from "@nexterm/shared";
+import type { Host, HostGroup } from "@termora/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick, ref } from "vue";
 
@@ -173,7 +173,7 @@ describe("useHostGroups", () => {
 		await nextTick();
 
 		expect((sections.value[0] as { collapsed: boolean }).collapsed).toBe(true);
-		expect(localStorageMap.get("nexterm:collapsed-host-groups")).toBe(JSON.stringify(["g1"]));
+		expect(localStorageMap.get("termora:collapsed-host-groups")).toBe(JSON.stringify(["g1"]));
 
 		toggleGroup("g1");
 		await nextTick();
@@ -268,7 +268,7 @@ describe("useHostGroups", () => {
 		toggleGroup("g1");
 		await nextTick();
 
-		expect(localStorageMap.get("nexterm:collapsed-host-groups")).toBe(JSON.stringify(["g1"]));
+		expect(localStorageMap.get("termora:collapsed-host-groups")).toBe(JSON.stringify(["g1"]));
 
 		// Second instance: should read collapsed state from localStorage
 		const { sections: sections2 } = useHostGroups();

@@ -1,4 +1,4 @@
-import type { TerminalProfile } from "@nexterm/shared";
+import type { TerminalProfile } from "@termora/shared";
 import { describe, expect, it } from "vitest";
 import { ref } from "vue";
 import { useWallpaper } from "./useWallpaper.js";

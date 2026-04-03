@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Stop nexterm dev servers and clean up orphan processes.
+# Stop termora dev servers and clean up orphan processes.
 # Usage: ./scripts/dev-stop.sh [hub|agent|all]   (default: all)
 set -euo pipefail
 
 TARGET="${1:-all}"
 
-LOG_DIR="/tmp/nexterm-dev"
+LOG_DIR="/tmp/termora-dev"
 PID_FILE="$LOG_DIR/dev.pid"
-AGENT_SOCK="${XDG_RUNTIME_DIR:-/tmp/nexterm-$(id -u)}/nexterm/agent.sock"
+AGENT_SOCK="${XDG_RUNTIME_DIR:-/tmp/termora-$(id -u)}/termora/agent.sock"
 
 # ── Helper: kill process(es) on a given port ─────────────────────────────────
 kill_port() {

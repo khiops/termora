@@ -2,9 +2,9 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ProtocolMessage, encodeFrame } from "@nexterm/shared";
-import type { HelloMessage } from "@nexterm/shared";
-import type { Host } from "@nexterm/shared";
+import { type ProtocolMessage, encodeFrame } from "@termora/shared";
+import type { HelloMessage } from "@termora/shared";
+import type { Host } from "@termora/shared";
 import { Server, type Server as SshServer } from "ssh2";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthPromptFn, SshAgent } from "./ssh-agent.js";
@@ -25,7 +25,7 @@ const { privateKey: CLIENT_PRIVATE_KEY_PEM } = generateKeyPairSync("rsa", {
 	publicKeyEncoding: { type: "pkcs1", format: "pem" },
 	privateKeyEncoding: { type: "pkcs1", format: "pem" },
 });
-const KEY_TMPDIR = mkdtempSync(join(tmpdir(), "nexterm-ssh-agent-test-"));
+const KEY_TMPDIR = mkdtempSync(join(tmpdir(), "termora-ssh-agent-test-"));
 const CLIENT_KEY_PATH = join(KEY_TMPDIR, "client.pem");
 writeFileSync(CLIENT_KEY_PATH, CLIENT_PRIVATE_KEY_PEM, { mode: 0o600 });
 

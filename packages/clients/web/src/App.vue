@@ -289,8 +289,8 @@
 import { computed, onMounted, onUnmounted, provide, ref, toRef, watch } from "vue";
 import TitleBar from "./components/TitleBar.vue";
 import { useResizable } from "./composables/useResizable.js";
-import { generateId } from "@nexterm/shared";
-import type { Host } from "@nexterm/shared";
+import { generateId } from "@termora/shared";
+import type { Host } from "@termora/shared";
 import { useAuthStore } from "./stores/auth.js";
 import { useSessionStore } from "./stores/session.js";
 import { useHostsStore } from "./stores/hosts.js";
@@ -543,7 +543,7 @@ const windowTitleEnabled = computed(
 );
 
 const windowTitleFormat = computed(
-	() => configStore.uiConfig.title?.windowFormat ?? "nexterm - {prefix}{host} - {title}",
+	() => configStore.uiConfig.title?.windowFormat ?? "termora - {prefix}{host} - {title}",
 );
 
 const activeChannelId = computed(() => {
@@ -593,10 +593,10 @@ const confirmDialog = ref({
  * Check if a confirmation should be skipped based on localStorage preferences.
  */
 function shouldSkipConfirm(action: string): boolean {
-	if (localStorage.getItem(`nexterm:skip${action}`) === "true") return true;
+	if (localStorage.getItem(`termora:skip${action}`) === "true") return true;
 	const hostId = channelsStore.activeHostId;
 	if (hostId) {
-		if (localStorage.getItem(`nexterm:skip${action}:${hostId}`) === "true") return true;
+		if (localStorage.getItem(`termora:skip${action}:${hostId}`) === "true") return true;
 	}
 	return false;
 }
@@ -609,10 +609,10 @@ function onConfirmAction(remember: { host: boolean; global: boolean }): void {
 	const actionKey = confirmDialog.value.actionKey;
 
 	if (remember.global) {
-		localStorage.setItem(`nexterm:skip${actionKey}`, "true");
+		localStorage.setItem(`termora:skip${actionKey}`, "true");
 	}
 	if (remember.host && channelsStore.activeHostId) {
-		localStorage.setItem(`nexterm:skip${actionKey}:${channelsStore.activeHostId}`, "true");
+		localStorage.setItem(`termora:skip${actionKey}:${channelsStore.activeHostId}`, "true");
 	}
 
 	action?.();
@@ -1443,7 +1443,7 @@ body,
 	font-style: italic;
 }
 
-body.nexterm-dragging * {
+body.termora-dragging * {
 	cursor: grabbing !important;
 }
 

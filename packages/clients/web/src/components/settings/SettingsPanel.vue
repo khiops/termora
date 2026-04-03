@@ -90,7 +90,7 @@ import SchemaCategory from "./categories/SchemaCategory.vue";
 import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
 import ElevationCategory from "./categories/ElevationCategory.vue";
 import ProfilesSettings from "./ProfilesSettings.vue";
-import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
+import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
 import { useSettingsStore, type Scope } from "../../stores/settings.js";
 import { useHostsStore } from "../../stores/hosts.js";
 import { useChannelsStore } from "../../stores/channels.js";

@@ -1,14 +1,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { LogConfig } from "@nexterm/shared";
+import type { LogConfig } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HubLogger } from "./hub-logger.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeTmpDir(): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-hub-logger-"));
+	return fs.mkdtempSync(path.join(os.tmpdir(), "termora-hub-logger-"));
 }
 
 function makeConfig(overrides: Partial<LogConfig> = {}): LogConfig {

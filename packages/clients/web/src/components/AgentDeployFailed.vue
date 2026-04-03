@@ -20,13 +20,13 @@
 				</div>
 
 				<p class="adf-body">
-					The nexterm agent was not found on the remote host and could not be deployed automatically.
+					The termora agent was not found on the remote host and could not be deployed automatically.
 				</p>
 
 				<div class="adf-info-box">
 					<p class="adf-info-heading">To resolve this, you can:</p>
 					<ul class="adf-instructions">
-						<li>Install the agent manually on the remote host (ensure <code class="adf-code">nexterm-agent</code> is in the PATH)</li>
+						<li>Install the agent manually on the remote host (ensure <code class="adf-code">termora-agent</code> is in the PATH)</li>
 						<li>Or place the pre-built binary in the local cache for automatic deployment</li>
 					</ul>
 				</div>

@@ -1,4 +1,4 @@
-import { generateId } from "@nexterm/shared";
+import { generateId } from "@termora/shared";
 import { ref, watch } from "vue";
 import {
 	MAX_PANE_COUNT,
@@ -32,7 +32,7 @@ export {
 // localStorage persistence key
 // ---------------------------------------------------------------------------
 
-const LAYOUT_KEY = "nexterm:layout";
+const LAYOUT_KEY = "termora:layout";
 
 interface PersistedState {
 	tabs: Tab[];

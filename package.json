@@ -1,5 +1,5 @@
 {
-	"name": "nexterm",
+	"name": "termora",
 	"version": "0.1.0",
 	"private": false,
 	"type": "module",
@@ -7,19 +7,19 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/nexterm/nexterm.git"
+		"url": "https://github.com/khiops/termora.git"
 	},
 	"engines": {
 		"node": ">=20"
 	},
 	"bin": {
-		"nexterm": "./bin/nexterm.js"
+		"termora": "./bin/termora.js"
 	},
 	"files": ["bin"],
 	"scripts": {
-		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @nexterm/hub dev\" \"pnpm -F @nexterm/web dev\"",
+		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @termora/hub dev\" \"pnpm -F @termora/web dev\"",
 		"build": "pnpm -r build",
-		"build:embed": "pnpm -F @nexterm/web build && node scripts/embed-web.js",
+		"build:embed": "pnpm -F @termora/web build && node scripts/embed-web.js",
 		"test": "vitest",
 		"test:run": "vitest run",
 		"lint": "biome check .",
@@ -30,7 +30,7 @@
 		"build:desktop": "bash scripts/build-desktop.sh"
 	},
 	"dependencies": {
-		"@nexterm/hub": "workspace:*"
+		"@termora/hub": "workspace:*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",

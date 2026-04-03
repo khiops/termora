@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import type { BorderStyle, VisualPreset, VisualProfile } from "@nexterm/shared";
+import type { BorderStyle, VisualPreset, VisualProfile } from "@termora/shared";
 import { computed } from "vue";
 import { resolvePreset } from "../utils/visual-presets.js";
 import TintPreview from "./TintPreview.vue";

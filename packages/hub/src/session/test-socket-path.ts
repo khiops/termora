@@ -12,8 +12,8 @@ import { join } from "node:path";
 
 export function getTestSocketPath(): string {
 	if (process.platform === "win32") {
-		return `\\\\.\\pipe\\nexterm-test-${randomBytes(8).toString("hex")}`;
+		return `\\\\.\\pipe\\termora-test-${randomBytes(8).toString("hex")}`;
 	}
-	const dir = mkdtempSync(join(tmpdir(), "nexterm-test-"));
+	const dir = mkdtempSync(join(tmpdir(), "termora-test-"));
 	return join(dir, "agent.sock");
 }

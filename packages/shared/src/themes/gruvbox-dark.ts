@@ -1,6 +1,6 @@
-import type { NexTermTheme } from "../theme.js";
+import type { TermoraTheme } from "../theme.js";
 
-export const gruvboxDark: NexTermTheme = {
+export const gruvboxDark: TermoraTheme = {
 	name: "gruvbox-dark",
 	author: "morhetz",
 	type: "dark",

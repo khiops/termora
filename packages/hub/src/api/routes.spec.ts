@@ -1,4 +1,4 @@
-import type { ProtocolMessage } from "@nexterm/shared";
+import type { ProtocolMessage } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../server.js";

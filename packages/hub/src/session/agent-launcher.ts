@@ -9,19 +9,19 @@ import {
 	AGENT_SOCKET_TIMEOUT,
 	type AgentConfig,
 	probeSocket,
-} from "@nexterm/shared";
-import { detectSea } from "@nexterm/shared/dist/sea-addon-loader.js";
+} from "@termora/shared";
+import { detectSea } from "@termora/shared/dist/sea-addon-loader.js";
 import { resolveAgentBinaryPath } from "../sea-agent-resolver.js";
-import { NextermAgent } from "./nexterm-agent.js";
+import { TermoraAgent } from "./termora-agent.js";
 
 /**
  * Resolve the path to the agent binary.
  *
- * In SEA mode: looks for a co-located nexterm-agent binary next to the hub
+ * In SEA mode: looks for a co-located termora-agent binary next to the hub
  * executable. Falls back to PATH resolution via resolveAgentBinaryPath().
  *
  * In dev mode: returns the Rust agent binary built by cargo at
- *   <project-root>/target/release/nexterm-agent[.exe]
+ *   <project-root>/target/release/termora-agent[.exe]
  */
 export function resolveAgentPath(): string {
 	const sea = detectSea();
@@ -33,7 +33,7 @@ export function resolveAgentPath(): string {
 	const __dirname = dirname(fileURLToPath(import.meta.url));
 	// This file is at packages/hub/src/session/ — go up 4 levels to project root
 	const ext = process.platform === "win32" ? ".exe" : "";
-	return join(__dirname, "../../../..", `target/release/nexterm-agent${ext}`);
+	return join(__dirname, "../../../..", `target/release/termora-agent${ext}`);
 }
 
 /**
@@ -53,13 +53,13 @@ export function isAgentBinary(agentPath: string): boolean {
  * 3. If EACCES → throw (different user's socket — do NOT unlink)
  * 4. Spawn: child_process.spawn with detached + unref
  * 5. Poll for socket availability (100ms interval, 5s timeout)
- * 6. Connect via NextermAgent.connectLocal
+ * 6. Connect via TermoraAgent.connectLocal
  */
 export async function connectOrLaunch(
 	socketPath: string,
 	config: AgentConfig,
 	agentBinaryPath?: string,
-): Promise<NextermAgent> {
+): Promise<TermoraAgent> {
 	const agentPath = agentBinaryPath ?? resolveAgentPath();
 
 	// Verify agent binary exists
@@ -74,7 +74,7 @@ export async function connectOrLaunch(
 	// Try direct connect first — avoids a throwaway probe connection that
 	// confuses the agent's AUTH handshake on Windows named pipes.
 	try {
-		return await NextermAgent.connectLocal(socketPath);
+		return await TermoraAgent.connectLocal(socketPath);
 	} catch {
 		// Connection failed — agent not running or stale socket
 	}
@@ -93,7 +93,7 @@ export async function connectOrLaunch(
 	await waitForSocket(socketPath);
 
 	// Connect
-	return NextermAgent.connectLocal(socketPath);
+	return TermoraAgent.connectLocal(socketPath);
 }
 
 /**
@@ -121,8 +121,8 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 
 	const stateDir =
 		process.platform === "win32"
-			? join(process.env.LOCALAPPDATA ?? homedir(), "nexterm")
-			: join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "nexterm");
+			? join(process.env.LOCALAPPDATA ?? homedir(), "termora")
+			: join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "termora");
 	mkdirSync(stateDir, { recursive: true });
 	const logPath = join(stateDir, "agent-daemon.log");
 	const logFd = openSync(logPath, "a");

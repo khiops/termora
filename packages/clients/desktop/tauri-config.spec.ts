@@ -19,17 +19,17 @@ describe("tauri.conf.json", () => {
 	const conf = readJson("src-tauri/tauri.conf.json") as Record<string, unknown>;
 
 	it("is valid JSON with required top-level fields", () => {
-		expect(conf).toHaveProperty("productName", "Nexterm");
-		expect(conf).toHaveProperty("identifier", "app.nexterm.desktop");
+		expect(conf).toHaveProperty("productName", "Termora");
+		expect(conf).toHaveProperty("identifier", "app.termora.desktop");
 		expect(conf).toHaveProperty("version", "0.1.0");
 	});
 
-	it("externalBin includes nexterm-hub", () => {
+	it("externalBin includes termora-hub", () => {
 		const bundle = conf.bundle as Record<string, unknown>;
 		expect(bundle).toBeDefined();
 		const externalBin = bundle.externalBin as string[];
 		expect(Array.isArray(externalBin)).toBe(true);
-		expect(externalBin).toContain("nexterm-hub");
+		expect(externalBin).toContain("termora-hub");
 	});
 
 	it("frontendDist points to web dist", () => {
@@ -89,7 +89,7 @@ describe("capabilities/default.json", () => {
 		const allow = shellExec?.allow as Array<Record<string, unknown>>;
 		expect(Array.isArray(allow)).toBe(true);
 
-		const hubRule = allow.find((a) => a.name === "nexterm-hub");
+		const hubRule = allow.find((a) => a.name === "termora-hub");
 		expect(hubRule).toBeDefined();
 		expect(hubRule?.sidecar).toBe(true);
 	});
@@ -125,7 +125,7 @@ describe("Cargo.toml", () => {
 	});
 
 	it("has correct package name", () => {
-		expect(cargo).toMatch(/name\s*=\s*"nexterm-desktop"/);
+		expect(cargo).toMatch(/name\s*=\s*"termora-desktop"/);
 	});
 });
 
@@ -133,7 +133,7 @@ describe("package.json", () => {
 	const pkg = readJson("package.json") as Record<string, unknown>;
 
 	it("has correct name", () => {
-		expect(pkg.name).toBe("@nexterm/desktop");
+		expect(pkg.name).toBe("@termora/desktop");
 	});
 
 	it("depends on @tauri-apps/api", () => {
@@ -169,7 +169,7 @@ describe("src/lib.ts", () => {
 	});
 
 	it("uses Command.sidecar for hub binary", () => {
-		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']nexterm-hub["']/);
+		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']termora-hub["']/);
 	});
 
 	it("polls /api/health endpoint for readiness", () => {

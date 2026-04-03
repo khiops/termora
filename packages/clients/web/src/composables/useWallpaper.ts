@@ -1,4 +1,4 @@
-import type { TerminalProfile } from "@nexterm/shared";
+import type { TerminalProfile } from "@termora/shared";
 import type { CSSProperties } from "vue";
 import { type Ref, computed, ref } from "vue";
 

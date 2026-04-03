@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { LogConfig } from "@nexterm/shared";
+import type { LogConfig } from "@termora/shared";
 import { LOG_SEVERITY } from "./index.js";
 
 // ─── ChannelLogger ─────────────────────────────────────────────────────────────

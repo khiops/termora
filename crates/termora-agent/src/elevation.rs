@@ -230,8 +230,8 @@ fn wrap_custom(custom_cmd: &str, shell: &str, args: &[String]) -> ElevatedComman
 /// SECURITY:
 /// - Uses O_EXCL to prevent race conditions
 /// - Mode 0700 (owner-only)
-/// - Secret passed via env var _NEXTERM_ELEV (not written to script)
-/// - Returns (script_path, env_map with _NEXTERM_ELEV)
+/// - Secret passed via env var _TERMORA_ELEV (not written to script)
+/// - Returns (script_path, env_map with _TERMORA_ELEV)
 #[cfg(unix)]
 async fn create_askpass_script(
     secret: &Zeroizing<String>,
@@ -243,7 +243,7 @@ async fn create_askpass_script(
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir());
     let filename = format!(
-        "nexterm-askpass-{}",
+        "termora-askpass-{}",
         ulid::Ulid::new().to_string().to_lowercase()
     );
     let path = tmp_dir.join(&filename);
@@ -259,11 +259,11 @@ async fn create_askpass_script(
     // Script echoes the env var, not the secret directly
     // Two writeln! calls: shebang line + echo line
     writeln!(file, "#!/bin/sh")?;
-    writeln!(file, r#"echo "$_NEXTERM_ELEV""#)?;
+    writeln!(file, r#"echo "$_TERMORA_ELEV""#)?;
     drop(file);
 
     let mut env = HashMap::new();
-    env.insert("_NEXTERM_ELEV".into(), secret.as_str().to_string());
+    env.insert("_TERMORA_ELEV".into(), secret.as_str().to_string());
 
     Ok((path, env))
 }
@@ -379,12 +379,12 @@ mod tests {
         assert_eq!(meta.permissions().mode() & 0o777, 0o700);
 
         // Verify env contains the secret key
-        assert_eq!(env.get("_NEXTERM_ELEV").unwrap(), "test_password");
+        assert_eq!(env.get("_TERMORA_ELEV").unwrap(), "test_password");
 
         // Verify script content
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("echo"));
-        assert!(content.contains("_NEXTERM_ELEV"));
+        assert!(content.contains("_TERMORA_ELEV"));
         assert!(!content.contains("test_password")); // Secret NOT in file
 
         // Cleanup
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn test_cleanup_all() {
         // Register a fake path
-        let tmp = std::env::temp_dir().join("nexterm-test-cleanup");
+        let tmp = std::env::temp_dir().join("termora-test-cleanup");
         std::fs::write(&tmp, "test").unwrap();
         register_cleanup(&tmp);
         cleanup_all();

@@ -1,6 +1,6 @@
-import type { NexTermTheme } from "../theme.js";
+import type { TermoraTheme } from "../theme.js";
 
-export const githubLight: NexTermTheme = {
+export const githubLight: TermoraTheme = {
 	name: "github-light",
 	author: "GitHub",
 	type: "light",

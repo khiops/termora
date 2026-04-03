@@ -1,4 +1,4 @@
-import type { AgentBinaryVerifyMessage } from "@nexterm/shared";
+import type { AgentBinaryVerifyMessage } from "@termora/shared";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type { IWsClient } from "../services/ws-client.js";

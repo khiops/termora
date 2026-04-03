@@ -1,11 +1,11 @@
-import { BUNDLED_THEMES } from "@nexterm/shared";
-import type { NexTermTheme } from "@nexterm/shared";
+import { BUNDLED_THEMES } from "@termora/shared";
+import type { TermoraTheme } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hexToRgb, useThemeStore } from "./theme.js";
 
-const catppuccinMocha = BUNDLED_THEMES["catppuccin-mocha"] as NexTermTheme;
-const nordTheme = BUNDLED_THEMES.nord as NexTermTheme;
+const catppuccinMocha = BUNDLED_THEMES["catppuccin-mocha"] as TermoraTheme;
+const nordTheme = BUNDLED_THEMES.nord as TermoraTheme;
 
 // Mock document.documentElement.style.setProperty
 const setPropertyMock = vi.fn();

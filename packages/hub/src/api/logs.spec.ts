@@ -9,7 +9,7 @@ import { registerLogRoutes } from "./logs.js";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeTmpDir(): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-logs-test-"));
+	return fs.mkdtempSync(path.join(os.tmpdir(), "termora-logs-test-"));
 }
 
 function writeChannelLog(logsDir: string, channelId: string, lines: object[]): void {

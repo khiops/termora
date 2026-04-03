@@ -8,12 +8,12 @@ and live preview.
 
 ## Theme File Format
 
-JSON files stored in `~/.config/nexterm/themes/`. Two sections:
+JSON files stored in `~/.config/termora/themes/`. Two sections:
 - `colors`: standard terminal ANSI 16 + fg/bg/cursor/selection (xterm.js ITheme compatible)
-- `ui`: nexterm app chrome colors
+- `ui`: termora app chrome colors
 
 ```typescript
-interface NexTermTheme {
+interface TermoraTheme {
   name: string
   author?: string
   type: "dark" | "light"
@@ -65,7 +65,7 @@ interface NexTermTheme {
 ## Theme Storage
 
 ```
-~/.config/nexterm/
+~/.config/termora/
   themes/
     one-half-dark.json         # bundled (copied on first launch)
     catppuccin-mocha.json
@@ -238,7 +238,7 @@ Live preview updates in real-time as colors change.
 
 ## Import / Export
 
-- Import: file picker -> validate JSON format -> copy to ~/.config/nexterm/themes/
+- Import: file picker -> validate JSON format -> copy to ~/.config/termora/themes/
   -> instant preview
 - Export: download current theme as .json file
 
@@ -370,12 +370,12 @@ When theme changes, update `terminal.options.theme` on all active terminals.
 
 ```typescript
 // useThemeStore
-const currentTheme = ref<NexTermTheme>(...)
-const availableThemes = ref<NexTermTheme[]>([])
-const previewTheme = ref<NexTermTheme | null>(null)  // hover preview
+const currentTheme = ref<TermoraTheme>(...)
+const availableThemes = ref<TermoraTheme[]>([])
+const previewTheme = ref<TermoraTheme | null>(null)  // hover preview
 
-function applyTheme(theme: NexTermTheme) { /* set CSS vars */ }
-function previewHover(theme: NexTermTheme) { /* temporary apply */ }
+function applyTheme(theme: TermoraTheme) { /* set CSS vars */ }
+function previewHover(theme: TermoraTheme) { /* temporary apply */ }
 function clearPreview() { /* restore currentTheme */ }
 ```
 

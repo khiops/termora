@@ -1,5 +1,5 @@
-import { THEME_NAME_REGEX } from "@nexterm/shared";
-import type { NexTermTheme } from "@nexterm/shared";
+import { THEME_NAME_REGEX } from "@termora/shared";
+import type { TermoraTheme } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import { ThemeError } from "../theme-manager.js";
 import type { ThemeManager } from "../theme-manager.js";
@@ -51,7 +51,7 @@ export function registerThemeRoutes(server: FastifyInstance, themeManager: Theme
 		}
 
 		try {
-			await themeManager.save(body as unknown as NexTermTheme);
+			await themeManager.save(body as unknown as TermoraTheme);
 			return reply.code(201).send({ name });
 		} catch (err) {
 			if (err instanceof ThemeError) {
@@ -73,7 +73,7 @@ export function registerThemeRoutes(server: FastifyInstance, themeManager: Theme
 		}
 
 		try {
-			await themeManager.save({ ...body, name } as unknown as NexTermTheme);
+			await themeManager.save({ ...body, name } as unknown as TermoraTheme);
 			return reply.code(200).send({ name });
 		} catch (err) {
 			if (err instanceof ThemeError) {

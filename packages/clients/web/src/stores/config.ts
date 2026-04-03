@@ -10,7 +10,7 @@ import {
 	type TabsConfig,
 	type TerminalProfile,
 	type TitleConfig,
-} from "@nexterm/shared";
+} from "@termora/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
@@ -32,7 +32,7 @@ type ProfileChangeListener = (event: ProfileChangeEvent) => void;
  */
 function injectFontFaces(families: FontFamily[]): void {
 	// Remove any previously injected style element
-	const existing = document.getElementById("nexterm-fonts");
+	const existing = document.getElementById("termora-fonts");
 	if (existing) existing.remove();
 
 	if (families.length === 0) return;
@@ -60,7 +60,7 @@ function injectFontFaces(families: FontFamily[]): void {
 	}
 
 	const style = document.createElement("style");
-	style.id = "nexterm-fonts";
+	style.id = "termora-fonts";
 	style.textContent = rules.join("\n");
 	document.head.appendChild(style);
 }

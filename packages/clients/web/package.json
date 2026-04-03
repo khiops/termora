@@ -1,7 +1,7 @@
 {
-	"name": "@nexterm/web",
+	"name": "@termora/web",
 	"version": "0.1.0",
-	"description": "nexterm web client — Vue 3 PWA (not published; embedded in hub static dir)",
+	"description": "termora web client — Vue 3 PWA (not published; embedded in hub static dir)",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -11,7 +11,7 @@
 	},
 	"dependencies": {
 		"@msgpack/msgpack": "catalog:",
-		"@nexterm/shared": "workspace:*",
+		"@termora/shared": "workspace:*",
 		"@tauri-apps/api": "^2.10.1",
 		"@xterm/addon-fit": "catalog:",
 		"@xterm/addon-search": "catalog:",

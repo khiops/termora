@@ -1,4 +1,4 @@
-// Protocol and runtime constants for nexterm
+// Protocol and runtime constants for termora
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_SIZE = 10 * 1024 * 1024; // 10 MB

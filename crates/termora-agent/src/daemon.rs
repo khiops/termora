@@ -28,17 +28,17 @@ struct ActiveConnection {
     frame_tx: FrameSender,
 }
 
-/// Returns the XDG config directory for nexterm (`~/.config/nexterm` on Linux/macOS).
+/// Returns the XDG config directory for termora (`~/.config/termora` on Linux/macOS).
 /// This is where `auth.json` lives — NOT the socket or state directory.
 #[cfg(not(windows))]
 fn get_config_dir() -> String {
     std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         format!("{}/.config", home)
-    }) + "/nexterm"
+    }) + "/termora"
 }
 
-/// Returns the XDG state directory for nexterm (`~/.local/state/nexterm` on Linux/macOS).
+/// Returns the XDG state directory for termora (`~/.local/state/termora` on Linux/macOS).
 /// This is where `meta.db` and `spool.db` live.
 #[cfg(not(windows))]
 fn get_state_dir() -> std::path::PathBuf {
@@ -46,23 +46,23 @@ fn get_state_dir() -> std::path::PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         format!("{}/.local/state", home)
     });
-    std::path::PathBuf::from(base).join("nexterm")
+    std::path::PathBuf::from(base).join("termora")
 }
 
-/// Returns the LOCALAPPDATA state directory for nexterm (`%LOCALAPPDATA%\nexterm` on Windows).
+/// Returns the LOCALAPPDATA state directory for termora (`%LOCALAPPDATA%\termora` on Windows).
 #[cfg(windows)]
 fn get_state_dir() -> std::path::PathBuf {
-    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\nexterm-state".into());
-    std::path::PathBuf::from(base).join("nexterm")
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\	ermora-state".into());
+    std::path::PathBuf::from(base).join("termora")
 }
 
-/// Returns the APPDATA config directory for nexterm (`%APPDATA%\nexterm` on Windows).
+/// Returns the APPDATA config directory for termora (`%APPDATA%\termora` on Windows).
 #[cfg(windows)]
 fn get_config_dir() -> String {
     std::env::var("APPDATA")
         .or_else(|_| std::env::var("LOCALAPPDATA"))
-        .unwrap_or_else(|_| "C:\\nexterm-config".into())
-        + "\\nexterm"
+        .unwrap_or_else(|_| "C:\\	ermora-config".into())
+        + "\\termora"
 }
 
 /// Run the agent in daemon mode.
@@ -186,11 +186,11 @@ async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Re
 
 /// Returns the named pipe path for this agent instance.
 ///
-/// Format: `\\.\pipe\nexterm-agent-<username>`
+/// Format: `\\.\pipe\termora-agent-<username>`
 #[cfg(windows)]
 fn get_pipe_name() -> String {
     let username = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
-    format!(r"\\.\pipe\nexterm-agent-{}", username)
+    format!(r"\\.\pipe\termora-agent-{}", username)
 }
 
 /// Run the agent in daemon mode (Windows named pipe).
@@ -209,7 +209,7 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
 
     tracing::info!("daemon listening on {}", pipe_name);
 
-    // Use the canonical Windows config dir (auth.json lives in %APPDATA%\nexterm\)
+    // Use the canonical Windows config dir (auth.json lives in %APPDATA%\termora\)
     let config_dir = get_config_dir();
 
     // Load auth token once at startup (None → first-run, skip auth)
@@ -809,12 +809,12 @@ mod tests {
     fn test_get_pipe_name_format() {
         let name = get_pipe_name();
         assert!(
-            name.starts_with(r"\\.\pipe\nexterm-agent-"),
-            "pipe name must start with \\\\.\\pipe\\nexterm-agent-, got: {}",
+            name.starts_with(r"\\.\pipe\termora-agent-"),
+            "pipe name must start with \\\\.\\pipe\\	ermora-agent-, got: {}",
             name
         );
         // Must include at least one character of username after the dash
-        let suffix = name.trim_start_matches(r"\\.\pipe\nexterm-agent-");
+        let suffix = name.trim_start_matches(r"\\.\pipe\termora-agent-");
         assert!(!suffix.is_empty(), "pipe name must include username");
     }
 
@@ -824,14 +824,14 @@ mod tests {
         // Use an empty temp dir as config_dir — no auth.json → no auth required.
         // Pass directly to run_daemon_impl to avoid env var mutation races.
         let empty_config = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-noop-{}",
+            "termora-test-cfg-noop-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
 
         let sock_name = format!(
-            "nexterm-test-{}.sock",
+            "termora-test-{}.sock",
             ulid::Ulid::new().to_string().to_lowercase()
         );
         let path = std::env::temp_dir().join(&sock_name);
@@ -868,14 +868,14 @@ mod tests {
     #[tokio::test]
     async fn test_connection_displacement() {
         let empty_config = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-disp-{}",
+            "termora-test-cfg-disp-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
 
         let sock_name = format!(
-            "nexterm-test-displace-{}.sock",
+            "termora-test-displace-{}.sock",
             ulid::Ulid::new().to_string().to_lowercase()
         );
         let path = std::env::temp_dir().join(&sock_name);
@@ -920,14 +920,14 @@ mod tests {
     #[tokio::test]
     async fn test_socket_permissions() {
         let empty_config = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-perms-{}",
+            "termora-test-cfg-perms-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
 
         let sock_name = format!(
-            "nexterm-test-perms-{}.sock",
+            "termora-test-perms-{}.sock",
             ulid::Ulid::new().to_string().to_lowercase()
         );
         let path = std::env::temp_dir().join(&sock_name);
@@ -952,14 +952,14 @@ mod tests {
     #[tokio::test]
     async fn test_channel_state_end_sent_on_connect() {
         let empty_config = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-stateend-{}",
+            "termora-test-cfg-stateend-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
 
         let sock_name = format!(
-            "nexterm-test-state-end-{}.sock",
+            "termora-test-state-end-{}.sock",
             ulid::Ulid::new().to_string().to_lowercase()
         );
         let path = std::env::temp_dir().join(&sock_name);
@@ -1051,7 +1051,7 @@ mod tests {
         use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
 
         let pipe_name = format!(
-            r"\\.\pipe\nexterm-test-{}",
+            r"\\.\pipe\termora-test-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         );
 
@@ -1169,7 +1169,7 @@ mod tests {
     /// read_auth_token returns None for a non-existent file.
     #[tokio::test]
     async fn test_read_auth_token_missing_file() {
-        let result = read_auth_token("/tmp/nexterm-nonexistent-99999/").await;
+        let result = read_auth_token("/tmp/termora-nonexistent-99999/").await;
         assert!(result.is_none(), "missing file must return None");
     }
 
@@ -1177,7 +1177,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_auth_token_valid() {
         let dir = std::env::temp_dir().join(format!(
-            "nexterm-auth-test-{}",
+            "termora-auth-test-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
@@ -1196,7 +1196,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_auth_token_malformed() {
         let dir = std::env::temp_dir().join(format!(
-            "nexterm-auth-bad-{}",
+            "termora-auth-bad-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
@@ -1220,7 +1220,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_auth_token_missing_token_field() {
         let dir = std::env::temp_dir().join(format!(
-            "nexterm-auth-nofield-{}",
+            "termora-auth-nofield-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
@@ -1250,7 +1250,7 @@ mod tests {
 
         // Write auth.json to a temp dir and pass it directly as config_dir to run_daemon_impl.
         let config_dir_path = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-auth-{}",
+            "termora-test-cfg-auth-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&config_dir_path).await.unwrap();
@@ -1262,7 +1262,7 @@ mod tests {
         let config_dir = config_dir_path.to_string_lossy().to_string();
 
         let sock_dir = std::env::temp_dir().join(format!(
-            "nexterm-daemon-auth-{}",
+            "termora-daemon-auth-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&sock_dir).await.unwrap();
@@ -1318,7 +1318,7 @@ mod tests {
         use crate::protocol::HubToAgent;
 
         let config_dir_path = std::env::temp_dir().join(format!(
-            "nexterm-test-cfg-authok-{}",
+            "termora-test-cfg-authok-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&config_dir_path).await.unwrap();
@@ -1330,7 +1330,7 @@ mod tests {
         let config_dir = config_dir_path.to_string_lossy().to_string();
 
         let sock_dir = std::env::temp_dir().join(format!(
-            "nexterm-daemon-authok-{}",
+            "termora-daemon-authok-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         ));
         tokio::fs::create_dir_all(&sock_dir).await.unwrap();
@@ -1385,7 +1385,7 @@ mod tests {
         use tokio::net::windows::named_pipe::ClientOptions;
 
         let pipe_name = format!(
-            r"\\.\pipe\nexterm-test-secure-{}",
+            r"\\.\pipe\termora-test-secure-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         );
 
@@ -1421,7 +1421,7 @@ mod tests {
         use tokio::net::windows::named_pipe::ClientOptions;
 
         let pipe_name = format!(
-            r"\\.\pipe\nexterm-test-hello-{}",
+            r"\\.\pipe\termora-test-hello-{}",
             ulid::Ulid::new().to_string().to_lowercase()
         );
 

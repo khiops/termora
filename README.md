@@ -1,4 +1,4 @@
-# nexterm
+# termora
 
 A local-first session terminal platform. Hub daemon + remote agents + SSH transport + PWA UI.
 Sessions survive client disconnects, SSH drops, and device switches.
@@ -30,7 +30,7 @@ Sessions survive client disconnects, SSH drops, and device switches.
 Once published to npm:
 
 ```sh
-npx nexterm
+npx termora
 ```
 
 Open `http://localhost:4100` in your browser.
@@ -61,12 +61,12 @@ The hub daemon binds to `127.0.0.1:4100` and serves both the REST API (`/api/*`)
 
 | Package | npm name | Description |
 |---------|----------|-------------|
-| `packages/shared` | `@nexterm/shared` | Protocol types, MessagePack codec, entity types, config types |
-| `packages/agent` | `@nexterm/agent` | PTY manager — node-pty + xterm.js headless + MessagePack protocol handler |
-| `packages/hub` | `@nexterm/hub` | Fastify daemon — session manager, client manager, storage, SSH transport |
-| `packages/clients/web` | `@nexterm/web` | Vue 3 PWA — embedded in hub at build time, not published separately |
-| `packages/clients/desktop` | `@nexterm/desktop` | Tauri desktop app wrapping the hub as a sidecar (P1) |
-| root | `nexterm` | CLI entrypoint — thin wrapper around `@nexterm/hub` (`npx nexterm`) |
+| `packages/shared` | `@termora/shared` | Protocol types, MessagePack codec, entity types, config types |
+| `packages/agent` | `@termora/agent` | PTY manager — node-pty + xterm.js headless + MessagePack protocol handler |
+| `packages/hub` | `@termora/hub` | Fastify daemon — session manager, client manager, storage, SSH transport |
+| `packages/clients/web` | `@termora/web` | Vue 3 PWA — embedded in hub at build time, not published separately |
+| `packages/clients/desktop` | `@termora/desktop` | Tauri desktop app wrapping the hub as a sidecar (P1) |
+| root | `termora` | CLI entrypoint — thin wrapper around `@termora/hub` (`npx termora`) |
 
 ---
 
@@ -98,28 +98,28 @@ pnpm lint             # Lint + format check (biome)
 pnpm lint:fix         # Auto-fix lint issues
 
 # Single-package operations
-pnpm -F @nexterm/hub test
-pnpm -F @nexterm/web dev
+pnpm -F @termora/hub test
+pnpm -F @termora/web dev
 ```
 
 ---
 
 ## Configuration
 
-nexterm reads configuration from a TOML file:
+termora reads configuration from a TOML file:
 
-- **Linux / macOS:** `~/.config/nexterm/config.toml`
-- **Windows:** `%APPDATA%\nexterm\config.toml`
+- **Linux / macOS:** `~/.config/termora/config.toml`
+- **Windows:** `%APPDATA%\termora\config.toml`
 
 State (databases, runtime socket) is stored in:
 
-- **Linux / macOS:** `~/.local/state/nexterm/`
-- **Windows:** `%LOCALAPPDATA%\nexterm\`
+- **Linux / macOS:** `~/.local/state/termora/`
+- **Windows:** `%LOCALAPPDATA%\termora\`
 
 The port defaults to `4100` and can be overridden via:
 
 1. CLI flag `--port`
-2. Environment variable `NEXTERM_PORT`
+2. Environment variable `TERMORA_PORT`
 3. `port` key in `config.toml`
 
 In `zero_conf` mode the hub auto-increments from 4100 to 4199 if the default port is taken, and writes the actual port to `runtime.json` in the state directory.

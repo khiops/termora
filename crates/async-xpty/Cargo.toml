@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Cross-platform async PTY for tokio"
-repository = "https://github.com/nichochar/nexterm"
+repository = "https://github.com/khiops/termora"
 keywords = ["pty", "terminal", "async", "tokio", "cross-platform"]
 categories = ["asynchronous", "os"]
 

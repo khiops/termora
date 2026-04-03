@@ -1,5 +1,5 @@
-import type { Channel } from "@nexterm/shared";
-import { DEFAULT_CHANNEL_NAME } from "@nexterm/shared";
+import type { Channel } from "@termora/shared";
+import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
 import { describe, expect, it } from "vitest";
 import { ref } from "vue";
 import { useTabTitle } from "./useTabTitle.js";

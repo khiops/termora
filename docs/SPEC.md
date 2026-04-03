@@ -1,4 +1,4 @@
-# nexterm — Architecture Specification
+# termora — Architecture Specification
 
 > Version: 0.1.0 (MVP)
 > Status: draft
@@ -6,7 +6,7 @@
 
 ## 1. Vision
 
-nexterm is a **local-first session terminal platform** that lets developers and SREs manage persistent terminal sessions across local and remote machines from a modern web UI. Sessions survive client disconnects, SSH drops, and device switches.
+termora is a **local-first session terminal platform** that lets developers and SREs manage persistent terminal sessions across local and remote machines from a modern web UI. Sessions survive client disconnects, SSH drops, and device switches.
 
 **Core differentiators:**
 - Hub owns state (cache + snapshot) independently of UI clients
@@ -45,9 +45,9 @@ nexterm is a **local-first session terminal platform** that lets developers and 
 │   │          spool.db (output chunks, snapshots)              │  │
 │   └───────────────────────────────────────────────────────────┘  │
 └──────────┬──────────────────────────────────────────────────────┘
-           │ Local: child_process.spawn("nexterm-agent --stdio")
-           │   ─or─ UDS to standalone daemon ("nexterm-agent --daemon")
-           │ Remote: SSH (ssh2) → "nexterm-agent --stdio"
+           │ Local: child_process.spawn("termora-agent --stdio")
+           │   ─or─ UDS to standalone daemon ("termora-agent --daemon")
+           │ Remote: SSH (ssh2) → "termora-agent --stdio"
            │ Transport: MessagePack framed over stdio or UDS (all modes)
            │
 ┌──────────▼──────────────────────────────────────────────────────┐
@@ -66,7 +66,7 @@ nexterm is a **local-first session terminal platform** that lets developers and 
 
 ## 3. Component Details
 
-### 3.1 Shared Package (`@nexterm/shared`)
+### 3.1 Shared Package (`@termora/shared`)
 
 TypeScript library used by hub, agent, and UI.
 
@@ -78,7 +78,7 @@ TypeScript library used by hub, agent, and UI.
 - Entity types (Host, Session, Channel, Workspace, ChannelGroup)
 - Constants (protocol version, default port, default config values)
 
-### 3.2 Agent (`@nexterm/agent`)
+### 3.2 Agent (`@termora/agent`)
 
 Universal PTY manager. Runs locally (child process) or remotely (via SSH). Same binary, same protocol.
 
@@ -92,11 +92,11 @@ Universal PTY manager. Runs locally (child process) or remotely (via SSH). Same 
 - Daemon mode: standalone process listening on UDS, output buffering via `OutputBuffer` ring buffer
 - `DaemonServer` (`daemon.ts`): UDS listener, HELLO handshake, connection displacement (last-writer-wins)
 - `OutputBuffer` (`buffer.ts`): per-channel ring buffer with per-channel cap and global cap, evicts from largest channel
-- CLI: `nexterm-agent --daemon --socket <path> --buffer-per-channel <bytes> --buffer-global <bytes>`
+- CLI: `termora-agent --daemon --socket <path> --buffer-per-channel <bytes> --buffer-global <bytes>`
 
 **Process model (local — stdio, legacy):**
 ```
-hub: child_process.spawn("nexterm-agent", ["--stdio"])
+hub: child_process.spawn("termora-agent", ["--stdio"])
   → Agent starts, writes HELLO to stdout
   → Hub reads HELLO, sends SPAWN commands
   → Each SPAWN creates a PTY + headless xterm
@@ -108,7 +108,7 @@ hub: child_process.spawn("nexterm-agent", ["--stdio"])
 ```
 hub: connectOrLaunch(socketPath, config, binaryPath)
   → Probes UDS socket via probeSocket()
-  → If no daemon running: spawn detached "nexterm-agent --daemon --socket <path>"
+  → If no daemon running: spawn detached "termora-agent --daemon --socket <path>"
   → Polls socket until ready (up to 5s)
   → Connects to UDS → Agent sends HELLO (with protocolVersion)
   → On reconnect: Agent sends N x AGENT_CHANNEL_STATE + CHANNEL_STATE_END
@@ -120,7 +120,7 @@ The `DaemonServer` class manages UDS connections with last-writer-wins displacem
 
 **Process model (remote):**
 ```
-hub: ssh2.exec("nexterm-agent --stdio")
+hub: ssh2.exec("termora-agent --stdio")
   → Agent starts, writes HELLO to stdout
   → Hub reads HELLO, sends SPAWN commands
   → Each SPAWN creates a PTY + headless xterm
@@ -139,12 +139,12 @@ The protocol is identical in all modes. Only the transport differs (stdio pipe, 
 
 **Agent installation (MVP):**
 - Agent is NOT auto-installed via npx in MVP (chicken-egg: package not yet published)
-- MVP: hub runs `ssh user@host "nexterm-agent --stdio"` — agent must be pre-installed
+- MVP: hub runs `ssh user@host "termora-agent --stdio"` — agent must be pre-installed
 - `scripts/install-agent.sh` copies agent build to remote via scp
-- UI shows warning if agent not found: "nexterm-agent not found. [Install instructions]"
+- UI shows warning if agent not found: "termora-agent not found. [Install instructions]"
 - P2: auto-install via bundled single-file binary (Node SEA)
 
-### 3.3 Hub (`@nexterm/hub`)
+### 3.3 Hub (`@termora/hub`)
 
 Local daemon, single process, binds to 127.0.0.1.
 
@@ -155,7 +155,7 @@ Local daemon, single process, binds to 127.0.0.1.
 - WebSocket upgrade on `/ws` path
 - Static file serving for UI (production build)
 - Health endpoint (`GET /api/health`)
-- Port resolution: CLI flag > `NEXTERM_PORT` env > config.toml `[server] port` > default 4100
+- Port resolution: CLI flag > `TERMORA_PORT` env > config.toml `[server] port` > default 4100
 - `zero_conf` mode (opt-in): if default port taken, auto-increment 4100→4199, write actual port to `runtime.json`
 
 **Session Manager:**
@@ -163,7 +163,7 @@ Local daemon, single process, binds to 127.0.0.1.
 - Local sessions (fallback): spawn agent as child process (`child_process.spawn`, --stdio)
 - Remote sessions: open SSH via ssh2, launch agent, pipe stdio
 - Hub never spawns PTYs directly — agent is the universal PTY manager
-- `NextermAgent` (`nexterm-agent.ts`): hub-side class extending `AgentConnection`, `connectLocal(socketPath)` factory, `waitForChannelState()` for reconnect reconciliation
+- `TermoraAgent` (`termora-agent.ts`): hub-side class extending `AgentConnection`, `connectLocal(socketPath)` factory, `waitForChannelState()` for reconnect reconciliation
 - `connectOrLaunch` (`agent-launcher.ts`): probes socket, spawns detached daemon if needed, polls for readiness
 - Session state machine: STARTING → ACTIVE ↔ DISCONNECTED → CLOSED, with DETACHED branch
 - Reconnect (remote): exponential backoff (1s, 2s, 4s, ... 30s max, 5min total timeout)
@@ -185,24 +185,24 @@ Local daemon, single process, binds to 127.0.0.1.
 
 **Config Resolver:**
 - Layer 1: built-in defaults (code)
-- Layer 2: `$NEXTERM_CONFIG_DIR/config.toml` (user file — see § 7 for platform paths)
+- Layer 2: `$TERMORA_CONFIG_DIR/config.toml` (user file — see § 7 for platform paths)
 - Layer 3: host.profile_json (meta.db)
 - Layer 3.5: agent visual_hints (from HELLO, if trust policy allows)
 - Layer 4: channel.profile_json (meta.db)
 - Resolution: deep merge in order, last wins
 
 **CLI:**
-- `nexterm start` — start daemon (foreground or background)
-- `nexterm stop` — stop daemon
-- `nexterm status` — show daemon status, active sessions
-- `nexterm host add|list|test|remove` — manage hosts
-- `nexterm session list|attach` — manage sessions
-- `nexterm workspace export|import` — workspace portability
-- `nexterm config edit` — open config.toml in $EDITOR
-- `nexterm pair` — generate pairing code for multi-device
-- `nexterm decode` — decode MessagePack frames from stdin (debug tool)
+- `termora start` — start daemon (foreground or background)
+- `termora stop` — stop daemon
+- `termora status` — show daemon status, active sessions
+- `termora host add|list|test|remove` — manage hosts
+- `termora session list|attach` — manage sessions
+- `termora workspace export|import` — workspace portability
+- `termora config edit` — open config.toml in $EDITOR
+- `termora pair` — generate pairing code for multi-device
+- `termora decode` — decode MessagePack frames from stdin (debug tool)
 
-### 3.4 Web Client (`@nexterm/web`)
+### 3.4 Web Client (`@termora/web`)
 
 Vue 3 SPA built with Vite. Served by hub in production, dev server in development.
 
@@ -367,7 +367,7 @@ TabLayout (workspace persistence)
 
 ### 4.1 Naming Convention
 
-All protocol messages use **snake_case** for field names (e.g., `channel_id`, `cursor_x`). TypeScript interfaces in `@nexterm/shared` use **camelCase** (e.g., `channelId`, `cursorX`). The MessagePack codec layer handles conversion at encode/decode boundaries.
+All protocol messages use **snake_case** for field names (e.g., `channel_id`, `cursor_x`). TypeScript interfaces in `@termora/shared` use **camelCase** (e.g., `channelId`, `cursorX`). The MessagePack codec layer handles conversion at encode/decode boundaries.
 
 ### 4.2 State Transition Rules
 
@@ -524,7 +524,7 @@ User clicks [+ channel] on local host
   │
   ├─ No → create Session (STARTING)
   │  Hub: connectOrLaunch(socketPath) → connect to daemon (or spawn it)
-  │  Fallback: child_process.spawn("nexterm-agent", ["--stdio"])
+  │  Fallback: child_process.spawn("termora-agent", ["--stdio"])
   │  Read HELLO from agent
   │  Session → ACTIVE
   │  Proceed to SPAWN
@@ -546,7 +546,7 @@ User clicks [+ channel] on remote host
   ├─ No → create Session (STARTING)
   │  Hub: ssh2.connect(host.sshConfig)
   │  ├─ Success:
-  │  │  ssh2.exec("nexterm-agent --stdio")
+  │  │  ssh2.exec("termora-agent --stdio")
   │  │  Read HELLO from agent stdout
   │  │  Session → ACTIVE
   │  │  Proceed to SPAWN
@@ -601,7 +601,7 @@ Hub starts (or reconnects after restart)
   │  Normal operation resumes
   │
   └─ probeSocket(socketPath) fails (no daemon):
-     Hub: spawn detached "nexterm-agent --daemon --socket <path>"
+     Hub: spawn detached "termora-agent --daemon --socket <path>"
      Hub: poll probeSocket() every 200ms (up to 5s)
      ├─ Socket appears → connect, receive HELLO (no AGENT_CHANNEL_STATE on fresh start)
      └─ Timeout → fall back to child_process stdio mode (warm restart)
@@ -653,7 +653,7 @@ Resolved config → xterm.js instance
 
 ### 6.1 Agent Config (`[agent]` section in config.toml)
 
-The `[agent]` section configures the local daemon agent. These settings are defined in the `AgentConfig` interface (`@nexterm/shared/agent-config.ts`):
+The `[agent]` section configures the local daemon agent. These settings are defined in the `AgentConfig` interface (`@termora/shared/agent-config.ts`):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -668,9 +668,9 @@ The `[agent]` section configures the local daemon agent. These settings are defi
 
 | Purpose | Linux / macOS (XDG) | Windows |
 |---------|---------------------|---------|
-| **Config** | `$XDG_CONFIG_HOME/nexterm/` → `~/.config/nexterm/` | `%APPDATA%\nexterm\` |
-| **Data** (DBs) | `$XDG_DATA_HOME/nexterm/` → `~/.local/share/nexterm/` | `%LOCALAPPDATA%\nexterm\` |
-| **State** (runtime) | `$XDG_STATE_HOME/nexterm/` → `~/.local/state/nexterm/` | `%LOCALAPPDATA%\nexterm\` |
+| **Config** | `$XDG_CONFIG_HOME/termora/` → `~/.config/termora/` | `%APPDATA%\termora\` |
+| **Data** (DBs) | `$XDG_DATA_HOME/termora/` → `~/.local/share/termora/` | `%LOCALAPPDATA%\termora\` |
+| **State** (runtime) | `$XDG_STATE_HOME/termora/` → `~/.local/state/termora/` | `%LOCALAPPDATA%\termora\` |
 
 All XDG variables respect user overrides. Fall back to defaults shown above.
 
@@ -708,21 +708,21 @@ CLI and UI read this file to find the hub. Deleted on clean shutdown; stale file
 
 | Package | npm name | Published? | Purpose |
 |---------|----------|-----------|---------|
-| Root | `nexterm` | Yes | CLI entrypoint (`npx nexterm`) |
-| shared | `@nexterm/shared` | Yes | Types, codec, framing |
-| agent | `@nexterm/agent` | Yes | Remote PTY manager (installed on remotes) |
-| hub | `@nexterm/hub` | Yes | Local daemon (imported by root CLI) |
-| web | `@nexterm/web` | No | Vue SPA (built + served by hub) |
-| desktop | `@nexterm/desktop` | No (P1) | Tauri desktop app |
+| Root | `termora` | Yes | CLI entrypoint (`npx termora`) |
+| shared | `@termora/shared` | Yes | Types, codec, framing |
+| agent | `@termora/agent` | Yes | Remote PTY manager (installed on remotes) |
+| hub | `@termora/hub` | Yes | Local daemon (imported by root CLI) |
+| web | `@termora/web` | No | Vue SPA (built + served by hub) |
+| desktop | `@termora/desktop` | No (P1) | Tauri desktop app |
 
-Root `nexterm` package is a thin CLI wrapper that depends on `@nexterm/hub`.
-`npx nexterm` launches the hub daemon. `npx @nexterm/agent` is available for remote install.
+Root `termora` package is a thin CLI wrapper that depends on `@termora/hub`.
+`npx termora` launches the hub daemon. `npx @termora/agent` is available for remote install.
 
 ### 8.2 Directory Layout
 
 ```
-nexterm/
-├── package.json             # nexterm (root CLI entrypoint)
+termora/
+├── package.json             # termora (root CLI entrypoint)
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json       # Shared TS config (strict)
 ├── biome.json               # Linter/formatter config
@@ -733,7 +733,7 @@ nexterm/
 │   ├── SECURITY.md
 │   └── MVP_ROADMAP.md
 ├── packages/
-│   ├── shared/              # @nexterm/shared — types, codec, framing
+│   ├── shared/              # @termora/shared — types, codec, framing
 │   │   ├── package.json
 │   │   └── src/
 │   │       ├── index.ts     # Barrel export
@@ -745,7 +745,7 @@ nexterm/
 │   │       ├── constants.ts # Protocol version, defaults, error codes
 │   │       ├── socket-path.ts # getSocketPath(override?) + probeSocket(path) for UDS
 │   │       └── agent-config.ts # AgentConfig interface (daemon settings)
-│   ├── agent/               # @nexterm/agent — remote PTY manager
+│   ├── agent/               # @termora/agent — remote PTY manager
 │   │   ├── package.json
 │   │   └── src/
 │   │       ├── main.ts      # Entry point (--stdio, --daemon flags)
@@ -755,7 +755,7 @@ nexterm/
 │   │       ├── config.ts    # Agent config (visual_hints)
 │   │       ├── daemon.ts    # DaemonServer: UDS listener, connection displacement, output buffering
 │   │       └── buffer.ts    # OutputBuffer: per-channel ring buffer with global cap
-│   ├── hub/                 # @nexterm/hub — local daemon
+│   ├── hub/                 # @termora/hub — local daemon
 │   │   ├── package.json
 │   │   └── src/
 │   │       ├── main.ts      # Daemon start (exported for root CLI)
@@ -763,7 +763,7 @@ nexterm/
 │   │       ├── api/         # REST route handlers
 │   │       ├── ws/          # WS message handlers
 │   │       ├── session/     # Session manager (local + SSH + daemon)
-│   │       │   ├── nexterm-agent.ts  # NextermAgent: hub-side AgentConnection over UDS
+│   │       │   ├── termora-agent.ts  # TermoraAgent: hub-side AgentConnection over UDS
 │   │       │   └── agent-launcher.ts # connectOrLaunch: probe, spawn, poll daemon
 │   │       ├── ssh.ts       # SSH connection manager
 │   │       ├── cache.ts     # Cache manager
@@ -775,7 +775,7 @@ nexterm/
 │   │       ├── auth.ts      # Token auth + pairing
 │   │       └── cli.ts       # CLI commands (start, stop, host, pair, ...)
 │   └── clients/
-│       ├── web/             # @nexterm/web — Vue 3 SPA (MVP)
+│       ├── web/             # @termora/web — Vue 3 SPA (MVP)
 │       │   ├── package.json
 │       │   ├── vite.config.ts
 │       │   └── src/
@@ -784,7 +784,7 @@ nexterm/
 │       │       ├── composables/ # useTerminal, useWs, useConfig
 │       │       ├── components/  # HostRail, ChannelSidebar, TerminalPane, ...
 │       │       └── services/    # API client, WS client
-│       └── desktop/         # @nexterm/desktop — Tauri v2 (P1, placeholder)
+│       └── desktop/         # @termora/desktop — Tauri v2 (P1, placeholder)
 │           └── README.md
 └── scripts/
     ├── dev.sh               # Start hub + web dev servers
@@ -794,32 +794,32 @@ nexterm/
 ### 8.3 Dependency Graph
 
 ```
-nexterm (root CLI)
-  └── @nexterm/hub
-        ├── @nexterm/shared
-        ├── @nexterm/web (build output embedded as static files)
-        ├── @nexterm/agent (spawned as child process for local sessions)
+termora (root CLI)
+  └── @termora/hub
+        ├── @termora/shared
+        ├── @termora/web (build output embedded as static files)
+        ├── @termora/agent (spawned as child process for local sessions)
         ├── better-sqlite3
         ├── ssh2
         └── fastify + @fastify/websocket
 
-@nexterm/agent
-  ├── @nexterm/shared
+@termora/agent
+  ├── @termora/shared
   ├── node-pty
   └── xterm-headless + @xterm/addon-serialize
 
 Note: Hub does NOT depend on node-pty — all PTY management is in the agent.
 Hub spawns agent locally (child_process) or remotely (SSH).
 
-@nexterm/web
-  ├── @nexterm/shared (types only, tree-shaken)
+@termora/web
+  ├── @termora/shared (types only, tree-shaken)
   ├── vue 3
   ├── pinia
   ├── xterm + @xterm/addon-fit + @xterm/addon-serialize
   └── @msgpack/msgpack
 
-@nexterm/desktop (P1)
-  └── @nexterm/web (embedded in Tauri webview)
+@termora/desktop (P1)
+  └── @termora/web (embedded in Tauri webview)
 ```
 
 ## 9. Technology Stack

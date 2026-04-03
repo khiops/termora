@@ -280,7 +280,7 @@ function getDropInsertIndex(event: DragEvent): number {
 function onTabBarDragOver(event: DragEvent): void {
 	if (!event.dataTransfer) return;
 	const types = event.dataTransfer.types;
-	if (!types.includes("text/x-nexterm-pane") && !types.includes("text/x-nexterm-tab")) return;
+	if (!types.includes("text/x-termora-pane") && !types.includes("text/x-termora-tab")) return;
 	event.dataTransfer.dropEffect = "move";
 	dropInsertIndex.value = getDropInsertIndex(event);
 }
@@ -298,7 +298,7 @@ function onTabBarDrop(event: DragEvent): void {
 	if (!event.dataTransfer) return;
 
 	// Tab reorder drop takes priority
-	const tabData = event.dataTransfer.getData("text/x-nexterm-tab");
+	const tabData = event.dataTransfer.getData("text/x-termora-tab");
 	if (tabData !== "") {
 		event.stopPropagation();
 		const fromIndex = Number.parseInt(tabData, 10);
@@ -311,7 +311,7 @@ function onTabBarDrop(event: DragEvent): void {
 	}
 
 	// Pane-to-new-tab drop (existing behavior)
-	const raw = event.dataTransfer.getData("text/x-nexterm-pane");
+	const raw = event.dataTransfer.getData("text/x-termora-pane");
 	if (!raw) return;
 
 	let data: { channelId: string; paneId: string; hostId: string | null };
@@ -340,7 +340,7 @@ function onTabDragStart(idx: number, event: DragEvent): void {
 	if (!event.dataTransfer) return;
 	dragTabIndex.value = idx;
 	event.dataTransfer.effectAllowed = "move";
-	event.dataTransfer.setData("text/x-nexterm-tab", String(idx));
+	event.dataTransfer.setData("text/x-termora-tab", String(idx));
 }
 
 function onTabDragEnd(): void {

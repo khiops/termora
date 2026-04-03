@@ -15,8 +15,8 @@ import type {
 	HostVerifyMessage,
 	ProtocolMessage,
 	TestConnectMessage,
-} from "@nexterm/shared";
-import { generateId } from "@nexterm/shared";
+} from "@termora/shared";
+import { generateId } from "@termora/shared";
 import { Client as SshClient } from "ssh2";
 import type { AgentConnectionManager } from "./agent-connection-manager.js";
 import { type BinaryVerifyPromptFn, getBinaryCacheDir } from "./agent-deployer.js";

@@ -1,5 +1,5 @@
-import type { AuthPromptResponseMessage } from "@nexterm/shared";
-import { isValidUlid } from "@nexterm/shared";
+import type { AuthPromptResponseMessage } from "@termora/shared";
+import { isValidUlid } from "@termora/shared";
 import type { WsHandlerContext } from "./types.js";
 
 export function handleAuthPromptResponse(

@@ -14,7 +14,7 @@ mod shell;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "nexterm-agent", version)]
+#[command(name = "termora-agent", version)]
 struct Cli {
     /// Run in stdio mode (default, used by hub LocalAgent)
     #[arg(long)]
@@ -52,7 +52,7 @@ async fn main() -> std::io::Result<()> {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "nexterm_agent=info".into()),
+                    .unwrap_or_else(|_| "termora_agent=info".into()),
             )
             .json()
             .with_writer(log_file)
@@ -62,7 +62,7 @@ async fn main() -> std::io::Result<()> {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "nexterm_agent=info".into()),
+                    .unwrap_or_else(|_| "termora_agent=info".into()),
             )
             .with_target(false)
             .with_writer(std::io::stderr)
@@ -78,18 +78,18 @@ async fn main() -> std::io::Result<()> {
                     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
                     format!("{}/.local/state", home)
                 });
-                let dir = format!("{}/nexterm", state_dir);
+                let dir = format!("{}/termora", state_dir);
                 let _ = std::fs::create_dir_all(&dir);
                 format!("{}/agent.socket", dir)
             }
             #[cfg(windows)]
             {
                 let username = std::env::var("USERNAME").unwrap_or_else(|_| "default".into());
-                format!(r"\\.\pipe\nexterm-agent-{}", username)
+                format!(r"\\.\pipe\termora-agent-{}", username)
             }
             #[cfg(not(any(unix, windows)))]
             {
-                "/tmp/nexterm-agent.socket".into()
+                "/tmp/termora-agent.socket".into()
             }
         });
 

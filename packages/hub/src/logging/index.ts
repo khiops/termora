@@ -1,7 +1,7 @@
 export { ChannelLogger } from "./channel-logger.js";
 export { HubLogger } from "./hub-logger.js";
 export { runLogGc } from "./log-gc.js";
-export type { LogConfig } from "@nexterm/shared";
+export type { LogConfig } from "@termora/shared";
 
 export type LoggerRegistry = Map<string, import("./channel-logger.js").ChannelLogger>;
 

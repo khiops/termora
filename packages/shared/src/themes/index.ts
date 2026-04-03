@@ -1,4 +1,4 @@
-import type { NexTermTheme } from "../theme.js";
+import type { TermoraTheme } from "../theme.js";
 import { catppuccinMocha } from "./catppuccin-mocha.js";
 import { dracula } from "./dracula.js";
 import { githubLight } from "./github-light.js";
@@ -9,7 +9,7 @@ import { oneHalfLight } from "./one-half-light.js";
 import { solarizedLight } from "./solarized-light.js";
 import { tokyoNight } from "./tokyo-night.js";
 
-export const BUNDLED_THEMES: Record<string, NexTermTheme> = {
+export const BUNDLED_THEMES: Record<string, TermoraTheme> = {
 	"one-half-dark": oneHalfDark,
 	"catppuccin-mocha": catppuccinMocha,
 	dracula: dracula,

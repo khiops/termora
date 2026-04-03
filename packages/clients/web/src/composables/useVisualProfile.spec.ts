@@ -1,4 +1,4 @@
-import type { Host } from "@nexterm/shared";
+import type { Host } from "@termora/shared";
 import { describe, expect, it } from "vitest";
 import {
 	clampOpacity,

@@ -1,6 +1,6 @@
-import type { NexTermTheme } from "../theme.js";
+import type { TermoraTheme } from "../theme.js";
 
-export const dracula: NexTermTheme = {
+export const dracula: TermoraTheme = {
 	name: "dracula",
 	author: "Zeno Rocha",
 	type: "dark",

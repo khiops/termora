@@ -1,6 +1,6 @@
 import { reactive, watch } from "vue";
 
-const STORAGE_KEY = "nexterm:host-rail-settings";
+const STORAGE_KEY = "termora:host-rail-settings";
 
 export interface HostRailSettingsData {
 	showLabels: boolean;

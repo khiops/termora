@@ -1,4 +1,4 @@
-# nexterm — Storage Specification
+# termora — Storage Specification
 
 > Version: 0.1.0 (MVP)
 > Status: draft
@@ -10,10 +10,10 @@ Two SQLite databases, both in WAL mode:
 
 | Database | Path | Purpose | Size profile |
 |----------|------|---------|-------------|
-| **meta.db** | `$NEXTERM_DATA_DIR/meta.db` | Config + relational data | Small (KB–MB) |
-| **spool.db** | `$NEXTERM_DATA_DIR/spool.db` | Output chunks + snapshots | Large (MB–GB) |
+| **meta.db** | `$TERMORA_DATA_DIR/meta.db` | Config + relational data | Small (KB–MB) |
+| **spool.db** | `$TERMORA_DATA_DIR/spool.db` | Output chunks + snapshots | Large (MB–GB) |
 
-Platform paths for `$NEXTERM_DATA_DIR`: see SPEC.md § 7 (Linux: `~/.local/share/nexterm/`, Windows: `%LOCALAPPDATA%\nexterm\`).
+Platform paths for `$TERMORA_DATA_DIR`: see SPEC.md § 7 (Linux: `~/.local/share/termora/`, Windows: `%LOCALAPPDATA%\termora\`).
 
 **Why 2 databases:**
 - VACUUM spool without blocking meta reads
@@ -394,12 +394,12 @@ Each migration is a **SQL file**, run inside a transaction. Files are discovered
 
 ```bash
 # Full backup (both DBs) — paths shown for Linux, see SPEC.md § 7 for Windows
-cp ~/.local/share/nexterm/meta.db backup/meta.db
-cp ~/.local/share/nexterm/spool.db backup/spool.db
+cp ~/.local/share/termora/meta.db backup/meta.db
+cp ~/.local/share/termora/spool.db backup/spool.db
 
 # Config-only backup (tiny, recommended for sync)
-cp ~/.local/share/nexterm/meta.db backup/meta.db
-cp ~/.config/nexterm/config.toml backup/config.toml
+cp ~/.local/share/termora/meta.db backup/meta.db
+cp ~/.config/termora/config.toml backup/config.toml
 # Spool is regeneratable — no need to backup
 ```
 
@@ -412,8 +412,8 @@ db.backup('backup/meta.db');
 ### 10.2 Workspace Export/Import
 
 ```bash
-nexterm workspace export my-workspace -o workspace.json
-nexterm workspace import workspace.json
+termora workspace export my-workspace -o workspace.json
+termora workspace import workspace.json
 ```
 
 Export format:

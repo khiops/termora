@@ -81,8 +81,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import type { NexTermTheme } from "@nexterm/shared";
-import { BUNDLED_THEME_NAMES, validateTheme } from "@nexterm/shared";
+import type { TermoraTheme } from "@termora/shared";
+import { BUNDLED_THEME_NAMES, validateTheme } from "@termora/shared";
 import { hubBaseUrl } from "../../utils/hub-url.js";
 import { useThemeStore } from "../../stores/theme.js";
 import { useAuthStore } from "../../stores/auth.js";
@@ -94,8 +94,8 @@ const props = defineProps<{
 
 defineEmits<{
 	"create-theme": [];
-	"edit-theme": [theme: NexTermTheme];
-	"select": [theme: NexTermTheme];
+	"edit-theme": [theme: TermoraTheme];
+	"select": [theme: TermoraTheme];
 }>();
 
 const themeStore = useThemeStore();
@@ -155,15 +155,15 @@ async function handleImport(event: Event) {
 const filteredThemes = computed(() => {
 	const query = searchQuery.value.toLowerCase().trim();
 	if (query === "") return themeStore.availableThemes;
-	return themeStore.availableThemes.filter((t: NexTermTheme) =>
+	return themeStore.availableThemes.filter((t: TermoraTheme) =>
 		t.name.toLowerCase().includes(query),
 	);
 });
 
 const sections = computed(() => {
-	const dark: NexTermTheme[] = [];
-	const light: NexTermTheme[] = [];
-	const custom: NexTermTheme[] = [];
+	const dark: TermoraTheme[] = [];
+	const light: TermoraTheme[] = [];
+	const custom: TermoraTheme[] = [];
 
 	for (const theme of filteredThemes.value) {
 		if (!BUNDLED_THEME_NAMES.has(theme.name)) {

@@ -1,4 +1,4 @@
-import { generateId } from "@nexterm/shared";
+import { generateId } from "@termora/shared";
 import type Database from "better-sqlite3";
 
 export interface InsertChunkInput {

@@ -15,9 +15,9 @@ import type {
 	ProtocolMessage,
 	UiAttachOkMessage,
 	UiSpawnOkMessage,
-} from "@nexterm/shared";
-import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@nexterm/shared";
-import type { ElevationMethod } from "@nexterm/shared";
+} from "@termora/shared";
+import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@termora/shared";
+import type { ElevationMethod } from "@termora/shared";
 import type { AgentConnection } from "./agent-connection.js";
 import type { ChannelState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";

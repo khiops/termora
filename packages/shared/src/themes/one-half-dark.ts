@@ -1,6 +1,6 @@
-import type { NexTermTheme } from "../theme.js";
+import type { TermoraTheme } from "../theme.js";
 
-export const oneHalfDark: NexTermTheme = {
+export const oneHalfDark: TermoraTheme = {
 	name: "one-half-dark",
 	author: "Son A. Pham",
 	type: "dark",

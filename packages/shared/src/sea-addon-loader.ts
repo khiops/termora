@@ -42,8 +42,8 @@ export function detectSea(): boolean {
 export function getAddonCacheDir(version: string): string {
 	const base =
 		platform() === "win32"
-			? join(process.env["LOCALAPPDATA"] ?? homedir(), "nexterm", "cache")
-			: join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "nexterm");
+			? join(process.env["LOCALAPPDATA"] ?? homedir(), "termora", "cache")
+			: join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "termora");
 	return join(base, "addons", version);
 }
 

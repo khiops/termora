@@ -1,7 +1,7 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Nexterm",
-	"identifier": "app.nexterm.desktop",
+	"productName": "Termora",
+	"identifier": "app.termora.desktop",
 	"version": "0.1.0",
 	"build": {
 		"devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
 		"windows": [
 			{
 				"label": "main",
-				"title": "Nexterm",
+				"title": "Termora",
 				"width": 1280,
 				"height": 800,
 				"minWidth": 800,
@@ -38,12 +38,12 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"externalBin": ["nexterm-hub", "nexterm-agent"],
+		"externalBin": ["termora-hub", "termora-agent"],
 		"createUpdaterArtifacts": false,
 		"resources": {},
 		"shortDescription": "Local-first session terminal platform",
 		"category": "DeveloperTool",
-		"copyright": "© 2026 Nexterm contributors",
+		"copyright": "© 2026 Termora contributors",
 		"licenseFile": "../../../../LICENSE",
 		"windows": {
 			"nsis": {
@@ -57,7 +57,7 @@
 	},
 	"plugins": {
 		"updater": {
-			"endpoints": ["https://github.com/khiops/nexterm/releases/latest/download/latest.json"],
+			"endpoints": ["https://github.com/khiops/termora/releases/latest/download/latest.json"],
 			"dialog": true,
 			"pubkey": ""
 		},

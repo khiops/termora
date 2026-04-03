@@ -1,6 +1,6 @@
-/// End-to-end integration tests for nexterm-agent.
+/// End-to-end integration tests for termora-agent.
 ///
-/// Each test spawns the real binary via `CARGO_BIN_EXE_nexterm-agent`,
+/// Each test spawns the real binary via `CARGO_BIN_EXE_termora-agent`,
 /// communicates over stdin/stdout using 4-byte LE length-prefixed MessagePack
 /// frames, and verifies correct protocol behavior.
 ///
@@ -15,7 +15,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 // ---------------------------------------------------------------------------
 
 async fn spawn_agent() -> Child {
-    let binary = env!("CARGO_BIN_EXE_nexterm-agent");
+    let binary = env!("CARGO_BIN_EXE_termora-agent");
     Command::new(binary)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -24,7 +24,7 @@ async fn spawn_agent() -> Child {
         // deadlocking the tokio runtime (especially on Windows with ConPTY).
         .stderr(std::process::Stdio::inherit())
         .spawn()
-        .expect("failed to spawn nexterm-agent binary")
+        .expect("failed to spawn termora-agent binary")
 }
 
 /// Read one length-prefixed frame from stdout and decode as `rmpv::Value`.
