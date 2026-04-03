@@ -80,7 +80,7 @@ jobs:
         run: |
           tar czf web-dist.tar.gz -C packages/clients/web/dist .
           tar czf web-embedded.tar.gz -C packages/hub/static .
-          gh release upload "$TAG_NAME" web-dist.tar.gz web-embedded.tar.gz
+          gh release upload "$TAG_NAME" --clobber web-dist.tar.gz web-embedded.tar.gz
 
   build-agent:
     name: Build Agent (${{ matrix.triple }})
@@ -130,7 +130,7 @@ jobs:
             if [ "$ext" = "$f" ]; then ext=""; else ext=".$ext"; fi
             base="termora-agent-${TRIPLE}${ext}"
             cp "$f" "$base"
-            gh release upload "$TAG_NAME" "$base"
+            gh release upload "$TAG_NAME" --clobber "$base"
           done
 
   build-hub:
@@ -188,7 +188,7 @@ jobs:
             if [ "$ext" = "$f" ]; then ext=""; else ext=".$ext"; fi
             base="termora-hub-${TRIPLE}${ext}"
             cp "$f" "$base"
-            gh release upload "$TAG_NAME" "$base"
+            gh release upload "$TAG_NAME" --clobber "$base"
           done
 
   build-desktop:
@@ -250,7 +250,7 @@ jobs:
         run: |
           find packages/clients/desktop/src-tauri/target/release/bundle -type f \
             \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) \
-            -exec gh release upload "$TAG_NAME" {} \;
+            -exec gh release upload "$TAG_NAME" --clobber {} \;
 
   publish-release:
     name: Publish Release
