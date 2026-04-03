@@ -28,6 +28,11 @@
 					"jsonpath": "$.version"
 				},
 				{
+					"type": "toml",
+					"path": "packages/clients/desktop/src-tauri/Cargo.toml",
+					"jsonpath": "$.package.version"
+				},
+				{
 					"type": "generic",
 					"path": "packages/hub/src/build-version.ts",
 					"glob": false
