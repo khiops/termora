@@ -259,8 +259,13 @@ async fn test_full_lifecycle() {
     ]);
     write_frame(&mut stdin, &spawn_msg).await;
 
-    // Expect SPAWN_OK first.
-    let spawn_ok = read_frame_timeout(&mut stdout, 5).await;
+    // Expect SPAWN_OK (skip any LOG frames that may arrive first).
+    let spawn_ok = loop {
+        let frame = read_frame_timeout(&mut stdout, 5).await;
+        if frame["type"].as_str() != Some("LOG") {
+            break frame;
+        }
+    };
     assert_eq!(spawn_ok["type"].as_str(), Some("SPAWN_OK"));
     let ch_id = spawn_ok["channel_id"].as_str().unwrap().to_string();
 
