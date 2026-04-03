@@ -164,18 +164,17 @@ export const useChannelsStore = defineStore('channels', () => {
 		if (authStore.token === null) return;
 		loading.value = true;
 		error.value = null;
-		activeHostId.value = hostId;
 
-		// Clear stale channel state immediately so that STATE_SYNC (which
-		// arrives concurrently over WebSocket) always goes through the
-		// buffering path (pendingStatuses + lastSyncIds).  Any real-time WS
-		// updates that arrive during the REST round-trip are buffered and
-		// applied after channels.value is populated below.
-		// The hub is the single source of truth — no in-memory state from a
-		// previous session should survive into the new fetch.
-		channels.value = [];
-		pendingStatuses.value = new Map();
-		lastSyncIds.value = null;
+		// Clear stale channel state only when switching hosts (or on first
+		// load).  When refreshing the same host (e.g. after SPAWN), keep
+		// existing channels so tabs stay open.
+		const hostChanged = activeHostId.value !== hostId || channels.value.length === 0;
+		activeHostId.value = hostId;
+		if (hostChanged) {
+			channels.value = [];
+			pendingStatuses.value = new Map();
+			lastSyncIds.value = null;
+		}
 
 		try {
 			const [channelsRes] = await Promise.all([

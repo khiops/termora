@@ -224,29 +224,46 @@ describe('useChannelsStore — fetchChannels clears stale state', () => {
 		});
 	}
 
-	it('clears channels at the start of fetchChannels so STATE_SYNC always buffers', async () => {
-		// Simulate stale in-memory state from a previous session
+	it('clears channels when switching hosts so STATE_SYNC buffers', async () => {
+		// Simulate existing state for host-1
 		stubChannelsAndGroups([makeChannelRow('ch-1')]);
 		const store = useChannelsStore();
 		await store.fetchChannels('host-1');
 		expect(store.channels).toHaveLength(1);
 
-		// Now simulate a second fetchChannels call (e.g., reconnect).
-		// channels.value must be [] at the start of the new fetch so that
-		// a concurrent STATE_SYNC is buffered (not applied directly).
+		// Switch to host-2 — channels must be cleared at the start
+		let capturedChannelsLength: number | null = null;
+		stubChannelsAndGroups([makeChannelRow('ch-2')]);
+		const origFetch = mockFetch.getMockImplementation();
+		mockFetch.mockImplementation(async (url: string) => {
+			capturedChannelsLength = store.channels.length;
+			return origFetch!(url);
+		});
+
+		await store.fetchChannels('host-2');
+
+		// channels must have been [] when the REST call started (host changed)
+		expect(capturedChannelsLength).toBe(0);
+		expect(store.channels).toHaveLength(1);
+	});
+
+	it('keeps existing channels when refreshing same host', async () => {
+		stubChannelsAndGroups([makeChannelRow('ch-1')]);
+		const store = useChannelsStore();
+		await store.fetchChannels('host-1');
+		expect(store.channels).toHaveLength(1);
+
+		// Refresh same host — channels must NOT be cleared (tabs stay open)
 		let capturedChannelsLength: number | null = null;
 		const origFetch = mockFetch.getMockImplementation();
 		mockFetch.mockImplementation(async (url: string) => {
-			// Capture channels.value length at the first await point inside fetchChannels
 			capturedChannelsLength = store.channels.length;
 			return origFetch!(url);
 		});
 
 		await store.fetchChannels('host-1');
 
-		// channels must have been [] when the REST call started
-		expect(capturedChannelsLength).toBe(0);
-		// And the result is still populated correctly
+		expect(capturedChannelsLength).toBe(1);
 		expect(store.channels).toHaveLength(1);
 	});
 
