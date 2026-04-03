@@ -49,7 +49,16 @@ jobs:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
           if gh release view "$TAG_NAME" &>/dev/null; then
-            echo "Release $TAG_NAME already exists — reusing"
+            # If the existing release is a stale draft (e.g. from a previous
+            # failed run after retag), delete it and recreate fresh.
+            IS_DRAFT=$(gh release view "$TAG_NAME" --json isDraft -q '.isDraft')
+            if [ "$IS_DRAFT" = "true" ]; then
+              echo "Deleting stale draft release $TAG_NAME"
+              gh release delete "$TAG_NAME" --yes
+              gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
+            else
+              echo "Release $TAG_NAME already exists (published) — reusing"
+            fi
           else
             gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
           fi
