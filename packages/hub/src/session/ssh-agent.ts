@@ -1,19 +1,12 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { type ProtocolMessage, encodeFrame } from "@termora/shared";
-import type { HelloMessage, HostArch, HostOs } from "@termora/shared";
-import type { Host } from "@termora/shared";
-import { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
-import ssh2 from "ssh2";
-import { AgentConnection } from "./agent-connection.js";
-import {
-	type BinaryVerifyPromptFn,
-	DeployError,
-	type DeployOptions,
-	deployAgentIfNeeded,
-} from "./agent-deployer.js";
-import { SendQueue } from "./send-queue.js";
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import type { HelloMessage, Host, HostArch, HostOs } from '@termora/shared';
+import { encodeFrame, type ProtocolMessage } from '@termora/shared';
+import ssh2, { Client, type ClientChannel, type SyncHostVerifier } from 'ssh2';
+import { AgentConnection } from './agent-connection.js';
+import { type BinaryVerifyPromptFn, DeployError, type DeployOptions, deployAgentIfNeeded } from './agent-deployer.js';
+import { SendQueue } from './send-queue.js';
 
 const HELLO_TIMEOUT_MS = 5_000;
 
@@ -33,7 +26,7 @@ export interface HostKeyVerification {
 /** Callback to prompt the user for a secret (password or key passphrase). */
 export type AuthPromptFn = (
 	hostId: string,
-	promptType: "password" | "passphrase" | "elevation",
+	promptType: 'password' | 'passphrase' | 'elevation',
 	message: string,
 ) => Promise<string | null>;
 
@@ -42,7 +35,7 @@ export type AuthPromptFn = (
  * Accepts "user@hostname" or just "hostname".
  */
 function parseSshHost(sshHost: string): { username: string; hostname: string } {
-	const atIdx = sshHost.indexOf("@");
+	const atIdx = sshHost.indexOf('@');
 	if (atIdx !== -1) {
 		return {
 			username: sshHost.slice(0, atIdx),
@@ -50,7 +43,7 @@ function parseSshHost(sshHost: string): { username: string; hostname: string } {
 		};
 	}
 	return {
-		username: process.env.USER ?? process.env.USERNAME ?? "root",
+		username: process.env.USER ?? process.env.USERNAME ?? 'root',
 		hostname: sshHost,
 	};
 }
@@ -81,47 +74,45 @@ export async function buildSshConnectConfig(
 	user: string,
 	promptAuth?: AuthPromptFn | undefined,
 	hostId?: string | undefined,
-): Promise<Parameters<InstanceType<typeof Client>["connect"]>[0]> {
-	const connectConfig: Parameters<InstanceType<typeof Client>["connect"]>[0] = {
+): Promise<Parameters<InstanceType<typeof Client>['connect']>[0]> {
+	const connectConfig: Parameters<InstanceType<typeof Client>['connect']>[0] = {
 		host: hostname,
 		port,
 		username: user,
 	};
 
-	if (auth.method === "password") {
+	if (auth.method === 'password') {
 		if (!promptAuth || !hostId) {
-			throw new Error("password auth not yet supported without promptAuth callback");
+			throw new Error('password auth not yet supported without promptAuth callback');
 		}
-		const secret = await promptAuth(hostId, "password", `Enter password for ${user}@${hostname}`);
+		const secret = await promptAuth(hostId, 'password', `Enter password for ${user}@${hostname}`);
 		if (secret === null) {
-			throw new Error("Authentication cancelled by user");
+			throw new Error('Authentication cancelled by user');
 		}
 		connectConfig.password = secret;
-	} else if (auth.method === "agent") {
+	} else if (auth.method === 'agent') {
 		const authSock = process.env.SSH_AUTH_SOCK;
 		if (!authSock) {
-			throw new Error("SSH_AUTH_SOCK is not set; cannot use agent auth");
+			throw new Error('SSH_AUTH_SOCK is not set; cannot use agent auth');
 		}
 		connectConfig.agent = authSock;
 	} else {
 		// "key" auth — read the private key file
 		if (!auth.keyPath) {
-			throw new Error("Key path is required for key auth");
+			throw new Error('Key path is required for key auth');
 		}
-		const resolvedPath = auth.keyPath.startsWith("~")
-			? auth.keyPath.replace("~", homedir())
-			: auth.keyPath;
+		const resolvedPath = auth.keyPath.startsWith('~') ? auth.keyPath.replace('~', homedir()) : auth.keyPath;
 		const keyContent = readFileSync(resolvedPath);
 		// Detect encrypted keys: use ssh2 parseKey which handles both
 		// legacy PEM ("ENCRYPTED" header) and modern OpenSSH format
 		const parsed = ssh2.utils.parseKey(keyContent);
 		if (parsed instanceof Error) {
 			if (!promptAuth || !hostId) {
-				throw new Error("Key is passphrase-protected but no prompt callback available");
+				throw new Error('Key is passphrase-protected but no prompt callback available');
 			}
-			const secret = await promptAuth(hostId, "passphrase", `Enter passphrase for ${auth.keyPath}`);
+			const secret = await promptAuth(hostId, 'passphrase', `Enter passphrase for ${auth.keyPath}`);
 			if (secret === null) {
-				throw new Error("Authentication cancelled by user");
+				throw new Error('Authentication cancelled by user');
 			}
 			connectConfig.privateKey = keyContent;
 			connectConfig.passphrase = secret;
@@ -163,22 +154,14 @@ export interface SshAgentDeployOptions {
  * Map SshAgentDeployOptions + resolved hostname to the DeployOptions shape
  * expected by deployAgentIfNeeded.
  */
-function toDeployOptions(
-	opts: SshAgentDeployOptions,
-	host: Host,
-	resolvedHostname: string,
-): DeployOptions {
+function toDeployOptions(opts: SshAgentDeployOptions, host: Host, resolvedHostname: string): DeployOptions {
 	return {
 		binaryCache: opts.binaryCache,
 		hostname: opts.hostname ?? resolvedHostname,
 		hostId: host.id,
 		...(opts.pinnedSha256 != null ? { pinnedSha256: opts.pinnedSha256 } : {}),
-		...(opts.sessionTrustedSha256 != null
-			? { sessionTrustedSha256: opts.sessionTrustedSha256 }
-			: {}),
-		...(opts.promptBinaryVerify !== undefined
-			? { promptBinaryVerify: opts.promptBinaryVerify }
-			: {}),
+		...(opts.sessionTrustedSha256 != null ? { sessionTrustedSha256: opts.sessionTrustedSha256 } : {}),
+		...(opts.promptBinaryVerify !== undefined ? { promptBinaryVerify: opts.promptBinaryVerify } : {}),
 		...(opts.onAgentPinned !== undefined ? { onAgentPinned: opts.onAgentPinned } : {}),
 		...(opts.onAgentTrustOnce !== undefined ? { onAgentTrustOnce: opts.onAgentTrustOnce } : {}),
 		...(opts.onAgentUpdated !== undefined ? { onAgentUpdated: opts.onAgentUpdated } : {}),
@@ -189,13 +172,13 @@ export class SshAgent extends AgentConnection {
 	private client: Client | null = null;
 	private channel: ClientChannel | null = null;
 	private channelOpen = false;
-	private readonly sendQueue = new SendQueue("ssh-agent");
+	private readonly sendQueue = new SendQueue('ssh-agent');
 	/**
 	 * Populated by the hostVerifier closure during a connect attempt.
 	 * Accessible after start() resolves or rejects so callers can inspect mismatch state.
 	 */
 	lastKeyVerification: HostKeyVerification = {
-		capturedFingerprint: "",
+		capturedFingerprint: '',
 		mismatch: false,
 		tofu: false,
 	};
@@ -222,12 +205,12 @@ export class SshAgent extends AgentConnection {
 		sessionTrustedFingerprint?: string | null,
 	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
 		if (!this.host.sshHost) {
-			throw new Error("Host has no sshHost configured");
+			throw new Error('Host has no sshHost configured');
 		}
 
 		const { username, hostname } = parseSshHost(this.host.sshHost);
 		const port = this.host.sshPort ?? 22;
-		const authMethod = this.host.sshAuth ?? "key";
+		const authMethod = this.host.sshAuth ?? 'key';
 
 		const client = new Client();
 		this.client = client;
@@ -245,14 +228,14 @@ export class SshAgent extends AgentConnection {
 		// The verifier populates this object synchronously before the connect attempt resolves.
 		// Also synced to this.lastKeyVerification so callers can inspect it after rejection.
 		const keyVerification: HostKeyVerification = {
-			capturedFingerprint: "",
+			capturedFingerprint: '',
 			mismatch: false,
 			tofu: false,
 		};
 		this.lastKeyVerification = keyVerification;
 
 		connectConfig.hostVerifier = ((key: Buffer) => {
-			const hash = createHash("sha256").update(key).digest("base64");
+			const hash = createHash('sha256').update(key).digest('base64');
 			const fingerprint = `SHA256:${hash}`;
 			keyVerification.capturedFingerprint = fingerprint;
 
@@ -274,145 +257,135 @@ export class SshAgent extends AgentConnection {
 			return false;
 		}) as SyncHostVerifier;
 
-		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>(
-			(resolve, reject) => {
-				let resolved = false;
-				const rejectOnce = (err: Error): void => {
-					if (resolved) return;
-					resolved = true;
-					reject(err);
+		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>((resolve, reject) => {
+			let resolved = false;
+			const rejectOnce = (err: Error): void => {
+				if (resolved) return;
+				resolved = true;
+				reject(err);
+			};
+
+			const resolveOnce = (msg: HelloMessage): void => {
+				if (resolved) return;
+				resolved = true;
+				resolve({ hello: msg, keyVerification });
+			};
+
+			// Use `on` (not `once`) so subsequent ssh2 error events (e.g.
+			// KEY_EXCHANGE_FAILED / { code: 3 } emitted after hostVerifier rejection)
+			// are also handled and don't become unhandled EventEmitter throws.
+			// rejectOnce is idempotent — only the first call wins.
+			client.on('error', (err) => {
+				// ssh2 may emit a plain object (e.g. { code: 3 }) rather than an Error
+				// instance when hostVerifier returns false. Normalise to a proper Error
+				// so callers (and vitest .rejects.toThrow()) always receive an Error.
+				if (keyVerification.tofu) {
+					// TOFU rejection — caller will prompt user for first-connect trust decision.
+					rejectOnce(new Error('SSH_TOFU'));
+					return;
+				}
+				if (keyVerification.mismatch) {
+					rejectOnce(
+						new Error(`Host key mismatch: expected ${storedFingerprint}, got ${keyVerification.capturedFingerprint}`),
+					);
+					return;
+				}
+				rejectOnce(err instanceof Error ? err : new Error(String(err)));
+			});
+
+			client.on('close', () => {
+				this.client = null;
+				this.channelOpen = false;
+				this.emit('close', undefined);
+			});
+
+			client.on('ready', () => {
+				// SEC-014: zero credentials immediately after successful auth
+				if (connectConfig.password) connectConfig.password = '';
+				if (connectConfig.passphrase) connectConfig.passphrase = '';
+				// Attach stream handler — called after deploy (or immediately if no deploy needed).
+				const runAgent = (agentPath: string): void => {
+					// Start HELLO timeout NOW — deploy phase is complete, agent is being exec'd.
+					// Timeout is intentionally NOT started earlier so that TOFU binary
+					// verification prompts (up to 30s) don't race against this 5s timer.
+					const helloTimeout = setTimeout(() => {
+						this.cleanup();
+						rejectOnce(new Error('Agent HELLO timeout'));
+					}, HELLO_TIMEOUT_MS);
+
+					// ssh2 Client — sends command over encrypted SSH channel to remote host
+					client.exec(agentPath, (err, stream) => {
+						if (err) {
+							clearTimeout(helloTimeout);
+							rejectOnce(err);
+							return;
+						}
+
+						this.channel = stream;
+						this.channelOpen = true;
+
+						stream.on('data', (data: Buffer) => {
+							this.handleData(data);
+						});
+
+						stream.on('close', () => {
+							clearTimeout(helloTimeout);
+							this.sendQueue.clear();
+							this.channel = null;
+							this.channelOpen = false;
+							client.end();
+						});
+
+						stream.on('error', (streamErr: Error) => {
+							this.emit('error', streamErr);
+						});
+
+						this.sendQueue.attach(stream);
+
+						// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
+						this.once('ready', (msg: HelloMessage) => {
+							clearTimeout(helloTimeout);
+							resolveOnce(msg);
+						});
+					});
 				};
 
-				const resolveOnce = (msg: HelloMessage): void => {
-					if (resolved) return;
-					resolved = true;
-					resolve({ hello: msg, keyVerification });
-				};
-
-				// Use `on` (not `once`) so subsequent ssh2 error events (e.g.
-				// KEY_EXCHANGE_FAILED / { code: 3 } emitted after hostVerifier rejection)
-				// are also handled and don't become unhandled EventEmitter throws.
-				// rejectOnce is idempotent — only the first call wins.
-				client.on("error", (err) => {
-					// ssh2 may emit a plain object (e.g. { code: 3 }) rather than an Error
-					// instance when hostVerifier returns false. Normalise to a proper Error
-					// so callers (and vitest .rejects.toThrow()) always receive an Error.
-					if (keyVerification.tofu) {
-						// TOFU rejection — caller will prompt user for first-connect trust decision.
-						rejectOnce(new Error("SSH_TOFU"));
-						return;
-					}
-					if (keyVerification.mismatch) {
-						rejectOnce(
-							new Error(
-								`Host key mismatch: expected ${storedFingerprint}, got ${keyVerification.capturedFingerprint}`,
-							),
-						);
-						return;
-					}
-					rejectOnce(err instanceof Error ? err : new Error(String(err)));
-				});
-
-				client.on("close", () => {
-					this.client = null;
-					this.channelOpen = false;
-					this.emit("close", undefined);
-				});
-
-				client.on("ready", () => {
-					// SEC-014: zero credentials immediately after successful auth
-					if (connectConfig.password) connectConfig.password = "";
-					if (connectConfig.passphrase) connectConfig.passphrase = "";
-					// Attach stream handler — called after deploy (or immediately if no deploy needed).
-					const runAgent = (agentPath: string): void => {
-						// Start HELLO timeout NOW — deploy phase is complete, agent is being exec'd.
-						// Timeout is intentionally NOT started earlier so that TOFU binary
-						// verification prompts (up to 30s) don't race against this 5s timer.
-						const helloTimeout = setTimeout(() => {
-							this.cleanup();
-							rejectOnce(new Error("Agent HELLO timeout"));
-						}, HELLO_TIMEOUT_MS);
-
-						// ssh2 Client — sends command over encrypted SSH channel to remote host
-						client.exec(agentPath, (err, stream) => {
-							if (err) {
-								clearTimeout(helloTimeout);
-								rejectOnce(err);
+				if (this.deployOptions) {
+					// Auto-deploy is best-effort: if it fails, we still try to run the agent
+					// (the user may have installed it manually in a non-standard path).
+					// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
+					deployAgentIfNeeded(client, this.host, toDeployOptions(this.deployOptions, this.host, hostname))
+						.then((result) => {
+							// Notify caller if new OS/arch info was detected (either via deploy or detection)
+							if (result.os && result.arch) {
+								this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
+							}
+							runAgent(result.remotePath);
+						})
+						.catch((deployErr: unknown) => {
+							// User-initiated rejections must propagate — no fallback
+							if (deployErr instanceof DeployError) {
+								rejectOnce(deployErr);
 								return;
 							}
-
-							this.channel = stream;
-							this.channelOpen = true;
-
-							stream.on("data", (data: Buffer) => {
-								this.handleData(data);
-							});
-
-							stream.on("close", () => {
-								clearTimeout(helloTimeout);
-								this.sendQueue.clear();
-								this.channel = null;
-								this.channelOpen = false;
-								client.end();
-							});
-
-							stream.on("error", (streamErr: Error) => {
-								this.emit("error", streamErr);
-							});
-
-							this.sendQueue.attach(stream);
-
-							// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
-							this.once("ready", (msg: HelloMessage) => {
-								clearTimeout(helloTimeout);
-								resolveOnce(msg);
-							});
+							// Infrastructure failures: propagate — don't silently fall back to an agent that isn't there
+							const deployErrMsg = deployErr instanceof Error ? deployErr.message : String(deployErr);
+							console.warn(`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErrMsg}`);
+							rejectOnce(new Error(`Agent deployment failed: ${deployErrMsg}`));
 						});
-					};
+				} else {
+					runAgent('termora-agent --stdio');
+				}
+			});
 
-					if (this.deployOptions) {
-						// Auto-deploy is best-effort: if it fails, we still try to run the agent
-						// (the user may have installed it manually in a non-standard path).
-						// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
-						deployAgentIfNeeded(
-							client,
-							this.host,
-							toDeployOptions(this.deployOptions, this.host, hostname),
-						)
-							.then((result) => {
-								// Notify caller if new OS/arch info was detected (either via deploy or detection)
-								if (result.os && result.arch) {
-									this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
-								}
-								runAgent(result.remotePath);
-							})
-							.catch((deployErr: unknown) => {
-								// User-initiated rejections must propagate — no fallback
-								if (deployErr instanceof DeployError) {
-									rejectOnce(deployErr);
-									return;
-								}
-								// Infrastructure failures: fall back to termora-agent --stdio
-								const msg = deployErr instanceof Error ? deployErr.message : String(deployErr);
-								process.stderr.write(
-									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${msg}. Trying termora-agent --stdio anyway.\n`,
-								);
-								runAgent("termora-agent --stdio");
-							});
-					} else {
-						runAgent("termora-agent --stdio");
-					}
-				});
-
-				client.connect(connectConfig);
-			},
-		);
+			client.connect(connectConfig);
+		});
 	}
 
 	/** Send a protocol message to the remote agent via the SSH channel stdin (with backpressure). */
 	send(msg: ProtocolMessage): void {
 		if (!this.channel || !this.channelOpen) {
-			throw new Error("SSH agent not connected");
+			throw new Error('SSH agent not connected');
 		}
 		this.sendQueue.send(Buffer.from(encodeFrame(msg)));
 	}

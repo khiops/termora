@@ -1,5 +1,12 @@
 # termora — Backlog
 
+## Completed: SSH spawn error handling + AgentDeployFailed modal (2026-04-03)
+
+- [x] ✅ [Hub] spawn.ts: send ERROR to WS client on unhandled handleSpawn throws (2026-04-03)
+- [x] ✅ [Hub] ssh-agent.ts: stop silent fallback on deploy failure — propagate error instead (2026-04-03)
+- [x] ✅ [Hub] session-manager.ts: pass full DeployError.message so UI gets cache path (2026-04-03)
+- [x] ✅ [Web] AgentDeployFailed.vue: enhanced modal with binary name, cache dir, download link, Try Again button (2026-04-03)
+
 ## Recently Completed: LOGGING-DAEMON (2026-03-21)
 
 (8 blocks archived → docs/historic/done-2026-03.md)

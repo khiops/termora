@@ -16,9 +16,12 @@
 import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
+	AgentConfig,
 	AgentLogMessage,
 	AgentSpawnMessage,
+	ElevationMethod,
 	ErrorMessage,
+	Host,
 	InputMessage,
 	ProtocolMessage,
 	ResizeMessage,
@@ -26,26 +29,25 @@ import type {
 	TestConnectMessage,
 	UiAttachOkMessage,
 	UiSpawnMessage,
-} from "@termora/shared";
-import type { AgentConfig, ElevationMethod, Host } from "@termora/shared";
-import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from "@termora/shared";
-import type { ConfigResolver, GcConfig } from "../config.js";
-import type { HubLogger } from "../logging/hub-logger.js";
-import type { LoggerRegistry } from "../logging/index.js";
-import type { DatabaseManager } from "../storage/db.js";
-import { MetaDAL } from "../storage/meta.js";
-import { SpoolDAL } from "../storage/spool.js";
-import { AgentConnectionManager } from "./agent-connection-manager.js";
-import { DeployError, getBinaryCacheDir } from "./agent-deployer.js";
-import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
-import { OutputChunker } from "./output-chunker.js";
-import type { SharedSessionContext } from "./session-context.js";
-import { SnapshotScheduler } from "./snapshot-scheduler.js";
-import { SpoolGarbageCollector } from "./spool-gc.js";
-import { SshAgent } from "./ssh-agent.js";
-import type { SshAgentDeployOptions } from "./ssh-agent.js";
-import { SshConnectionManager } from "./ssh-connection-manager.js";
-import { StateBroadcaster } from "./state-broadcaster.js";
+} from '@termora/shared';
+import { DEFAULT_AGENT_CONFIG, generateId, validateCustomCommand } from '@termora/shared';
+import type { ConfigResolver, GcConfig } from '../config.js';
+import type { HubLogger } from '../logging/hub-logger.js';
+import type { LoggerRegistry } from '../logging/index.js';
+import type { DatabaseManager } from '../storage/db.js';
+import { MetaDAL } from '../storage/meta.js';
+import { SpoolDAL } from '../storage/spool.js';
+import { AgentConnectionManager } from './agent-connection-manager.js';
+import { DeployError, getBinaryCacheDir } from './agent-deployer.js';
+import { ChannelLifecycleManager } from './channel-lifecycle-manager.js';
+import { OutputChunker } from './output-chunker.js';
+import type { SharedSessionContext } from './session-context.js';
+import { SnapshotScheduler } from './snapshot-scheduler.js';
+import { SpoolGarbageCollector } from './spool-gc.js';
+import type { SshAgentDeployOptions } from './ssh-agent.js';
+import { SshAgent } from './ssh-agent.js';
+import { SshConnectionManager } from './ssh-connection-manager.js';
+import { StateBroadcaster } from './state-broadcaster.js';
 
 export interface WsClient {
 	id: string;
@@ -131,7 +133,7 @@ export class SessionManager {
 		// Wire reconnect callback for restartChannel on SSH hosts
 		this.lifecycle.onReconnectAgent = async (hostId: string): Promise<boolean> => {
 			const host = ctx.metaDal.getHost(hostId);
-			if (!host || host.type !== "ssh") return false;
+			if (!host || host.type !== 'ssh') return false;
 
 			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
 			const firstClient = ctx.clients.values().next().value;
@@ -143,8 +145,8 @@ export class SessionManager {
 				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
 
 				const storedFp = ctx.metaDal.getHostFingerprint(hostId);
-				const sshHostname = host.sshHost?.includes("@")
-					? (host.sshHost.split("@")[1] ?? host.sshHost)
+				const sshHostname = host.sshHost?.includes('@')
+					? (host.sshHost.split('@')[1] ?? host.sshHost)
 					: (host.sshHost ?? host.label);
 				const sshPort = host.sshPort ?? 22;
 				const hostKey = `${sshHostname}:${sshPort}`;
@@ -154,7 +156,7 @@ export class SessionManager {
 
 				// Ensure session exists
 				const session = await this.agentMgr.getOrCreateSession(hostId, true);
-				this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+				this.broadcaster.updateSessionStatus(hostId, session.id, 'active');
 				this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
 				ctx.agents.set(hostId, sshAgent);
 				return true;
@@ -272,7 +274,7 @@ export class SessionManager {
 		}
 
 		if (!hostId) {
-			this.ctx.metaDal.updateSessionStatus(sessionId, "closed");
+			this.ctx.metaDal.updateSessionStatus(sessionId, 'closed');
 			return;
 		}
 
@@ -289,8 +291,8 @@ export class SessionManager {
 
 	/** Build SshAgentDeployOptions for a given host + WS client. */
 	private _buildDeployOpts(hostId: string, host: Host, client: WsClient): SshAgentDeployOptions {
-		const sshHostname = host.sshHost?.includes("@")
-			? (host.sshHost.split("@")[1] ?? host.sshHost)
+		const sshHostname = host.sshHost?.includes('@')
+			? (host.sshHost.split('@')[1] ?? host.sshHost)
 			: (host.sshHost ?? host.label);
 		const binaryCache = getBinaryCacheDir();
 		const pinnedSha256 = this.ctx.metaDal.getHostAgentSha256(hostId);
@@ -312,8 +314,8 @@ export class SessionManager {
 			},
 			onAgentUpdated: (_hid) => {
 				this.broadcaster.broadcastToAllClients({
-					type: "ERROR",
-					code: "AGENT_UPDATED",
+					type: 'ERROR',
+					code: 'AGENT_UPDATED',
 					message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
 				} satisfies ErrorMessage);
 			},
@@ -321,49 +323,49 @@ export class SessionManager {
 	}
 
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
-		this.ctx.hubLogger?.log("debug", "handleSpawn: start", { clientId, hostId: msg.hostId });
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: start', { clientId, hostId: msg.hostId });
 		const client = this.ctx.clients.get(clientId);
 		if (!client) {
-			this.ctx.hubLogger?.log("debug", "handleSpawn: client not found", { clientId });
+			this.ctx.hubLogger?.log('debug', 'handleSpawn: client not found', { clientId });
 			return null;
 		}
 
 		const hostId = await this.agentMgr.resolveHostId(msg.hostId);
-		this.ctx.hubLogger?.log("debug", "handleSpawn: resolvedHostId", { hostId });
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: resolvedHostId', { hostId });
 		const host = this.ctx.metaDal.getHost(hostId);
 		if (!host) {
-			this.ctx.hubLogger?.log("warn", "handleSpawn: host not found", { hostId });
+			this.ctx.hubLogger?.log('warn', 'handleSpawn: host not found', { hostId });
 			const errorMsg: ErrorMessage = {
-				type: "ERROR",
-				code: "HOST_NOT_FOUND",
+				type: 'ERROR',
+				code: 'HOST_NOT_FOUND',
 				message: `Host ${hostId} not found`,
 			};
 			client.send(errorMsg);
 			return null;
 		}
 
-		this.ctx.hubLogger?.log("debug", "handleSpawn: host found", {
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: host found', {
 			hostId,
 			type: host.type,
 			label: host.label,
 		});
-		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
-		this.ctx.hubLogger?.log("debug", "handleSpawn: session", {
+		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === 'ssh');
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: session', {
 			sessionId: session.id,
 			status: session.status,
 		});
 
 		let agent = this.ctx.agents.get(hostId);
-		this.ctx.hubLogger?.log("debug", "handleSpawn: existing agent", {
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: existing agent', {
 			connected: agent?.connected ?? false,
 		});
 		if (!agent?.connected) {
-			if (host.type === "ssh") {
+			if (host.type === 'ssh') {
 				const promptAuth = this.sshMgr.buildPromptAuth(client);
 
 				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
-				const sshHostname = host.sshHost?.includes("@")
-					? (host.sshHost.split("@")[1] ?? host.sshHost)
+				const sshHostname = host.sshHost?.includes('@')
+					? (host.sshHost.split('@')[1] ?? host.sshHost)
 					: (host.sshHost ?? host.label);
 				const sshPort = host.sshPort ?? 22;
 				const hostKey = `${sshHostname}:${sshPort}`;
@@ -379,15 +381,12 @@ export class SessionManager {
 					// Handle deploy errors (user rejection, binary not available)
 					if (err instanceof DeployError) {
 						client.send({
-							type: "ERROR",
+							type: 'ERROR',
 							code: err.code,
-							message:
-								err.code === "AGENT_NOT_AVAILABLE"
-									? `Remote agent not available on ${host.sshHost ?? host.label}`
-									: err.message,
+							message: err.message,
 							hostId,
 						} satisfies ErrorMessage);
-						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						this.broadcaster.updateSessionStatus(hostId, session.id, 'closed');
 						return null;
 					}
 
@@ -397,21 +396,21 @@ export class SessionManager {
 							client,
 							hostId,
 							host.sshHost ?? host.label,
-							kv.mismatch ? (storedFingerprint ?? "") : "",
+							kv.mismatch ? (storedFingerprint ?? '') : '',
 							kv.capturedFingerprint,
 							kv.tofu,
 						);
-						if (action === "reject") {
-							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						if (action === 'reject') {
+							this.broadcaster.updateSessionStatus(hostId, session.id, 'closed');
 							client.send({
-								type: "ERROR",
-								code: "SSH_HOST_KEY_REJECTED",
-								message: "SSH host key rejected by user",
+								type: 'ERROR',
+								code: 'SSH_HOST_KEY_REJECTED',
+								message: 'SSH host key rejected by user',
 							} satisfies ErrorMessage);
 							return null;
 						}
 						const retryFp = kv.capturedFingerprint;
-						if (action === "trust_permanent") {
+						if (action === 'trust_permanent') {
 							this.ctx.metaDal.updateHostFingerprint(hostId, retryFp);
 						} else {
 							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
@@ -419,40 +418,37 @@ export class SessionManager {
 						const retryAgent = new SshAgent(host, promptAuth, deployOpts);
 						try {
 							await retryAgent.start(
-								action === "trust_permanent" ? retryFp : null,
-								action === "trust_once" ? retryFp : undefined,
+								action === 'trust_permanent' ? retryFp : null,
+								action === 'trust_once' ? retryFp : undefined,
 							);
 						} catch (retryErr) {
-							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+							this.broadcaster.updateSessionStatus(hostId, session.id, 'closed');
 							if (retryErr instanceof DeployError) {
 								client.send({
-									type: "ERROR",
+									type: 'ERROR',
 									code: retryErr.code,
-									message:
-										retryErr.code === "AGENT_NOT_AVAILABLE"
-											? `Remote agent not available on ${host.sshHost ?? host.label}`
-											: retryErr.message,
+									message: retryErr.message,
 									hostId,
 								} satisfies ErrorMessage);
 							} else {
 								client.send({
-									type: "ERROR",
-									code: "SSH_CONNECT_FAILED",
-									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+									type: 'ERROR',
+									code: 'SSH_CONNECT_FAILED',
+									message: retryErr instanceof Error ? retryErr.message : 'SSH connection failed',
 								} satisfies ErrorMessage);
 							}
 							return null;
 						}
-						this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+						this.broadcaster.updateSessionStatus(hostId, session.id, 'active');
 						this.agentMgr.wireAgentEvents(hostId, session.id, retryAgent);
 						this.ctx.agents.set(hostId, retryAgent);
 						agent = retryAgent;
 					} else {
-						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						this.broadcaster.updateSessionStatus(hostId, session.id, 'closed');
 						client.send({
-							type: "ERROR",
-							code: "SSH_CONNECT_FAILED",
-							message: err instanceof Error ? err.message : "SSH connection failed",
+							type: 'ERROR',
+							code: 'SSH_CONNECT_FAILED',
+							message: err instanceof Error ? err.message : 'SSH connection failed',
 						} satisfies ErrorMessage);
 						return null;
 					}
@@ -460,21 +456,21 @@ export class SessionManager {
 
 				if (agent == null) {
 					// First connection succeeded without TOFU/mismatch prompt
-					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
+					this.broadcaster.updateSessionStatus(hostId, session.id, 'active');
 					this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
 					this.ctx.agents.set(hostId, sshAgent);
 					agent = sshAgent;
 				}
 			} else {
-				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — connecting to daemon agent", {
+				this.ctx.hubLogger?.log('debug', 'handleSpawn: local host — connecting to daemon agent', {
 					hostId,
 				});
 				agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
-				this.ctx.hubLogger?.log("debug", "handleSpawn: daemon agent connected", { hostId });
+				this.ctx.hubLogger?.log('debug', 'handleSpawn: daemon agent connected', { hostId });
 			}
 		}
 
-		this.ctx.hubLogger?.log("debug", "handleSpawn: agent ready, building SPAWN message", {
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: agent ready, building SPAWN message', {
 			hostId,
 		});
 		const requestId = generateId();
@@ -497,7 +493,7 @@ export class SessionManager {
 				resolvedArgs = msg.args ?? profile.args ?? [];
 				resolvedCwd = msg.cwd ?? profile.cwd ?? resolvedCwd;
 				resolvedEnv = { ...(profile.env ?? {}), ...(msg.env ?? {}) };
-				resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
+				resolvedDirectProcess = msg.directProcess ?? profile.mode === 'process';
 				resolvedElevated = msg.elevated ?? profile.elevated;
 				resolvedLaunchProfileId = profile.id;
 			}
@@ -520,22 +516,20 @@ export class SessionManager {
 
 		// ── Elevation checks ──────────────────────────────────────────────────
 		if (resolvedElevated) {
-			if (host.type === "ssh") {
-				this.ctx.hubLogger?.log(
-					"warn",
-					"ERR-04: elevation not supported over SSH, spawning without elevation",
-					{ hostId },
-				);
+			if (host.type === 'ssh') {
+				this.ctx.hubLogger?.log('warn', 'ERR-04: elevation not supported over SSH, spawning without elevation', {
+					hostId,
+				});
 				resolvedElevated = false;
 			}
 		}
 
 		if (resolvedElevated) {
 			const caps = this.ctx.agentCapabilities.get(hostId) ?? [];
-			if (!caps.includes("launch-profiles")) {
+			if (!caps.includes('launch-profiles')) {
 				this.ctx.hubLogger?.log(
-					"warn",
-					"ERR-05: agent does not advertise launch-profiles capability, spawning without elevation",
+					'warn',
+					'ERR-05: agent does not advertise launch-profiles capability, spawning without elevation',
 					{ hostId },
 				);
 				resolvedElevated = false;
@@ -543,14 +537,12 @@ export class SessionManager {
 		}
 
 		// ── Resolve terminal profile for env mode ─────────────────────────────
-		const terminalProfile = this.ctx.configResolver
-			? this.ctx.configResolver.resolve(hostId)
-			: null;
-		const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
+		const terminalProfile = this.ctx.configResolver ? this.ctx.configResolver.resolve(hostId) : null;
+		const resolvedEnvMode = terminalProfile?.envMode ?? 'inherit';
 
 		// ── Build base spawn message ──────────────────────────────────────────
 		const baseSpawnMsg: AgentSpawnMessage = {
-			type: "SPAWN",
+			type: 'SPAWN',
 			requestId,
 			...(resolvedShell !== undefined ? { shell: resolvedShell } : {}),
 			...(resolvedArgs.length > 0 && { args: resolvedArgs }),
@@ -566,11 +558,11 @@ export class SessionManager {
 		if (resolvedElevated) {
 			const rawMethod = this.ctx.configResolver
 				? this.ctx.configResolver.resolveElevationMethod(host.elevationMethod)
-				: process.platform === "win32"
-					? "gsudo"
-					: "sudo";
+				: process.platform === 'win32'
+					? 'gsudo'
+					: 'sudo';
 			const elevCfg = this._resolveElevationConfig(host.customCommand, rawMethod);
-			if ("validationError" in elevCfg) {
+			if ('validationError' in elevCfg) {
 				client.send(elevCfg.validationError);
 				return null;
 			}
@@ -629,23 +621,19 @@ export class SessionManager {
 				resolvedElevationMethod: method,
 			});
 
-			if (firstResult.channelId !== null || firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED") {
+			if (firstResult.channelId !== null || firstResult.errCode !== 'ELEVATION_PASSWORD_REQUIRED') {
 				return firstResult.channelId;
 			}
 
 			// Passwordless failed — prompt user
 			const promptFn = this.sshMgr.buildPromptAuth(client);
 			const hostname = host.sshHost ?? host.label ?? hostId;
-			const secret = await promptFn(
-				hostId,
-				"elevation",
-				`Enter password for elevated shell on ${hostname}`,
-			);
+			const secret = await promptFn(hostId, 'elevation', `Enter password for elevated shell on ${hostname}`);
 			if (secret === null) {
 				client.send({
-					type: "ERROR",
-					code: "ELEVATION_CANCELLED",
-					message: "Elevation cancelled by user",
+					type: 'ERROR',
+					code: 'ELEVATION_CANCELLED',
+					message: 'Elevation cancelled by user',
 				});
 				return null;
 			}
@@ -683,7 +671,7 @@ export class SessionManager {
 		}
 
 		// ── Non-elevated spawn ─────────────────────────────────────────────────
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sending non-elevated SPAWN", {
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: sending non-elevated SPAWN', {
 			requestId: baseSpawnMsg.requestId,
 			shell: baseSpawnMsg.shell,
 		});
@@ -702,7 +690,7 @@ export class SessionManager {
 			cols,
 			rows,
 		});
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sendSpawnAndWait returned", {
+		this.ctx.hubLogger?.log('debug', 'handleSpawn: sendSpawnAndWait returned', {
 			channelId: spawnResult.channelId,
 			errCode: spawnResult.errCode,
 		});
@@ -716,26 +704,26 @@ export class SessionManager {
 		const channel = this.ctx.channels.get(channelId);
 		if (!channel) {
 			const dbChannel = this.ctx.metaDal.getChannel(channelId);
-			if (dbChannel?.status === "dead") {
+			if (dbChannel?.status === 'dead') {
 				const respawned = await this.lifecycle.respawnDeadChannel(channelId, client, clientId);
 				if (respawned) return true;
 			}
-			const code = dbChannel?.status === "dead" ? "CHANNEL_DEAD" : "CHANNEL_NOT_FOUND";
+			const code = dbChannel?.status === 'dead' ? 'CHANNEL_DEAD' : 'CHANNEL_NOT_FOUND';
 			const errorMsg: ErrorMessage = {
-				type: "ERROR",
+				type: 'ERROR',
 				code,
-				message: `Channel ${channelId} ${code === "CHANNEL_DEAD" ? "is dead" : "not found"}`,
+				message: `Channel ${channelId} ${code === 'CHANNEL_DEAD' ? 'is dead' : 'not found'}`,
 			};
 			client.send(errorMsg);
 			return false;
 		}
 
-		const wasOrphan = channel.status === "orphan";
+		const wasOrphan = channel.status === 'orphan';
 		channel.clients.add(clientId);
 		client.attachedChannels.add(channelId);
 
 		if (wasOrphan) {
-			this.broadcaster.updateChannelStatus(channelId, channel.sessionId, "live");
+			this.broadcaster.updateChannelStatus(channelId, channel.sessionId, 'live');
 		}
 
 		const agent = this.ctx.agents.get(channel.hostId);
@@ -756,7 +744,7 @@ export class SessionManager {
 		if (!agent?.connected) {
 			const { snapshot, tail } = this.lifecycle.buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
-				type: "ATTACH_OK",
+				type: 'ATTACH_OK',
 				channelId,
 				snapshot,
 				tail,
@@ -770,7 +758,7 @@ export class SessionManager {
 			return true;
 		}
 
-		const agentAttach: AgentAttachMessage = { type: "ATTACH", channelId };
+		const agentAttach: AgentAttachMessage = { type: 'ATTACH', channelId };
 		agent.send(agentAttach);
 
 		const pendingKey = `attach:${channelId}`;
@@ -778,19 +766,19 @@ export class SessionManager {
 			const agentResponse = await new Promise<AgentAttachOkMessage>((resolve, reject) => {
 				const timer = setTimeout(() => {
 					this.ctx.pendingRequests.delete(pendingKey);
-					reject(new Error("Agent ATTACH timeout"));
+					reject(new Error('Agent ATTACH timeout'));
 				}, ATTACH_TIMEOUT_MS);
 
 				this.ctx.pendingRequests.set(pendingKey, (incoming: ProtocolMessage) => {
-					if (incoming.type === "ATTACH_OK") {
+					if (incoming.type === 'ATTACH_OK') {
 						const attachOkMsg = incoming as AgentAttachOkMessage;
 						clearTimeout(timer);
 						this.ctx.pendingRequests.delete(pendingKey);
 						resolve(attachOkMsg);
-					} else if (incoming.type === "ERROR") {
+					} else if (incoming.type === 'ERROR') {
 						clearTimeout(timer);
 						this.ctx.pendingRequests.delete(pendingKey);
-						reject(new Error("Agent ATTACH error"));
+						reject(new Error('Agent ATTACH error'));
 					}
 				});
 			});
@@ -798,13 +786,13 @@ export class SessionManager {
 			this.lifecycle.storeSnapshot(channelId, agentResponse.snapshot, agentResponse.lastSeq);
 
 			const tailChunks = this.ctx.spoolDal.getChunksByChannel(channelId, {
-				kind: "output",
+				kind: 'output',
 				afterSeq: agentResponse.lastSeq,
 			});
 			const tail = tailChunks.map((c) => new Uint8Array(c.dataBlob));
 
 			const attachOk: UiAttachOkMessage = {
-				type: "ATTACH_OK",
+				type: 'ATTACH_OK',
 				channelId,
 				snapshot: agentResponse.snapshot,
 				tail,
@@ -818,7 +806,7 @@ export class SessionManager {
 		} catch {
 			const { snapshot, tail } = this.lifecycle.buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
-				type: "ATTACH_OK",
+				type: 'ATTACH_OK',
 				channelId,
 				snapshot,
 				tail,
@@ -842,7 +830,7 @@ export class SessionManager {
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
 		if (!agent) return;
-		const inputMsg: InputMessage = { type: "INPUT", channelId, data };
+		const inputMsg: InputMessage = { type: 'INPUT', channelId, data };
 		agent.send(inputMsg);
 	}
 
@@ -851,33 +839,22 @@ export class SessionManager {
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
 		if (!agent) return;
-		const resizeMsg: ResizeMessage = { type: "RESIZE", channelId, cols, rows };
+		const resizeMsg: ResizeMessage = { type: 'RESIZE', channelId, cols, rows };
 		agent.send(resizeMsg);
 		channel.cols = cols;
 		channel.rows = rows;
 		this.ctx.metaDal.updateChannelDimensions(channelId, cols, rows);
 	}
 
-	handleAuthPromptResponse(
-		clientId: string,
-		hostId: string,
-		secret: string | null,
-		rememberSession?: boolean,
-	): void {
+	handleAuthPromptResponse(clientId: string, hostId: string, secret: string | null, rememberSession?: boolean): void {
 		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret, rememberSession);
 	}
 
-	handleHostVerifyResponse(
-		promptId: string,
-		action: "trust_permanent" | "trust_once" | "reject",
-	): void {
+	handleHostVerifyResponse(promptId: string, action: 'trust_permanent' | 'trust_once' | 'reject'): void {
 		this.sshMgr.handleHostVerifyResponse(promptId, action);
 	}
 
-	handleAgentVerifyResponse(
-		promptId: string,
-		action: "trust_permanent" | "trust_once" | "reject",
-	): void {
+	handleAgentVerifyResponse(promptId: string, action: 'trust_permanent' | 'trust_once' | 'reject'): void {
 		this.sshMgr.handleAgentVerifyResponse(promptId, action);
 	}
 
@@ -890,35 +867,35 @@ export class SessionManager {
 	//   (sm as unknown as { agents: Map<…> }).agents
 	// These getters make those casts resolve correctly without changing behaviour.
 
-	get agents(): SharedSessionContext["agents"] {
+	get agents(): SharedSessionContext['agents'] {
 		return this.ctx.agents;
 	}
 
-	get sessions(): SharedSessionContext["sessions"] {
+	get sessions(): SharedSessionContext['sessions'] {
 		return this.ctx.sessions;
 	}
 
-	get channels(): SharedSessionContext["channels"] {
+	get channels(): SharedSessionContext['channels'] {
 		return this.ctx.channels;
 	}
 
-	get restartTracking(): SharedSessionContext["restartTracking"] {
+	get restartTracking(): SharedSessionContext['restartTracking'] {
 		return this.ctx.restartTracking;
 	}
 
-	get pendingRequests(): SharedSessionContext["pendingRequests"] {
+	get pendingRequests(): SharedSessionContext['pendingRequests'] {
 		return this.ctx.pendingRequests;
 	}
 
-	get pendingAuthPrompts(): SharedSessionContext["pendingAuthPrompts"] {
+	get pendingAuthPrompts(): SharedSessionContext['pendingAuthPrompts'] {
 		return this.ctx.pendingAuthPrompts;
 	}
 
-	get agentCapabilities(): SharedSessionContext["agentCapabilities"] {
+	get agentCapabilities(): SharedSessionContext['agentCapabilities'] {
 		return this.ctx.agentCapabilities;
 	}
 
-	get elevationCache(): SharedSessionContext["elevationCache"] {
+	get elevationCache(): SharedSessionContext['elevationCache'] {
 		return this.ctx.elevationCache;
 	}
 
@@ -952,11 +929,9 @@ export class SessionManager {
 	private _resolveElevationConfig(
 		hostCustomCommand: string | null | undefined,
 		method: ElevationMethod,
-	):
-		| { method: ElevationMethod; customCommand: string | undefined }
-		| { validationError: ErrorMessage } {
+	): { method: ElevationMethod; customCommand: string | undefined } | { validationError: ErrorMessage } {
 		const customCommand =
-			method === "custom" && this.ctx.configResolver
+			method === 'custom' && this.ctx.configResolver
 				? this.ctx.configResolver.resolveCustomCommand(hostCustomCommand)
 				: undefined;
 
@@ -967,8 +942,8 @@ export class SessionManager {
 				const e = err as { code: string; message: string };
 				return {
 					validationError: {
-						type: "ERROR",
-						code: "INVALID_CUSTOM_COMMAND",
+						type: 'ERROR',
+						code: 'INVALID_CUSTOM_COMMAND',
 						message: e.message,
 					},
 				};

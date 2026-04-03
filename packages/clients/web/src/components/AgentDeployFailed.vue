@@ -16,25 +16,50 @@
 							<circle cx="12" cy="15.5" r="0.75" fill="currentColor" stroke="currentColor" stroke-width="1"/>
 						</svg>
 					</span>
-					<h3 id="adf-title" class="adf-title">Remote Agent Not Available</h3>
+					<h3 id="adf-title" class="adf-title">Agent binary not available</h3>
 				</div>
 
 				<p class="adf-body">
-					The termora agent was not found on the remote host and could not be deployed automatically.
+					The agent binary required to connect to <strong>{{ hostname }}</strong> was not found in the local cache.
 				</p>
 
 				<div class="adf-info-box">
-					<p class="adf-info-heading">To resolve this, you can:</p>
-					<ul class="adf-instructions">
-						<li>Install the agent manually on the remote host (ensure <code class="adf-code">termora-agent</code> is in the PATH)</li>
-						<li>Or place the pre-built binary in the local cache for automatic deployment</li>
-					</ul>
+					<table class="adf-detail-table">
+						<tbody>
+							<tr>
+								<td class="adf-detail-label">Expected file</td>
+								<td><code class="adf-code">{{ expectedBinary }}</code></td>
+							</tr>
+							<tr>
+								<td class="adf-detail-label">Cache directory</td>
+								<td><code class="adf-code">{{ cacheDir }}</code></td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<div class="adf-info-box">
+					<p class="adf-info-heading">To resolve this:</p>
+					<ol class="adf-instructions">
+						<li>
+							Download the matching agent binary from the
+							<a
+								href="https://github.com/khiops/termora/releases/latest"
+								target="_blank"
+								rel="noopener noreferrer"
+								class="adf-link"
+							>releases page</a>
+						</li>
+						<li>Rename it to <code class="adf-code">{{ expectedBinary }}</code></li>
+						<li>Save it to the cache directory shown above</li>
+						<li>Click "Try Again"</li>
+					</ol>
 				</div>
 
 				<div class="adf-actions">
 					<button class="adf-btn adf-close" @click="handleClose">Close</button>
 					<button class="adf-btn adf-retry" @click="handleRetry" :disabled="retrying">
-						{{ retrying ? 'Retrying…' : 'Retry' }}
+						{{ retrying ? 'Retrying…' : 'Try Again' }}
 					</button>
 				</div>
 			</div>
@@ -43,15 +68,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { useAgentVerifyStore } from "../stores/agent-verify.js";
-import { useChannelsStore } from "../stores/channels.js";
+import { computed, ref } from 'vue';
+import { useAgentVerifyStore } from '../stores/agent-verify.js';
+import { useChannelsStore } from '../stores/channels.js';
 
 const store = useAgentVerifyStore();
 const channelsStore = useChannelsStore();
 
 const error = computed(() => store.deployError);
 const retrying = ref(false);
+
+/**
+ * Parse the cache directory and expected binary name from the deployer error message.
+ * Message format: "Agent binary not found in cache: /path/to/cache/termora-agent-<os>-<arch>[.exe]. ..."
+ */
+const parsedDetails = computed(() => {
+	const msg = error.value?.message ?? '';
+	const match = msg.match(/Agent binary not found in cache:\s*(.+?)(?:\s*\.|$)/);
+	if (!match) {
+		return { expectedBinary: 'termora-agent-<os>-<arch>', cacheDir: '(unknown)' };
+	}
+	const fullPath = (match[1] ?? '').trim();
+	const lastSlash = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
+	const binaryName = lastSlash >= 0 ? fullPath.slice(lastSlash + 1) : fullPath;
+	const dir = lastSlash >= 0 ? fullPath.slice(0, lastSlash) : '.';
+	return { expectedBinary: binaryName, cacheDir: dir };
+});
+
+const expectedBinary = computed(() => parsedDetails.value.expectedBinary);
+const cacheDir = computed(() => parsedDetails.value.cacheDir);
+
+/**
+ * Use hostId as display name — the full sshHost label is not available in the error payload.
+ */
+const hostname = computed(() => error.value?.hostId ?? 'remote host');
 
 function handleClose(): void {
 	store.clearDeployError();
@@ -89,7 +139,7 @@ async function handleRetry(): Promise<void> {
 	border: 1px solid var(--nt-border);
 	border-radius: 10px;
 	padding: 24px 28px;
-	width: 420px;
+	width: 480px;
 	max-width: calc(100vw - 48px);
 	box-shadow: var(--nt-shadow);
 	display: flex;
@@ -174,6 +224,34 @@ async function handleRetry(): Promise<void> {
 	padding: 1px 4px;
 	font-size: 11px;
 	color: var(--nt-fg);
+	word-break: break-all;
+}
+
+.adf-detail-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.adf-detail-table td {
+	font-size: 12px;
+	padding: 3px 0;
+	vertical-align: top;
+}
+
+.adf-detail-label {
+	color: var(--nt-text-muted);
+	white-space: nowrap;
+	padding-right: 12px;
+	width: 1%;
+}
+
+.adf-link {
+	color: var(--nt-accent);
+	text-decoration: none;
+}
+
+.adf-link:hover {
+	text-decoration: underline;
 }
 
 .adf-actions {
