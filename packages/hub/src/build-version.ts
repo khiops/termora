@@ -5,18 +5,23 @@
  *   1. TERMORA_BUILD_HASH env var (set by CI or SEA esbuild define)
  *   2. `git rev-parse --short HEAD` (dev mode fallback)
  *   3. "dev" (if git is unavailable)
+ *
+ * Resolves the semver version at startup:
+ *   1. TERMORA_VERSION env var (set by CI or SEA esbuild define)
+ *   2. package.json `version` field (dev mode fallback)
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 function resolveGitHash(): string {
 	try {
-		return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-			encoding: "utf-8",
-			stdio: ["pipe", "pipe", "pipe"],
+		return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+			encoding: 'utf-8',
+			stdio: ['pipe', 'pipe', 'pipe'],
 		}).trim();
 	} catch {
-		return "dev";
+		return 'dev';
 	}
 }
 
@@ -31,4 +36,28 @@ export const BUILD_HASH: string = (() => {
 		return env.slice(0, 7);
 	}
 	return resolveGitHash();
+})();
+
+function resolvePackageVersion(): string {
+	try {
+		const require = createRequire(import.meta.url);
+		// Works in both dev (source) and SEA (embedded package.json)
+		const pkg = require('../../package.json') as { version?: string };
+		return pkg.version ?? '0.0.0';
+	} catch {
+		return '0.0.0';
+	}
+}
+
+/**
+ * Returns the semver version string for this hub process.
+ * Cached after first call — safe to call repeatedly.
+ * Resolution order: TERMORA_VERSION env → package.json → "0.0.0"
+ */
+export const HUB_VERSION: string = (() => {
+	const env = process.env.TERMORA_VERSION;
+	if (env && env.length > 0) {
+		return env;
+	}
+	return resolvePackageVersion();
 })();

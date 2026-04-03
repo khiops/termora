@@ -22,15 +22,16 @@ import type {
 	OutputMessage,
 	ProtocolMessage,
 	SessionStatus,
-} from "@termora/shared";
-import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from "@termora/shared";
-import type { AgentConnection } from "./agent-connection.js";
-import { connectOrLaunch } from "./agent-launcher.js";
-import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
-import { TermoraAgent } from "./termora-agent.js";
-import type { SessionState, SharedSessionContext } from "./session-context.js";
-import type { SshConnectionManager } from "./ssh-connection-manager.js";
-import type { StateBroadcaster } from "./state-broadcaster.js";
+} from '@termora/shared';
+import { DEFAULT_CHANNEL_NAME, generateId, getSocketPath } from '@termora/shared';
+import { HUB_VERSION } from '../build-version.js';
+import type { AgentConnection } from './agent-connection.js';
+import { connectOrLaunch } from './agent-launcher.js';
+import type { ChannelLifecycleManager } from './channel-lifecycle-manager.js';
+import type { SessionState, SharedSessionContext } from './session-context.js';
+import type { SshConnectionManager } from './ssh-connection-manager.js';
+import type { StateBroadcaster } from './state-broadcaster.js';
+import { TermoraAgent } from './termora-agent.js';
 
 export class AgentConnectionManager {
 	/** Lazy ref to SshConnectionManager — set after construction to break circular dep */
@@ -45,14 +46,14 @@ export class AgentConnectionManager {
 	// ─── Host / session helpers ───────────────────────────────────────────────
 
 	async ensureLocalHost(): Promise<string> {
-		const existing = this.ctx.metaDal.getHostByLabel("local");
+		const existing = this.ctx.metaDal.getHostByLabel('local');
 		if (existing) return existing.id;
-		const host = this.ctx.metaDal.createHost({ type: "local", label: "local" });
+		const host = this.ctx.metaDal.createHost({ type: 'local', label: 'local' });
 		return host.id;
 	}
 
 	async resolveHostId(requestedId?: string): Promise<string> {
-		if (!requestedId || requestedId === "local") {
+		if (!requestedId || requestedId === 'local') {
 			return this.ensureLocalHost();
 		}
 		return requestedId;
@@ -60,12 +61,12 @@ export class AgentConnectionManager {
 
 	async getOrCreateSession(hostId: string, isSsh: boolean): Promise<SessionState> {
 		const existing = this.ctx.sessions.get(hostId);
-		if (existing && (existing.status === "active" || existing.status === "disconnected")) {
+		if (existing && (existing.status === 'active' || existing.status === 'disconnected')) {
 			return existing;
 		}
 
 		const sessionId = generateId();
-		const initialStatus: SessionStatus = "starting";
+		const initialStatus: SessionStatus = 'starting';
 		this.ctx.metaDal.createSession({ id: sessionId, hostId, status: initialStatus });
 
 		const state: SessionState = { id: sessionId, hostId, status: initialStatus };
@@ -94,10 +95,10 @@ export class AgentConnectionManager {
 			if (!first) continue;
 			const hostType = first.hostType;
 			const sessions = this.ctx.metaDal.listSessions(hostId);
-			const session = sessions.find((s) => s.status !== "closed");
+			const session = sessions.find((s) => s.status !== 'closed');
 			if (!session) {
 				for (const ch of channels) {
-					this.ctx.metaDal.updateChannelStatus(ch.id, "dead");
+					this.ctx.metaDal.updateChannelStatus(ch.id, 'dead');
 				}
 				continue;
 			}
@@ -106,7 +107,7 @@ export class AgentConnectionManager {
 			this.ctx.sessions.set(hostId, {
 				id: session.id,
 				hostId,
-				status: "disconnected",
+				status: 'disconnected',
 			});
 
 			this.ctx.metaDal.markHostChannelsOrphan(hostId);
@@ -114,7 +115,7 @@ export class AgentConnectionManager {
 				this.ctx.channels.set(ch.id, {
 					sessionId: session.id,
 					hostId,
-					status: "orphan",
+					status: 'orphan',
 					clients: new Set(),
 					shell: ch.shell,
 					...(ch.args.length > 0 && { args: ch.args }),
@@ -128,7 +129,7 @@ export class AgentConnectionManager {
 				});
 			}
 
-			if (hostType === "local") {
+			if (hostType === 'local') {
 				try {
 					await this.connectDaemonAgent(hostId, session.id);
 				} catch {
@@ -141,8 +142,8 @@ export class AgentConnectionManager {
 				// attempt reconnect here instead (like local daemon).
 				for (const ch of channels) {
 					const chState = this.ctx.channels.get(ch.id);
-					if (chState) chState.status = "dead";
-					this.ctx.metaDal.updateChannelStatus(ch.id, "dead");
+					if (chState) chState.status = 'dead';
+					this.ctx.metaDal.updateChannelStatus(ch.id, 'dead');
 				}
 			}
 		}
@@ -151,7 +152,7 @@ export class AgentConnectionManager {
 	// ─── Event wiring ─────────────────────────────────────────────────────────
 
 	wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
-		agent.on("message", (msg: ProtocolMessage) => {
+		agent.on('message', (msg: ProtocolMessage) => {
 			// Dispatch pending request responses
 			const rid = (msg as { requestId?: string }).requestId;
 			if (rid) {
@@ -163,7 +164,7 @@ export class AgentConnectionManager {
 			}
 
 			// Dispatch pending attach responses (ATTACH_OK uses channelId, not requestId)
-			if (msg.type === "ATTACH_OK" || msg.type === "ERROR") {
+			if (msg.type === 'ATTACH_OK' || msg.type === 'ERROR') {
 				const cid = (msg as { channelId?: string }).channelId;
 				if (cid) {
 					const handler = this.ctx.pendingRequests.get(`attach:${cid}`);
@@ -174,42 +175,37 @@ export class AgentConnectionManager {
 				}
 			}
 
-			if (msg.type === "HELLO") {
+			if (msg.type === 'HELLO') {
 				const helloMsg = msg as HelloMessage;
-				this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", {
+				this.ctx.hubLogger?.log('debug', 'agent-connection-manager: HELLO received', {
 					hostId,
+					agentVersion: helloMsg.agentVersion,
 					capabilities: helloMsg.capabilities,
 					availableShells: helloMsg.availableShells,
 				});
+				if (helloMsg.agentVersion && helloMsg.agentVersion !== HUB_VERSION) {
+					console.warn(`[termora] Agent version mismatch: agent=${helloMsg.agentVersion} hub=${HUB_VERSION}`);
+				}
 				if (helloMsg.availableShells !== undefined) {
-					this.ctx.metaDal.updateHostDiscoveredShells(
-						hostId,
-						helloMsg.availableShells,
-						helloMsg.defaultShell,
-					);
+					this.ctx.metaDal.updateHostDiscoveredShells(hostId, helloMsg.availableShells, helloMsg.defaultShell);
 				}
 				if (Array.isArray(helloMsg.capabilities)) {
 					this.ctx.agentCapabilities.set(hostId, helloMsg.capabilities);
 				}
-			} else if (msg.type === "OUTPUT") {
+			} else if (msg.type === 'OUTPUT') {
 				const outputMsg = msg as OutputMessage;
 				this.broadcaster.broadcastToChannel(outputMsg.channelId, outputMsg);
 				this.ctx.scheduler.onOutput(outputMsg.channelId);
 				this.ctx.chunker.onOutput(outputMsg.channelId, outputMsg.data);
-			} else if (msg.type === "SNAPSHOT_RES") {
+			} else if (msg.type === 'SNAPSHOT_RES') {
 				const res = msg as AgentSnapshotResMessage;
 				this.ctx.scheduler.onSnapshotResponse(res.channelId);
 				this.lifecycle.storeSnapshot(res.channelId, res.snapshot, res.lastSeq);
-			} else if (msg.type === "CHANNEL_EXIT") {
+			} else if (msg.type === 'CHANNEL_EXIT') {
 				const exitMsg = msg as ChannelExitMessage;
 				const channel = this.ctx.channels.get(exitMsg.channelId);
 				if (channel) {
-					this.broadcaster.updateChannelStatus(
-						exitMsg.channelId,
-						channel.sessionId,
-						"dead",
-						exitMsg.exitCode,
-					);
+					this.broadcaster.updateChannelStatus(exitMsg.channelId, channel.sessionId, 'dead', exitMsg.exitCode);
 				}
 				this.ctx.scheduler.untrackChannel(exitMsg.channelId);
 				this.ctx.chunker.untrackChannel(exitMsg.channelId);
@@ -218,62 +214,58 @@ export class AgentConnectionManager {
 				// Close and remove the channel logger on exit
 				const exitLogger = this.ctx.loggerRegistry?.get(exitMsg.channelId);
 				if (exitLogger) {
-					exitLogger.log("hub", "info", "channel exit", { exitCode: exitMsg.exitCode ?? null });
+					exitLogger.log('hub', 'info', 'channel exit', { exitCode: exitMsg.exitCode ?? null });
 					exitLogger.close();
 					this.ctx.loggerRegistry!.delete(exitMsg.channelId);
 				}
-			} else if (msg.type === "TITLE_CHANGE") {
+			} else if (msg.type === 'TITLE_CHANGE') {
 				this.broadcaster.handleTitleChange(msg as AgentTitleChangeMessage);
-			} else if (msg.type === "PROCESS_TITLE") {
+			} else if (msg.type === 'PROCESS_TITLE') {
 				this.broadcaster.handleProcessTitle(msg as AgentProcessTitleMessage);
-			} else if (msg.type === "BELL") {
+			} else if (msg.type === 'BELL') {
 				const bellMsg = msg as AgentBellMessage;
 				if (this.broadcaster.rateLimitCheck(this.ctx.bellTimestamps, bellMsg.channelId, 10)) {
 					this.broadcaster.broadcastToChannel(bellMsg.channelId, bellMsg);
 				}
-			} else if (msg.type === "NOTIFICATION") {
+			} else if (msg.type === 'NOTIFICATION') {
 				const notifMsg = msg as AgentNotificationMessage;
-				if (
-					this.broadcaster.rateLimitCheck(this.ctx.notificationTimestamps, notifMsg.channelId, 5)
-				) {
+				if (this.broadcaster.rateLimitCheck(this.ctx.notificationTimestamps, notifMsg.channelId, 5)) {
 					this.broadcaster.broadcastToChannel(notifMsg.channelId, notifMsg);
 				}
-			} else if ((msg as { type: string }).type === "LOG") {
+			} else if ((msg as { type: string }).type === 'LOG') {
 				const logMsg = msg as unknown as AgentLogMessage;
 				// Validate level before casting
-				const validLevels = ["trace", "debug", "info", "warn", "error"];
-				const level = (
-					validLevels.includes(logMsg.level) ? logMsg.level : "info"
-				) as LogConfig["level"];
+				const validLevels = ['trace', 'debug', 'info', 'warn', 'error'];
+				const level = (validLevels.includes(logMsg.level) ? logMsg.level : 'info') as LogConfig['level'];
 				const channelLogger = this.ctx.loggerRegistry?.get(logMsg.channelId);
 				if (channelLogger) {
-					channelLogger.log("agent", level, logMsg.msg);
+					channelLogger.log('agent', level, logMsg.msg);
 				} else {
-					this.ctx.hubLogger?.log(level, logMsg.msg, { channelId: logMsg.channelId, src: "agent" });
+					this.ctx.hubLogger?.log(level, logMsg.msg, { channelId: logMsg.channelId, src: 'agent' });
 				}
 			}
 		});
 
 		// The HELLO may have fired before we registered the "message" handler
 		if (agent.helloMessage) {
-			this.ctx.hubLogger?.log("debug", "agent-connection-manager: replaying cached HELLO", {
-				hostId,
-			});
 			const helloMsg = agent.helloMessage;
+			this.ctx.hubLogger?.log('debug', 'agent-connection-manager: replaying cached HELLO', {
+				hostId,
+				agentVersion: helloMsg.agentVersion,
+			});
+			if (helloMsg.agentVersion && helloMsg.agentVersion !== HUB_VERSION) {
+				console.warn(`[termora] Agent version mismatch: agent=${helloMsg.agentVersion} hub=${HUB_VERSION}`);
+			}
 			if (helloMsg.availableShells !== undefined) {
-				this.ctx.metaDal.updateHostDiscoveredShells(
-					hostId,
-					helloMsg.availableShells,
-					helloMsg.defaultShell,
-				);
+				this.ctx.metaDal.updateHostDiscoveredShells(hostId, helloMsg.availableShells, helloMsg.defaultShell);
 			}
 			if (Array.isArray(helloMsg.capabilities)) {
 				this.ctx.agentCapabilities.set(hostId, helloMsg.capabilities);
 			}
 		}
 
-		agent.on("close", () => {
-			this.ctx.hubLogger?.log("info", "agent-connection-manager: agent closed", { hostId });
+		agent.on('close', () => {
+			this.ctx.hubLogger?.log('info', 'agent-connection-manager: agent closed', { hostId });
 			const session = this.ctx.sessions.get(hostId);
 			const host = this.ctx.metaDal.getHost(hostId);
 			this.ctx.agents.delete(hostId);
@@ -282,15 +274,15 @@ export class AgentConnectionManager {
 			if (!session) return;
 
 			if (agent instanceof TermoraAgent) {
-				this.broadcaster.updateSessionStatus(hostId, session.id, "disconnected");
+				this.broadcaster.updateSessionStatus(hostId, session.id, 'disconnected');
 				this.reconnectDaemon(hostId, session.id).catch(() => {
 					this.lifecycle.closeSession(hostId, session.id);
 				});
 				return;
 			}
 
-			if (host?.type === "ssh") {
-				this.broadcaster.updateSessionStatus(hostId, session.id, "disconnected");
+			if (host?.type === 'ssh') {
+				this.broadcaster.updateSessionStatus(hostId, session.id, 'disconnected');
 				this.sshMgr.scheduleReconnect(hostId, session.id, 0, Date.now());
 			} else {
 				this.warmRestartLocal(hostId, session.id).catch(() => {
@@ -304,43 +296,43 @@ export class AgentConnectionManager {
 
 	private async attachDaemon(hostId: string, sessionId: string): Promise<TermoraAgent> {
 		const socketPath = getSocketPath(this.ctx.agentConfig.socketPath);
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", {
+		this.ctx.hubLogger?.log('debug', 'agent-connection-manager: attachDaemon', {
 			hostId,
 			sessionId,
 			socketPath,
 		});
 		const agent = await connectOrLaunch(socketPath, this.ctx.agentConfig);
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", {
+		this.ctx.hubLogger?.log('debug', 'agent-connection-manager: connectOrLaunch succeeded', {
 			hostId,
 			connected: agent.connected,
 		});
 
 		// Send AUTH to daemon agent (required before CHANNEL_STATE handshake)
 		if (this.ctx.primaryToken) {
-			agent.send({ type: "AUTH", token: this.ctx.primaryToken });
+			agent.send({ type: 'AUTH', token: this.ctx.primaryToken });
 		}
 
 		this.wireAgentEvents(hostId, sessionId, agent);
 
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", {
+		this.ctx.hubLogger?.log('debug', 'agent-connection-manager: waiting for channel state', {
 			hostId,
 		});
 		const states = await agent.waitForChannelState();
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", {
+		this.ctx.hubLogger?.log('debug', 'agent-connection-manager: got channel states', {
 			hostId,
 			count: states.length,
 		});
 		this.lifecycle.reconcileChannelState(hostId, states);
 
 		this.ctx.agents.set(hostId, agent);
-		this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
-		this.ctx.hubLogger?.log("info", "agent-connection-manager: agent active", { hostId });
+		this.broadcaster.updateSessionStatus(hostId, sessionId, 'active');
+		this.ctx.hubLogger?.log('info', 'agent-connection-manager: agent active', { hostId });
 
 		return agent;
 	}
 
 	async connectDaemonAgent(hostId: string, sessionId: string): Promise<TermoraAgent> {
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectDaemonAgent", {
+		this.ctx.hubLogger?.log('debug', 'agent-connection-manager: connectDaemonAgent', {
 			hostId,
 			sessionId,
 		});
@@ -385,7 +377,7 @@ export class AgentConnectionManager {
 				this.ctx.chunker.trackChannel(channelId);
 			},
 			(channelId, ch) => {
-				this.broadcaster.updateChannelStatus(channelId, ch.sessionId, "dead");
+				this.broadcaster.updateChannelStatus(channelId, ch.sessionId, 'dead');
 			},
 		);
 	}

@@ -26,6 +26,11 @@
 					"type": "json",
 					"path": "packages/clients/desktop/src-tauri/tauri.conf.json",
 					"jsonpath": "$.version"
+				},
+				{
+					"type": "generic",
+					"path": "packages/hub/src/build-version.ts",
+					"glob": false
 				}
 			]
 		}

@@ -69,8 +69,8 @@ Source: read from root `package.json` at build time.
 | Version | `VERSION` from shared |
 | Build | `BUILD_HASH` (7-char SHA) |
 | Website | https://o2csi.com |
-| Repository | https://github.com/nicmusic/termora |
-| Issues | https://github.com/nicmusic/termora/issues |
+| Repository | https://github.com/khiops/termora |
+| Issues | https://github.com/khiops/termora/issues |
 | License | MIT (from package.json) |
 
 ### UI

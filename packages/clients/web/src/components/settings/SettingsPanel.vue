@@ -73,28 +73,42 @@
 								</template>
 							</div>
 						</div>
+
+						<!-- About footer -->
+						<div class="settings-footer">
+							<button
+								class="settings-about-btn"
+								type="button"
+								@click="showAbout = true"
+							>
+								About Termora
+							</button>
+						</div>
 					</div>
 				</Transition>
 			</div>
 		</Transition>
 	</Teleport>
+
+	<AboutModal :show="showAbout" @close="showAbout = false" />
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from "vue";
-import ScopeTabBar from "./ScopeTabBar.vue";
-import CategoryNav from "./CategoryNav.vue";
-import AppearanceCategory from "./categories/AppearanceCategory.vue";
-import WallpaperCategory from "./categories/WallpaperCategory.vue";
-import SchemaCategory from "./categories/SchemaCategory.vue";
-import KeybindingsCategory from "./categories/KeybindingsCategory.vue";
-import ElevationCategory from "./categories/ElevationCategory.vue";
-import ProfilesSettings from "./ProfilesSettings.vue";
-import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
-import { useSettingsStore, type Scope } from "../../stores/settings.js";
-import { useHostsStore } from "../../stores/hosts.js";
-import { useChannelsStore } from "../../stores/channels.js";
-import { useToastStore } from "../../stores/toast.js";
+import { DEFAULT_CHANNEL_NAME } from '@termora/shared';
+import { computed, ref, watch } from 'vue';
+import { useChannelsStore } from '../../stores/channels.js';
+import { useHostsStore } from '../../stores/hosts.js';
+import { type Scope, useSettingsStore } from '../../stores/settings.js';
+import { useToastStore } from '../../stores/toast.js';
+import AboutModal from '../AboutModal.vue';
+import CategoryNav from './CategoryNav.vue';
+import AppearanceCategory from './categories/AppearanceCategory.vue';
+import ElevationCategory from './categories/ElevationCategory.vue';
+import KeybindingsCategory from './categories/KeybindingsCategory.vue';
+import SchemaCategory from './categories/SchemaCategory.vue';
+import WallpaperCategory from './categories/WallpaperCategory.vue';
+import ProfilesSettings from './ProfilesSettings.vue';
+import ScopeTabBar from './ScopeTabBar.vue';
 
 const props = defineProps<{
 	visible: boolean;
@@ -108,6 +122,8 @@ const settingsStore = useSettingsStore();
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
 const toastStore = useToastStore();
+
+const showAbout = ref(false);
 
 // ─── Derived context ──────────────────────────────────────────────────
 
@@ -145,8 +161,8 @@ watch(
 watch(
 	() => showHost.value,
 	(hasHost) => {
-		if (!hasHost && settingsStore.activeScope === "host") {
-			settingsStore.activeScope = "global";
+		if (!hasHost && settingsStore.activeScope === 'host') {
+			settingsStore.activeScope = 'global';
 		}
 	},
 );
@@ -154,8 +170,8 @@ watch(
 watch(
 	() => showChannel.value,
 	(hasChannel) => {
-		if (!hasChannel && settingsStore.activeScope === "channel") {
-			settingsStore.activeScope = "global";
+		if (!hasChannel && settingsStore.activeScope === 'channel') {
+			settingsStore.activeScope = 'global';
 		}
 	},
 );
@@ -167,31 +183,22 @@ watch(
  * the given scope (i.e. every value will fall back to a higher scope).
  */
 function hasNoScopeOverrides(scope: Scope): boolean {
-	if (scope === "global") return false;
+	if (scope === 'global') return false;
 	if (!settingsStore.cascade) return false;
-	const layer =
-		scope === "host"
-			? settingsStore.cascade.terminal.host
-			: settingsStore.cascade.terminal.channel;
+	const layer = scope === 'host' ? settingsStore.cascade.terminal.host : settingsStore.cascade.terminal.channel;
 	if (!layer) return true;
 	// If every own key is null/undefined the scope has no overrides
-	return Object.values(layer as Record<string, unknown>).every(
-		(v) => v === null || v === undefined,
-	);
+	return Object.values(layer as Record<string, unknown>).every((v) => v === null || v === undefined);
 }
 
 watch(
 	() => settingsStore.activeScope,
 	(scope) => {
-		if (scope === "global") return;
+		if (scope === 'global') return;
 		if (!settingsStore.cascade) return;
 		if (hasNoScopeOverrides(scope)) {
-			const scopeName = scope === "host" ? hostName.value ?? "host" : "channel";
-			toastStore.show(
-				"info",
-				`No overrides at ${scopeName} level — showing inherited values`,
-				3000,
-			);
+			const scopeName = scope === 'host' ? (hostName.value ?? 'host') : 'channel';
+			toastStore.show('info', `No overrides at ${scopeName} level — showing inherited values`, 3000);
 		}
 	},
 );
@@ -272,6 +279,30 @@ watch(
 	height: 100%;
 	color: var(--nt-text-secondary);
 	font-size: 13px;
+}
+
+.settings-footer {
+	flex-shrink: 0;
+	padding: 10px 16px;
+	border-top: 1px solid var(--nt-border);
+	display: flex;
+	justify-content: center;
+}
+
+.settings-about-btn {
+	background: transparent;
+	border: none;
+	color: var(--nt-text-secondary);
+	font-size: 12px;
+	cursor: pointer;
+	padding: 4px 8px;
+	border-radius: 4px;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.settings-about-btn:hover {
+	color: var(--nt-fg);
+	background: var(--nt-border);
 }
 
 /* ── Transitions ──────────────────────────────────────────────────────── */
