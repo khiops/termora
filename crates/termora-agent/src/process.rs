@@ -80,7 +80,7 @@ fn get_title_windows_native(pid: u32) -> Option<String> {
 
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle == 0 {
+        if handle.is_null() {
             return None;
         }
         let mut buf = [0u16; 260]; // MAX_PATH
