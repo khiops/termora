@@ -283,6 +283,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
+          echo "Publishing release: $TAG_NAME"
           gh release delete-asset "$TAG_NAME" web-dist.tar.gz --yes || true
           gh release delete-asset "$TAG_NAME" web-embedded.tar.gz --yes || true
           gh release edit "$TAG_NAME" --draft=false
+          IS_DRAFT=$(gh release view "$TAG_NAME" --json isDraft -q '.isDraft')
+          echo "Release $TAG_NAME draft=$IS_DRAFT"
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "::error::Release $TAG_NAME is still draft after edit!"
+            exit 1
+          fi
