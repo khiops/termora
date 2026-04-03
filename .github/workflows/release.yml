@@ -222,6 +222,15 @@ jobs:
           workspaces: packages/clients/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm -F @termora/shared build
+      - name: Align tauri.conf.json version with release tag
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          CONF="packages/clients/desktop/src-tauri/tauri.conf.json"
+          node -e "const f=require('fs'); const c=JSON.parse(f.readFileSync('$CONF','utf8')); c.version='$VERSION'; f.writeFileSync('$CONF', JSON.stringify(c,null,'\t')+'\n');"
+          echo "Set tauri.conf.json version to $VERSION"
       - name: Download assets from release
         shell: bash
         env:
