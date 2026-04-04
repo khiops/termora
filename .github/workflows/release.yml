@@ -48,17 +48,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
+          # Delete ALL draft releases for this tag (there can be duplicates
+          # from concurrent or retried runs).
+          DRAFT_IDS=$(gh api repos/${{ github.repository }}/releases \
+            --jq "[.[] | select(.tag_name==\"$TAG_NAME\" and .draft) | .id] | .[]")
+          for id in $DRAFT_IDS; do
+            echo "Deleting stale draft release id=$id"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$id"
+          done
+          # Check if a published release already exists
           if gh release view "$TAG_NAME" &>/dev/null; then
-            # If the existing release is a stale draft (e.g. from a previous
-            # failed run after retag), delete it and recreate fresh.
-            IS_DRAFT=$(gh release view "$TAG_NAME" --json isDraft -q '.isDraft')
-            if [ "$IS_DRAFT" = "true" ]; then
-              echo "Deleting stale draft release $TAG_NAME"
-              gh release delete "$TAG_NAME" --yes
-              gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
-            else
-              echo "Release $TAG_NAME already exists (published) — reusing"
-            fi
+            echo "Release $TAG_NAME already exists (published) — reusing"
           else
             gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
           fi
