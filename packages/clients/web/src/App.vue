@@ -16,6 +16,9 @@
 		<!-- Agent deploy failed dialog — AGENT_NOT_AVAILABLE error with retry, rendered via Teleport -->
 		<AgentDeployFailed />
 
+		<!-- Global in-app toast notifications (SSH errors, spawn failures, etc.) -->
+		<ToastContainer />
+
 		<!-- Command Palette — Teleport to body, triggered by Ctrl+P / Cmd+P -->
 		<CommandPalette />
 
@@ -286,50 +289,57 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref, toRef, watch } from "vue";
-import TitleBar from "./components/TitleBar.vue";
-import { useResizable } from "./composables/useResizable.js";
-import { generateId } from "@termora/shared";
-import type { Host } from "@termora/shared";
-import { useAuthStore } from "./stores/auth.js";
-import { useSessionStore } from "./stores/session.js";
-import { useHostsStore } from "./stores/hosts.js";
-import { useChannelsStore } from "./stores/channels.js";
-import { useConfigStore } from "./stores/config.js";
-import { useThemeStore } from "./stores/theme.js";
-import { useWriteLockStore } from "./stores/writelock.js";
-import { countPanes, purgeDeadTabs, purgeOrphanedTabs, collectTerminalChannelIds, useLayout } from "./composables/useLayout.js";
-import type { DropZone } from "./composables/useLayout.js";
-import { useCommandPalette } from "./composables/useCommandPalette.js";
-import { useProfilesStore } from "./stores/profiles.js";
-import { useWindowTitle } from "./composables/useWindowTitle.js";
-import { useTabTitle } from "./composables/useTabTitle.js";
-import { useMultiPaneSearch, MULTI_PANE_SEARCH_KEY } from "./composables/useMultiPaneSearch.js";
-import { useAutoSwitch } from "./composables/useAutoSwitch.js";
-import { hubBaseUrl, initHubPort } from "./utils/hub-url.js";
-import HostRail from "./components/HostRail.vue";
-import ChannelSidebar from "./components/ChannelSidebar.vue";
-import TabBar from "./components/TabBar.vue";
-import PaneLayout from "./components/PaneLayout.vue";
-import PairingCodeGenerator from "./components/PairingCodeGenerator.vue";
-import PairingScreen from "./components/PairingScreen.vue";
-import WriteRequestDialog from "./components/WriteRequestDialog.vue";
-import AuthPromptDialog from "./components/AuthPromptDialog.vue";
-import HostKeyWarning from "./components/HostKeyWarning.vue";
-import AgentBinaryVerify from "./components/AgentBinaryVerify.vue";
-import AgentDeployFailed from "./components/AgentDeployFailed.vue";
-import CommandPalette from "./components/CommandPalette.vue";
-import SettingsPanel from "./components/settings/SettingsPanel.vue";
-import ConfigureCommandDialog from "./components/ConfigureCommandDialog.vue";
-import ConfirmDialog from "./components/ConfirmDialog.vue";
-import HostModal from "./components/HostModal.vue";
-import HostContextMenu from "./components/HostContextMenu.vue";
-import GroupContextMenu from "./components/GroupContextMenu.vue";
-import RailContextMenu from "./components/RailContextMenu.vue";
-import DeleteHostModal from "./components/DeleteHostModal.vue";
-import BatchImportModal from "./components/BatchImportModal.vue";
-import GroupActionDialog from "./components/GroupActionDialog.vue";
-import SidebarContextMenu from "./components/SidebarContextMenu.vue";
+import type { Host } from '@termora/shared';
+import { generateId } from '@termora/shared';
+import { computed, onMounted, onUnmounted, provide, ref, toRef, watch } from 'vue';
+import AgentBinaryVerify from './components/AgentBinaryVerify.vue';
+import AgentDeployFailed from './components/AgentDeployFailed.vue';
+import AuthPromptDialog from './components/AuthPromptDialog.vue';
+import BatchImportModal from './components/BatchImportModal.vue';
+import ChannelSidebar from './components/ChannelSidebar.vue';
+import CommandPalette from './components/CommandPalette.vue';
+import ConfigureCommandDialog from './components/ConfigureCommandDialog.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
+import DeleteHostModal from './components/DeleteHostModal.vue';
+import GroupActionDialog from './components/GroupActionDialog.vue';
+import GroupContextMenu from './components/GroupContextMenu.vue';
+import HostContextMenu from './components/HostContextMenu.vue';
+import HostKeyWarning from './components/HostKeyWarning.vue';
+import HostModal from './components/HostModal.vue';
+import HostRail from './components/HostRail.vue';
+import PairingCodeGenerator from './components/PairingCodeGenerator.vue';
+import PairingScreen from './components/PairingScreen.vue';
+import PaneLayout from './components/PaneLayout.vue';
+import RailContextMenu from './components/RailContextMenu.vue';
+import SidebarContextMenu from './components/SidebarContextMenu.vue';
+import SettingsPanel from './components/settings/SettingsPanel.vue';
+import TabBar from './components/TabBar.vue';
+import TitleBar from './components/TitleBar.vue';
+import ToastContainer from './components/ToastContainer.vue';
+import WriteRequestDialog from './components/WriteRequestDialog.vue';
+import { useAutoSwitch } from './composables/useAutoSwitch.js';
+import { useCommandPalette } from './composables/useCommandPalette.js';
+import type { DropZone } from './composables/useLayout.js';
+import {
+	collectTerminalChannelIds,
+	countPanes,
+	purgeDeadTabs,
+	purgeOrphanedTabs,
+	useLayout,
+} from './composables/useLayout.js';
+import { MULTI_PANE_SEARCH_KEY, useMultiPaneSearch } from './composables/useMultiPaneSearch.js';
+import { useResizable } from './composables/useResizable.js';
+import { useTabTitle } from './composables/useTabTitle.js';
+import { useWindowTitle } from './composables/useWindowTitle.js';
+import { useAuthStore } from './stores/auth.js';
+import { useChannelsStore } from './stores/channels.js';
+import { useConfigStore } from './stores/config.js';
+import { useHostsStore } from './stores/hosts.js';
+import { useProfilesStore } from './stores/profiles.js';
+import { useSessionStore } from './stores/session.js';
+import { useThemeStore } from './stores/theme.js';
+import { useWriteLockStore } from './stores/writelock.js';
+import { hubBaseUrl, initHubPort } from './utils/hub-url.js';
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -340,9 +350,9 @@ const configStore = useConfigStore();
 function saveLayoutWidth(key: string, value: number): void {
 	if (authStore.token === null) return;
 	void fetch(`${hubBaseUrl()}/api/config/ui`, {
-		method: "PUT",
+		method: 'PUT',
 		headers: {
-			"Content-Type": "application/json",
+			'Content-Type': 'application/json',
 			Authorization: `Bearer ${authStore.token}`,
 		},
 		body: JSON.stringify({ layout: { [key]: value } }),
@@ -353,7 +363,7 @@ const railResize = useResizable({
 	initialWidth: 48,
 	minWidth: 48,
 	maxWidth: 120,
-	onResizeEnd: (width) => saveLayoutWidth("hostRailWidth", width),
+	onResizeEnd: (width) => saveLayoutWidth('hostRailWidth', width),
 });
 
 const sidebarResize = useResizable({
@@ -361,7 +371,7 @@ const sidebarResize = useResizable({
 	minWidth: 140,
 	maxWidth: 400,
 	collapseThreshold: 80,
-	onResizeEnd: (width) => saveLayoutWidth("sidebarWidth", width),
+	onResizeEnd: (width) => saveLayoutWidth('sidebarWidth', width),
 });
 
 // Apply persisted layout widths once the config loads (after auth).
@@ -385,8 +395,8 @@ watch(
 );
 
 const layoutStyle = computed(() => ({
-	"--rail-w": `${railResize.width.value}px`,
-	"--sidebar-w": `${sidebarResize.collapsed.value ? 0 : sidebarResize.width.value}px`,
+	'--rail-w': `${railResize.width.value}px`,
+	'--sidebar-w': `${sidebarResize.collapsed.value ? 0 : sidebarResize.width.value}px`,
 }));
 const hostsStore = useHostsStore();
 const channelsStore = useChannelsStore();
@@ -425,24 +435,24 @@ watch(
 // Wire up palette external actions (add-host, settings, ssh-import, toggle-sidebar, pairing-code)
 commandPalette.onExternalAction.value = (actionId: string) => {
 	switch (actionId) {
-		case "action:add-host":
+		case 'action:add-host':
 			editingHost.value = null;
 			showHostModal.value = true;
 			break;
-		case "action:settings":
+		case 'action:settings':
 			showSettings.value = true;
 			break;
-		case "action:ssh-import":
+		case 'action:ssh-import':
 			showBatchImport.value = true;
 			break;
-		case "action:toggle-sidebar":
+		case 'action:toggle-sidebar':
 			sidebarResize.collapsed.value = !sidebarResize.collapsed.value;
 			break;
-		case "action:pairing-code":
+		case 'action:pairing-code':
 			showPairingGenerator.value = true;
 			break;
 		default:
-			console.warn("[CommandPalette] unhandled external action:", actionId);
+			console.warn('[CommandPalette] unhandled external action:', actionId);
 	}
 };
 const hostContextMenu = ref<{
@@ -461,9 +471,9 @@ const railContextMenu = ref<{ x: number; y: number } | null>(null);
 const createGroupDialogVisible = ref(false);
 // ID of the group being renamed/deleted
 const renameGroupId = ref<string | null>(null);
-const renameGroupCurrentName = ref<string>("");
+const renameGroupCurrentName = ref<string>('');
 const deleteGroupId = ref<string | null>(null);
-const deleteGroupCurrentName = ref<string>("");
+const deleteGroupCurrentName = ref<string>('');
 // Channel-group create dialog + sidebar context menu
 const sidebarContextMenu = ref<{ x: number; y: number } | null>(null);
 const createChannelGroupDialogVisible = ref(false);
@@ -485,13 +495,13 @@ async function applyCascadeTheme(channelId: string): Promise<void> {
 	if (authStore.token === null) return;
 	try {
 		const params = new URLSearchParams();
-		if (hostId) params.set("host_id", hostId);
-		params.set("channel_id", channelId);
+		if (hostId) params.set('host_id', hostId);
+		params.set('channel_id', channelId);
 		const res = await fetch(`${hubBaseUrl()}/api/config/cascade?${params.toString()}`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) return;
-		const data = await res.json() as {
+		const data = (await res.json()) as {
 			terminal: {
 				resolved: { theme?: string };
 				host?: { theme?: string } | null;
@@ -538,12 +548,10 @@ watch(
 
 // ─── Window title ────────────────────────────────────────────────────────────
 
-const windowTitleEnabled = computed(
-	() => configStore.uiConfig.title?.windowTitle !== false,
-);
+const windowTitleEnabled = computed(() => configStore.uiConfig.title?.windowTitle !== false);
 
 const windowTitleFormat = computed(
-	() => configStore.uiConfig.title?.windowFormat ?? "termora - {prefix}{host} - {title}",
+	() => configStore.uiConfig.title?.windowFormat ?? 'termora - {prefix}{host} - {title}',
 );
 
 const activeChannelId = computed(() => {
@@ -552,23 +560,20 @@ const activeChannelId = computed(() => {
 	return layout.getActiveChannelId(tab.id);
 });
 /** Resolved title of the active tab's channel (no prefix, no truncation). */
-const { resolvedTitle: _resolvedTitle } = useTabTitle(
-	activeChannelId,
-	toRef(channelsStore, "channels"),
-);
-const activeTitle = computed(() => (activeChannelId.value === null ? "" : _resolvedTitle.value));
+const { resolvedTitle: _resolvedTitle } = useTabTitle(activeChannelId, toRef(channelsStore, 'channels'));
+const activeTitle = computed(() => (activeChannelId.value === null ? '' : _resolvedTitle.value));
 
 /** Label of the host that owns the active tab's channel. */
 const activeHost = computed(() => {
 	const hostId = hostsStore.selectedHostId;
-	if (hostId === null) return "";
+	if (hostId === null) return '';
 	const host = hostsStore.hosts.find((h) => h.id === hostId);
-	return host?.label ?? "";
+	return host?.label ?? '';
 });
 
 /** Per-host prefix from config (global default from [title] section). */
 const activePrefix = computed(() => {
-	return configStore.uiConfig.title?.prefix ?? "";
+	return configStore.uiConfig.title?.prefix ?? '';
 });
 
 useWindowTitle({
@@ -583,20 +588,20 @@ useWindowTitle({
 
 const confirmDialog = ref({
 	visible: false,
-	title: "",
-	message: "",
+	title: '',
+	message: '',
 	action: null as (() => void) | null,
-	actionKey: "" as string,
+	actionKey: '' as string,
 });
 
 /**
  * Check if a confirmation should be skipped based on localStorage preferences.
  */
 function shouldSkipConfirm(action: string): boolean {
-	if (localStorage.getItem(`termora:skip${action}`) === "true") return true;
+	if (localStorage.getItem(`termora:skip${action}`) === 'true') return true;
 	const hostId = channelsStore.activeHostId;
 	if (hostId) {
-		if (localStorage.getItem(`termora:skip${action}:${hostId}`) === "true") return true;
+		if (localStorage.getItem(`termora:skip${action}:${hostId}`) === 'true') return true;
 	}
 	return false;
 }
@@ -609,10 +614,10 @@ function onConfirmAction(remember: { host: boolean; global: boolean }): void {
 	const actionKey = confirmDialog.value.actionKey;
 
 	if (remember.global) {
-		localStorage.setItem(`termora:skip${actionKey}`, "true");
+		localStorage.setItem(`termora:skip${actionKey}`, 'true');
 	}
 	if (remember.host && channelsStore.activeHostId) {
-		localStorage.setItem(`termora:skip${actionKey}:${channelsStore.activeHostId}`, "true");
+		localStorage.setItem(`termora:skip${actionKey}:${channelsStore.activeHostId}`, 'true');
 	}
 
 	action?.();
@@ -627,9 +632,7 @@ function onConfirmAction(remember: { host: boolean; global: boolean }): void {
  */
 const appReady = ref(false);
 const postAuthLoading = ref(false);
-const needsPairing = computed(
-	() => authStore.token === null || sessionStore.authFailed || postAuthLoading.value,
-);
+const needsPairing = computed(() => authStore.token === null || sessionStore.authFailed || postAuthLoading.value);
 
 /** Helper: open a tab backed by a pending spawn (TerminalPane handles the actual SPAWN). */
 function openPendingTab(hostId: string): void {
@@ -643,7 +646,7 @@ function openPendingTab(hostId: string): void {
  */
 onMounted(async () => {
 	// Ctrl+K / Cmd+K must be captured before Chrome's omnibox intercepts it (SC-14)
-	window.addEventListener("keydown", onGlobalKeydown, { capture: true });
+	window.addEventListener('keydown', onGlobalKeydown, { capture: true });
 
 	// Load fonts before terminals are created (no auth needed)
 	await configStore.loadFonts();
@@ -660,8 +663,8 @@ onMounted(async () => {
 	// token check — connect() is gated by token !== null, so the invoke
 	// inside _doConnect() was never reached on first launch.
 	try {
-		const { invoke } = await import("@tauri-apps/api/core");
-		const tauriToken = await invoke<string | null>("get_hub_auth_token");
+		const { invoke } = await import('@tauri-apps/api/core');
+		const tauriToken = await invoke<string | null>('get_hub_auth_token');
 		if (tauriToken) {
 			authStore.setToken(tauriToken);
 		}
@@ -681,9 +684,7 @@ onMounted(async () => {
 			// it applies the OS-preferred theme. Otherwise fall back to saved theme.
 			if (!themeStore.appearance.autoSwitch.enabled) {
 				const savedThemeName = themeStore.appearance.theme;
-				const savedTheme = themeStore.availableThemes.find(
-					(t) => t.name === savedThemeName,
-				);
+				const savedTheme = themeStore.availableThemes.find((t) => t.name === savedThemeName);
 				if (savedTheme) {
 					themeStore.currentTheme = savedTheme;
 					themeStore.applyTheme(savedTheme);
@@ -698,14 +699,14 @@ onMounted(async () => {
 				await applyCascadeTheme(channelsStore.selectedChannelId);
 			}
 		} catch (err) {
-			console.error("[App] startup connect failed:", err);
+			console.error('[App] startup connect failed:', err);
 		}
 	}
 	appReady.value = true;
 });
 
 onUnmounted(() => {
-	window.removeEventListener("keydown", onGlobalKeydown, { capture: true });
+	window.removeEventListener('keydown', onGlobalKeydown, { capture: true });
 });
 
 /**
@@ -719,9 +720,7 @@ watch(
 		if (hostId === null) return;
 		await channelsStore.fetchChannels(hostId);
 		// Clear stale write-lock entries for dead channels
-		const deadIds = new Set(
-			channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
-		);
+		const deadIds = new Set(channelsStore.channels.filter((c) => c.status === 'dead').map((c) => c.id));
 		writeLockStore.pruneDeadLocks(deadIds);
 		// Always purge tabs for channels that no longer exist on this host
 		purgeOrphanedTabs(
@@ -732,13 +731,11 @@ watch(
 			channelsStore.channelHostMap,
 			layout.layouts.value,
 		);
-		if (configStore.uiConfig.onChannelDead === "close") {
+		if (configStore.uiConfig.onChannelDead === 'close') {
 			purgeDeadTabs(channelsStore.channels, layout.tabs.value, layout.closeTab, layout.layouts.value);
 		}
 		// Auto-open welcome tab if one exists and is alive
-		const welcomeCh = channelsStore.channels.find(
-			(c) => c.isWelcome && c.status !== "dead",
-		);
+		const welcomeCh = channelsStore.channels.find((c) => c.isWelcome && c.status !== 'dead');
 		if (welcomeCh) {
 			layout.openTab(welcomeCh.id);
 		}
@@ -746,8 +743,8 @@ watch(
 		// Auto-spawn only for local hosts with no live channels and no tabs open.
 		// SSH hosts require an explicit connection — auto-spawn would timeout.
 		const host = hostsStore.hosts.find((h) => h.id === hostId);
-		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== "dead");
-		if (host?.type === "local" && !hasAliveChannels && layout.tabs.value.length === 0) {
+		const hasAliveChannels = channelsStore.channels.some((c) => c.status !== 'dead');
+		if (host?.type === 'local' && !hasAliveChannels && layout.tabs.value.length === 0) {
 			openPendingTab(hostId);
 		}
 	},
@@ -805,18 +802,18 @@ watch(
 
 		// Close tabs for channels that died (only in "close" mode).
 		// In the new model, only close a tab if ALL its terminal panes are dead.
-		if (configStore.uiConfig.onChannelDead === "close") {
+		if (configStore.uiConfig.onChannelDead === 'close') {
 			for (const ch of current) {
-				if (ch.status !== "dead") continue;
+				if (ch.status !== 'dead') continue;
 				const prev = previous.find((p) => p.id === ch.id);
-				if (prev && prev.status !== "dead") {
+				if (prev && prev.status !== 'dead') {
 					// Find which tab contains this channel
 					const tabId = layout.findTabForChannel(ch.id);
 					if (tabId === null) continue;
 					// Only close if ALL terminal panes in the tab are dead
 					const root = layout.layouts.value[tabId];
 					if (root !== null && root !== undefined) {
-						const deadIds = new Set(current.filter((c) => c.status === "dead").map((c) => c.id));
+						const deadIds = new Set(current.filter((c) => c.status === 'dead').map((c) => c.id));
 						const termIds = collectTerminalChannelIds(root);
 						if (termIds.length > 0 && termIds.every((id) => deadIds.has(id))) {
 							const idx = layout.tabs.value.findIndex((t) => t.id === tabId);
@@ -857,7 +854,7 @@ watch(
 function isPtyFocused(): boolean {
 	const el = document.activeElement;
 	if (el === null) return false;
-	return el.closest(".xterm") !== null;
+	return el.closest('.xterm') !== null;
 }
 
 /**
@@ -866,7 +863,7 @@ function isPtyFocused(): boolean {
  * Intercepts Ctrl+Shift+1..9 to spawn profile N (INV-13: only when PTY is NOT focused).
  */
 function onGlobalKeydown(event: KeyboardEvent): void {
-	const isK = event.key === "k" || event.key === "K";
+	const isK = event.key === 'k' || event.key === 'K';
 	const modifier = event.ctrlKey || event.metaKey;
 	if (isK && modifier) {
 		event.preventDefault();
@@ -887,7 +884,7 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 		}
 	}
 
-	if (event.key === "Escape" && showSettings.value) {
+	if (event.key === 'Escape' && showSettings.value) {
 		showSettings.value = false;
 	}
 }
@@ -905,10 +902,7 @@ function onHostSaved(_host: Host): void {
  * Handle right-click on a host badge in the rail.
  * Stores position + hostId for the context menu component.
  */
-function onHostContextMenu(payload: {
-	hostId: string;
-	event: MouseEvent;
-}): void {
+function onHostContextMenu(payload: { hostId: string; event: MouseEvent }): void {
 	hostContextMenu.value = {
 		hostId: payload.hostId,
 		x: payload.event.clientX,
@@ -919,11 +913,7 @@ function onHostContextMenu(payload: {
 /**
  * Handle right-click on a group header in the rail.
  */
-function onGroupContextMenu(payload: {
-	groupId: string;
-	groupName: string;
-	event: MouseEvent;
-}): void {
+function onGroupContextMenu(payload: { groupId: string; groupName: string; event: MouseEvent }): void {
 	groupContextMenu.value = {
 		groupId: payload.groupId,
 		groupName: payload.groupName,
@@ -1014,9 +1004,7 @@ function onAddChannelGroupFromSidebar(): void {
 
 async function onPurgeDead(): Promise<void> {
 	// Close tabs whose ALL terminal panes are dead before purging
-	const deadIds = new Set(
-		channelsStore.channels.filter((c) => c.status === "dead").map((c) => c.id),
-	);
+	const deadIds = new Set(channelsStore.channels.filter((c) => c.status === 'dead').map((c) => c.id));
 	// Iterate tabs in reverse so indices stay stable as we close
 	for (let i = layout.tabs.value.length - 1; i >= 0; i--) {
 		const tab = layout.tabs.value[i];
@@ -1069,9 +1057,7 @@ async function onAuthenticated(): Promise<void> {
 		// Auto-switch watcher fires here — if enabled, OS preference wins.
 		if (!themeStore.appearance.autoSwitch.enabled) {
 			const savedThemeName = themeStore.appearance.theme;
-			const savedTheme = themeStore.availableThemes.find(
-				(t) => t.name === savedThemeName,
-			);
+			const savedTheme = themeStore.availableThemes.find((t) => t.name === savedThemeName);
 			if (savedTheme) {
 				themeStore.currentTheme = savedTheme;
 				themeStore.applyTheme(savedTheme);
@@ -1081,7 +1067,7 @@ async function onAuthenticated(): Promise<void> {
 		themeStore.applyScrollbar(themeStore.appearance.scrollbar);
 		await hostsStore.fetchHosts();
 	} catch (err) {
-		console.error("[App] post-pairing init failed:", err);
+		console.error('[App] post-pairing init failed:', err);
 	} finally {
 		postAuthLoading.value = false;
 		appReady.value = true;
@@ -1119,14 +1105,14 @@ function onCloseAll(): void {
 	if (
 		closingCount > 0 &&
 		configStore.uiConfig.tabs?.confirmCloseAll !== false &&
-		!shouldSkipConfirm("ConfirmCloseAll")
+		!shouldSkipConfirm('ConfirmCloseAll')
 	) {
 		confirmDialog.value = {
 			visible: true,
-			title: `Close ${closingCount} terminal${closingCount > 1 ? "s" : ""}?`,
-			message: "Terminals will be detached but continue running.",
+			title: `Close ${closingCount} terminal${closingCount > 1 ? 's' : ''}?`,
+			message: 'Terminals will be detached but continue running.',
 			action: () => layout.closeAll(welcomeId),
-			actionKey: "ConfirmCloseAll",
+			actionKey: 'ConfirmCloseAll',
 		};
 	} else {
 		layout.closeAll(welcomeId);
@@ -1143,14 +1129,14 @@ function onCloseOthers(keepIndex: number): void {
 	if (
 		closingCount > 0 &&
 		configStore.uiConfig.tabs?.confirmCloseOthers !== false &&
-		!shouldSkipConfirm("ConfirmCloseOthers")
+		!shouldSkipConfirm('ConfirmCloseOthers')
 	) {
 		confirmDialog.value = {
 			visible: true,
-			title: `Close ${closingCount} other terminal${closingCount > 1 ? "s" : ""}?`,
-			message: "Terminals will be detached but continue running.",
+			title: `Close ${closingCount} other terminal${closingCount > 1 ? 's' : ''}?`,
+			message: 'Terminals will be detached but continue running.',
 			action: () => layout.closeOthers(keepIndex),
-			actionKey: "ConfirmCloseOthers",
+			actionKey: 'ConfirmCloseOthers',
 		};
 	} else {
 		layout.closeOthers(keepIndex);
@@ -1177,10 +1163,7 @@ async function onSetWelcome(channelId: string): Promise<void> {
  * Split a pane. The second pane opens as a vacant slot — the user picks
  * or spawns a channel via the VacantPane picker.
  */
-function onSplit(
-	existingChannelId: string,
-	direction: "horizontal" | "vertical",
-): void {
+function onSplit(existingChannelId: string, direction: 'horizontal' | 'vertical'): void {
 	layout.splitPane(existingChannelId, direction);
 }
 
@@ -1245,14 +1228,9 @@ function onRearrangeVacant(vacantId: string): void {
  * Handle cross-tab pane DnD: move sourceChannelId into the target tab.
  * Validates max-4-panes (for non-center drops) before delegating to layout.
  */
-function onDropPane(
-	sourceChannelId: string,
-	targetPaneId: string,
-	targetTabId: string,
-	zone: DropZone,
-): void {
+function onDropPane(sourceChannelId: string, targetPaneId: string, targetTabId: string, zone: DropZone): void {
 	// For non-center zone, check max panes in target tab
-	if (zone !== "center") {
+	if (zone !== 'center') {
 		const targetRoot = layout.layouts.value[targetTabId];
 		if (targetRoot && countPanes(targetRoot) >= 4) return;
 	}

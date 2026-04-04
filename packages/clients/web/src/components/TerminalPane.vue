@@ -99,31 +99,31 @@
 </template>
 
 <script setup lang="ts">
-import { DEFAULT_CHANNEL_NAME } from "@termora/shared";
-import { computed, inject, ref, toRef, watch, onMounted, onUnmounted } from "vue";
-import { useResolvedProfile } from "../composables/useResolvedProfile.js";
-import { useTabTitle } from "../composables/useTabTitle.js";
-import { useSessionStore } from "../stores/session.js";
-import { useChannelsStore } from "../stores/channels.js";
-import { useWriteLockStore } from "../stores/writelock.js";
-import { useConfigStore } from "../stores/config.js";
-import { useTerminal } from "../composables/useTerminal.js";
-import { useSearchHistory } from "../composables/useSearchHistory.js";
-import type { SearchHistoryEntry } from "../composables/useSearchHistory.js";
-import { useSearchShortcuts } from "../composables/useSearchShortcuts.js";
-import { MULTI_PANE_SEARCH_KEY } from "../composables/useMultiPaneSearch.js";
-import type { SearchScope } from "../composables/useMultiPaneSearch.js";
-import { useNotificationStore } from "../stores/notifications.js";
-import { useActivityTracker } from "../composables/useActivityTracker.js";
-import { useScrollBehavior } from "../composables/useScrollBehavior.js";
-import { useVisualProfile } from "../composables/useVisualProfile.js";
-import { useWallpaper } from "../composables/useWallpaper.js";
-import { useHostsStore } from "../stores/hosts.js";
-import { playBellSound } from "../composables/useBellSound.js";
-import WriteLockIndicator from "./WriteLockIndicator.vue";
-import SearchOverlay from "./SearchOverlay.vue";
-import UnreadLinesBar from "./UnreadLinesBar.vue";
-import EnvironmentBanner from "./EnvironmentBanner.vue";
+import { DEFAULT_CHANNEL_NAME } from '@termora/shared';
+import { computed, inject, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
+import { useActivityTracker } from '../composables/useActivityTracker.js';
+import { playBellSound } from '../composables/useBellSound.js';
+import type { SearchScope } from '../composables/useMultiPaneSearch.js';
+import { MULTI_PANE_SEARCH_KEY } from '../composables/useMultiPaneSearch.js';
+import { useResolvedProfile } from '../composables/useResolvedProfile.js';
+import { useScrollBehavior } from '../composables/useScrollBehavior.js';
+import type { SearchHistoryEntry } from '../composables/useSearchHistory.js';
+import { useSearchHistory } from '../composables/useSearchHistory.js';
+import { useSearchShortcuts } from '../composables/useSearchShortcuts.js';
+import { useTabTitle } from '../composables/useTabTitle.js';
+import { useTerminal } from '../composables/useTerminal.js';
+import { useVisualProfile } from '../composables/useVisualProfile.js';
+import { useWallpaper } from '../composables/useWallpaper.js';
+import { useChannelsStore } from '../stores/channels.js';
+import { useConfigStore } from '../stores/config.js';
+import { useHostsStore } from '../stores/hosts.js';
+import { useNotificationStore } from '../stores/notifications.js';
+import { useSessionStore } from '../stores/session.js';
+import { useWriteLockStore } from '../stores/writelock.js';
+import EnvironmentBanner from './EnvironmentBanner.vue';
+import SearchOverlay from './SearchOverlay.vue';
+import UnreadLinesBar from './UnreadLinesBar.vue';
+import WriteLockIndicator from './WriteLockIndicator.vue';
 
 // ---------------------------------------------------------------------------
 // Props + emits
@@ -148,15 +148,15 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-	(e: "split-right", channelId: string): void;
-	(e: "split-down", channelId: string): void;
-	(e: "detach-pane", channelId: string): void;
-	(e: "close-pane", channelId: string): void;
-	(e: "channel-spawned", tempId: string, realId: string): void;
-	(e: "configure-command", channelId: string): void;
-	(e: "search-all-panes", query: string): void;
-	(e: "find-next-all", currentChannelId: string): void;
-	(e: "find-previous-all", currentChannelId: string): void;
+	(e: 'split-right', channelId: string): void;
+	(e: 'split-down', channelId: string): void;
+	(e: 'detach-pane', channelId: string): void;
+	(e: 'close-pane', channelId: string): void;
+	(e: 'channel-spawned', tempId: string, realId: string): void;
+	(e: 'configure-command', channelId: string): void;
+	(e: 'search-all-panes', query: string): void;
+	(e: 'find-next-all', currentChannelId: string): void;
+	(e: 'find-previous-all', currentChannelId: string): void;
 }>();
 
 // ---------------------------------------------------------------------------
@@ -192,24 +192,28 @@ const { profile: resolvedProfile } = useResolvedProfile(
 	computed(() => props.channelId ?? undefined),
 );
 
-const { init, attachChannel, reattachChannel, applyProfile, suppressNextResize, dispose, canWrite, currentDynamicTitle, search, terminal } = useTerminal(
-	terminalContainer,
-	sessionStore.wsClient,
-	resolvedProfile.value,
-	hostThemeName,
-);
+const {
+	init,
+	attachChannel,
+	reattachChannel,
+	applyProfile,
+	suppressNextResize,
+	dispose,
+	canWrite,
+	currentDynamicTitle,
+	search,
+	terminal,
+} = useTerminal(terminalContainer, sessionStore.wsClient, resolvedProfile.value, hostThemeName);
 
 // ---------------------------------------------------------------------------
 // Search config from config store
 // ---------------------------------------------------------------------------
 
 const searchConfig = computed(() => configStore.uiConfig.search ?? {});
-const searchPosition = computed<"top-right" | "bottom-right" | "bottom-bar">(
-	() => searchConfig.value.position ?? "top-right",
+const searchPosition = computed<'top-right' | 'bottom-right' | 'bottom-bar'>(
+	() => searchConfig.value.position ?? 'top-right',
 );
-const highlightOnClose = computed<"clear" | "fade" | "persist">(
-	() => searchConfig.value.highlightOnClose ?? "clear",
-);
+const highlightOnClose = computed<'clear' | 'fade' | 'persist'>(() => searchConfig.value.highlightOnClose ?? 'clear');
 const searchHistorySize = computed(() => searchConfig.value.historySize ?? 20);
 const searchHistory = useSearchHistory(searchHistorySize);
 
@@ -219,9 +223,7 @@ const searchHistory = useSearchHistory(searchHistorySize);
  */
 const internalChannelId = ref<string | null>(null);
 
-const effectiveChannelId = computed<string | null>(
-	() => props.channelId ?? internalChannelId.value,
-);
+const effectiveChannelId = computed<string | null>(() => props.channelId ?? internalChannelId.value);
 
 // ---------------------------------------------------------------------------
 // Notification: activity tracking + unread lines bar
@@ -239,10 +241,16 @@ useActivityTracker({
 });
 
 const notificationConfig = computed(() => configStore.uiConfig.notifications ?? {});
-const scrollMode = computed(() => notificationConfig.value.scroll?.mode ?? "auto");
+const scrollMode = computed(() => notificationConfig.value.scroll?.mode ?? 'auto');
 const autoThreshold = computed(() => notificationConfig.value.scroll?.autoThreshold ?? 100);
 
-const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBottom, onNaturalScrollToBottom } = useScrollBehavior({
+const {
+	showBar: showUnreadBar,
+	barLineCount: unreadBarCount,
+	markRead,
+	jumpToBottom,
+	onNaturalScrollToBottom,
+} = useScrollBehavior({
 	channelId: effectiveChannelId,
 	isActiveTab,
 	scrollMode: scrollMode.value,
@@ -252,11 +260,7 @@ const { showBar: showUnreadBar, barLineCount: unreadBarCount, markRead, jumpToBo
 	},
 });
 
-const { tabTitle: paneTitle } = useTabTitle(
-	effectiveChannelId,
-	toRef(channelsStore, "channels"),
-	currentDynamicTitle,
-);
+const { tabTitle: paneTitle } = useTabTitle(effectiveChannelId, toRef(channelsStore, 'channels'), currentDynamicTitle);
 
 // ---------------------------------------------------------------------------
 // Visual profile (UX-07)
@@ -268,7 +272,7 @@ const paneHost = computed(() => {
 });
 
 const { profile: visualProfile, bannerText, borderStyle, tintStyle } = useVisualProfile(paneHost);
-const { wallpaperStyle, dimStyle } = useWallpaper(toRef(configStore, "profile"));
+const { wallpaperStyle, dimStyle } = useWallpaper(toRef(configStore, 'profile'));
 
 // ---------------------------------------------------------------------------
 // Write-lock awareness
@@ -295,7 +299,7 @@ const isDead = computed(() => {
 	const chId = effectiveChannelId.value;
 	if (!chId) return false;
 	const channel = channelsStore.channels.find((c) => c.id === chId);
-	return channel?.status === "dead";
+	return channel?.status === 'dead';
 });
 
 const isDirectProcess = computed(() => {
@@ -307,9 +311,9 @@ const isDirectProcess = computed(() => {
 
 const exitMessage = computed(() => {
 	const chId = effectiveChannelId.value;
-	if (!chId) return "Exited";
+	if (!chId) return 'Exited';
 	const channel = channelsStore.channels.find((c) => c.id === chId);
-	const label = channel?.directProcess ? "Process" : "Shell";
+	const label = channel?.directProcess ? 'Process' : 'Shell';
 	const code = channel?.exitCode;
 	if (code !== undefined && code !== null) {
 		return `${label} exited (code ${code})`;
@@ -348,7 +352,7 @@ onMounted(async () => {
 				// that attachChannel would otherwise send (prevents SIGWINCH)
 				suppressNextResize();
 				attachChannel(realId);
-				emit("channel-spawned", props.channelId, realId);
+				emit('channel-spawned', props.channelId, realId);
 			} else {
 				// Dead channels must not send ATTACH — the hub rejects with
 				// CHANNEL_DEAD and the error state would obscure the dead
@@ -384,9 +388,8 @@ onMounted(async () => {
 				const p = resolvedProfile.value;
 				const sound = p.bellSound;
 				// Backward compat: boolean true → "system", false/undefined → "mute"
-				const resolved =
-					typeof sound === "boolean" ? (sound ? "system" : "mute") : (sound ?? "mute");
-				if (resolved === "mute") return;
+				const resolved = typeof sound === 'boolean' ? (sound ? 'system' : 'mute') : (sound ?? 'mute');
+				if (resolved === 'mute') return;
 				playBellSound({
 					sound: resolved,
 					...(p.bellCustomFile && { customSoundFile: p.bellCustomFile }),
@@ -397,12 +400,17 @@ onMounted(async () => {
 		const msg = err instanceof Error ? err.message : String(err);
 		// CHANNEL_DEAD from hub means the channel died between page load and ATTACH.
 		// Treat as dead channel (show overlay) rather than an error state.
-		if (msg.includes("is dead") || msg.includes("CHANNEL_DEAD")) {
+		if (msg.includes('is dead') || msg.includes('CHANNEL_DEAD')) {
 			ready.value = true;
 			return;
 		}
+		// AGENT_NOT_AVAILABLE is handled by the AgentDeployFailed modal — the
+		// inline pane error would be redundant and confusing alongside the modal.
+		if (msg.startsWith('AGENT_NOT_AVAILABLE:')) {
+			return;
+		}
 		error.value = msg;
-		console.error("[TerminalPane] Initialization failed:", err);
+		console.error('[TerminalPane] Initialization failed:', err);
 	}
 });
 
@@ -446,9 +454,13 @@ watch(
 // Re-apply profile when the per-terminal resolved profile updates.
 // useResolvedProfile fetches /api/config/resolved?host_id=X&channel_id=Y and
 // re-fetches on relevant ProfileChangeEvents so each terminal reacts to its own overrides.
-watch(resolvedProfile, (p) => {
-	applyProfile(p);
-}, { deep: true });
+watch(
+	resolvedProfile,
+	(p) => {
+		applyProfile(p);
+	},
+	{ deep: true },
+);
 
 onUnmounted(() => {
 	dispose();
@@ -464,14 +476,14 @@ async function onRestart(): Promise<void> {
 
 	// SSH hosts: restart goes through WS SPAWN flow (supports async prompts
 	// for passphrase/TOFU/deploy). REST restart can't handle interactive auth.
-	if (paneHost.value?.type === "ssh" && props.hostId) {
+	if (paneHost.value?.type === 'ssh' && props.hostId) {
 		const term = terminal.value;
 		await channelsStore.spawnChannel(props.hostId, {
 			...(term !== null ? { cols: term.cols, rows: term.rows } : {}),
 		});
 		// Remove the dead channel entirely and close its pane
 		await channelsStore.deleteChannel(chId);
-		emit("close-pane", chId);
+		emit('close-pane', chId);
 		return;
 	}
 
@@ -492,14 +504,14 @@ async function onRestart(): Promise<void> {
 function onConfigure(): void {
 	const chId = effectiveChannelId.value;
 	if (chId !== null) {
-		emit("configure-command", chId);
+		emit('configure-command', chId);
 	}
 }
 
 function onClosePaneFromOverlay(): void {
 	const chId = effectiveChannelId.value;
 	if (chId !== null) {
-		emit("close-pane", chId);
+		emit('close-pane', chId);
 	}
 }
 
@@ -520,25 +532,25 @@ function showContextMenu(event: MouseEvent): void {
 function onSplitRight(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
-	if (chId !== null) emit("split-right", chId);
+	if (chId !== null) emit('split-right', chId);
 }
 
 function onSplitDown(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
-	if (chId !== null) emit("split-down", chId);
+	if (chId !== null) emit('split-down', chId);
 }
 
 function onDetachPane(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
-	if (chId !== null) emit("detach-pane", chId);
+	if (chId !== null) emit('detach-pane', chId);
 }
 
 function onClosePane(): void {
 	contextMenuVisible.value = false;
 	const chId = effectiveChannelId.value;
-	if (chId !== null) emit("close-pane", chId);
+	if (chId !== null) emit('close-pane', chId);
 }
 
 // Dismiss context menu on any outside click
@@ -546,20 +558,20 @@ function onDocumentClick(): void {
 	contextMenuVisible.value = false;
 }
 
-onMounted(() => document.addEventListener("click", onDocumentClick));
-onUnmounted(() => document.removeEventListener("click", onDocumentClick));
+onMounted(() => document.addEventListener('click', onDocumentClick));
+onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
 // ---------------------------------------------------------------------------
 // Multi-pane search registry (SC-11, SC-12)
 // ---------------------------------------------------------------------------
 
 const multiPaneSearch = inject(MULTI_PANE_SEARCH_KEY, null);
-const searchScope = computed<SearchScope>(() => multiPaneSearch?.scope.value ?? "pane");
+const searchScope = computed<SearchScope>(() => multiPaneSearch?.scope.value ?? 'pane');
 
 /** Pane name shown in cross-pane match indicator. */
 const matchPaneName = computed<string | null>(() => {
 	if (!multiPaneSearch) return null;
-	if (searchScope.value !== "all") return null;
+	if (searchScope.value !== 'all') return null;
 	const matchChId = multiPaneSearch.matchPaneChannelId.value;
 	if (matchChId === null || matchChId === effectiveChannelId.value) return null;
 	const ch = channelsStore.channels.find((c) => c.id === matchChId);
@@ -568,7 +580,7 @@ const matchPaneName = computed<string | null>(() => {
 
 /** Effective match count: aggregated when scope=all, local when scope=pane. */
 const effectiveMatchCount = computed(() => {
-	if (searchScope.value === "all" && multiPaneSearch) {
+	if (searchScope.value === 'all' && multiPaneSearch) {
 		return multiPaneSearch.totalMatchCount.value;
 	}
 	return search.matchCount.value;
@@ -576,7 +588,7 @@ const effectiveMatchCount = computed(() => {
 
 /** Effective current match: aggregated when scope=all, local when scope=pane. */
 const effectiveCurrentMatch = computed(() => {
-	if (searchScope.value === "all" && multiPaneSearch) {
+	if (searchScope.value === 'all' && multiPaneSearch) {
 		return multiPaneSearch.totalCurrentMatch.value;
 	}
 	return search.currentMatch.value;
@@ -631,10 +643,10 @@ onUnmounted(() => {
 function onSearchClose(): void {
 	const mode = highlightOnClose.value;
 
-	if (mode === "persist") {
+	if (mode === 'persist') {
 		// Close overlay but keep decorations visible
 		search.isOpen.value = false;
-	} else if (mode === "fade") {
+	} else if (mode === 'fade') {
 		// Close overlay, then fade decorations after 300ms
 		search.isOpen.value = false;
 		setTimeout(() => {
@@ -645,22 +657,22 @@ function onSearchClose(): void {
 		search.close();
 	}
 
-	if (multiPaneSearch && searchScope.value === "all") {
+	if (multiPaneSearch && searchScope.value === 'all') {
 		multiPaneSearch.clearAll();
-		multiPaneSearch.setScope("pane");
+		multiPaneSearch.setScope('pane');
 	}
 	// Refocus the terminal so keyboard input resumes
 	terminal.value?.focus();
 }
 
-function onSearchOptionsUpdate(opts: import("../composables/useTerminalSearch.js").SearchOptions): void {
+function onSearchOptionsUpdate(opts: import('../composables/useTerminalSearch.js').SearchOptions): void {
 	search.options.value = opts;
 	// Re-trigger search with new options
 	if (search.query.value) {
 		search.search(search.query.value);
 		// If scope=all, re-search on all panes
-		if (searchScope.value === "all" && multiPaneSearch) {
-			emit("search-all-panes", search.query.value);
+		if (searchScope.value === 'all' && multiPaneSearch) {
+			emit('search-all-panes', search.query.value);
 		}
 	}
 }
@@ -668,30 +680,30 @@ function onSearchOptionsUpdate(opts: import("../composables/useTerminalSearch.js
 function onScopeUpdate(newScope: SearchScope): void {
 	if (!multiPaneSearch) return;
 	multiPaneSearch.setScope(newScope);
-	if (newScope === "all" && search.query.value) {
+	if (newScope === 'all' && search.query.value) {
 		// Broadcast current query to all panes
-		emit("search-all-panes", search.query.value);
+		emit('search-all-panes', search.query.value);
 	}
 }
 
 function onSearchEmit(query: string): void {
 	search.search(query);
-	if (searchScope.value === "all" && multiPaneSearch) {
-		emit("search-all-panes", query);
+	if (searchScope.value === 'all' && multiPaneSearch) {
+		emit('search-all-panes', query);
 	}
 }
 
 function onFindNext(): void {
-	if (searchScope.value === "all" && multiPaneSearch && effectiveChannelId.value) {
-		emit("find-next-all", effectiveChannelId.value);
+	if (searchScope.value === 'all' && multiPaneSearch && effectiveChannelId.value) {
+		emit('find-next-all', effectiveChannelId.value);
 	} else {
 		search.findNext();
 	}
 }
 
 function onFindPrevious(): void {
-	if (searchScope.value === "all" && multiPaneSearch && effectiveChannelId.value) {
-		emit("find-previous-all", effectiveChannelId.value);
+	if (searchScope.value === 'all' && multiPaneSearch && effectiveChannelId.value) {
+		emit('find-previous-all', effectiveChannelId.value);
 	} else {
 		search.findPrevious();
 	}
@@ -702,8 +714,8 @@ function onSelectHistory(entry: SearchHistoryEntry): void {
 	search.options.value = { ...search.options.value, regex: entry.regex };
 	// Trigger search with the stored query
 	search.search(entry.query);
-	if (searchScope.value === "all" && multiPaneSearch) {
-		emit("search-all-panes", entry.query);
+	if (searchScope.value === 'all' && multiPaneSearch) {
+		emit('search-all-panes', entry.query);
 	}
 }
 
@@ -711,7 +723,7 @@ function onAddToHistory(query: string, regex: boolean): void {
 	searchHistory.add(query, regex);
 }
 
-function toggleSearchOption(key: keyof import("../composables/useTerminalSearch.js").SearchOptions): void {
+function toggleSearchOption(key: keyof import('../composables/useTerminalSearch.js').SearchOptions): void {
 	onSearchOptionsUpdate({
 		...search.options.value,
 		[key]: !search.options.value[key],
@@ -719,9 +731,9 @@ function toggleSearchOption(key: keyof import("../composables/useTerminalSearch.
 }
 
 useSearchShortcuts(search.isOpen, {
-	onToggleCase: () => toggleSearchOption("caseSensitive"),
-	onToggleRegex: () => toggleSearchOption("regex"),
-	onToggleWholeWord: () => toggleSearchOption("wholeWord"),
+	onToggleCase: () => toggleSearchOption('caseSensitive'),
+	onToggleRegex: () => toggleSearchOption('regex'),
+	onToggleWholeWord: () => toggleSearchOption('wholeWord'),
 });
 
 // Wire natural scroll-to-bottom detection (EFF-07 / F-007).
@@ -745,30 +757,30 @@ watch(terminal, (term) => {
 watch(terminal, (term) => {
 	if (!term) return;
 	term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
-		if (ev.ctrlKey && ev.shiftKey && ev.key === "F") {
-			if (ev.type === "keydown") {
+		if (ev.ctrlKey && ev.shiftKey && ev.key === 'F') {
+			if (ev.type === 'keydown') {
 				search.open();
 			}
 			return false; // prevent xterm from processing
 		}
 		// When search overlay is open, let Escape propagate to the overlay
-		if (ev.key === "Escape" && search.isOpen.value) {
+		if (ev.key === 'Escape' && search.isOpen.value) {
 			return false;
 		}
 		// When search is open, intercept Alt+C/R/W so they reach
 		// useSearchShortcuts instead of being sent to the PTY
 		if (ev.altKey && search.isOpen.value) {
 			const k = ev.key.toLowerCase();
-			if (k === "c" || k === "r" || k === "w") {
+			if (k === 'c' || k === 'r' || k === 'w') {
 				return false;
 			}
 		}
 		// Ctrl+V / Ctrl+Shift+V → let browser handle paste from clipboard
-		if (ev.ctrlKey && ev.key === "v") {
+		if (ev.ctrlKey && ev.key === 'v') {
 			return false;
 		}
 		// Ctrl+C with selection → copy to clipboard (not SIGINT)
-		if (ev.ctrlKey && ev.key === "c" && term.hasSelection()) {
+		if (ev.ctrlKey && ev.key === 'c' && term.hasSelection()) {
 			return false;
 		}
 		return true;
@@ -784,12 +796,12 @@ function onDragStart(event: DragEvent): void {
 	const chId = effectiveChannelId.value;
 	if (chId === null) return;
 
-	event.dataTransfer.effectAllowed = "move";
+	event.dataTransfer.effectAllowed = 'move';
 
 	const hostId = channelsStore.activeHostId ?? null;
 
 	event.dataTransfer.setData(
-		"text/x-termora-pane",
+		'text/x-termora-pane',
 		JSON.stringify({
 			channelId: chId,
 			paneId: props.paneId,
@@ -797,11 +809,11 @@ function onDragStart(event: DragEvent): void {
 		}),
 	);
 
-	document.body.classList.add("termora-dragging");
+	document.body.classList.add('termora-dragging');
 }
 
 function onDragEnd(): void {
-	document.body.classList.remove("termora-dragging");
+	document.body.classList.remove('termora-dragging');
 }
 </script>
 

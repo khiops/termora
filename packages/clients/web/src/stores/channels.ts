@@ -518,20 +518,41 @@ export const useChannelsStore = defineStore('channels', () => {
 		const sessionStore = useSessionStore();
 		const configStore = useConfigStore();
 		return new Promise<string>((resolve, reject) => {
+			// Use `let` so the timeout/error callbacks can reference both unsub
+			// functions even though they are declared after the timer is set.
+			// Both are assigned synchronously before any async event fires.
+			let unsubOk: () => void;
+			let unsubErr: () => void;
+
 			const timer = setTimeout(() => {
-				unsub();
+				unsubOk();
+				unsubErr();
 				reject(new Error('SPAWN timeout — no SPAWN_OK after 10s'));
 			}, 10_000);
 
-			const unsub = sessionStore.wsClient.on('SPAWN_OK', (msg) => {
+			unsubOk = sessionStore.wsClient.on('SPAWN_OK', (msg) => {
 				if (msg.type === 'SPAWN_OK') {
 					clearTimeout(timer);
-					unsub();
+					unsubOk();
+					unsubErr();
 					void fetchChannels(hostId);
 					if (opts?.select !== false) {
 						selectChannel(msg.channelId);
 					}
 					resolve(msg.channelId);
+				}
+			});
+
+			// Cancel the spawn wait immediately on any ERROR — the hub sends ERROR
+			// (e.g. SSH_CONNECT_FAILED, SPAWN_FAILED) instead of SPAWN_OK when the
+			// session cannot be established. Without this the caller would silently
+			// wait 10 s before seeing the timeout message.
+			unsubErr = sessionStore.wsClient.on('ERROR', (msg) => {
+				if (msg.type === 'ERROR') {
+					clearTimeout(timer);
+					unsubOk();
+					unsubErr();
+					reject(new Error(`${msg.code}: ${msg.message}`));
 				}
 			});
 

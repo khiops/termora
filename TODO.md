@@ -1,5 +1,12 @@
 # termora — Backlog
 
+## Completed: SSH/SPAWN error display in web UI (2026-04-04)
+
+- [x] ✅ [Web] ToastContainer.vue: global toast renderer mounted in App.vue (2026-04-04)
+- [x] ✅ [Web] session.ts: _registerAgentVerifyHandlers pushes all unhandled ERROR codes to useToastStore (2026-04-04)
+- [x] ✅ [Web] channels.ts: spawnChannel listens for ERROR and rejects immediately (cancels 10s timeout) (2026-04-04)
+- [x] ✅ [Web] TerminalPane.vue: suppress inline error for AGENT_NOT_AVAILABLE (modal handles it) (2026-04-04)
+
 ## Completed: SSH verbose logging + DELETE cascade + About modal wiring (2026-04-04)
 
 - [x] ✅ [Hub] session-manager.ts: add [termora-ssh] console.error logs at each SSH SPAWN stage (2026-04-04)
