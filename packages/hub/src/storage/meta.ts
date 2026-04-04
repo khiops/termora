@@ -10,36 +10,23 @@ import type {
 	LaunchProfile,
 	Session,
 	SessionStatus,
-} from "@termora/shared";
-import type Database from "better-sqlite3";
+} from '@termora/shared';
+import type Database from 'better-sqlite3';
 
-import { ChannelGroupsDAL } from "./channel-groups-dal.js";
-import { ChannelsDAL } from "./channels-dal.js";
-import { HostsDAL } from "./hosts-dal.js";
-import { LaunchProfilesDAL } from "./launch-profiles-dal.js";
-import type {
-	CreateChannelInput,
-	CreateHostInput,
-	CreateSessionInput,
-	PairingCodeRow,
-} from "./meta-types.js";
-import { PairRateLimitsDAL } from "./pair-rate-limits-dal.js";
-import { PairingCodesDAL } from "./pairing-codes-dal.js";
-import { SessionsDAL } from "./sessions-dal.js";
+import { ChannelGroupsDAL } from './channel-groups-dal.js';
+import { ChannelsDAL } from './channels-dal.js';
+import { HostsDAL } from './hosts-dal.js';
+import { LaunchProfilesDAL } from './launch-profiles-dal.js';
+import type { CreateChannelInput, CreateHostInput, CreateSessionInput, PairingCodeRow } from './meta-types.js';
+import { PairRateLimitsDAL } from './pair-rate-limits-dal.js';
+import { PairingCodesDAL } from './pairing-codes-dal.js';
+import { SessionsDAL } from './sessions-dal.js';
 
 // Re-export input types so existing callers can continue importing from meta.ts
 export type { CreateChannelInput, CreateHostInput, CreateSessionInput, PairingCodeRow };
 
 // Re-export sub-DAL classes for consumers that want direct access
-export {
-	ChannelGroupsDAL,
-	ChannelsDAL,
-	HostsDAL,
-	LaunchProfilesDAL,
-	PairRateLimitsDAL,
-	PairingCodesDAL,
-	SessionsDAL,
-};
+export { ChannelGroupsDAL, ChannelsDAL, HostsDAL, LaunchProfilesDAL, PairingCodesDAL, PairRateLimitsDAL, SessionsDAL };
 
 // ─── MetaDAL — facade over domain-specific DALs ──────────────────────────────
 
@@ -110,6 +97,18 @@ export class MetaDAL {
 
 	deleteHost(id: string): boolean {
 		return this.hosts.deleteHost(id);
+	}
+
+	deleteCascadeForHost(hostId: string): void {
+		// Delete in FK dependency order: cache_index → channels → sessions → channel_groups
+		this.db
+			.prepare(
+				'DELETE FROM cache_index WHERE channel_id IN (SELECT c.id FROM channels c JOIN sessions s ON c.session_id = s.id WHERE s.host_id = ?)',
+			)
+			.run(hostId);
+		this.db.prepare('DELETE FROM channels WHERE session_id IN (SELECT id FROM sessions WHERE host_id = ?)').run(hostId);
+		this.db.prepare('DELETE FROM sessions WHERE host_id = ?').run(hostId);
+		this.db.prepare('DELETE FROM channel_groups WHERE host_id = ?').run(hostId);
 	}
 
 	importHosts(inputs: CreateHostInput[]): Host[] {
@@ -246,9 +245,7 @@ export class MetaDAL {
 		return this.channels.getChannel(id);
 	}
 
-	getChannelWithHost(
-		channelId: string,
-	): { channel: Channel; hostId: string; hostType: string } | null {
+	getChannelWithHost(channelId: string): { channel: Channel; hostId: string; hostType: string } | null {
 		return this.channels.getChannelWithHost(channelId);
 	}
 
@@ -379,7 +376,7 @@ export class MetaDAL {
 
 	// ─── Launch Profiles ─────────────────────────────────────────────────────
 
-	createLaunchProfile(input: Omit<LaunchProfile, "id" | "createdAt" | "updatedAt">): LaunchProfile {
+	createLaunchProfile(input: Omit<LaunchProfile, 'id' | 'createdAt' | 'updatedAt'>): LaunchProfile {
 		return this.launchProfiles.createLaunchProfile(input);
 	}
 
@@ -418,28 +415,15 @@ export class MetaDAL {
 		return this.launchProfiles.listHostProfiles(hostId, hostOs);
 	}
 
-	upsertHostProfileOverride(
-		hostId: string,
-		profileId: string,
-		overrideType: string,
-		sortOrder?: number,
-	): void {
-		return this.launchProfiles.upsertHostProfileOverride(
-			hostId,
-			profileId,
-			overrideType,
-			sortOrder,
-		);
+	upsertHostProfileOverride(hostId: string, profileId: string, overrideType: string, sortOrder?: number): void {
+		return this.launchProfiles.upsertHostProfileOverride(hostId, profileId, overrideType, sortOrder);
 	}
 
 	deleteHostProfileOverride(hostId: string, profileId: string): boolean {
 		return this.launchProfiles.deleteHostProfileOverride(hostId, profileId);
 	}
 
-	getHostLaunchProfileOverride(
-		hostId: string,
-		profileId: string,
-	): HostLaunchProfileOverride | undefined {
+	getHostLaunchProfileOverride(hostId: string, profileId: string): HostLaunchProfileOverride | undefined {
 		return this.launchProfiles.getHostLaunchProfileOverride(hostId, profileId);
 	}
 }

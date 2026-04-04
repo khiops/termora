@@ -257,6 +257,7 @@ export class SshAgent extends AgentConnection {
 			return false;
 		}) as SyncHostVerifier;
 
+		console.error(`[termora-ssh] connecting...`);
 		return new Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }>((resolve, reject) => {
 			let resolved = false;
 			const rejectOnce = (err: Error): void => {
@@ -300,6 +301,7 @@ export class SshAgent extends AgentConnection {
 			});
 
 			client.on('ready', () => {
+				console.error('[termora-ssh] SSH ready');
 				// SEC-014: zero credentials immediately after successful auth
 				if (connectConfig.password) connectConfig.password = '';
 				if (connectConfig.passphrase) connectConfig.passphrase = '';
@@ -344,6 +346,7 @@ export class SshAgent extends AgentConnection {
 
 						// Wait for HELLO — emitted by AgentConnection.handleData once HELLO decoded
 						this.once('ready', (msg: HelloMessage) => {
+							console.error('[termora-ssh] agent HELLO received');
 							clearTimeout(helloTimeout);
 							resolveOnce(msg);
 						});
@@ -354,26 +357,34 @@ export class SshAgent extends AgentConnection {
 					// Auto-deploy is best-effort: if it fails, we still try to run the agent
 					// (the user may have installed it manually in a non-standard path).
 					// DeployError (user-initiated rejection) propagates; infrastructure failures fall back.
+					console.error('[termora-ssh] deploy phase starting');
 					deployAgentIfNeeded(client, this.host, toDeployOptions(this.deployOptions, this.host, hostname))
 						.then((result) => {
 							// Notify caller if new OS/arch info was detected (either via deploy or detection)
 							if (result.os && result.arch) {
 								this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
 							}
+							console.error(
+								`[termora-ssh] deploy result: remotePath=${result.remotePath} os=${result.os ?? 'unknown'} arch=${result.arch ?? 'unknown'}`,
+							);
+							console.error('[termora-ssh] exec termora-agent...');
 							runAgent(result.remotePath);
 						})
 						.catch((deployErr: unknown) => {
 							// User-initiated rejections must propagate — no fallback
 							if (deployErr instanceof DeployError) {
+								console.error(`[termora-ssh] deploy result: rejected by user (${deployErr.code})`);
 								rejectOnce(deployErr);
 								return;
 							}
 							// Infrastructure failures: propagate — don't silently fall back to an agent that isn't there
 							const deployErrMsg = deployErr instanceof Error ? deployErr.message : String(deployErr);
+							console.error(`[termora-ssh] deploy result: failed — ${deployErrMsg}`);
 							console.warn(`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErrMsg}`);
 							rejectOnce(new Error(`Agent deployment failed: ${deployErrMsg}`));
 						});
 				} else {
+					console.error('[termora-ssh] exec termora-agent...');
 					runAgent('termora-agent --stdio');
 				}
 			});

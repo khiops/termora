@@ -1,5 +1,13 @@
 # termora — Backlog
 
+## Completed: SSH verbose logging + DELETE cascade + About modal wiring (2026-04-04)
+
+- [x] ✅ [Hub] session-manager.ts: add [termora-ssh] console.error logs at each SSH SPAWN stage (2026-04-04)
+- [x] ✅ [Hub] ssh-agent.ts: add [termora-ssh] console.error logs for connect/ready/deploy/exec/HELLO (2026-04-04)
+- [x] ✅ [Hub] host-crud.ts: DELETE /api/hosts/:id now cascade-deletes cache_index/channels/sessions/channel_groups (2026-04-04)
+- [x] ✅ [Hub] meta.ts: added deleteCascadeForHost() method to MetaDAL (2026-04-04)
+- [x] ✅ [Web] SettingsPanel.vue: About button + AboutModal already wired — confirmed (2026-04-04)
+
 ## Completed: SSH spawn error handling + AgentDeployFailed modal (2026-04-03)
 
 - [x] ✅ [Hub] spawn.ts: send ERROR to WS client on unhandled handleSpawn throws (2026-04-03)

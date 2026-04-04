@@ -373,11 +373,17 @@ export class SessionManager {
 
 				const deployOpts = this._buildDeployOpts(hostId, host, client);
 
+				console.error(`[termora-ssh] creating SshAgent for host ${host.id}`);
 				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
 
+				console.error(`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label}`);
 				try {
+					console.error('[termora-ssh] deploying agent...');
 					await sshAgent.start(storedFingerprint, sessionTrustedFp);
+					console.error('[termora-ssh] agent deployed, exec starting');
+					console.error('[termora-ssh] SSH connection established');
 				} catch (err) {
+					console.error(`[termora-ssh] SSH error: ${err instanceof Error ? err.message : String(err)}`);
 					// Handle deploy errors (user rejection, binary not available)
 					if (err instanceof DeployError) {
 						client.send({
@@ -416,12 +422,20 @@ export class SessionManager {
 							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
 						}
 						const retryAgent = new SshAgent(host, promptAuth, deployOpts);
+						console.error(`[termora-ssh] creating SshAgent for host ${host.id} (retry)`);
+						console.error(`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label} (retry)`);
 						try {
+							console.error('[termora-ssh] deploying agent...');
 							await retryAgent.start(
 								action === 'trust_permanent' ? retryFp : null,
 								action === 'trust_once' ? retryFp : undefined,
 							);
+							console.error('[termora-ssh] agent deployed, exec starting');
+							console.error('[termora-ssh] SSH connection established');
 						} catch (retryErr) {
+							console.error(
+								`[termora-ssh] SSH error: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+							);
 							this.broadcaster.updateSessionStatus(hostId, session.id, 'closed');
 							if (retryErr instanceof DeployError) {
 								client.send({
