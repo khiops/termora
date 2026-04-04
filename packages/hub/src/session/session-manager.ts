@@ -515,7 +515,16 @@ export class SessionManager {
 
 		// ── First-profile fallback: if no shell resolved yet, use sort_order=0 profile ──
 		if (resolvedShell === undefined) {
-			const firstProfile = this.ctx.metaDal.listLaunchProfiles(1)[0];
+			let firstProfile;
+			if (host.type === 'ssh') {
+				// Use per-host profiles for SSH hosts (filtered by remote OS)
+				const hostOs = host.os ?? 'linux';
+				const hostProfiles = this.ctx.metaDal.listHostProfiles(hostId, hostOs);
+				firstProfile = hostProfiles[0];
+			} else {
+				// Local host: use global profiles
+				firstProfile = this.ctx.metaDal.listLaunchProfiles(1)[0];
+			}
 			if (firstProfile !== undefined) {
 				resolvedShell = firstProfile.shell;
 				if (resolvedArgs.length === 0 && firstProfile.args) {
@@ -526,6 +535,8 @@ export class SessionManager {
 					resolvedEnv = { ...firstProfile.env };
 				}
 			}
+			// If STILL no shell (SSH host with no profiles), leave resolvedShell undefined.
+			// The SPAWN message will go without shell, and the agent will use $SHELL.
 		}
 
 		// ── Elevation checks ──────────────────────────────────────────────────
