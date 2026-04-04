@@ -118,18 +118,20 @@ export async function buildSshConnectConfig(
 			if (secret === null) {
 				throw new Error('Authentication cancelled by user');
 			}
-			// Pre-decrypt the key and re-serialize as unencrypted PEM.
-			// ssh2's connect() doesn't reliably handle inline decryption
-			// for modern OpenSSH ed25519/bcrypt keys. We decrypt via
-			// parseKey then export as plain PEM that connect() consumes.
-			const decrypted = ssh2.utils.parseKey(keyContent, secret);
-			if (decrypted instanceof Error) {
-				console.error(`[termora-ssh] key decryption failed: ${decrypted.message}`);
-				throw new Error(`Failed to decrypt SSH key: ${decrypted.message}`);
+			// Pass raw key + passphrase — ssh2 connect() decrypts internally.
+			// Verify first that the passphrase works, to give a clear error.
+			const verify = ssh2.utils.parseKey(keyContent, secret);
+			if (verify instanceof Error) {
+				console.error(`[termora-ssh] key decryption failed: ${verify.message}`);
+				throw new Error(`Failed to decrypt SSH key: ${verify.message}`);
 			}
-			const decryptedKey = Array.isArray(decrypted) ? decrypted[0] : decrypted;
-			console.error(`[termora-ssh] key decrypted successfully (type: ${decryptedKey.type})`);
-			connectConfig.privateKey = decryptedKey.getPrivatePEM();
+			const verifiedKey = Array.isArray(verify) ? verify[0] : verify;
+			console.error(`[termora-ssh] key verified (type: ${verifiedKey.type})`);
+			connectConfig.privateKey = keyContent;
+			connectConfig.passphrase = secret;
+			console.error(
+				`[termora-ssh] connectConfig has privateKey (${keyContent.length}B) + passphrase (${secret.length}ch)`,
+			);
 		} else {
 			connectConfig.privateKey = keyContent;
 		}
@@ -222,9 +224,13 @@ export class SshAgent extends AgentConnection {
 			throw new Error('Host has no sshHost configured');
 		}
 
-		const { username, hostname } = parseSshHost(this.host.sshHost);
+		const parsed = parseSshHost(this.host.sshHost);
+		// Prefer explicit ssh_user from host config over parsed user@host
+		const username = this.host.sshUser || parsed.username;
+		const hostname = parsed.hostname;
 		const port = this.host.sshPort ?? 22;
 		const authMethod = this.host.sshAuth ?? 'key';
+		console.error(`[termora-ssh] resolved: ${username}@${hostname}:${port} auth=${authMethod}`);
 
 		const client = new Client();
 		this.client = client;
