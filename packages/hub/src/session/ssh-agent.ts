@@ -118,16 +118,18 @@ export async function buildSshConnectConfig(
 			if (secret === null) {
 				throw new Error('Authentication cancelled by user');
 			}
-			// Pre-decrypt the key with the passphrase. ssh2's connect()
-			// doesn't reliably handle inline decryption for modern OpenSSH
-			// ed25519/bcrypt keys. parseKey returns the decrypted key object.
+			// Pre-decrypt the key and re-serialize as unencrypted PEM.
+			// ssh2's connect() doesn't reliably handle inline decryption
+			// for modern OpenSSH ed25519/bcrypt keys. We decrypt via
+			// parseKey then export as plain PEM that connect() consumes.
 			const decrypted = ssh2.utils.parseKey(keyContent, secret);
 			if (decrypted instanceof Error) {
 				console.error(`[termora-ssh] key decryption failed: ${decrypted.message}`);
 				throw new Error(`Failed to decrypt SSH key: ${decrypted.message}`);
 			}
-			console.error('[termora-ssh] key decrypted successfully');
-			connectConfig.privateKey = decrypted as unknown as Buffer;
+			const decryptedKey = Array.isArray(decrypted) ? decrypted[0] : decrypted;
+			console.error(`[termora-ssh] key decrypted successfully (type: ${decryptedKey.type})`);
+			connectConfig.privateKey = decryptedKey.getPrivatePEM();
 		} else {
 			connectConfig.privateKey = keyContent;
 		}
