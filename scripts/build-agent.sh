@@ -20,12 +20,17 @@ echo "🔨 Building Rust agent (triple: $TERMORA_TARGET_TRIPLE)..."
 
 mkdir -p "$TERMORA_DIST_DIR"
 cd "$ROOT"
-# Note: native build only (no --target). Cross-compilation would need --target $TERMORA_TARGET_TRIPLE.
-# TERMORA_TARGET_TRIPLE is used for artifact naming and CI metadata.
-cargo build -p termora-agent --release --target-dir "$TERMORA_CARGO_TARGET_DIR"
+# Use --target for cross-compilation, skip for native builds
+if [ "$TERMORA_TARGET_TRIPLE" != "$DETECTED_TRIPLE" ]; then
+  echo "  Cross-compiling for $TERMORA_TARGET_TRIPLE (native: $DETECTED_TRIPLE)"
+  cargo build -p termora-agent --release --target "$TERMORA_TARGET_TRIPLE" --target-dir "$TERMORA_CARGO_TARGET_DIR"
+  BINARY="$TERMORA_CARGO_TARGET_DIR/$TERMORA_TARGET_TRIPLE/release/termora-agent"
+else
+  cargo build -p termora-agent --release --target-dir "$TERMORA_CARGO_TARGET_DIR"
+  BINARY="$TERMORA_CARGO_TARGET_DIR/release/termora-agent"
+fi
 
 # Copy binary to dist
-BINARY="$TERMORA_CARGO_TARGET_DIR/release/termora-agent"
 if [ ! -f "$BINARY" ]; then
   echo "❌ Binary not found at $BINARY" >&2
   exit 1
