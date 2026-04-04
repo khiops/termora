@@ -107,10 +107,14 @@ export async function buildSshConnectConfig(
 		// legacy PEM ("ENCRYPTED" header) and modern OpenSSH format
 		const parsed = ssh2.utils.parseKey(keyContent);
 		if (parsed instanceof Error) {
+			console.error(`[termora-ssh] key needs passphrase (parseKey error: ${parsed.message})`);
 			if (!promptAuth || !hostId) {
 				throw new Error('Key is passphrase-protected but no prompt callback available');
 			}
 			const secret = await promptAuth(hostId, 'passphrase', `Enter passphrase for ${auth.keyPath}`);
+			console.error(
+				`[termora-ssh] passphrase obtained: ${secret ? 'yes (length ' + secret.length + ')' : 'null (cancelled)'}`,
+			);
 			if (secret === null) {
 				throw new Error('Authentication cancelled by user');
 			}
