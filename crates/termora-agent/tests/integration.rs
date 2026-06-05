@@ -259,13 +259,8 @@ async fn test_full_lifecycle() {
     ]);
     write_frame(&mut stdin, &spawn_msg).await;
 
-    // Expect SPAWN_OK (skip any LOG frames that may arrive first).
-    let spawn_ok = loop {
-        let frame = read_frame_timeout(&mut stdout, 5).await;
-        if frame["type"].as_str() != Some("LOG") {
-            break frame;
-        }
-    };
+    // SPAWN_OK must be the very first frame after the SPAWN request — no skip loop needed.
+    let spawn_ok = read_frame_timeout(&mut stdout, 5).await;
     assert_eq!(spawn_ok["type"].as_str(), Some("SPAWN_OK"));
     let ch_id = spawn_ok["channel_id"].as_str().unwrap().to_string();
 
@@ -466,6 +461,60 @@ async fn test_conpty_no_stdout_leak() {
             Err(_) => break, // timeout — OK, no more frames
         }
     }
+
+    agent.kill().await.ok();
+}
+
+/// Regression: SPAWN_OK must be the very first frame after a SPAWN request,
+/// even when the shell exits immediately (e.g. `exit 0`).
+///
+/// Before the fix, tokio work-stealing could run the PTY reader task before
+/// `handle_spawn` enqueued SPAWN_OK, causing CHANNEL_EXIT to arrive first —
+/// a protocol inversion (PROTOCOL.md §SPAWN_OK is the "channel exists" ack).
+///
+/// Post-fix this is deterministic: SPAWN_OK is enqueued *before*
+/// `spawn_reader_task` is called, so no reader frame can precede it in the
+/// single FIFO mpsc channel regardless of scheduler ordering.
+#[tokio::test]
+async fn test_spawn_ok_precedes_channel_exit() {
+    let mut agent = spawn_agent().await;
+    let mut stdout = agent.stdout.take().unwrap();
+    let mut stdin = agent.stdin.take().unwrap();
+
+    // Consume the mandatory HELLO frame.
+    let hello = read_frame_timeout(&mut stdout, 5).await;
+    assert_eq!(hello["type"].as_str(), Some("HELLO"));
+
+    // Spawn a shell that exits immediately — maximises scheduler pressure on
+    // the race window between SPAWN_OK and the reader task's CHANNEL_EXIT.
+    let spawn_msg = msgmap(vec![
+        ("type", sv("SPAWN")),
+        ("request_id", sv("req-ordering")),
+        ("shell", sv("/bin/sh")),
+        ("args", rmpv::Value::Array(vec![sv("-c"), sv("exit 0")])),
+        ("cols", iv(80)),
+        ("rows", iv(24)),
+    ]);
+    write_frame(&mut stdin, &spawn_msg).await;
+
+    // PRIMARY ASSERTION: the very first frame after SPAWN must be SPAWN_OK.
+    // No skip loop — any other frame type here is a protocol violation.
+    let first = read_frame_timeout(&mut stdout, 5).await;
+    assert_eq!(
+        first["type"].as_str(),
+        Some("SPAWN_OK"),
+        "SPAWN_OK must be the first agent->hub frame after SPAWN; got {:?}",
+        first
+    );
+    assert!(
+        first["channel_id"].as_str().is_some_and(|s| !s.is_empty()),
+        "SPAWN_OK must carry a non-empty channel_id"
+    );
+    assert_eq!(
+        first["request_id"].as_str(),
+        Some("req-ordering"),
+        "SPAWN_OK request_id must echo the SPAWN request_id"
+    );
 
     agent.kill().await.ok();
 }

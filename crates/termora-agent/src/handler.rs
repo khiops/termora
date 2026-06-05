@@ -580,8 +580,30 @@ async fn handle_spawn(
                     senders.insert(ch_id.clone(), cmd_tx);
                 }
 
+                // Send SPAWN_OK *before* starting the reader task.
+                //
+                // The reader task is a separate tokio::spawn that immediately
+                // reads the PTY.  On a multi-core scheduler, work-stealing can
+                // run the reader task before this function resumes, causing it
+                // to enqueue LOG("PTY closed") and CHANNEL_EXIT into the shared
+                // FIFO frame channel *before* SPAWN_OK is enqueued here.
+                // PROTOCOL.md requires SPAWN_OK to be the first agent→hub frame
+                // for any spawn, so enqueue it now, while we still hold the
+                // logical ordering advantage, then start the reader.
+                //
+                // We clone ch_id so that both the SpawnOk frame and the reader
+                // task receive their own owned copy; the original ch_id is moved
+                // into the reader task call below.
+                send_frame(
+                    &frame_tx,
+                    &AgentToHub::SpawnOk {
+                        request_id,
+                        channel_id: ch_id.clone(),
+                    },
+                )?;
+
                 spawn_reader_task(
-                    ch_id.clone(),
+                    ch_id,
                     pty_pid,
                     pty_reader,
                     mirror,
@@ -592,14 +614,6 @@ async fn handle_spawn(
                     Arc::clone(&cmd_senders),
                 );
             }
-
-            send_frame(
-                &frame_tx,
-                &AgentToHub::SpawnOk {
-                    request_id,
-                    channel_id: ch_id,
-                },
-            )?;
         }
 
         Err(e) => {
