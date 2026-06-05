@@ -44,6 +44,7 @@ auth.json
 # Claude Code workflow state (ephemeral)
 .workflow-state.json
 .claude-recovery.md
+*.local.md
 
 # npm pack
 *.tgz
