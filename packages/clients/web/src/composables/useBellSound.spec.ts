@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { playBellSound } from "./useBellSound.js";
 
 describe("playBellSound", () => {
@@ -10,13 +10,13 @@ describe("playBellSound", () => {
 	});
 
 	describe("custom sound — extension validation", () => {
-		let mockAudio: { play: ReturnType<typeof vi.fn>; volume: number };
-		let AudioSpy: ReturnType<typeof vi.spyOn>;
-		let warnSpy: ReturnType<typeof vi.spyOn>;
+		let mockAudio: { play: MockInstance; volume: number };
+		let AudioSpy: MockInstance;
+		let warnSpy: MockInstance;
 
 		beforeEach(() => {
 			mockAudio = { play: vi.fn().mockResolvedValue(undefined), volume: 0 };
-			AudioSpy = vi.spyOn(globalThis, "Audio" as never).mockReturnValue(mockAudio as never);
+			AudioSpy = vi.spyOn(globalThis, "Audio" as any).mockReturnValue(mockAudio as never);
 			warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		});
 

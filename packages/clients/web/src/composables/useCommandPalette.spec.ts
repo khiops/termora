@@ -55,8 +55,8 @@ vi.mock("../stores/session.js", () => ({
 const mockPushRecent = vi.fn();
 const mockClearRecent = vi.fn();
 
-vi.mock("./useRecentPaletteItems.js", () => {
-	const { ref } = require("vue") as typeof import("vue");
+vi.mock("./useRecentPaletteItems.js", async () => {
+	const { ref } = await import("vue");
 	const recentIds = ref<string[]>([]);
 	return {
 		useRecentPaletteItems: () => ({
