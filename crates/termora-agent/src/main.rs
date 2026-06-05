@@ -93,6 +93,28 @@ async fn main() -> std::io::Result<()> {
             }
         });
 
+        // Ensure the socket's parent directory exists when --socket is provided.
+        // The unwrap_or_else default branch already calls create_dir_all for its
+        // own path; an explicit --socket value may point to a directory that was
+        // never created (e.g. /run/user/1000/termora/ under XDG_RUNTIME_DIR on
+        // a freshly-booted WSL2 instance), causing UnixListener::bind to fail
+        // with ENOENT and the daemon to exit silently.
+        // On Windows the socket is a named pipe (\\.\pipe\...) with no real
+        // parent directory — skip create_dir_all to avoid a misleading error.
+        #[cfg(unix)]
+        if let Some(parent) = std::path::Path::new(&socket).parent() {
+            if !parent.as_os_str().is_empty() {
+                use std::os::unix::fs::DirBuilderExt;
+                if let Err(e) = std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(parent)
+                {
+                    tracing::warn!(error = %e, dir = ?parent, "failed to create socket parent directory");
+                }
+            }
+        }
+
         let socket_for_signal = socket.clone();
 
         // Spawn signal handler — cross-platform graceful shutdown

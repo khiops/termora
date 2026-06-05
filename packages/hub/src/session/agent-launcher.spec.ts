@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -30,7 +31,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 // Import AFTER vi.mock so the mock is in place
-const { connectOrLaunch } = await import("./agent-launcher.js");
+const { connectOrLaunch, readBoundedLogTail } = await import("./agent-launcher.js");
 
 const TEST_TIMEOUT = 15_000;
 
@@ -273,5 +274,228 @@ describe("connectOrLaunch", () => {
 			},
 			TEST_TIMEOUT,
 		);
+	});
+
+	/**
+	 * Mutation caught: removing the `mkdirSync(dirname(socketPath), ...)` call
+	 * in launchDaemon causes the agent's UnixListener::bind to fail with ENOENT
+	 * on WSL / XDG_RUNTIME_DIR environments where the socket parent dir does not
+	 * pre-exist. This test verifies the directory is created before spawn is called.
+	 */
+	it.skipIf(process.platform === "win32")(
+		"[socket parent dir] creates missing parent directory before spawning the agent",
+		async () => {
+			// Use a separate temp base so cleanup is independent of the outer tmpDir.
+			const isolatedBase = mkdtempSync(path.join(os.tmpdir(), "termora-sockdir-test-"));
+			try {
+				// Point the socket at a two-level-deep path that does not exist yet.
+				// Neither `isolatedBase/missing/` nor `isolatedBase/missing/nested/` exists.
+				const missingParent = path.join(isolatedBase, "missing", "nested");
+				const deepSocketPath = path.join(missingParent, "agent.sock");
+
+				// Verify the directory genuinely does not exist before the call.
+				expect(existsSync(missingParent)).toBe(false);
+
+				let dirCreatedBeforeSpawn = false;
+				mockSpawnImpl = (...args: unknown[]) => {
+					// At this point launchDaemon has already run mkdirSync — check it.
+					dirCreatedBeforeSpawn = existsSync(missingParent);
+					// Start the mock daemon so waitForSocket succeeds.
+					setTimeout(async () => {
+						daemon = await createMockDaemon(deepSocketPath);
+					}, 150);
+					return { unref: vi.fn(), pid: 55555 };
+				};
+
+				const dummyBinary = path.join(tmpDir, "fake-agent.js");
+				await writeFile(dummyBinary, "// placeholder");
+
+				agent = await connectOrLaunch(deepSocketPath, config, dummyBinary);
+
+				// The socket parent directory must have been created before spawn.
+				expect(dirCreatedBeforeSpawn).toBe(true);
+				// Belt-and-suspenders: directory still exists after connect.
+				expect(existsSync(missingParent)).toBe(true);
+				expect(agent.connected).toBe(true);
+			} finally {
+				rmSync(isolatedBase, { recursive: true, force: true });
+			}
+		},
+		TEST_TIMEOUT,
+	);
+
+	/**
+	 * Mutation caught: reverting mode 0o700 → no mode (default 0o777 & umask)
+	 * would leave the socket parent dir group/world-accessible, allowing other
+	 * local users to reach the agent socket.
+	 * This test verifies the created directory has mode 0o700.
+	 */
+	it.skipIf(process.platform === "win32")(
+		"[socket parent dir] creates parent directory with owner-only mode 0o700",
+		async () => {
+			const isolatedBase = mkdtempSync(path.join(os.tmpdir(), "termora-sockmode-test-"));
+			try {
+				const socketParent = path.join(isolatedBase, "sockdir");
+				const testSocketPath = path.join(socketParent, "agent.sock");
+
+				expect(existsSync(socketParent)).toBe(false);
+
+				mockSpawnImpl = (..._args: unknown[]) => {
+					setTimeout(async () => {
+						daemon = await createMockDaemon(testSocketPath);
+					}, 150);
+					return { unref: vi.fn(), pid: 55556 };
+				};
+
+				const dummyBinary = path.join(tmpDir, "fake-agent.js");
+				await writeFile(dummyBinary, "// placeholder");
+
+				agent = await connectOrLaunch(testSocketPath, config, dummyBinary);
+
+				// Directory must exist and have mode 0o700 (owner rwx, no group/other).
+				expect(existsSync(socketParent)).toBe(true);
+				const st = statSync(socketParent);
+				// st.mode & 0o777 masks off the file-type bits — only rwxrwxrwx remain.
+				expect(st.mode & 0o777).toBe(0o700);
+			} finally {
+				rmSync(isolatedBase, { recursive: true, force: true });
+			}
+		},
+		TEST_TIMEOUT,
+	);
+});
+
+/**
+ * Unit tests for readBoundedLogTail — the bounded-suffix log reader extracted
+ * from waitForSocket.  These tests exercise the helper directly with a real
+ * temp file so there is no need to wire up the full 5-second timeout path.
+ *
+ * Mutations caught:
+ *   (a) reverting to readFileSync(whole) — the "large file" test asserts the
+ *       returned string length is bounded (≤ ~4 KB + ellipsis overhead) even
+ *       when the log is 50 KB, so the whole-file version would pass content
+ *       but produce an oversized result that the assertion rejects.
+ *   (b) dropping the lines.slice(-20) limit — the last-lines test asserts only
+ *       the final line is present and early lines are absent.
+ *   (c) making the helper always return "" — the content assertion fails.
+ *   (d) ENOENT not handled gracefully — the missing-file test would throw.
+ */
+describe("readBoundedLogTail", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(path.join(os.tmpdir(), "termora-logtail-test-"));
+	});
+
+	afterEach(async () => {
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	it("returns empty string for a missing log file (ENOENT)", () => {
+		const result = readBoundedLogTail(path.join(tmpDir, "nonexistent.log"));
+		expect(result).toBe("");
+	});
+
+	it("returns empty string for an empty log file", () => {
+		const logPath = path.join(tmpDir, "empty.log");
+		writeFileSync(logPath, "");
+		expect(readBoundedLogTail(logPath)).toBe("");
+	});
+
+	it("returns the log content for a small log file", () => {
+		const logPath = path.join(tmpDir, "small.log");
+		writeFileSync(logPath, "line1\nline2\nline3\n");
+		const result = readBoundedLogTail(logPath);
+		expect(result).toContain("line1");
+		expect(result).toContain("line2");
+		expect(result).toContain("line3");
+	});
+
+	it("returns only the last N lines when the log has many lines", () => {
+		const logPath = path.join(tmpDir, "manylines.log");
+		// Write 100 numbered lines
+		const allLines = Array.from({ length: 100 }, (_, i) => `log-line-${i + 1}`);
+		writeFileSync(logPath, `${allLines.join("\n")}\n`);
+
+		// Default maxLines=20: should have the last 20 lines, not the first ones
+		const result = readBoundedLogTail(logPath);
+		expect(result).toContain("log-line-100");
+		expect(result).toContain("log-line-81");
+		expect(result).not.toContain("log-line-1\n");
+		expect(result).not.toContain("log-line-80");
+	});
+
+	it("returns bounded output for a large log file (>8 KB window)", () => {
+		const logPath = path.join(tmpDir, "large.log");
+
+		// Write ~50 KB of log content: 1000 lines × ~50 bytes each
+		const earlyLine = "early-line-that-should-not-appear-in-tail";
+		const lateLine = "late-line-that-must-appear-in-tail";
+		const lines: string[] = [];
+		// 950 "early" padding lines
+		for (let i = 0; i < 950; i++) {
+			lines.push(`${earlyLine}-${i}-${"x".repeat(30)}`);
+		}
+		// 50 "late" lines that must appear in the tail
+		for (let i = 0; i < 50; i++) {
+			lines.push(`${lateLine}-${i}`);
+		}
+		writeFileSync(logPath, `${lines.join("\n")}\n`);
+
+		const result = readBoundedLogTail(logPath);
+
+		// Result must be bounded — total length well under 50 KB
+		// maxChars cap is 4096; add overhead for "…" prefix = ~4097 chars max
+		expect(result.length).toBeLessThanOrEqual(4097);
+
+		// Must contain the final late line
+		expect(result).toContain(`${lateLine}-49`);
+
+		// Must NOT contain the very early padding lines (they're outside the window)
+		expect(result).not.toContain(`${earlyLine}-0-`);
+	});
+
+	it("uses the provided windowBytes parameter to limit disk reads", () => {
+		const logPath = path.join(tmpDir, "windowed.log");
+
+		// Write 30 lines, each exactly 20 chars + newline = 21 bytes
+		// Total ~630 bytes.  windowBytes=100 → only the last ~4-5 lines fit.
+		const allLines = Array.from(
+			{ length: 30 },
+			(_, i) => `line${String(i + 1).padStart(2, "0")}-${"a".repeat(14)}`,
+		);
+		writeFileSync(logPath, `${allLines.join("\n")}\n`);
+
+		// windowBytes=100 should exclude the early lines
+		const result = readBoundedLogTail(logPath, 100, 20, 4096);
+		expect(result).toContain("line30");
+		// line01 is ~21*29 bytes before the end — outside the 100-byte window
+		expect(result).not.toContain("line01");
+	});
+
+	it("decodes only the bytes actually read (truncation safety)", () => {
+		// Mutation caught: using buf.toString("utf8") instead of
+		// buf.toString("utf8", 0, bytesRead) would include uninitialized memory
+		// from Buffer.allocUnsafe when readSync returns fewer bytes than requested.
+		//
+		// We can't easily force readSync to return a short count on a real file,
+		// so we verify the contract from the other side: the returned string must
+		// consist entirely of printable ASCII (the known file content), with no
+		// stray non-printable bytes that would indicate uninitialized buffer regions
+		// were included.
+		const logPath = path.join(tmpDir, "truncation-safety.log");
+		const content = "alpha\nbeta\ngamma\ndelta\n";
+		writeFileSync(logPath, content);
+
+		const result = readBoundedLogTail(logPath);
+
+		// Every character in the result must be a printable ASCII character or newline.
+		// Uninitialized memory from allocUnsafe would contain arbitrary bytes,
+		// including control chars/NULs that would fail this assertion.
+		expect(result).toMatch(/^[\x20-\x7E\n]*$/);
+
+		// Content is still present — not a trivially-empty result.
+		expect(result).toContain("alpha");
+		expect(result).toContain("gamma");
 	});
 });
