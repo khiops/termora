@@ -355,6 +355,28 @@ export interface ChannelStateMessage {
 	exitCode?: number;
 }
 
+/**
+ * Hub → UI: a new channel was just created on this hub.
+ * Broadcast to ALL connected clients of the host so observers learn
+ * about channels spawned by other clients without a manual fetchChannels.
+ * Carries the full channel payload (same shape as REST GET /api/channels).
+ */
+export interface ChannelCreatedMessage {
+	type: "CHANNEL_CREATED";
+	hostId: string;
+	channelId: string;
+	sessionId: string;
+	shell: string;
+	args?: string[];
+	cwd?: string;
+	cols: number;
+	rows: number;
+	status: ChannelStatus;
+	displayTitle: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
 /** Hub → UI: full state snapshot sent immediately after AUTH_OK */
 export interface StateSyncMessage {
 	type: "STATE_SYNC";
@@ -536,6 +558,7 @@ export type HubToUiMessage =
 	| OutputMessage
 	| SessionStateMessage
 	| ChannelStateMessage
+	| ChannelCreatedMessage
 	| StateSyncMessage
 	| WriteRequestMessage
 	| WriteGrantMessage
@@ -589,6 +612,7 @@ export type ProtocolMessage =
 	| WriteLockMessage
 	| SessionStateMessage
 	| ChannelStateMessage
+	| ChannelCreatedMessage
 	| StateSyncMessage
 	| PingMessage
 	| PongMessage

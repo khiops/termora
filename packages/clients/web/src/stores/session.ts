@@ -1,21 +1,21 @@
-import { DEFAULT_CHANNEL_NAME, DEFAULT_NOTIFICATION_CONFIG, generateId } from '@termora/shared';
-import { defineStore } from 'pinia';
-import { markRaw, ref } from 'vue';
-import { showSimpleNotification } from '../composables/useDesktopNotifications.js';
-import { WsClient } from '../services/ws-client.js';
-import { hubWsUrl } from '../utils/hub-url.js';
-import { useAgentVerifyStore } from './agent-verify.js';
-import { useAuthStore } from './auth.js';
-import { useAuthPromptStore } from './auth-prompt.js';
-import { useChannelsStore } from './channels.js';
-import { useConfigStore } from './config.js';
-import { useHostVerifyStore } from './host-verify.js';
-import { useHostsStore } from './hosts.js';
-import { useNotificationStore } from './notifications.js';
-import { useToastStore } from './toast.js';
-import { useWriteLockStore } from './writelock.js';
+import { DEFAULT_CHANNEL_NAME, DEFAULT_NOTIFICATION_CONFIG, generateId } from "@termora/shared";
+import { defineStore } from "pinia";
+import { markRaw, ref } from "vue";
+import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
+import { WsClient } from "../services/ws-client.js";
+import { hubWsUrl } from "../utils/hub-url.js";
+import { useAgentVerifyStore } from "./agent-verify.js";
+import { useAuthPromptStore } from "./auth-prompt.js";
+import { useAuthStore } from "./auth.js";
+import { useChannelsStore } from "./channels.js";
+import { useConfigStore } from "./config.js";
+import { useHostVerifyStore } from "./host-verify.js";
+import { useHostsStore } from "./hosts.js";
+import { useNotificationStore } from "./notifications.js";
+import { useToastStore } from "./toast.js";
+import { useWriteLockStore } from "./writelock.js";
 
-export const useSessionStore = defineStore('session', () => {
+export const useSessionStore = defineStore("session", () => {
 	// markRaw: prevent Pinia/Vue from making WsClient reactive,
 	// which would strip private class members and break the class methods.
 	const wsClient = markRaw(new WsClient());
@@ -117,7 +117,7 @@ export const useSessionStore = defineStore('session', () => {
 				}
 				reconnectCount.value++;
 			} catch (err) {
-				console.error('[session] Reconnect auth failed:', err);
+				console.error("[session] Reconnect auth failed:", err);
 			}
 		});
 	}
@@ -133,11 +133,11 @@ export const useSessionStore = defineStore('session', () => {
 			const timer = setTimeout(() => {
 				unsubOk();
 				unsubFail();
-				reject(new Error('AUTH timeout — no response after 10s'));
+				reject(new Error("AUTH timeout — no response after 10s"));
 			}, 10_000);
 
-			const unsubOk = wsClient.on('AUTH_OK', (msg) => {
-				if (msg.type === 'AUTH_OK') {
+			const unsubOk = wsClient.on("AUTH_OK", (msg) => {
+				if (msg.type === "AUTH_OK") {
 					clearTimeout(timer);
 					unsubOk();
 					unsubFail();
@@ -148,8 +148,8 @@ export const useSessionStore = defineStore('session', () => {
 				}
 			});
 
-			const unsubFail = wsClient.on('AUTH_FAIL', (msg) => {
-				if (msg.type === 'AUTH_FAIL') {
+			const unsubFail = wsClient.on("AUTH_FAIL", (msg) => {
+				if (msg.type === "AUTH_FAIL") {
 					clearTimeout(timer);
 					unsubOk();
 					unsubFail();
@@ -160,8 +160,8 @@ export const useSessionStore = defineStore('session', () => {
 			});
 
 			wsClient.send({
-				type: 'AUTH',
-				token: authStore.token ?? '',
+				type: "AUTH",
+				token: authStore.token ?? "",
 			});
 		});
 	}
@@ -170,23 +170,23 @@ export const useSessionStore = defineStore('session', () => {
 	 * Wire up write-lock protocol message handlers to the write-lock store.
 	 */
 	function _registerWriteLockHandlers(writeLockStore: ReturnType<typeof useWriteLockStore>): void {
-		wsClient.on('WRITE_LOCK', (msg) => {
-			if (msg.type === 'WRITE_LOCK') {
+		wsClient.on("WRITE_LOCK", (msg) => {
+			if (msg.type === "WRITE_LOCK") {
 				writeLockStore.handleWriteLock(msg.channelId, msg.holder);
 			}
 		});
-		wsClient.on('WRITE_REQUEST', (msg) => {
-			if (msg.type === 'WRITE_REQUEST') {
+		wsClient.on("WRITE_REQUEST", (msg) => {
+			if (msg.type === "WRITE_REQUEST") {
 				writeLockStore.handleWriteRequest(msg.channelId, msg.fromClientId);
 			}
 		});
-		wsClient.on('WRITE_REVOKED', (msg) => {
-			if (msg.type === 'WRITE_REVOKED') {
+		wsClient.on("WRITE_REVOKED", (msg) => {
+			if (msg.type === "WRITE_REVOKED") {
 				writeLockStore.handleWriteRevoked(msg.channelId);
 			}
 		});
-		wsClient.on('WRITE_DENY', (msg) => {
-			if (msg.type === 'WRITE_DENY') {
+		wsClient.on("WRITE_DENY", (msg) => {
+			if (msg.type === "WRITE_DENY") {
 				writeLockStore.handleWriteDeny(msg.channelId);
 			}
 		});
@@ -195,9 +195,11 @@ export const useSessionStore = defineStore('session', () => {
 	/**
 	 * Wire up AUTH_PROMPT message handler to the auth-prompt store.
 	 */
-	function _registerAuthPromptHandlers(authPromptStore: ReturnType<typeof useAuthPromptStore>): void {
-		wsClient.on('AUTH_PROMPT', (msg) => {
-			if (msg.type === 'AUTH_PROMPT') {
+	function _registerAuthPromptHandlers(
+		authPromptStore: ReturnType<typeof useAuthPromptStore>,
+	): void {
+		wsClient.on("AUTH_PROMPT", (msg) => {
+			if (msg.type === "AUTH_PROMPT") {
 				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
 			}
 		});
@@ -206,9 +208,11 @@ export const useSessionStore = defineStore('session', () => {
 	/**
 	 * Wire up HOST_VERIFY message handler for SSH key-mismatch prompts.
 	 */
-	function _registerHostVerifyHandlers(hostVerifyStore: ReturnType<typeof useHostVerifyStore>): void {
-		wsClient.on('HOST_VERIFY', (msg) => {
-			if (msg.type === 'HOST_VERIFY' && msg.promptId) {
+	function _registerHostVerifyHandlers(
+		hostVerifyStore: ReturnType<typeof useHostVerifyStore>,
+	): void {
+		wsClient.on("HOST_VERIFY", (msg) => {
+			if (msg.type === "HOST_VERIFY" && msg.promptId) {
 				// Surface dialog for both TOFU (firstConnect) and mismatch (oldFingerprint) prompts
 				const hostname = msg.hostId; // best-effort; hub doesn't send hostname yet
 				hostVerifyStore.handleHostVerify(
@@ -216,7 +220,7 @@ export const useSessionStore = defineStore('session', () => {
 					hostname,
 					msg.fingerprint,
 					msg.algorithm,
-					msg.oldFingerprint ?? '',
+					msg.oldFingerprint ?? "",
 					msg.promptId,
 					msg.firstConnect ?? false,
 				);
@@ -227,32 +231,34 @@ export const useSessionStore = defineStore('session', () => {
 	/**
 	 * Wire up AGENT_BINARY_VERIFY and agent-related ERROR message handlers.
 	 */
-	function _registerAgentVerifyHandlers(agentVerifyStore: ReturnType<typeof useAgentVerifyStore>): void {
-		wsClient.on('AGENT_BINARY_VERIFY', (msg) => {
-			if (msg.type === 'AGENT_BINARY_VERIFY') {
+	function _registerAgentVerifyHandlers(
+		agentVerifyStore: ReturnType<typeof useAgentVerifyStore>,
+	): void {
+		wsClient.on("AGENT_BINARY_VERIFY", (msg) => {
+			if (msg.type === "AGENT_BINARY_VERIFY") {
 				agentVerifyStore.handleAgentVerify(msg);
 			}
 		});
 
-		wsClient.on('ERROR', (msg) => {
-			if (msg.type === 'ERROR') {
-				if (msg.code === 'AGENT_NOT_AVAILABLE') {
+		wsClient.on("ERROR", (msg) => {
+			if (msg.type === "ERROR") {
+				if (msg.code === "AGENT_NOT_AVAILABLE") {
 					agentVerifyStore.handleDeployError(msg.message, msg.hostId);
 					return;
 				}
-				if (msg.code === 'AGENT_UPDATED') {
+				if (msg.code === "AGENT_UPDATED") {
 					// Informational — agent binary was updated; no user action required.
 					// Intentionally not surfaced as a generic error.
 					return;
 				}
-				if (msg.code === 'AGENT_BINARY_REJECTED') {
+				if (msg.code === "AGENT_BINARY_REJECTED") {
 					// User chose to reject the binary — no toast needed.
 					return;
 				}
 				// All other error codes (SSH_CONNECT_FAILED, SPAWN_FAILED,
 				// SSH_HOST_KEY_REJECTED, etc.) are surfaced as error toasts.
 				const toastStore = useToastStore();
-				toastStore.show('error', msg.message, 10_000);
+				toastStore.show("error", msg.message, 10_000);
 			}
 		});
 	}
@@ -261,26 +267,32 @@ export const useSessionStore = defineStore('session', () => {
 	 * Wire up SESSION_STATE messages to the hosts store for rail status dots.
 	 */
 	function _registerSessionHandlers(hostsStore: ReturnType<typeof useHostsStore>): void {
-		wsClient.on('SESSION_STATE', (msg) => {
-			if (msg.type === 'SESSION_STATE') {
+		wsClient.on("SESSION_STATE", (msg) => {
+			if (msg.type === "SESSION_STATE") {
 				hostsStore.updateSessionStatus(msg.hostId, msg.status);
 			}
 		});
 	}
 
 	/**
-	 * Wire up CHANNEL_STATE, TITLE_CHANGE, and PROCESS_TITLE messages
-	 * to the channels store.
+	 * Wire up CHANNEL_STATE, CHANNEL_CREATED, TITLE_CHANGE, and PROCESS_TITLE
+	 * messages to the channels store.
 	 */
 	function _registerChannelHandlers(channelsStore: ReturnType<typeof useChannelsStore>): void {
-		wsClient.on('CHANNEL_STATE', (msg) => {
-			if (msg.type === 'CHANNEL_STATE') {
+		wsClient.on("CHANNEL_STATE", (msg) => {
+			if (msg.type === "CHANNEL_STATE") {
 				channelsStore.updateChannelStatus(msg.channelId, msg.status, msg.exitCode);
 			}
 		});
 
-		wsClient.on('TITLE_CHANGE', (msg) => {
-			if (msg.type === 'TITLE_CHANGE') {
+		wsClient.on("CHANNEL_CREATED", (msg) => {
+			if (msg.type === "CHANNEL_CREATED") {
+				channelsStore.handleChannelCreated(msg);
+			}
+		});
+
+		wsClient.on("TITLE_CHANGE", (msg) => {
+			if (msg.type === "TITLE_CHANGE") {
 				channelsStore.setDynamicTitle(msg.channelId, msg.title);
 				if (msg.displayTitle) {
 					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
@@ -288,8 +300,8 @@ export const useSessionStore = defineStore('session', () => {
 			}
 		});
 
-		wsClient.on('PROCESS_TITLE', (msg) => {
-			if (msg.type === 'PROCESS_TITLE') {
+		wsClient.on("PROCESS_TITLE", (msg) => {
+			if (msg.type === "PROCESS_TITLE") {
 				channelsStore.updateProcessTitle(msg.channelId, msg.title);
 				if (msg.displayTitle) {
 					channelsStore.setDisplayTitle(msg.channelId, msg.displayTitle);
@@ -307,9 +319,10 @@ export const useSessionStore = defineStore('session', () => {
 		configStore: ReturnType<typeof useConfigStore>,
 		channelsStore: ReturnType<typeof useChannelsStore>,
 	): void {
-		wsClient.on('BELL', (msg) => {
-			if (msg.type === 'BELL') {
-				const bellCfg = configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
+		wsClient.on("BELL", (msg) => {
+			if (msg.type === "BELL") {
+				const bellCfg =
+					configStore.uiConfig.notifications?.bell ?? DEFAULT_NOTIFICATION_CONFIG.bell;
 				// Note: bell badge + sound are BOTH handled by TerminalPane's xterm.js
 				// onBell handler (per-channel profile). The WS BELL message is kept
 				// only for desktop notifications (below) — do NOT increment the badge
@@ -318,14 +331,15 @@ export const useSessionStore = defineStore('session', () => {
 				if (bellCfg.desktopNotification !== false && document.hidden) {
 					const ch = channelsStore.channels.find((c) => c.id === msg.channelId);
 					const name = ch?.displayTitle ?? DEFAULT_CHANNEL_NAME;
-					showSimpleNotification(`Bell in ${name}`, '', msg.channelId);
+					showSimpleNotification(`Bell in ${name}`, "", msg.channelId);
 				}
 			}
 		});
 
-		wsClient.on('NOTIFICATION', (msg) => {
-			if (msg.type === 'NOTIFICATION') {
-				const osc9Cfg = configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
+		wsClient.on("NOTIFICATION", (msg) => {
+			if (msg.type === "NOTIFICATION") {
+				const osc9Cfg =
+					configStore.uiConfig.notifications?.osc9 ?? DEFAULT_NOTIFICATION_CONFIG.osc9;
 				// Always show badge (brief flash on active tab, persistent on background)
 				notificationStore.incrementBellCount(msg.channelId);
 				if (msg.channelId === channelsStore.selectedChannelId) {
@@ -337,7 +351,7 @@ export const useSessionStore = defineStore('session', () => {
 				}
 				// Desktop notification when document is hidden
 				if (osc9Cfg.desktopNotification !== false && document.hidden) {
-					showSimpleNotification('Terminal Notification', msg.message, msg.channelId);
+					showSimpleNotification("Terminal Notification", msg.message, msg.channelId);
 				}
 			}
 		});
@@ -351,8 +365,8 @@ export const useSessionStore = defineStore('session', () => {
 		hostsStore: ReturnType<typeof useHostsStore>,
 		channelsStore: ReturnType<typeof useChannelsStore>,
 	): void {
-		wsClient.on('STATE_SYNC', (msg) => {
-			if (msg.type === 'STATE_SYNC') {
+		wsClient.on("STATE_SYNC", (msg) => {
+			if (msg.type === "STATE_SYNC") {
 				// Build sessionId → hostId lookup for channel-host mapping
 				const sessionHostMap = new Map<string, string>();
 				for (const s of msg.sessions) {
@@ -386,11 +400,11 @@ export const useSessionStore = defineStore('session', () => {
 		return new Promise<string>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				unsub();
-				reject(new Error('SPAWN timeout — no SPAWN_OK after 10s'));
+				reject(new Error("SPAWN timeout — no SPAWN_OK after 10s"));
 			}, 10_000);
 
-			const unsub = wsClient.on('SPAWN_OK', (msg) => {
-				if (msg.type === 'SPAWN_OK') {
+			const unsub = wsClient.on("SPAWN_OK", (msg) => {
+				if (msg.type === "SPAWN_OK") {
 					clearTimeout(timer);
 					unsub();
 					currentChannelId.value = msg.channelId;
@@ -399,8 +413,8 @@ export const useSessionStore = defineStore('session', () => {
 			});
 
 			wsClient.send({
-				type: 'SPAWN',
-				hostId: 'local',
+				type: "SPAWN",
+				hostId: "local",
 			});
 		});
 	}
