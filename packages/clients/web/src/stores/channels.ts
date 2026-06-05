@@ -197,12 +197,15 @@ export const useChannelsStore = defineStore("channels", () => {
 	// REST: fetch channels for a host
 	// -------------------------------------------------------------------------
 
-	// -------------------------------------------------------------------------
-	// REST: fetch channels for a host
-	// -------------------------------------------------------------------------
-
 	async function fetchChannels(hostId: string): Promise<void> {
 		if (authStore.token === null) return;
+
+		// ── 1. Capture generation FIRST — before any state mutation ──────────
+		// Generation is incremented before loading/error are touched so the
+		// per-generation lifecycle (loading start → loading end) is fully
+		// bracketed by the same generation value.
+		const myGeneration = ++fetchGeneration.value;
+
 		loading.value = true;
 		error.value = null;
 
@@ -217,15 +220,12 @@ export const useChannelsStore = defineStore("channels", () => {
 			lastSyncIds.value = null;
 		}
 
-		// Capture a generation stamp so stale fetch resolutions (superseded by a
-		// newer fetch) can be detected and discarded without clobbering newer state.
-		const myGeneration = fetchGeneration.value + 1;
-		fetchGeneration.value = myGeneration;
 		// Register a tracking set for WS-added channels during this fetch.
 		const myWsAdded = new Set<string>();
 		wsAddedDuringFetch.value = new Map(wsAddedDuringFetch.value).set(myGeneration, myWsAdded);
 
 		try {
+			// ── 2. ALL I/O — no state commits in this section ────────────────
 			const [channelsRes, fetchedGroups] = await Promise.all([
 				fetch(`${hubBaseUrl()}/api/channels?host_id=${encodeURIComponent(hostId)}`, {
 					headers: { Authorization: `Bearer ${authStore.token}` },
@@ -233,19 +233,24 @@ export const useChannelsStore = defineStore("channels", () => {
 				_fetchGroupsRaw(hostId),
 			]);
 
-			// Discard this resolution if a newer fetchChannels has already run.
-			// Groups are committed here (not inside _fetchGroupsRaw) so that a
-			// stale slow fetch cannot overwrite a newer generation's group state.
-			if (fetchGeneration.value !== myGeneration) return;
-
-			// Commit group state only for the winning generation.
-			groups.value = fetchedGroups.groups;
-			generalCollapsed.value = fetchedGroups.generalCollapsed;
-
 			if (!channelsRes.ok) {
 				throw new Error(`GET /api/channels failed: ${channelsRes.status}`);
 			}
+			// Parse JSON — still inside the I/O section, no commits yet.
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
+
+			// ── 3. SINGLE generation guard — dominates ALL commits ────────────
+			// Must appear AFTER every await so no stale fetch can slip through
+			// between two awaits.  All assignments below are conditional on this.
+			if (fetchGeneration.value !== myGeneration) return;
+
+			// ── 4. Commit block — all state mutations happen here ─────────────
+
+			// Commit group state for the winning generation.
+			groups.value = fetchedGroups.groups;
+			generalCollapsed.value = fetchedGroups.generalCollapsed;
+
+			// Build merged channel list entirely in locals before writing refs.
 			const data = rows.map(apiRowToChannel);
 
 			// M2: union in any channels added by handleChannelCreated DURING this
@@ -257,15 +262,8 @@ export const useChannelsStore = defineStore("channels", () => {
 			const wsChannelsToKeep = [...channels.value].filter(
 				(c) => myWsAdded.has(c.id) && !dataIds.has(c.id),
 			);
-			const merged = [...data, ...wsChannelsToKeep];
+			let merged = [...data, ...wsChannelsToKeep];
 
-			channels.value = merged;
-			// Populate persistent channelId → hostId map (survives host switch)
-			const nextHostMap = new Map(channelHostMap.value);
-			for (const ch of merged) {
-				nextHostMap.set(ch.id, hostId);
-			}
-			channelHostMap.value = nextHostMap;
 			// Apply any WS status updates that arrived before the fetch completed.
 			// pendingStatuses accumulates CHANNEL_STATE and STATE_SYNC entries
 			// that were buffered while channels.value was empty.
@@ -273,7 +271,7 @@ export const useChannelsStore = defineStore("channels", () => {
 				const pending = pendingStatuses.value;
 				pendingStatuses.value = new Map();
 				let statusUpdated = false;
-				const reconciled = channels.value.map((ch) => {
+				const reconciled = merged.map((ch) => {
 					const p = pending.get(ch.id);
 					if (p) {
 						statusUpdated = true;
@@ -286,15 +284,16 @@ export const useChannelsStore = defineStore("channels", () => {
 					return ch;
 				});
 				if (statusUpdated) {
-					channels.value = reconciled;
+					merged = reconciled;
 				}
 			}
+
 			// Mark channels absent from last STATE_SYNC as dead (hub restarted, lost track).
 			// lastSyncIds is set by applyStateSync when it buffers (channels were empty
 			// during the WS message — the common case after our clear above).
 			if (lastSyncIds.value !== null) {
-				const syncIds = lastSyncIds.value as Set<string>;
-				channels.value = channels.value.map((ch) => {
+				const syncIds = lastSyncIds.value;
+				merged = merged.map((ch) => {
 					if (ch.status !== "dead" && !syncIds.has(ch.id)) {
 						return { ...ch, status: "dead" as const };
 					}
@@ -302,19 +301,36 @@ export const useChannelsStore = defineStore("channels", () => {
 				});
 				lastSyncIds.value = null; // Always clear — one-shot reconciliation
 			}
+
+			// Write channels ref once with the fully-reconciled list.
+			channels.value = merged;
+
+			// Populate persistent channelId → hostId map (survives host switch).
+			const nextHostMap = new Map(channelHostMap.value);
+			for (const ch of merged) {
+				nextHostMap.set(ch.id, hostId);
+			}
+			channelHostMap.value = nextHostMap;
+
 			// Clear selection if the previously selected channel is no longer
-			// present (e.g. host switched)
+			// present (e.g. host switched).
 			if (selectedChannelId.value !== null) {
 				const still = channels.value.find((c) => c.id === selectedChannelId.value);
 				if (!still) selectedChannelId.value = null;
 			}
 		} catch (err) {
-			error.value = err instanceof Error ? err.message : String(err);
+			// ── 5. Guarded catch — a stale failed fetch must not clobber a newer
+			// generation's (cleared or set) error state.
+			if (fetchGeneration.value === myGeneration) {
+				error.value = err instanceof Error ? err.message : String(err);
+			}
 		} finally {
-			// Clean up the WS-added tracking set for this generation
+			// Clean up the WS-added tracking set for this generation.
 			const next = new Map(wsAddedDuringFetch.value);
 			next.delete(myGeneration);
 			wsAddedDuringFetch.value = next;
+			// ── 6. Guarded finally — because generation is captured before loading
+			// is set, the loading lifecycle is fully consistent per-generation.
 			if (fetchGeneration.value === myGeneration) {
 				loading.value = false;
 			}

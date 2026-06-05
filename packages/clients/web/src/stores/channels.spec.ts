@@ -868,3 +868,217 @@ describe("useChannelsStore — M2: WS-added channel preserved when fetchChannels
 		expect(store.channels.find((c) => c.id === "ch-ws")?.status).toBe("live");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// G1 holistic-guard: post-JSON race — stale fetch resolving after json() parse
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — G1: stale fetch resolving after channelsRes.json() must not commit", () => {
+	it("post-JSON race: gen-N json() resolves after gen-N+1 committed " +
+		"— channels.value must reflect gen-N+1, NOT gen-N " +
+		"(mutation caught: committing channels.value before the single post-await guard)", async () => {
+		// Controlled teardown: gen-1 (host-A) is held until after gen-2 (host-B) commits.
+		// After gen-2 commits, gen-1's json() resolves — the guard must discard it.
+		let resolveHostAJson!: () => void;
+		const hostAJsonReady = new Promise<void>((r) => {
+			resolveHostAJson = r;
+		});
+
+		function makeRow(id: string): Record<string, unknown> {
+			return {
+				id,
+				session_id: "sess-1",
+				shell: "/bin/bash",
+				cols: 80,
+				rows: 24,
+				status: "live",
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			};
+		}
+
+		// Track which channels call this is (1=host-A fetch, 2=host-B fetch).
+		let channelsFetchCount = 0;
+
+		mockFetch.mockImplementation((url: string) => {
+			if ((url as string).includes("/api/groups")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			channelsFetchCount++;
+			const call = channelsFetchCount;
+			if (call === 1) {
+				// host-A fetch: Response resolves immediately but json() is held.
+				return Promise.resolve({
+					ok: true,
+					json: () => hostAJsonReady.then(() => [makeRow("ch-host-a")]),
+				});
+			}
+			// host-B fetch: resolves fully immediately.
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve([makeRow("ch-host-b")]),
+			});
+		});
+
+		const store = useChannelsStore();
+
+		// Start gen-1 (host-A) — its json() is held.
+		const fetchA = store.fetchChannels("host-a");
+
+		// Start gen-2 (host-B) — it will fully resolve (new host, channels cleared).
+		await store.fetchChannels("host-b");
+
+		// Gen-2 has committed — channels.value must be host-B's list.
+		expect(store.channels.map((c) => c.id)).toContain("ch-host-b");
+		expect(store.channels.map((c) => c.id)).not.toContain("ch-host-a");
+
+		// Now unblock gen-1's json() — the single post-await guard must discard it.
+		resolveHostAJson();
+		await fetchA;
+
+		// channels.value must still reflect gen-2 (host-B), NOT overwritten by gen-1.
+		expect(store.channels.map((c) => c.id)).toContain("ch-host-b");
+		expect(store.channels.map((c) => c.id)).not.toContain("ch-host-a");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// G2 holistic-guard: error-clobber race — stale failed fetch must not clear
+//                    a newer generation's (null) error state
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — G2: stale failed fetch must not clobber newer generation error=null", () => {
+	it("error clobber: gen-N+1 succeeds (error stays null); gen-N fails afterward " +
+		"— error.value must remain null " +
+		"(mutation caught: assigning error.value in catch without generation guard)", async () => {
+		// gen-1 starts first; its json() is held so it resolves AFTER gen-2.
+		// gen-2 starts second; it fails immediately (network error).
+		// gen-3 starts third; it succeeds and clears error.
+		// Then gen-1's failure resolves — the guarded catch must NOT re-set error.
+
+		// Simpler scenario that directly tests the catch guard:
+		// gen-1: response ok but json() is held → will fail with a thrown error later
+		// gen-2: succeeds fully → error.value = null
+
+		let resolveGen1Json!: (v: unknown) => void;
+		let rejectGen1Json!: (reason: unknown) => void;
+		const gen1JsonPromise = new Promise<unknown>((res, rej) => {
+			resolveGen1Json = res;
+			rejectGen1Json = rej;
+		});
+
+		function makeRow(id: string): Record<string, unknown> {
+			return {
+				id,
+				session_id: "sess-1",
+				shell: "/bin/bash",
+				cols: 80,
+				rows: 24,
+				status: "live",
+				created_at: "2026-01-01T00:00:00Z",
+				updated_at: "2026-01-01T00:00:00Z",
+			};
+		}
+
+		let channelsFetchCount = 0;
+		mockFetch.mockImplementation((url: string) => {
+			if ((url as string).includes("/api/groups")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			channelsFetchCount++;
+			const call = channelsFetchCount;
+			if (call === 1) {
+				// gen-1 Response is fine but json() is controlled (will be rejected).
+				return Promise.resolve({
+					ok: true,
+					json: () => gen1JsonPromise,
+				});
+			}
+			// gen-2+: immediately succeeds with a channel.
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve([makeRow("ch-gen2")]),
+			});
+		});
+
+		const store = useChannelsStore();
+
+		// Start gen-1 — its json() is held.
+		const fetchGen1 = store.fetchChannels("host-1");
+
+		// Start gen-2 (same host) — it fully succeeds.
+		await store.fetchChannels("host-1");
+
+		// Gen-2 succeeded → error must be null.
+		expect(store.error).toBeNull();
+		expect(store.channels.map((c) => c.id)).toContain("ch-gen2");
+
+		// Now make gen-1's json() throw — it's a stale fetch.
+		// The guarded catch must NOT assign error.value for the stale generation.
+		rejectGen1Json(new Error("stale-network-failure"));
+		await fetchGen1;
+
+		// error.value must still be null — gen-2 succeeded, gen-1's failure is stale.
+		expect(store.error).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// G3 holistic-guard: loading lifecycle — stale fetch must not flip loading
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — G3: stale fetch finally must not flip loading for current generation", () => {
+	it("loading lifecycle: stale gen-N finishing after gen-N+1 must not set loading=false " +
+		"for the current generation if it is still in-flight " +
+		"(mutation caught: unconditional loading.value=false in finally)", async () => {
+		// gen-1: slow json() — resolves after gen-2 is in-flight.
+		// gen-2: slow json() too — we observe loading stays true while gen-2 is pending.
+
+		let resolveGen1Json!: () => void;
+		let resolveGen2Json!: () => void;
+
+		const gen1JsonReady = new Promise<void>((r) => {
+			resolveGen1Json = r;
+		});
+		const gen2JsonReady = new Promise<void>((r) => {
+			resolveGen2Json = r;
+		});
+
+		let channelsFetchCount = 0;
+		mockFetch.mockImplementation((url: string) => {
+			if ((url as string).includes("/api/groups")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			channelsFetchCount++;
+			const call = channelsFetchCount;
+			if (call === 1) {
+				return Promise.resolve({ ok: true, json: () => gen1JsonReady.then(() => []) });
+			}
+			return Promise.resolve({ ok: true, json: () => gen2JsonReady.then(() => []) });
+		});
+
+		const store = useChannelsStore();
+
+		// Start gen-1 — it will be superseded.
+		const fetchGen1 = store.fetchChannels("host-1");
+		expect(store.loading).toBe(true);
+
+		// Start gen-2 — supersedes gen-1.
+		const fetchGen2 = store.fetchChannels("host-1");
+		expect(store.loading).toBe(true);
+
+		// Release gen-1 first — its finally must NOT flip loading=false because
+		// gen-2 is still in-flight and gen-2 is the current generation.
+		resolveGen1Json();
+		await fetchGen1;
+
+		// gen-2 is still pending — loading must still be true.
+		expect(store.loading).toBe(true);
+
+		// Now finish gen-2 — loading can become false.
+		resolveGen2Json();
+		await fetchGen2;
+
+		expect(store.loading).toBe(false);
+	});
+});
