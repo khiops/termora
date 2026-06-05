@@ -174,6 +174,9 @@ export class ChannelLifecycleManager {
 					// present) and via fetchChannels' own channel-list check on resolve.
 					const dbChannel = this.ctx.metaDal.getChannel(channelId);
 					const now = dbChannel?.createdAt ?? new Date().toISOString();
+					// Use the same resolution path as GET /api/channels so observers
+					// and late-fetchers see an identical displayTitle (not hardcoded).
+					const resolvedDisplayTitle = this.broadcaster.resolveDisplayTitle(channelId);
 					const channelCreatedMsg: ChannelCreatedMessage = {
 						type: "CHANNEL_CREATED",
 						hostId,
@@ -185,7 +188,7 @@ export class ChannelLifecycleManager {
 						cols,
 						rows,
 						status: "live",
-						displayTitle: DEFAULT_CHANNEL_NAME,
+						displayTitle: resolvedDisplayTitle,
 						createdAt: now,
 						updatedAt: now,
 					};

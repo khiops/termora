@@ -707,6 +707,123 @@ describe("useChannelsStore — M1: stale pendingStatuses cannot resurrect a dead
 });
 
 // ---------------------------------------------------------------------------
+// F1: stale group-fetch race — generation guard must cover groups.value
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — F1: stale fetchChannels must not overwrite newer generation groups", () => {
+	function stubControlledFetch(opts: {
+		groupsForFirst: Record<string, unknown>[];
+		groupsForSecond: Record<string, unknown>[];
+	}): {
+		resolveFirstChannels: () => void;
+		resolveSecondChannels: () => void;
+	} {
+		let resolveFirstChannels!: () => void;
+		let resolveSecondChannels!: () => void;
+		let callCount = 0;
+
+		const firstChannelsDone = new Promise<void>((r) => {
+			resolveFirstChannels = r;
+		});
+		const secondChannelsDone = new Promise<void>((r) => {
+			resolveSecondChannels = r;
+		});
+
+		mockFetch.mockImplementation(async (url: string) => {
+			const isGroups = (url as string).includes("/api/groups");
+			if (isGroups) {
+				// First call returns first groups, second call returns second groups.
+				callCount++;
+				const groups = callCount === 1 ? opts.groupsForFirst : opts.groupsForSecond;
+				return { ok: true, json: () => Promise.resolve(groups) };
+			}
+			// Channels: first fetch is held, second resolves immediately.
+			if (callCount <= 1) {
+				// First channels fetch — held until released
+				await firstChannelsDone;
+			} else {
+				await secondChannelsDone;
+			}
+			return { ok: true, json: () => Promise.resolve([]) };
+		});
+
+		return { resolveFirstChannels, resolveSecondChannels };
+	}
+
+	it("stale (older-generation) fetch resolving last must NOT overwrite newer generation groups", async () => {
+		// Arrange two fetch invocations:
+		//   - fetch-1 (gen=1): slow, carries "OldGroup" groups
+		//   - fetch-2 (gen=2): fast, carries "NewGroup" groups; resolves first
+		//
+		// Mutation caught: committing groups.value inside _fetchGroupsRaw (before
+		// the generation guard) would let fetch-1's stale groups clobber fetch-2's.
+
+		let resolveFirst!: () => void;
+		let resolveSecond!: () => void;
+
+		const firstChannelsDone = new Promise<void>((r) => {
+			resolveFirst = r;
+		});
+		const secondChannelsDone = new Promise<void>((r) => {
+			resolveSecond = r;
+		});
+
+		const groupsForGen1 = [makeGroupRow("g-stale", "OldGroup")];
+		const groupsForGen2 = [makeGroupRow("g-fresh", "NewGroup")];
+
+		// Track which generation the groups fetch belongs to via call order.
+		let groupsFetchCount = 0;
+		let channelsFetchCount = 0;
+
+		mockFetch.mockImplementation(async (url: string) => {
+			const isGroups = (url as string).includes("/api/groups");
+			if (isGroups) {
+				groupsFetchCount++;
+				const thisGen = groupsFetchCount;
+				const groups = thisGen === 1 ? groupsForGen1 : groupsForGen2;
+				return { ok: true, json: () => Promise.resolve(groups) };
+			}
+			// Channels fetches: gen-1 is HELD, gen-2 resolves immediately then gen-1 resolves late.
+			channelsFetchCount++;
+			const thisCall = channelsFetchCount;
+			if (thisCall === 1) {
+				// gen-1 channels — hold until told to release
+				await firstChannelsDone;
+			} else {
+				// gen-2 channels — resolve immediately then release gen-1 after
+				await secondChannelsDone;
+			}
+			return { ok: true, json: () => Promise.resolve([]) };
+		});
+
+		const store = useChannelsStore();
+
+		// Start fetch-1 (gen=1) — it will hang waiting for channels.
+		const fetch1Promise = store.fetchChannels("host-1");
+
+		// Start fetch-2 (gen=2) immediately — groups resolve fast, channels resolve fast.
+		// fetch-2 must win and set groups to NewGroup.
+		const fetch2Promise = store.fetchChannels("host-1");
+
+		// Let gen-2 complete first.
+		resolveSecond();
+		await fetch2Promise;
+
+		// At this point the store should reflect gen-2 groups.
+		expect(store.groups.map((g) => g.id)).toContain("g-fresh");
+		expect(store.groups.map((g) => g.id)).not.toContain("g-stale");
+
+		// Now release gen-1's channel fetch — it resolves LATE with OldGroup groups.
+		// The generation guard MUST discard it; groups.value must remain "NewGroup".
+		resolveFirst();
+		await fetch1Promise;
+
+		expect(store.groups.map((g) => g.id)).not.toContain("g-stale");
+		expect(store.groups.map((g) => g.id)).toContain("g-fresh");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // M2 race: CHANNEL_CREATED during in-flight fetchChannels
 // ---------------------------------------------------------------------------
 

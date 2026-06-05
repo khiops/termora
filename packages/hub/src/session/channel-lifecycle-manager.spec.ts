@@ -405,6 +405,99 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 		expect(spawnerOk).toHaveLength(1);
 	});
 
+	it("F2: CHANNEL_CREATED displayTitle uses resolveDisplayTitle (not hardcoded DEFAULT_CHANNEL_NAME)", async () => {
+		// Arrange: give the channel a custom title in the DB so resolveDisplayTitle
+		// returns a value DIFFERENT from DEFAULT_CHANNEL_NAME.
+		// Mutation caught: setting displayTitle: DEFAULT_CHANNEL_NAME directly would
+		// disagree with the resolver when a custom title exists.
+		const CUSTOM_TITLE = "My Custom Terminal";
+		const now = new Date().toISOString();
+		const { clients, channels, pendingRequests, scheduler, chunker } = makeSpawnCtx();
+
+		const spawner = makeWsClient("spawner-f2", (m) => {
+			/* ignore spawner messages */
+			void m;
+		});
+		const observerMessages: ProtocolMessage[] = [];
+		const observer = makeWsClient("observer-f2", (m) =>
+			observerMessages.push(m as ProtocolMessage),
+		);
+		clients.set(spawner.id, spawner as never);
+		clients.set(observer.id, observer as never);
+
+		// metaDal.getChannel returns a channel with a custom title
+		const metaDal = {
+			createChannel: vi.fn(),
+			updateChannelStatus: vi.fn(),
+			getChannel: vi.fn().mockReturnValue({
+				id: "ch-f2",
+				sessionId: "sess-f2",
+				shell: "/bin/bash",
+				cols: 80,
+				rows: 24,
+				status: "live" as const,
+				title: CUSTOM_TITLE,
+				createdAt: now,
+				updatedAt: now,
+			}),
+		};
+
+		const ctx = {
+			clients,
+			channels,
+			pendingRequests,
+			metaDal,
+			scheduler,
+			chunker,
+			sessions: new Map(),
+			agents: new Map(),
+			pendingAuthPrompts: new Map(),
+			hubLogger: null,
+			primaryToken: null,
+			configResolver: null,
+		} as unknown as SharedSessionContext;
+
+		const broadcaster = new StateBroadcaster(ctx);
+		const manager = new ChannelLifecycleManager(ctx, broadcaster);
+
+		const spawnMsg = {
+			type: "SPAWN" as const,
+			requestId: "req-f2",
+			channelId: "ch-f2",
+			cols: 80,
+			rows: 24,
+		} as import("@termora/shared").AgentSpawnMessage;
+
+		const spawnPromise = manager.sendSpawnAndWait({
+			agent: { connected: true, send: vi.fn() } as never,
+			spawnMsg,
+			clientId: spawner.id,
+			hostId: "host-f2",
+			session: { id: "sess-f2" },
+			client: spawner as never,
+			resolvedShell: "/bin/bash",
+			resolvedArgs: [],
+			resolvedCwd: undefined,
+			resolvedDirectProcess: false,
+			resolvedLaunchProfileId: undefined,
+			cols: 80,
+			rows: 24,
+		});
+
+		// Simulate SPAWN_OK
+		const handler = pendingRequests.get("req-f2");
+		expect(handler).toBeDefined();
+		handler?.({ type: "SPAWN_OK", requestId: "req-f2", channelId: "ch-f2" } as AgentSpawnOkMessage);
+		await spawnPromise;
+
+		// Assert: CHANNEL_CREATED must carry the resolved title, not DEFAULT_CHANNEL_NAME
+		const createdMsgs = observerMessages.filter((m) => m.type === "CHANNEL_CREATED");
+		expect(createdMsgs).toHaveLength(1);
+		const created = createdMsgs[0] as ChannelCreatedMessage;
+		expect(created.displayTitle).toBe(CUSTOM_TITLE);
+		expect(created.displayTitle).not.toBe("Terminal"); // guard: DEFAULT_CHANNEL_NAME is "Terminal"
+	});
+
 	it("does not broadcast CHANNEL_CREATED when spawn fails with SPAWN_ERR", async () => {
 		// ── Arrange ──────────────────────────────────────────────────────────
 		const observerMessages: ProtocolMessage[] = [];

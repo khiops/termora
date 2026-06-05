@@ -226,6 +226,11 @@ export class SshConnectionManager {
 			if (cached && cached.expiresAt > Date.now()) {
 				return cached.secret;
 			}
+			// Evict the expired entry so it doesn't linger in memory past TTL.
+			// Mirror the interactive buildPromptAuth path which also deletes on expiry.
+			if (cached) {
+				this.ctx.passphraseCache.delete(hostId);
+			}
 			throw new Error("no cached passphrase for non-interactive reconnect");
 		};
 	}

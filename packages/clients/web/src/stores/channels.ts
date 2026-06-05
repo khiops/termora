@@ -157,8 +157,16 @@ export const useChannelsStore = defineStore("channels", () => {
 	// REST: fetch groups for a host
 	// -------------------------------------------------------------------------
 
-	async function fetchGroups(hostId: string): Promise<void> {
-		if (authStore.token === null) return;
+	/**
+	 * Fetch and parse groups for a host WITHOUT committing to store state.
+	 * Returns the parsed group list and generalCollapsed flag so the caller
+	 * can commit them after any required guards (e.g. generation check).
+	 */
+	async function _fetchGroupsRaw(hostId: string): Promise<{
+		groups: ChannelGroup[];
+		generalCollapsed: boolean;
+	}> {
+		if (authStore.token === null) return { groups: [], generalCollapsed: false };
 		const res = await fetch(`${hubBaseUrl()}/api/groups?host_id=${encodeURIComponent(hostId)}`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
@@ -167,8 +175,22 @@ export const useChannelsStore = defineStore("channels", () => {
 		}
 		const rows = (await res.json()) as Record<string, unknown>[];
 		const collapsedMap = loadCollapsedMap();
-		groups.value = rows.map((r) => apiGroupToChannelGroup(r, collapsedMap));
-		generalCollapsed.value = collapsedMap.__general__ ?? false;
+		return {
+			groups: rows.map((r) => apiGroupToChannelGroup(r, collapsedMap)),
+			generalCollapsed: collapsedMap.__general__ ?? false,
+		};
+	}
+
+	/**
+	 * Public committing wrapper: fetch groups for a host and commit to store
+	 * state immediately. Use this for standalone group refreshes (e.g. after
+	 * addGroup/removeGroup). For fetchChannels, use _fetchGroupsRaw so groups
+	 * are committed only after the generation guard.
+	 */
+	async function fetchGroups(hostId: string): Promise<void> {
+		const result = await _fetchGroupsRaw(hostId);
+		groups.value = result.groups;
+		generalCollapsed.value = result.generalCollapsed;
 	}
 
 	// -------------------------------------------------------------------------
@@ -204,15 +226,21 @@ export const useChannelsStore = defineStore("channels", () => {
 		wsAddedDuringFetch.value = new Map(wsAddedDuringFetch.value).set(myGeneration, myWsAdded);
 
 		try {
-			const [channelsRes] = await Promise.all([
+			const [channelsRes, fetchedGroups] = await Promise.all([
 				fetch(`${hubBaseUrl()}/api/channels?host_id=${encodeURIComponent(hostId)}`, {
 					headers: { Authorization: `Bearer ${authStore.token}` },
 				}),
-				fetchGroups(hostId),
+				_fetchGroupsRaw(hostId),
 			]);
 
 			// Discard this resolution if a newer fetchChannels has already run.
+			// Groups are committed here (not inside _fetchGroupsRaw) so that a
+			// stale slow fetch cannot overwrite a newer generation's group state.
 			if (fetchGeneration.value !== myGeneration) return;
+
+			// Commit group state only for the winning generation.
+			groups.value = fetchedGroups.groups;
+			generalCollapsed.value = fetchedGroups.generalCollapsed;
 
 			if (!channelsRes.ok) {
 				throw new Error(`GET /api/channels failed: ${channelsRes.status}`);

@@ -301,6 +301,27 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		);
 	});
 
+	it("F3: cache-only promptAuth evicts expired entry from passphraseCache before throwing", async () => {
+		// Mutation caught: omitting the delete call leaves an expired secret in memory
+		// past its TTL, violating the security requirement to evict on expiry.
+		const hostId = "host-reconnect-expired";
+		const ctx = {
+			passphraseCache: new Map([[hostId, { secret: "stale-secret", expiresAt: Date.now() - 1 }]]),
+			pendingAuthPrompts: new Map(),
+		} as unknown as SharedSessionContext;
+
+		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
+		const promptAuth = mgr.buildCacheOnlyPromptAuth(hostId);
+
+		// Must throw (fail-closed) on expired entry
+		await expect(promptAuth(hostId, "passphrase", "Enter passphrase")).rejects.toThrow(
+			"no cached passphrase for non-interactive reconnect",
+		);
+
+		// The expired entry must have been evicted — it must NOT linger in cache
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+	});
+
 	it("cache-only promptAuth returns null for non-passphrase prompt types", async () => {
 		const hostId = "host-reconnect-type";
 		const ctx = {
