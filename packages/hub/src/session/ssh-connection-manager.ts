@@ -213,8 +213,11 @@ export class SshConnectionManager {
 
 	/**
 	 * Build a cache-only AuthPromptFn for use during non-interactive reconnects.
-	 * Returns the cached passphrase if present and unexpired; otherwise returns null
-	 * (signals "no passphrase available") without touching the UI or hanging.
+	 * Returns the cached passphrase if present and unexpired.
+	 * On cache miss, throws with a distinct internal reason so callers surface a
+	 * meaningful diagnostic rather than the generic "Authentication cancelled"
+	 * message — the error still propagates fail-closed (backoff retry / closeSession).
+	 * No secret material is included in the error message.
 	 */
 	buildCacheOnlyPromptAuth(hostId: string): AuthPromptFn {
 		return async (_hid, promptType, _message) => {
@@ -223,7 +226,7 @@ export class SshConnectionManager {
 			if (cached && cached.expiresAt > Date.now()) {
 				return cached.secret;
 			}
-			return null;
+			throw new Error("no cached passphrase for non-interactive reconnect");
 		};
 	}
 

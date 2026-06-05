@@ -170,7 +170,8 @@ export class ChannelLifecycleManager {
 					// Broadcast CHANNEL_CREATED to all clients so observers (clients
 					// not involved in this spawn) learn about the new channel without
 					// having to call fetchChannels.  The spawning client deduplicates
-					// via addChannel's guard (no-op if channelId already present).
+					// via handleChannelCreated's guard (no-op if channelId already
+					// present) and via fetchChannels' own channel-list check on resolve.
 					const dbChannel = this.ctx.metaDal.getChannel(channelId);
 					const now = dbChannel?.createdAt ?? new Date().toISOString();
 					const channelCreatedMsg: ChannelCreatedMessage = {

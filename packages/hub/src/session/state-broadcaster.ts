@@ -180,10 +180,10 @@ export class StateBroadcaster {
 	}
 
 	/**
-	 * Broadcast a CHANNEL_CREATED message to all clients attached to the
-	 * same host so observers learn about new channels without a manual
-	 * fetchChannels.  The spawning client receives the same message and is
-	 * expected to deduplicate against the SPAWN_OK it already handled.
+	 * Broadcast a CHANNEL_CREATED message to all connected clients so observers
+	 * learn about new channels without a manual fetchChannels.  The UI filters
+	 * by host on the receiving end; the spawning client deduplicates against the
+	 * channel it already obtained via fetchChannels after SPAWN_OK.
 	 */
 	broadcastChannelCreated(msg: ChannelCreatedMessage): void {
 		this.broadcastToAllClients(msg);

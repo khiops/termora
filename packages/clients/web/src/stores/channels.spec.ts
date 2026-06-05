@@ -540,15 +540,47 @@ describe("useChannelsStore — handleChannelCreated", () => {
 	it("channel becomes visible with status live — no pendingStatuses gap", async () => {
 		// This proves the grey-icon race is gone: the channel enters the list
 		// already-live so updateChannelStatus never needs to buffer it.
+		// Also asserts pendingStatuses is purged after handleChannelCreated so a
+		// stale buffered entry cannot resurrect a later dead channel (M1 guard).
 		stubEmpty();
 		const store = useChannelsStore();
 		await store.fetchChannels("host-1");
 
+		// Simulate CHANNEL_STATE("live") arriving before the channel was loaded —
+		// this buffers an entry in pendingStatuses.
+		store.updateChannelStatus("ch-new", "live");
+
+		// Now the channel materialises via CHANNEL_CREATED.
 		store.handleChannelCreated(makeCreatedMsg());
 
 		const ch = store.channels.find((c) => c.id === "ch-new");
 		expect(ch).toBeDefined();
 		expect(ch?.status).toBe("live");
+
+		// The channel then dies on the server.  fetchChannels (same host, so
+		// hostChanged===false → pendingStatuses NOT cleared automatically) returns
+		// it as "dead".  The stale "live" buffer must NOT overwrite server-truth.
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups")
+				? []
+				: [
+						{
+							id: "ch-new",
+							session_id: "sess-1",
+							shell: "/bin/bash",
+							cols: 80,
+							rows: 24,
+							status: "dead",
+							created_at: "2026-01-01T00:00:00Z",
+							updated_at: "2026-01-01T00:00:00Z",
+						},
+					];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+		await store.fetchChannels("host-1");
+
+		const chAfter = store.channels.find((c) => c.id === "ch-new");
+		expect(chAfter?.status).toBe("dead");
 	});
 
 	it("is host-scoped: ignores CHANNEL_CREATED for a host the client is not viewing", async () => {
@@ -615,5 +647,107 @@ describe("useChannelsStore — handleChannelCreated", () => {
 		const ch = store.channels.find((c) => c.id === "ch-args");
 		expect(ch?.args).toEqual(["-l"]);
 		expect(ch?.cwd).toBe("/home/user");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M1 full race: CHANNEL_STATE buffered → CHANNEL_CREATED → dead → fetchChannels
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — M1: stale pendingStatuses cannot resurrect a dead channel", () => {
+	function makeChannelRow(
+		id: string,
+		status: "live" | "dead" | "connecting" = "live",
+	): Record<string, unknown> {
+		return {
+			id,
+			session_id: "sess-1",
+			shell: "/bin/bash",
+			cols: 80,
+			rows: 24,
+			status,
+			created_at: "2026-01-01T00:00:00Z",
+			updated_at: "2026-01-01T00:00:00Z",
+		};
+	}
+
+	it("CHANNEL_STATE(live) buffered before CHANNEL_CREATED — after channel dies, " +
+		"same-host fetchChannels returns dead — channel must stay dead (purge mutation catch)", async () => {
+		// Step 1: channels empty, CHANNEL_STATE("live") arrives → buffered in pendingStatuses.
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups") ? [] : [];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+		const store = useChannelsStore();
+		await store.fetchChannels("host-1");
+		// Buffer a "live" status before the channel exists.
+		store.updateChannelStatus("ch-m1", "live");
+
+		// Step 2: CHANNEL_CREATED arrives — channel materialises.
+		store.handleChannelCreated(makeCreatedMsg({ channelId: "ch-m1", status: "live" }));
+		expect(store.channels.find((c) => c.id === "ch-m1")?.status).toBe("live");
+
+		// Step 3: server reports channel as dead.
+		// Same host (host-1) → hostChanged===false → pendingStatuses NOT cleared automatically.
+		// The handleChannelCreated purge MUST have removed the "live" entry so that
+		// fetchChannels now surfaces server-truth ("dead") without overwrite.
+		mockFetch.mockImplementation((url: string) => {
+			const body = url.includes("/api/groups") ? [] : [makeChannelRow("ch-m1", "dead")];
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+		});
+		await store.fetchChannels("host-1");
+
+		const ch = store.channels.find((c) => c.id === "ch-m1");
+		expect(ch?.status).toBe("dead");
+		// Verify by running a second same-host fetch (still returns dead) — if
+		// the buffered entry had survived the purge, it would flip status to "live".
+		await store.fetchChannels("host-1");
+		expect(store.channels.find((c) => c.id === "ch-m1")?.status).toBe("dead");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M2 race: CHANNEL_CREATED during in-flight fetchChannels
+// ---------------------------------------------------------------------------
+
+describe("useChannelsStore — M2: WS-added channel preserved when fetchChannels resolves", () => {
+	it("channel added by handleChannelCreated while fetchChannels is in-flight — " +
+		"resolve with data lacking that channel — WS-added channel must still be present " +
+		"(mutation catch: blindly setting channels.value=data on resolve)", async () => {
+		// Controlled promise to pause the REST response mid-flight.
+		let resolveChannels!: (v: unknown) => void;
+		const channelsPromise = new Promise((r) => {
+			resolveChannels = r;
+		});
+
+		mockFetch.mockImplementation((url: string) => {
+			if (url.includes("/api/groups")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			// Channels response is held — snapshot was taken BEFORE ch-ws existed.
+			return channelsPromise.then(() => ({
+				ok: true,
+				json: () => Promise.resolve([]),
+			}));
+		});
+
+		const store = useChannelsStore();
+		const fetchPromise = store.fetchChannels("host-1");
+
+		// CHANNEL_CREATED arrives while the REST request is still in-flight.
+		store.handleChannelCreated(makeCreatedMsg({ channelId: "ch-ws", status: "live" }));
+
+		// Verify it was added to channels immediately.
+		expect(store.channels.find((c) => c.id === "ch-ws")).toBeDefined();
+
+		// Now resolve the fetch with a server snapshot that LACKS ch-ws
+		// (it was created AFTER the REST snapshot was taken).
+		resolveChannels(undefined);
+		await fetchPromise;
+
+		// ch-ws must still be present — the WS event is the authority for
+		// channels created after the REST snapshot.
+		expect(store.channels.find((c) => c.id === "ch-ws")).toBeDefined();
+		expect(store.channels.find((c) => c.id === "ch-ws")?.status).toBe("live");
 	});
 });

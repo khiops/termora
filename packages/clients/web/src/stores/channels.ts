@@ -92,16 +92,30 @@ export const useChannelsStore = defineStore("channels", () => {
 	 */
 	const unreadChannels = ref<Set<string>>(new Set());
 
-	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
 	/** Channel IDs from the last STATE_SYNC — used to mark absent channels as dead after fetchChannels. */
 	const lastSyncIds = ref<Set<string> | null>(null);
+	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
 	const pendingStatuses = ref<Map<string, { status: Channel["status"]; exitCode?: number }>>(
 		new Map(),
 	);
 
 	/**
+	 * Monotonically increasing fetch generation counter.
+	 * Incremented at the START of each fetchChannels call so that
+	 * a stale fetch resolving late can detect it has been superseded.
+	 */
+	const fetchGeneration = ref<number>(0);
+
+	/**
+	 * Channels added by handleChannelCreated DURING the current in-flight fetch.
+	 * Keyed by fetch generation so concurrent/overlapping fetches don't mix.
+	 * Cleared when the owning fetch resolves.
+	 */
+	const wsAddedDuringFetch = ref<Map<number, Set<string>>>(new Map());
+
+	/**
 	 * Persistent channelId → hostId mapping.
-	 * Populated by fetchChannels, addChannel, and registerChannelHost.
+	 * Populated by fetchChannels and registerChannelHost.
 	 * NOT cleared on host switch — accumulates across all visited hosts
 	 * so that bell/activity aggregation works for non-active hosts.
 	 */
@@ -181,6 +195,14 @@ export const useChannelsStore = defineStore("channels", () => {
 			lastSyncIds.value = null;
 		}
 
+		// Capture a generation stamp so stale fetch resolutions (superseded by a
+		// newer fetch) can be detected and discarded without clobbering newer state.
+		const myGeneration = fetchGeneration.value + 1;
+		fetchGeneration.value = myGeneration;
+		// Register a tracking set for WS-added channels during this fetch.
+		const myWsAdded = new Set<string>();
+		wsAddedDuringFetch.value = new Map(wsAddedDuringFetch.value).set(myGeneration, myWsAdded);
+
 		try {
 			const [channelsRes] = await Promise.all([
 				fetch(`${hubBaseUrl()}/api/channels?host_id=${encodeURIComponent(hostId)}`, {
@@ -188,16 +210,31 @@ export const useChannelsStore = defineStore("channels", () => {
 				}),
 				fetchGroups(hostId),
 			]);
+
+			// Discard this resolution if a newer fetchChannels has already run.
+			if (fetchGeneration.value !== myGeneration) return;
+
 			if (!channelsRes.ok) {
 				throw new Error(`GET /api/channels failed: ${channelsRes.status}`);
 			}
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
 			const data = rows.map(apiRowToChannel);
 
-			channels.value = data;
+			// M2: union in any channels added by handleChannelCreated DURING this
+			// fetch.  These channels exist on the server but are absent from `data`
+			// (REST snapshot was taken before they were created).  We preserve them
+			// only when they were added SINCE this fetch started (myWsAdded), so we
+			// never resurrect channels the server legitimately dropped.
+			const dataIds = new Set(data.map((c) => c.id));
+			const wsChannelsToKeep = [...channels.value].filter(
+				(c) => myWsAdded.has(c.id) && !dataIds.has(c.id),
+			);
+			const merged = [...data, ...wsChannelsToKeep];
+
+			channels.value = merged;
 			// Populate persistent channelId → hostId map (survives host switch)
 			const nextHostMap = new Map(channelHostMap.value);
-			for (const ch of data) {
+			for (const ch of merged) {
 				nextHostMap.set(ch.id, hostId);
 			}
 			channelHostMap.value = nextHostMap;
@@ -208,7 +245,7 @@ export const useChannelsStore = defineStore("channels", () => {
 				const pending = pendingStatuses.value;
 				pendingStatuses.value = new Map();
 				let statusUpdated = false;
-				const merged = data.map((ch) => {
+				const reconciled = channels.value.map((ch) => {
 					const p = pending.get(ch.id);
 					if (p) {
 						statusUpdated = true;
@@ -221,7 +258,7 @@ export const useChannelsStore = defineStore("channels", () => {
 					return ch;
 				});
 				if (statusUpdated) {
-					channels.value = merged;
+					channels.value = reconciled;
 				}
 			}
 			// Mark channels absent from last STATE_SYNC as dead (hub restarted, lost track).
@@ -240,13 +277,19 @@ export const useChannelsStore = defineStore("channels", () => {
 			// Clear selection if the previously selected channel is no longer
 			// present (e.g. host switched)
 			if (selectedChannelId.value !== null) {
-				const still = data.find((c) => c.id === selectedChannelId.value);
+				const still = channels.value.find((c) => c.id === selectedChannelId.value);
 				if (!still) selectedChannelId.value = null;
 			}
 		} catch (err) {
 			error.value = err instanceof Error ? err.message : String(err);
 		} finally {
-			loading.value = false;
+			// Clean up the WS-added tracking set for this generation
+			const next = new Map(wsAddedDuringFetch.value);
+			next.delete(myGeneration);
+			wsAddedDuringFetch.value = next;
+			if (fetchGeneration.value === myGeneration) {
+				loading.value = false;
+			}
 		}
 	}
 
@@ -460,22 +503,6 @@ export const useChannelsStore = defineStore("channels", () => {
 	}
 
 	/**
-	 * Called when a SPAWN_OK arrives so the new channel appears immediately
-	 * without requiring a full refetch.
-	 */
-	function addChannel(channel: Channel): void {
-		// Avoid duplicates if REST fetch races with WS event
-		if (channels.value.some((c) => c.id === channel.id)) return;
-		channels.value = [...channels.value, channel];
-		// Track channelId → hostId for the active host
-		if (activeHostId.value !== null) {
-			const next = new Map(channelHostMap.value);
-			next.set(channel.id, activeHostId.value);
-			channelHostMap.value = next;
-		}
-	}
-
-	/**
 	 * Handle a CHANNEL_CREATED WebSocket message broadcast by the hub.
 	 *
 	 * This message is sent to ALL connected clients when any client spawns a
@@ -485,14 +512,27 @@ export const useChannelsStore = defineStore("channels", () => {
 	 * Host-scoped: ignored when the message is for a host the client is not
 	 * currently viewing (activeHostId mismatch).
 	 * Deduplicated: no-op if the channel is already in the list (handles the
-	 * spawning client that already added it via SPAWN_OK / addChannel).
+	 * spawning client that already obtained the channel via fetchChannels after
+	 * SPAWN_OK).
 	 */
 	function handleChannelCreated(msg: ChannelCreatedMessage): void {
 		// Ignore channels for other hosts — this client may be viewing a
 		// different host and should not accumulate foreign channels.
 		if (activeHostId.value !== msg.hostId) return;
 
-		// Deduplicate: spawning client already has the channel via SPAWN_OK.
+		// M1: purge any buffered pendingStatuses entry for this channel —
+		// the channel is about to be materialized with its correct status from
+		// the message itself.  Leaving a stale entry would allow a later
+		// same-host fetchChannels (hostChanged===false) to overwrite server-truth
+		// with the buffered value.  Do this on BOTH paths (add and dedupe-skip)
+		// because a buffered status for an already-present channel is equally stale.
+		if (pendingStatuses.value.has(msg.channelId)) {
+			const next = new Map(pendingStatuses.value);
+			next.delete(msg.channelId);
+			pendingStatuses.value = next;
+		}
+
+		// Deduplicate: spawning client already has the channel via fetchChannels.
 		if (channels.value.some((c) => c.id === msg.channelId)) return;
 
 		const channel: Channel = {
@@ -509,6 +549,12 @@ export const useChannelsStore = defineStore("channels", () => {
 			...(msg.cwd !== undefined && { cwd: msg.cwd }),
 		};
 		channels.value = [...channels.value, channel];
+
+		// M2: register this channel as WS-added during any in-flight fetch so
+		// fetchChannels can union it in when the REST snapshot resolves.
+		for (const wsAdded of wsAddedDuringFetch.value.values()) {
+			wsAdded.add(msg.channelId);
+		}
 
 		// Track channelId → hostId for bell/activity aggregation
 		const next = new Map(channelHostMap.value);
@@ -1011,7 +1057,6 @@ export const useChannelsStore = defineStore("channels", () => {
 		updateProcessTitle,
 		applyStateSync,
 		removeChannel,
-		addChannel,
 		handleChannelCreated,
 		spawnChannel,
 		registerPendingSpawn,

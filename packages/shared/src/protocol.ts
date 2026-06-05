@@ -357,9 +357,10 @@ export interface ChannelStateMessage {
 
 /**
  * Hub → UI: a new channel was just created on this hub.
- * Broadcast to ALL connected clients of the host so observers learn
- * about channels spawned by other clients without a manual fetchChannels.
- * Carries the full channel payload (same shape as REST GET /api/channels).
+ * Broadcast to all connected clients so observers learn about channels
+ * spawned by other clients without a manual fetchChannels.
+ * Carries creation-time fields only (no groupId, title, or icon —
+ * those are not yet persisted at spawn time).
  */
 export interface ChannelCreatedMessage {
 	type: "CHANNEL_CREATED";

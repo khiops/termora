@@ -280,7 +280,7 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		expect(result).toBe(passphrase);
 	});
 
-	it("cache-only promptAuth returns null on cache MISS (no UI prompt, no hang)", async () => {
+	it("cache-only promptAuth throws with a distinct reason on cache MISS (no UI prompt, no hang)", async () => {
 		capturedSshAgentArgs = null;
 
 		const hostId = "host-reconnect-miss";
@@ -294,9 +294,11 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
 		const promptAuth = mgr.buildCacheOnlyPromptAuth(hostId);
 
-		// Must resolve immediately (no pending promise, no UI send) to null
-		const result = await promptAuth(hostId, "passphrase", "Enter passphrase");
-		expect(result).toBeNull();
+		// Must reject immediately (no pending promise, no UI send) with a
+		// distinct internal reason — NOT "Authentication cancelled by user".
+		await expect(promptAuth(hostId, "passphrase", "Enter passphrase")).rejects.toThrow(
+			"no cached passphrase for non-interactive reconnect",
+		);
 	});
 
 	it("cache-only promptAuth returns null for non-passphrase prompt types", async () => {
