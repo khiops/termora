@@ -21,7 +21,10 @@ const mockAddon = {
 };
 
 vi.mock("@xterm/addon-search", () => ({
-	SearchAddon: vi.fn().mockImplementation(() => ({ ...mockAddon })),
+	// biome-ignore lint/complexity/useArrowFunction: regular function needed for `new` constructability (vitest 4)
+	SearchAddon: vi.fn().mockImplementation(function () {
+		return { ...mockAddon };
+	}),
 }));
 
 // ── Mock getComputedStyle for decoration colors ─────────────────────────

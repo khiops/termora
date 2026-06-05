@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type MockedFunction, beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, ref } from "vue";
 import { useSearchShortcuts } from "./useSearchShortcuts.js";
 
@@ -23,9 +23,9 @@ function fireKeydown(key: string, modifiers: Partial<KeyboardEventInit> = {}): K
 // ---------------------------------------------------------------------------
 
 describe("useSearchShortcuts", () => {
-	let onToggleCase: ReturnType<typeof vi.fn>;
-	let onToggleRegex: ReturnType<typeof vi.fn>;
-	let onToggleWholeWord: ReturnType<typeof vi.fn>;
+	let onToggleCase: MockedFunction<() => void>;
+	let onToggleRegex: MockedFunction<() => void>;
+	let onToggleWholeWord: MockedFunction<() => void>;
 
 	beforeEach(() => {
 		onToggleCase = vi.fn();
