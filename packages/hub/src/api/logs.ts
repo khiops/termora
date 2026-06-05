@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as readline from "node:readline";
 import type { FastifyInstance } from "fastify";
 import { LOG_SEVERITY } from "../logging/index.js";
 
@@ -22,16 +23,25 @@ const CHANNEL_ID_RE = /^[0-9A-Za-z]{26}$/;
 
 /**
  * Read a JSONL file and return parsed entries, skipping empty/malformed lines.
+ * Uses readline streaming to avoid slurping the entire file into memory.
  */
-function readJsonl(filePath: string): Record<string, unknown>[] {
-	let raw: string;
+async function readJsonl(filePath: string): Promise<Record<string, unknown>[]> {
+	let stream: fs.ReadStream;
 	try {
-		raw = fs.readFileSync(filePath, "utf8");
+		stream = fs.createReadStream(filePath, { encoding: "utf8" });
+		// Surface ENOENT / permission errors before we await lines
+		await new Promise<void>((resolve, reject) => {
+			stream.once("error", reject);
+			stream.once("readable", resolve);
+			stream.once("end", resolve);
+		});
 	} catch {
 		return [];
 	}
+
+	const rl = readline.createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
 	const entries: Record<string, unknown>[] = [];
-	for (const line of raw.split("\n")) {
+	for await (const line of rl) {
 		const trimmed = line.trim();
 		if (!trimmed) continue;
 		try {
@@ -171,7 +181,7 @@ export async function registerLogRoutes(app: FastifyInstance, logsDir: string): 
 			}
 
 			const filePath = path.join(logsDir, "channels", `${channelId}.jsonl`);
-			let entries = readJsonl(filePath);
+			let entries = await readJsonl(filePath);
 
 			entries = filterByLevel(entries, level);
 			entries = filterChannelByTime(entries, from_t, to_t);
@@ -196,7 +206,7 @@ export async function registerLogRoutes(app: FastifyInstance, logsDir: string): 
 		}
 
 		const filePath = path.join(logsDir, "hub.jsonl");
-		let entries = readJsonl(filePath);
+		let entries = await readJsonl(filePath);
 
 		entries = filterByLevel(entries, level);
 		entries = filterHubByTime(entries, from_t, to_t);
