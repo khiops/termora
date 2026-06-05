@@ -1,13 +1,13 @@
-import type { Channel, ChannelGroup } from '@termora/shared';
-import { generateId } from '@termora/shared';
-import { defineStore } from 'pinia';
-import { computed, nextTick, ref } from 'vue';
-import { hubBaseUrl } from '../utils/hub-url.js';
-import { useAuthStore } from './auth.js';
-import { useConfigStore } from './config.js';
-import { useSessionStore } from './session.js';
+import type { Channel, ChannelCreatedMessage, ChannelGroup } from "@termora/shared";
+import { generateId } from "@termora/shared";
+import { defineStore } from "pinia";
+import { computed, nextTick, ref } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
+import { useAuthStore } from "./auth.js";
+import { useConfigStore } from "./config.js";
+import { useSessionStore } from "./session.js";
 
-const COLLAPSED_KEY = 'termora:collapsed-groups';
+const COLLAPSED_KEY = "termora:collapsed-groups";
 
 function loadCollapsedMap(): Record<string, boolean> {
 	try {
@@ -31,7 +31,7 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 		shell: row.shell as string,
 		cols: row.cols as number,
 		rows: row.rows as number,
-		status: row.status as Channel['status'],
+		status: row.status as Channel["status"],
 		createdAt: row.created_at as string,
 		updatedAt: row.updated_at as string,
 	};
@@ -54,7 +54,10 @@ function apiRowToChannel(row: Record<string, unknown>): Channel {
 }
 
 /** Convert a snake_case group row from the API to a camelCase ChannelGroup. */
-function apiGroupToChannelGroup(row: Record<string, unknown>, collapsedMap: Record<string, boolean>): ChannelGroup {
+function apiGroupToChannelGroup(
+	row: Record<string, unknown>,
+	collapsedMap: Record<string, boolean>,
+): ChannelGroup {
 	return {
 		id: row.id as string,
 		hostId: row.host_id as string,
@@ -74,7 +77,7 @@ function apiGroupToChannelGroup(row: Record<string, unknown>, collapsedMap: Reco
  *
  * CHANNEL_STATE WebSocket messages update channel status in real time.
  */
-export const useChannelsStore = defineStore('channels', () => {
+export const useChannelsStore = defineStore("channels", () => {
 	const authStore = useAuthStore();
 
 	const channels = ref<Channel[]>([]);
@@ -89,14 +92,30 @@ export const useChannelsStore = defineStore('channels', () => {
 	 */
 	const unreadChannels = ref<Set<string>>(new Set());
 
-	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
 	/** Channel IDs from the last STATE_SYNC — used to mark absent channels as dead after fetchChannels. */
 	const lastSyncIds = ref<Set<string> | null>(null);
-	const pendingStatuses = ref<Map<string, { status: Channel['status']; exitCode?: number }>>(new Map());
+	/** Buffered channel status updates from WS that arrived before fetchChannels populated the list. */
+	const pendingStatuses = ref<Map<string, { status: Channel["status"]; exitCode?: number }>>(
+		new Map(),
+	);
+
+	/**
+	 * Monotonically increasing fetch generation counter.
+	 * Incremented at the START of each fetchChannels call so that
+	 * a stale fetch resolving late can detect it has been superseded.
+	 */
+	const fetchGeneration = ref<number>(0);
+
+	/**
+	 * Channels added by handleChannelCreated DURING the current in-flight fetch.
+	 * Keyed by fetch generation so concurrent/overlapping fetches don't mix.
+	 * Cleared when the owning fetch resolves.
+	 */
+	const wsAddedDuringFetch = ref<Map<number, Set<string>>>(new Map());
 
 	/**
 	 * Persistent channelId → hostId mapping.
-	 * Populated by fetchChannels, addChannel, and registerChannelHost.
+	 * Populated by fetchChannels and registerChannelHost.
 	 * NOT cleared on host switch — accumulates across all visited hosts
 	 * so that bell/activity aggregation works for non-active hosts.
 	 */
@@ -138,8 +157,16 @@ export const useChannelsStore = defineStore('channels', () => {
 	// REST: fetch groups for a host
 	// -------------------------------------------------------------------------
 
-	async function fetchGroups(hostId: string): Promise<void> {
-		if (authStore.token === null) return;
+	/**
+	 * Fetch and parse groups for a host WITHOUT committing to store state.
+	 * Returns the parsed group list and generalCollapsed flag so the caller
+	 * can commit them after any required guards (e.g. generation check).
+	 */
+	async function _fetchGroupsRaw(hostId: string): Promise<{
+		groups: ChannelGroup[];
+		generalCollapsed: boolean;
+	}> {
+		if (authStore.token === null) return { groups: [], generalCollapsed: false };
 		const res = await fetch(`${hubBaseUrl()}/api/groups?host_id=${encodeURIComponent(hostId)}`, {
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
@@ -148,13 +175,23 @@ export const useChannelsStore = defineStore('channels', () => {
 		}
 		const rows = (await res.json()) as Record<string, unknown>[];
 		const collapsedMap = loadCollapsedMap();
-		groups.value = rows.map((r) => apiGroupToChannelGroup(r, collapsedMap));
-		generalCollapsed.value = collapsedMap.__general__ ?? false;
+		return {
+			groups: rows.map((r) => apiGroupToChannelGroup(r, collapsedMap)),
+			generalCollapsed: collapsedMap.__general__ ?? false,
+		};
 	}
 
-	// -------------------------------------------------------------------------
-	// REST: fetch channels for a host
-	// -------------------------------------------------------------------------
+	/**
+	 * Public committing wrapper: fetch groups for a host and commit to store
+	 * state immediately. Use this for standalone group refreshes (e.g. after
+	 * addGroup/removeGroup). For fetchChannels, use _fetchGroupsRaw so groups
+	 * are committed only after the generation guard.
+	 */
+	async function fetchGroups(hostId: string): Promise<void> {
+		const result = await _fetchGroupsRaw(hostId);
+		groups.value = result.groups;
+		generalCollapsed.value = result.generalCollapsed;
+	}
 
 	// -------------------------------------------------------------------------
 	// REST: fetch channels for a host
@@ -162,6 +199,13 @@ export const useChannelsStore = defineStore('channels', () => {
 
 	async function fetchChannels(hostId: string): Promise<void> {
 		if (authStore.token === null) return;
+
+		// ── 1. Capture generation FIRST — before any state mutation ──────────
+		// Generation is incremented before loading/error are touched so the
+		// per-generation lifecycle (loading start → loading end) is fully
+		// bracketed by the same generation value.
+		const myGeneration = ++fetchGeneration.value;
+
 		loading.value = true;
 		error.value = null;
 
@@ -176,26 +220,50 @@ export const useChannelsStore = defineStore('channels', () => {
 			lastSyncIds.value = null;
 		}
 
+		// Register a tracking set for WS-added channels during this fetch.
+		const myWsAdded = new Set<string>();
+		wsAddedDuringFetch.value = new Map(wsAddedDuringFetch.value).set(myGeneration, myWsAdded);
+
 		try {
-			const [channelsRes] = await Promise.all([
+			// ── 2. ALL I/O — no state commits in this section ────────────────
+			const [channelsRes, fetchedGroups] = await Promise.all([
 				fetch(`${hubBaseUrl()}/api/channels?host_id=${encodeURIComponent(hostId)}`, {
 					headers: { Authorization: `Bearer ${authStore.token}` },
 				}),
-				fetchGroups(hostId),
+				_fetchGroupsRaw(hostId),
 			]);
+
 			if (!channelsRes.ok) {
 				throw new Error(`GET /api/channels failed: ${channelsRes.status}`);
 			}
+			// Parse JSON — still inside the I/O section, no commits yet.
 			const rows = (await channelsRes.json()) as Record<string, unknown>[];
+
+			// ── 3. SINGLE generation guard — dominates ALL commits ────────────
+			// Must appear AFTER every await so no stale fetch can slip through
+			// between two awaits.  All assignments below are conditional on this.
+			if (fetchGeneration.value !== myGeneration) return;
+
+			// ── 4. Commit block — all state mutations happen here ─────────────
+
+			// Commit group state for the winning generation.
+			groups.value = fetchedGroups.groups;
+			generalCollapsed.value = fetchedGroups.generalCollapsed;
+
+			// Build merged channel list entirely in locals before writing refs.
 			const data = rows.map(apiRowToChannel);
 
-			channels.value = data;
-			// Populate persistent channelId → hostId map (survives host switch)
-			const nextHostMap = new Map(channelHostMap.value);
-			for (const ch of data) {
-				nextHostMap.set(ch.id, hostId);
-			}
-			channelHostMap.value = nextHostMap;
+			// M2: union in any channels added by handleChannelCreated DURING this
+			// fetch.  These channels exist on the server but are absent from `data`
+			// (REST snapshot was taken before they were created).  We preserve them
+			// only when they were added SINCE this fetch started (myWsAdded), so we
+			// never resurrect channels the server legitimately dropped.
+			const dataIds = new Set(data.map((c) => c.id));
+			const wsChannelsToKeep = [...channels.value].filter(
+				(c) => myWsAdded.has(c.id) && !dataIds.has(c.id),
+			);
+			let merged = [...data, ...wsChannelsToKeep];
+
 			// Apply any WS status updates that arrived before the fetch completed.
 			// pendingStatuses accumulates CHANNEL_STATE and STATE_SYNC entries
 			// that were buffered while channels.value was empty.
@@ -203,7 +271,7 @@ export const useChannelsStore = defineStore('channels', () => {
 				const pending = pendingStatuses.value;
 				pendingStatuses.value = new Map();
 				let statusUpdated = false;
-				const merged = data.map((ch) => {
+				const reconciled = merged.map((ch) => {
 					const p = pending.get(ch.id);
 					if (p) {
 						statusUpdated = true;
@@ -216,32 +284,56 @@ export const useChannelsStore = defineStore('channels', () => {
 					return ch;
 				});
 				if (statusUpdated) {
-					channels.value = merged;
+					merged = reconciled;
 				}
 			}
+
 			// Mark channels absent from last STATE_SYNC as dead (hub restarted, lost track).
 			// lastSyncIds is set by applyStateSync when it buffers (channels were empty
 			// during the WS message — the common case after our clear above).
 			if (lastSyncIds.value !== null) {
-				const syncIds = lastSyncIds.value as Set<string>;
-				channels.value = channels.value.map((ch) => {
-					if (ch.status !== 'dead' && !syncIds.has(ch.id)) {
-						return { ...ch, status: 'dead' as const };
+				const syncIds = lastSyncIds.value;
+				merged = merged.map((ch) => {
+					if (ch.status !== "dead" && !syncIds.has(ch.id)) {
+						return { ...ch, status: "dead" as const };
 					}
 					return ch;
 				});
 				lastSyncIds.value = null; // Always clear — one-shot reconciliation
 			}
+
+			// Write channels ref once with the fully-reconciled list.
+			channels.value = merged;
+
+			// Populate persistent channelId → hostId map (survives host switch).
+			const nextHostMap = new Map(channelHostMap.value);
+			for (const ch of merged) {
+				nextHostMap.set(ch.id, hostId);
+			}
+			channelHostMap.value = nextHostMap;
+
 			// Clear selection if the previously selected channel is no longer
-			// present (e.g. host switched)
+			// present (e.g. host switched).
 			if (selectedChannelId.value !== null) {
-				const still = data.find((c) => c.id === selectedChannelId.value);
+				const still = channels.value.find((c) => c.id === selectedChannelId.value);
 				if (!still) selectedChannelId.value = null;
 			}
 		} catch (err) {
-			error.value = err instanceof Error ? err.message : String(err);
+			// ── 5. Guarded catch — a stale failed fetch must not clobber a newer
+			// generation's (cleared or set) error state.
+			if (fetchGeneration.value === myGeneration) {
+				error.value = err instanceof Error ? err.message : String(err);
+			}
 		} finally {
-			loading.value = false;
+			// Clean up the WS-added tracking set for this generation.
+			const next = new Map(wsAddedDuringFetch.value);
+			next.delete(myGeneration);
+			wsAddedDuringFetch.value = next;
+			// ── 6. Guarded finally — because generation is captured before loading
+			// is set, the loading lifecycle is fully consistent per-generation.
+			if (fetchGeneration.value === myGeneration) {
+				loading.value = false;
+			}
 		}
 	}
 
@@ -275,7 +367,11 @@ export const useChannelsStore = defineStore('channels', () => {
 	// Real-time channel state updates from CHANNEL_STATE WS messages
 	// -------------------------------------------------------------------------
 
-	function updateChannelStatus(channelId: string, status: Channel['status'], exitCode?: number): void {
+	function updateChannelStatus(
+		channelId: string,
+		status: Channel["status"],
+		exitCode?: number,
+	): void {
 		const idx = channels.value.findIndex((c) => c.id === channelId);
 		if (idx === -1) {
 			// Channel not loaded yet — buffer for later application
@@ -350,7 +446,7 @@ export const useChannelsStore = defineStore('channels', () => {
 		syncChannels: Array<{
 			channelId: string;
 			sessionId: string;
-			status: Channel['status'];
+			status: Channel["status"];
 			exitCode?: number;
 		}>,
 	): void {
@@ -385,10 +481,10 @@ export const useChannelsStore = defineStore('channels', () => {
 					...(sc.exitCode !== undefined && { exitCode: sc.exitCode }),
 				};
 			}
-			if (!sc && ch.status !== 'dead') {
+			if (!sc && ch.status !== "dead") {
 				// Channel not in STATE_SYNC — hub doesn't know about it anymore
 				changed = true;
-				return { ...ch, status: 'dead' as const };
+				return { ...ch, status: "dead" as const };
 			}
 			return ch;
 		});
@@ -419,7 +515,7 @@ export const useChannelsStore = defineStore('channels', () => {
 	async function removeChannel(channelId: string): Promise<void> {
 		try {
 			await fetch(`${hubBaseUrl()}/api/channels/${channelId}`, {
-				method: 'DELETE',
+				method: "DELETE",
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 		} catch {
@@ -430,9 +526,9 @@ export const useChannelsStore = defineStore('channels', () => {
 		const idx = channels.value.findIndex((c) => c.id === channelId);
 		if (idx !== -1) {
 			const existing = channels.value[idx];
-			if (existing && existing.status !== 'dead') {
+			if (existing && existing.status !== "dead") {
 				const next = [...channels.value];
-				next[idx] = { ...existing, status: 'dead' as const };
+				next[idx] = { ...existing, status: "dead" as const };
 				channels.value = next;
 			}
 		}
@@ -441,7 +537,7 @@ export const useChannelsStore = defineStore('channels', () => {
 		// Then remove from sidebar list
 		channels.value = channels.value.filter((c) => c.id !== channelId);
 		if (selectedChannelId.value === channelId) {
-			const fallback = channels.value.find((c) => c.status !== 'dead');
+			const fallback = channels.value.find((c) => c.status !== "dead");
 			if (fallback) {
 				selectChannel(fallback.id);
 			} else {
@@ -451,19 +547,63 @@ export const useChannelsStore = defineStore('channels', () => {
 	}
 
 	/**
-	 * Called when a SPAWN_OK arrives so the new channel appears immediately
-	 * without requiring a full refetch.
+	 * Handle a CHANNEL_CREATED WebSocket message broadcast by the hub.
+	 *
+	 * This message is sent to ALL connected clients when any client spawns a
+	 * new channel, so that observer clients (those not involved in the spawn)
+	 * learn about the new channel without having to call fetchChannels.
+	 *
+	 * Host-scoped: ignored when the message is for a host the client is not
+	 * currently viewing (activeHostId mismatch).
+	 * Deduplicated: no-op if the channel is already in the list (handles the
+	 * spawning client that already obtained the channel via fetchChannels after
+	 * SPAWN_OK).
 	 */
-	function addChannel(channel: Channel): void {
-		// Avoid duplicates if REST fetch races with WS event
-		if (channels.value.some((c) => c.id === channel.id)) return;
-		channels.value = [...channels.value, channel];
-		// Track channelId → hostId for the active host
-		if (activeHostId.value !== null) {
-			const next = new Map(channelHostMap.value);
-			next.set(channel.id, activeHostId.value);
-			channelHostMap.value = next;
+	function handleChannelCreated(msg: ChannelCreatedMessage): void {
+		// Ignore channels for other hosts — this client may be viewing a
+		// different host and should not accumulate foreign channels.
+		if (activeHostId.value !== msg.hostId) return;
+
+		// M1: purge any buffered pendingStatuses entry for this channel —
+		// the channel is about to be materialized with its correct status from
+		// the message itself.  Leaving a stale entry would allow a later
+		// same-host fetchChannels (hostChanged===false) to overwrite server-truth
+		// with the buffered value.  Do this on BOTH paths (add and dedupe-skip)
+		// because a buffered status for an already-present channel is equally stale.
+		if (pendingStatuses.value.has(msg.channelId)) {
+			const next = new Map(pendingStatuses.value);
+			next.delete(msg.channelId);
+			pendingStatuses.value = next;
 		}
+
+		// Deduplicate: spawning client already has the channel via fetchChannels.
+		if (channels.value.some((c) => c.id === msg.channelId)) return;
+
+		const channel: Channel = {
+			id: msg.channelId,
+			sessionId: msg.sessionId,
+			shell: msg.shell,
+			cols: msg.cols,
+			rows: msg.rows,
+			status: msg.status,
+			displayTitle: msg.displayTitle,
+			createdAt: msg.createdAt,
+			updatedAt: msg.updatedAt,
+			...(msg.args !== undefined && msg.args.length > 0 && { args: msg.args }),
+			...(msg.cwd !== undefined && { cwd: msg.cwd }),
+		};
+		channels.value = [...channels.value, channel];
+
+		// M2: register this channel as WS-added during any in-flight fetch so
+		// fetchChannels can union it in when the REST snapshot resolves.
+		for (const wsAdded of wsAddedDuringFetch.value.values()) {
+			wsAdded.add(msg.channelId);
+		}
+
+		// Track channelId → hostId for bell/activity aggregation
+		const next = new Map(channelHostMap.value);
+		next.set(msg.channelId, msg.hostId);
+		channelHostMap.value = next;
 	}
 
 	// -------------------------------------------------------------------------
@@ -527,11 +667,11 @@ export const useChannelsStore = defineStore('channels', () => {
 			const timer = setTimeout(() => {
 				unsubOk();
 				unsubErr();
-				reject(new Error('SPAWN timeout — no SPAWN_OK after 10s'));
+				reject(new Error("SPAWN timeout — no SPAWN_OK after 10s"));
 			}, 10_000);
 
-			unsubOk = sessionStore.wsClient.on('SPAWN_OK', (msg) => {
-				if (msg.type === 'SPAWN_OK') {
+			unsubOk = sessionStore.wsClient.on("SPAWN_OK", (msg) => {
+				if (msg.type === "SPAWN_OK") {
 					clearTimeout(timer);
 					unsubOk();
 					unsubErr();
@@ -547,8 +687,8 @@ export const useChannelsStore = defineStore('channels', () => {
 			// (e.g. SSH_CONNECT_FAILED, SPAWN_FAILED) instead of SPAWN_OK when the
 			// session cannot be established. Without this the caller would silently
 			// wait 10 s before seeing the timeout message.
-			unsubErr = sessionStore.wsClient.on('ERROR', (msg) => {
-				if (msg.type === 'ERROR') {
+			unsubErr = sessionStore.wsClient.on("ERROR", (msg) => {
+				if (msg.type === "ERROR") {
 					clearTimeout(timer);
 					unsubOk();
 					unsubErr();
@@ -558,7 +698,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
 			// Auto-assign to first group when configured
 			let autoGroupId: string | undefined;
-			if (configStore.uiConfig.channels?.autoGroup === 'first') {
+			if (configStore.uiConfig.channels?.autoGroup === "first") {
 				const sorted = [...groups.value].sort((a, b) => a.sortOrder - b.sortOrder);
 				if (sorted.length > 0 && sorted[0] !== undefined) {
 					autoGroupId = sorted[0].id;
@@ -566,10 +706,12 @@ export const useChannelsStore = defineStore('channels', () => {
 			}
 
 			sessionStore.wsClient.send({
-				type: 'SPAWN',
+				type: "SPAWN",
 				hostId,
 				...(autoGroupId !== undefined ? { groupId: autoGroupId } : {}),
-				...(opts?.cols !== undefined && opts?.rows !== undefined ? { cols: opts.cols, rows: opts.rows } : {}),
+				...(opts?.cols !== undefined && opts?.rows !== undefined
+					? { cols: opts.cols, rows: opts.rows }
+					: {}),
 				...(opts?.launchProfileId !== undefined ? { launchProfileId: opts.launchProfileId } : {}),
 				...(opts?.shell !== undefined ? { shell: opts.shell } : {}),
 				...(opts?.args !== undefined && opts.args.length > 0 ? { args: opts.args } : {}),
@@ -583,14 +725,14 @@ export const useChannelsStore = defineStore('channels', () => {
 	// -------------------------------------------------------------------------
 
 	async function addGroup(name: string): Promise<ChannelGroup> {
-		if (authStore.token === null) throw new Error('Not authenticated');
+		if (authStore.token === null) throw new Error("Not authenticated");
 		const hostId = activeHostId.value;
-		if (hostId === null) throw new Error('No active host');
+		if (hostId === null) throw new Error("No active host");
 
 		const res = await fetch(`${hubBaseUrl()}/api/groups`, {
-			method: 'POST',
+			method: "POST",
 			headers: {
-				'Content-Type': 'application/json',
+				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token}`,
 			},
 			body: JSON.stringify({ host_id: hostId, name }),
@@ -608,7 +750,7 @@ export const useChannelsStore = defineStore('channels', () => {
 		if (authStore.token === null) return;
 
 		await fetch(`${hubBaseUrl()}/api/groups/${groupId}`, {
-			method: 'DELETE',
+			method: "DELETE",
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 
@@ -636,9 +778,9 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/groups/${groupId}`, {
-				method: 'PATCH',
+				method: "PATCH",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token}`,
 				},
 				body: JSON.stringify({ name }),
@@ -664,9 +806,9 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/groups/order`, {
-				method: 'PUT',
+				method: "PUT",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token}`,
 				},
 				body: JSON.stringify({ host_id: hostId, group_ids: groupIds }),
@@ -679,7 +821,9 @@ export const useChannelsStore = defineStore('channels', () => {
 	}
 
 	function toggleGroupCollapsed(groupId: string): void {
-		groups.value = groups.value.map((g) => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g));
+		groups.value = groups.value.map((g) =>
+			g.id === groupId ? { ...g, collapsed: !g.collapsed } : g,
+		);
 		// Persist collapsed state to localStorage
 		const collapsedMap = loadCollapsedMap();
 		const group = groups.value.find((g) => g.id === groupId);
@@ -717,14 +861,14 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/channels/${channelId}`, {
-				method: 'PATCH',
+				method: "PATCH",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token}`,
 				},
 				body: JSON.stringify({ title }),
 			});
-			if (!res.ok) throw new Error('Failed to rename');
+			if (!res.ok) throw new Error("Failed to rename");
 		} catch {
 			// Rollback
 			const rollbackIdx = channels.value.findIndex((c) => c.id === channelId);
@@ -765,9 +909,9 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/channels/${channelId}`, {
-				method: 'PATCH',
+				method: "PATCH",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token}`,
 				},
 				body: JSON.stringify({ group_id: groupId }),
@@ -800,9 +944,9 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/hosts/${hostId}/welcome`, {
-				method: 'PUT',
+				method: "PUT",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 					Authorization: `Bearer ${authStore.token}`,
 				},
 				body: JSON.stringify({ channel_id: channelId }),
@@ -827,7 +971,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
 		try {
 			const res = await fetch(`${hubBaseUrl()}/api/hosts/${hostId}/welcome`, {
-				method: 'DELETE',
+				method: "DELETE",
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});
 			if (!res.ok) throw new Error(`DELETE /api/hosts/${hostId}/welcome failed: ${res.status}`);
@@ -854,9 +998,9 @@ export const useChannelsStore = defineStore('channels', () => {
 		if (authStore.token === null) return false;
 
 		const res = await fetch(`${hubBaseUrl()}/api/channels/${channelId}`, {
-			method: 'PATCH',
+			method: "PATCH",
 			headers: {
-				'Content-Type': 'application/json',
+				"Content-Type": "application/json",
 				Authorization: `Bearer ${authStore.token}`,
 			},
 			body: JSON.stringify(config),
@@ -874,7 +1018,7 @@ export const useChannelsStore = defineStore('channels', () => {
 		if (authStore.token === null) return false;
 
 		const res = await fetch(`${hubBaseUrl()}/api/channels/${channelId}/restart`, {
-			method: 'POST',
+			method: "POST",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
 			},
@@ -895,7 +1039,7 @@ export const useChannelsStore = defineStore('channels', () => {
 	async function deleteChannel(channelId: string): Promise<boolean> {
 		if (authStore.token === null) return false;
 		const res = await fetch(`${hubBaseUrl()}/api/channels/${channelId}`, {
-			method: 'DELETE',
+			method: "DELETE",
 			headers: { Authorization: `Bearer ${authStore.token}` },
 		});
 		if (!res.ok) return false;
@@ -917,17 +1061,17 @@ export const useChannelsStore = defineStore('channels', () => {
 	async function purgeDeadChannels(): Promise<number> {
 		if (authStore.token === null || activeHostId.value === null) return 0;
 		const res = await fetch(`${hubBaseUrl()}/api/channels/dead`, {
-			method: 'DELETE',
+			method: "DELETE",
 			headers: {
 				Authorization: `Bearer ${authStore.token}`,
-				'Content-Type': 'application/json',
+				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ host_id: activeHostId.value }),
 		});
 		if (!res.ok) return 0;
 		const data = (await res.json()) as { purged: number };
-		const deadIds = new Set(channels.value.filter((c) => c.status === 'dead').map((c) => c.id));
-		channels.value = channels.value.filter((c) => c.status !== 'dead');
+		const deadIds = new Set(channels.value.filter((c) => c.status === "dead").map((c) => c.id));
+		channels.value = channels.value.filter((c) => c.status !== "dead");
 		const nextMap = new Map(channelHostMap.value);
 		for (const id of deadIds) {
 			nextMap.delete(id);
@@ -957,7 +1101,7 @@ export const useChannelsStore = defineStore('channels', () => {
 		updateProcessTitle,
 		applyStateSync,
 		removeChannel,
-		addChannel,
+		handleChannelCreated,
 		spawnChannel,
 		registerPendingSpawn,
 		consumePendingSpawn,

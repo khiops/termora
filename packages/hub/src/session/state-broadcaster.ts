@@ -11,6 +11,7 @@
 import type {
 	AgentProcessTitleMessage,
 	AgentTitleChangeMessage,
+	ChannelCreatedMessage,
 	ChannelStateMessage,
 	ProtocolMessage,
 	SessionStateMessage,
@@ -176,6 +177,16 @@ export class StateBroadcaster {
 		for (const client of this.ctx.clients.values()) {
 			client.send(msg);
 		}
+	}
+
+	/**
+	 * Broadcast a CHANNEL_CREATED message to all connected clients so observers
+	 * learn about new channels without a manual fetchChannels.  The UI filters
+	 * by host on the receiving end; the spawning client deduplicates against the
+	 * channel it already obtained via fetchChannels after SPAWN_OK.
+	 */
+	broadcastChannelCreated(msg: ChannelCreatedMessage): void {
+		this.broadcastToAllClients(msg);
 	}
 
 	// ─── Title management ───────────────────────────────────────────────────

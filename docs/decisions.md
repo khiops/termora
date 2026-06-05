@@ -4,6 +4,15 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## MULTICLIENT-SYNC — Multi-client channel sync & SSH reconnect (2026-06-05)
+
+- CHANNEL_CREATED broadcast: new channels are announced to all connected clients via a CHANNEL_CREATED message carrying the full channel payload (status live, resolved display title) so observers add the channel without a manual refresh; the web client filters by active host and dedupes by channel id.
+- Consistency invariant: the hub persists the channel row to meta.db before broadcasting CHANNEL_CREATED and before sending SPAWN_OK (synchronous, no await between), so the spawning client's post-SPAWN_OK fetchChannels always observes the new channel in the REST snapshot. Observer clients whose fetchChannels is already in flight are covered by in-flight reconciliation: channels added via CHANNEL_CREATED during a fetch are preserved when the (pre-creation) REST snapshot resolves.
+- fetchChannels generation guard: fetchChannels captures a monotonic generation counter before any I/O and commits all state (channels, groups, error, loading) in a single block behind a post-await generation check, so a slow stale fetch can never overwrite newer state or clobber error state.
+- SSH reconnect passphrase policy: reconnect uses a cache-only passphrase callback that returns the cached passphrase for an encrypted key (non-interactive, never prompts the UI) and evicts expired entries on access, consistent with the interactive TTL policy.
+
+---
+
 ## LOGGING-DAEMON — Unified per-channel logging + Windows daemon mode (2026-03-21)
 
 - Log granularity: per-channel (1 JSONL file = 1 terminal tab), correlates directly with spool.db (output) and meta.db (metadata) by channel_id

@@ -9,6 +9,7 @@ import type {
 	AgentSpawnMessage,
 	AgentSpawnOkMessage,
 	AuthPromptMessage,
+	ChannelCreatedMessage,
 	ChannelStateMessage,
 	DestroyMessage,
 	ErrorMessage,
@@ -165,6 +166,33 @@ export class ChannelLifecycleManager {
 						status: "live",
 					};
 					this.broadcaster.broadcastToAllClients(channelStateMsg);
+
+					// Broadcast CHANNEL_CREATED to all clients so observers (clients
+					// not involved in this spawn) learn about the new channel without
+					// having to call fetchChannels.  The spawning client deduplicates
+					// via handleChannelCreated's guard (no-op if channelId already
+					// present) and via fetchChannels' own channel-list check on resolve.
+					const dbChannel = this.ctx.metaDal.getChannel(channelId);
+					const now = dbChannel?.createdAt ?? new Date().toISOString();
+					// Use the same resolution path as GET /api/channels so observers
+					// and late-fetchers see an identical displayTitle (not hardcoded).
+					const resolvedDisplayTitle = this.broadcaster.resolveDisplayTitle(channelId);
+					const channelCreatedMsg: ChannelCreatedMessage = {
+						type: "CHANNEL_CREATED",
+						hostId,
+						channelId,
+						sessionId: session.id,
+						shell: resolvedShell ?? process.env.SHELL ?? "/bin/sh",
+						...(resolvedArgs.length > 0 && { args: resolvedArgs }),
+						...(resolvedCwd !== undefined && { cwd: resolvedCwd }),
+						cols,
+						rows,
+						status: "live",
+						displayTitle: resolvedDisplayTitle,
+						createdAt: now,
+						updatedAt: now,
+					};
+					this.broadcaster.broadcastChannelCreated(channelCreatedMsg);
 
 					const response: UiSpawnOkMessage = {
 						type: "SPAWN_OK",

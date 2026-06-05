@@ -455,6 +455,25 @@ Sent immediately after `AUTH_OK`. Full snapshot of all active sessions and chann
   status: "born" | "live" | "orphan" | "dead",
   exit_code?: number
 }
+
+// Hub → ALL connected clients: a new channel was created by any client.
+// Observers use this to add the channel to their list without a fetchChannels.
+// The spawning client receives it too and deduplicates (no-op if already present).
+{
+  type: "CHANNEL_CREATED",
+  host_id: string,
+  channel_id: string,
+  session_id: string,
+  shell: string,
+  args?: string[],
+  cwd?: string,
+  cols: number,
+  rows: number,
+  status: "live",
+  display_title: string,
+  created_at: string,   // ISO 8601
+  updated_at: string    // ISO 8601
+}
 ```
 
 ### 4.8 PING / PONG
