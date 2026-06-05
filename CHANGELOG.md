@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/khiops/termora/compare/v0.3.0...v0.3.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **agent:** emit SPAWN_OK before starting the PTY reader task ([ee95f84](https://github.com/khiops/termora/commit/ee95f84597956c884197a29c93c71087abe8bd86))
+* **hub,agent:** create socket parent dir before bind so the daemon starts under WSL ([72cf1ed](https://github.com/khiops/termora/commit/72cf1eddbb97dd58508aff71eefdd61bc71f7238))
+
 ## [0.3.0](https://github.com/khiops/termora/compare/v0.2.9...v0.3.0) (2026-06-05)
 
 
