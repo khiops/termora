@@ -290,3 +290,100 @@ describe("GET /api/logs/hub", () => {
 		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 });
+
+// ─── Streaming correctness (readline path) ────────────────────────────────────
+//
+// These tests exercise the streaming read path directly via the HTTP routes to
+// ensure the readline implementation is faithful to the old readFileSync slurp:
+//   - Blank lines are skipped (not counted as malformed or real entries)
+//   - Malformed lines are silently skipped
+//   - No trailing newline at EOF: the last entry is still returned
+//   - Mutation caught: a streaming impl that drops the last line when there is
+//     no trailing newline, or miscounts entries due to blank-line handling.
+
+describe("streaming correctness — readline vs slurp parity", () => {
+	it("returns last entry when file has no trailing newline", async () => {
+		// Write JSONL WITHOUT a trailing newline — a common readline pitfall where
+		// the final line is silently dropped if the impl only emits on "\n".
+		const dir = path.join(logsDir, "channels");
+		fs.mkdirSync(dir, { recursive: true });
+		const lines = [
+			JSON.stringify({ t: 0, src: "hub", lvl: "info", msg: "first" }),
+			JSON.stringify({ t: 1, src: "hub", lvl: "info", msg: "last" }),
+		];
+		// Deliberately NO trailing "\n"
+		fs.writeFileSync(path.join(dir, `${CHANNEL_ID}.jsonl`), lines.join("\n"));
+
+		const res = await app.inject({
+			method: "GET",
+			url: `/api/logs/channels/${CHANNEL_ID}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ entries: Array<{ msg: string }>; total: number }>();
+		// Both entries must be present — the last one must not be dropped
+		expect(body.total).toBe(2);
+		expect(body.entries[1]?.msg).toBe("last");
+	});
+
+	it("blank lines and malformed line do not affect valid entry count", async () => {
+		// Mixed fixture: valid, blank, malformed, blank, valid — no trailing newline
+		const dir = path.join(logsDir, "channels");
+		fs.mkdirSync(dir, { recursive: true });
+		const content = [
+			JSON.stringify({ t: 0, src: "hub", lvl: "info", msg: "entry-a" }),
+			"",
+			"NOT_JSON{{{{",
+			"",
+			JSON.stringify({ t: 1, src: "hub", lvl: "warn", msg: "entry-b" }),
+		].join("\n"); // no trailing newline
+		fs.writeFileSync(path.join(dir, `${CHANNEL_ID}.jsonl`), content);
+
+		const res = await app.inject({
+			method: "GET",
+			url: `/api/logs/channels/${CHANNEL_ID}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ entries: Array<{ msg: string }>; total: number }>();
+		// Only the two valid objects should be returned
+		expect(body.total).toBe(2);
+		expect(body.entries[0]?.msg).toBe("entry-a");
+		expect(body.entries[1]?.msg).toBe("entry-b");
+	});
+
+	it("returns [] for a missing file (ENOENT) without throwing", async () => {
+		// No file written — ENOENT must be handled gracefully, returning empty result
+		const res = await app.inject({
+			method: "GET",
+			url: `/api/logs/channels/${CHANNEL_ID}`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ entries: unknown[]; total: number }>();
+		expect(body.entries).toEqual([]);
+		expect(body.total).toBe(0);
+	});
+
+	it("filters apply correctly after streaming read (level + search combined)", async () => {
+		// Ensure downstream filter chain works identically after the async read
+		const dir = path.join(logsDir, "channels");
+		fs.mkdirSync(dir, { recursive: true });
+		const content =
+			[
+				JSON.stringify({ t: 0, src: "hub", lvl: "info", msg: "noise" }),
+				JSON.stringify({ t: 1, src: "hub", lvl: "warn", msg: "important warning" }),
+				JSON.stringify({ t: 2, src: "hub", lvl: "error", msg: "important error" }),
+				JSON.stringify({ t: 3, src: "hub", lvl: "warn", msg: "other warn" }),
+			].join("\n") + "\n";
+		fs.writeFileSync(path.join(dir, `${CHANNEL_ID}.jsonl`), content);
+
+		const res = await app.inject({
+			method: "GET",
+			url: `/api/logs/channels/${CHANNEL_ID}?level=warn&search=important`,
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ entries: Array<{ msg: string }>; total: number }>();
+		// warn+error filtered, then "important" search: 2 entries remain
+		expect(body.total).toBe(2);
+		expect(body.entries[0]?.msg).toBe("important warning");
+		expect(body.entries[1]?.msg).toBe("important error");
+	});
+});
