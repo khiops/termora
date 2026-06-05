@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -37,6 +37,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 const mockExistsSync = vi.mocked(existsSync);
+const mockReadFileSync = vi.mocked(readFileSync);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -327,10 +328,18 @@ describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 		vi.mocked(existsSync).mockRestore();
+		vi.mocked(readFileSync).mockRestore();
 	});
+
+	/** Return a fake /etc/shells content listing the given paths. */
+	function fakeEtcShells(...paths: string[]): string {
+		return `# fake /etc/shells for tests\n${paths.join("\n")}\n`;
+	}
 
 	it("includes $SHELL when it exists", () => {
 		vi.stubEnv("SHELL", "/bin/zsh");
+		// /etc/shells is empty — only $SHELL is the source
+		mockReadFileSync.mockReturnValue(fakeEtcShells());
 		mockExistsSync.mockImplementation((p) => p === "/bin/zsh");
 
 		const shells = discoverUnixShells();
@@ -339,8 +348,10 @@ describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 		expect(shells[0].label).toBe("Zsh");
 	});
 
-	it("deduplicates $SHELL against common shells", () => {
+	it("deduplicates $SHELL against /etc/shells entries with the same basename", () => {
 		vi.stubEnv("SHELL", "/bin/bash");
+		// /etc/shells also lists bash — it must appear only once
+		mockReadFileSync.mockReturnValue(fakeEtcShells("/bin/bash", "/usr/bin/bash"));
 		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
 
 		const shells = discoverUnixShells();
@@ -348,8 +359,10 @@ describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 		expect(bashShells).toHaveLength(1);
 	});
 
-	it("includes /bin/bash and /bin/zsh when they exist", () => {
+	it("includes /bin/bash and /bin/zsh when they exist in /etc/shells", () => {
 		vi.stubEnv("SHELL", "");
+		// Both shells listed in /etc/shells and both exist on disk
+		mockReadFileSync.mockReturnValue(fakeEtcShells("/bin/bash", "/bin/zsh"));
 		mockExistsSync.mockImplementation((p) => p === "/bin/bash" || p === "/bin/zsh");
 
 		const shells = discoverUnixShells();
@@ -358,8 +371,22 @@ describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 		expect(paths).toContain("/bin/zsh");
 	});
 
+	it("excludes /etc/shells entries that do not exist on disk", () => {
+		vi.stubEnv("SHELL", "");
+		// /etc/shells lists three shells but only bash is present on disk
+		mockReadFileSync.mockReturnValue(fakeEtcShells("/bin/bash", "/bin/zsh", "/bin/fish"));
+		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
+
+		const shells = discoverUnixShells();
+		const paths = shells.map((s) => s.shell);
+		expect(paths).toContain("/bin/bash");
+		expect(paths).not.toContain("/bin/zsh");
+		expect(paths).not.toContain("/bin/fish");
+	});
+
 	it("returns empty when no shells exist", () => {
 		vi.stubEnv("SHELL", "");
+		mockReadFileSync.mockReturnValue(fakeEtcShells("/bin/bash", "/bin/zsh"));
 		mockExistsSync.mockReturnValue(false);
 
 		const shells = discoverUnixShells();
@@ -368,6 +395,7 @@ describe.skipIf(process.platform === "win32")("discoverUnixShells", () => {
 
 	it("sets supportedOs to linux on linux platform", () => {
 		vi.stubEnv("SHELL", "/bin/bash");
+		mockReadFileSync.mockReturnValue(fakeEtcShells("/bin/bash"));
 		mockExistsSync.mockImplementation((p) => p === "/bin/bash");
 		vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 
