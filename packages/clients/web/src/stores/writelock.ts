@@ -31,7 +31,9 @@ export const useWriteLockStore = defineStore("writelock", () => {
 	// ── Incoming protocol message handlers ──────────────────────────────────
 
 	function handleWriteLock(channelId: string, holder: string | null): void {
-		locks.value.set(channelId, { holder });
+		const next = new Map(locks.value);
+		next.set(channelId, { holder });
+		locks.value = next;
 	}
 
 	function handleWriteRequest(channelId: string, fromClientId: string): void {
@@ -44,7 +46,9 @@ export const useWriteLockStore = defineStore("writelock", () => {
 		// We clear any holder reference immediately so the UI becomes read-only.
 		const current = locks.value.get(channelId);
 		if (current) {
-			locks.value.set(channelId, { holder: null });
+			const next = new Map(locks.value);
+			next.set(channelId, { holder: null });
+			locks.value = next;
 		}
 	}
 
@@ -100,7 +104,9 @@ export const useWriteLockStore = defineStore("writelock", () => {
 	 * Set initial write-lock holder from ATTACH_OK response.
 	 */
 	function setInitialHolder(channelId: string, holder: string | null): void {
-		locks.value.set(channelId, { holder });
+		const next = new Map(locks.value);
+		next.set(channelId, { holder });
+		locks.value = next;
 	}
 
 	/**
