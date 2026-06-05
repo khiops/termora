@@ -28,14 +28,16 @@ async fn test_read_output() {
         .unwrap();
 
     let mut reader = pty.reader();
-    let mut buf = vec![0u8; 1024];
+    let mut output = String::new();
 
-    let n = tokio::time::timeout(std::time::Duration::from_secs(5), reader.read(&mut buf))
-        .await
-        .expect("read timed out")
-        .expect("read error");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        reader.read_to_string(&mut output),
+    )
+    .await
+    .expect("read timed out")
+    .expect("read error");
 
-    let output = String::from_utf8_lossy(&buf[..n]);
     assert!(output.contains("hello"), "expected 'hello' in {:?}", output);
 }
 
@@ -116,20 +118,18 @@ async fn test_env_and_cwd() {
         .unwrap();
 
     let mut reader = pty.reader();
-    let mut buf = vec![0u8; 4096];
+    let mut output = String::new();
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        reader.read_to_string(&mut output),
+    )
+    .await
+    .expect("read timed out")
+    .expect("read error");
 
-    let n = tokio::time::timeout(std::time::Duration::from_secs(5), reader.read(&mut buf))
-        .await
-        .expect("read timed out")
-        .expect("read error");
-
-    let output = String::from_utf8_lossy(&buf[..n]);
     assert!(output.contains("bar"), "expected 'bar' in {:?}", output);
     assert!(output.contains("/tmp"), "expected '/tmp' in {:?}", output);
-
-    pty.kill().ok();
 }
 
 /// SC-08: Spawning a non-existent program returns an error.
@@ -187,14 +187,16 @@ async fn test_env_clear() {
         .unwrap();
 
     let mut reader = pty.reader();
-    let mut buf = vec![0u8; 1024];
+    let mut output = String::new();
 
-    let n = tokio::time::timeout(std::time::Duration::from_secs(5), reader.read(&mut buf))
-        .await
-        .expect("read timed out")
-        .expect("read error");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        reader.read_to_string(&mut output),
+    )
+    .await
+    .expect("read timed out")
+    .expect("read error");
 
-    let output = String::from_utf8_lossy(&buf[..n]);
     // HOME should be unset → "HOME=" with empty value
     assert!(
         output.contains("HOME=\r") || output.contains("HOME=\n"),
