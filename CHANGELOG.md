@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/khiops/termora/compare/v0.3.1...v0.3.2) (2026-06-06)
+
+
+### Bug Fixes
+
+* **hub,web:** harden host-group input validation and useLogs request races ([960aa2d](https://github.com/khiops/termora/commit/960aa2df37125dd988fce13669bf98f6980f14b8))
+
 ## [0.3.1](https://github.com/khiops/termora/compare/v0.3.0...v0.3.1) (2026-06-05)
 
 
