@@ -366,31 +366,6 @@ export class HostsDAL {
 		});
 	}
 
-	renameHostGroup(oldName: string, newName: string): number {
-		const now = new Date().toISOString();
-		const result = this.db
-			.prepare("UPDATE hosts SET host_group = ?, updated_at = ? WHERE host_group = ?")
-			.run(newName, now, oldName);
-		return result.changes;
-	}
-
-	deleteHostGroup(name: string): number {
-		const now = new Date().toISOString();
-		const result = this.db
-			.prepare("UPDATE hosts SET host_group = NULL, updated_at = ? WHERE host_group = ?")
-			.run(now, name);
-		return result.changes;
-	}
-
-	listHostGroups(): string[] {
-		const rows = this.db
-			.prepare(
-				"SELECT DISTINCT host_group FROM hosts WHERE host_group IS NOT NULL ORDER BY host_group ASC",
-			)
-			.all() as Array<{ host_group: string }>;
-		return rows.map((r) => r.host_group);
-	}
-
 	// ─── Host Groups (first-class) ───────────────────────────────────────────
 
 	listHostGroupEntities(limit?: number, offset?: number): HostGroup[] {
