@@ -157,16 +157,37 @@ describe("GET /api/host-groups", () => {
 		expect(body.data[0].name).toBe("Page-C");
 	});
 
-	it("returns VALIDATION_ERROR for invalid limit (0)", async () => {
-		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=0" });
-		expect(res.statusCode).toBe(200);
+	it("returns 400 VALIDATION_ERROR for non-digit limit (10abc)", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=10abc" });
+		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error?: { code: string } }>();
 		expect(body.error?.code).toBe("VALIDATION_ERROR");
 	});
 
-	it("returns VALIDATION_ERROR for negative offset", async () => {
+	it("returns 400 VALIDATION_ERROR for non-digit offset (2xyz)", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?offset=2xyz" });
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 VALIDATION_ERROR for limit=0 (out of range)", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=0" });
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 VALIDATION_ERROR for limit=2000 (out of range)", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=2000" });
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 VALIDATION_ERROR for negative offset (-1)", async () => {
 		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=10&offset=-1" });
-		expect(res.statusCode).toBe(200);
+		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error?: { code: string } }>();
 		expect(body.error?.code).toBe("VALIDATION_ERROR");
 	});
@@ -619,18 +640,18 @@ describe("PUT /api/host-groups/:id persistence", () => {
 // ─── Reorder with unknown IDs ─────────────────────────────────────────────────
 
 describe("PUT /api/host-groups/order — unknown IDs", () => {
-	it("silently ignores unknown group ids (no-op UPDATE) and returns ok", async () => {
+	it("rejects all-unknown group ids with 400 VALIDATION_ERROR", async () => {
 		const res = await server.inject({
 			method: "PUT",
 			url: "/api/host-groups/order",
 			payload: { group_ids: ["01UNKNOWNIDXXXXXXXXXXX00001", "01UNKNOWNIDXXXXXXXXXXX00002"] },
 		});
-		// Route does not error on unknown IDs — silently no-ops the UPDATE rows
-		expect(res.statusCode).toBe(200);
-		expect(res.json<{ ok: boolean }>().ok).toBe(true);
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
 
-	it("known IDs mixed with unknown IDs — known group sort_order still updated", async () => {
+	it("rejects mixed known+unknown IDs with 400 VALIDATION_ERROR", async () => {
 		const alpha = await server
 			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Mix-Alpha" } })
 			.then((r) => r.json<{ id: string }>());
@@ -638,19 +659,232 @@ describe("PUT /api/host-groups/order — unknown IDs", () => {
 			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Mix-Beta" } })
 			.then((r) => r.json<{ id: string }>());
 
-		// Include a non-existent ID — should not cause an error
-		await server.inject({
+		// Include a non-existent ID — must be rejected, not silently no-oped
+		const res = await server.inject({
 			method: "PUT",
 			url: "/api/host-groups/order",
 			payload: { group_ids: ["01GHOSTIDXXXXXXXXXXXXXXXX01", beta.id, alpha.id] },
 		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
 
-		const listRes = await server.inject({ method: "GET", url: "/api/host-groups" });
-		const groups = listRes.json<Array<{ id: string; name: string; sort_order: number }>>();
-		const a = groups.find((g) => g.id === alpha.id);
-		const b = groups.find((g) => g.id === beta.id);
-		// beta gets sort_order=1, alpha gets sort_order=2 (ghost occupies index 0 with no row)
-		expect(b?.sort_order).toBe(1);
-		expect(a?.sort_order).toBe(2);
+// ─── Reorder validation — partial list (omitted group) ───────────────────────
+
+describe("PUT /api/host-groups/order — partial list", () => {
+	it("rejects a valid but incomplete id list (omits one existing group) with 400 VALIDATION_ERROR", async () => {
+		// Mutation: removing the length-equality check causes this to return 200 and
+		// corrupt sort_order by leaving the omitted group with a duplicate value.
+		const alpha = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Partial-Alpha" } })
+			.then((r) => r.json<{ id: string }>());
+		const beta = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Partial-Beta" } })
+			.then((r) => r.json<{ id: string }>());
+		await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "Partial-Gamma" },
+		});
+
+		// Submit only alpha+beta — gamma is intentionally omitted
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/order",
+			payload: { group_ids: [beta.id, alpha.id] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string; message: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+		expect(body.error.message).toBe("group_ids must include every host group");
+	});
+});
+
+// ─── Reorder validation — non-string ids, duplicates ─────────────────────────
+
+describe("PUT /api/host-groups/order — extra validation", () => {
+	it("rejects non-string ids with 400 VALIDATION_ERROR", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/order",
+			payload: { group_ids: [123, 456] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("rejects duplicate ids with 400 VALIDATION_ERROR", async () => {
+		const grp = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Dup-Group" } })
+			.then((r) => r.json<{ id: string }>());
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/order",
+			payload: { group_ids: [grp.id, grp.id] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── POST / PUT — whitespace-only name ───────────────────────────────────────
+
+describe("POST /api/host-groups — whitespace-only name", () => {
+	it("returns 400 VALIDATION_ERROR for whitespace-only name (POST)", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "   " },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+describe("PUT /api/host-groups/:id — whitespace-only name", () => {
+	it("returns 400 VALIDATION_ERROR for whitespace-only name (PUT)", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "ValidGroup" },
+		});
+		const created = createRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: `/api/host-groups/${created.id}`,
+			payload: { name: "   " },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── POST / PUT — runtime body validation (missing/null/non-string fields) ───
+
+describe("POST /api/host-groups — malformed body", () => {
+	it("returns 400 for missing name field (no name key)", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { color: "#ff0000" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when name is null", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: null },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 when name is a number", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: 42 },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 for invalid color (non-hex string)", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "ColorTest", color: "red" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 for invalid color (5-digit hex)", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "ColorTest", color: "#12345" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("accepts null color on POST", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "NullColor", color: null },
+		});
+		expect(res.statusCode).toBe(201);
+		const body = res.json<{ color: null }>();
+		expect(body.color).toBeNull();
+	});
+
+	it("accepts omitted color on POST (defaults to null)", async () => {
+		const res = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "NoColor" },
+		});
+		expect(res.statusCode).toBe(201);
+		const body = res.json<{ color: null }>();
+		expect(body.color).toBeNull();
+	});
+});
+
+describe("PUT /api/host-groups/:id — color validation", () => {
+	it("returns 400 for invalid color (non-hex string) on PUT", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "ColorGroup2" },
+		});
+		const created = createRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: `/api/host-groups/${created.id}`,
+			payload: { color: "blue" },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── GET — strict pagination (non-numeric limit/offset) ─────────────────────
+
+describe("GET /api/host-groups — strict pagination", () => {
+	it("returns 400 VALIDATION_ERROR for limit=10abc", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=10abc" });
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns 400 VALIDATION_ERROR for offset=2xyz", async () => {
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/host-groups?limit=10&offset=2xyz",
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
 	});
 });
