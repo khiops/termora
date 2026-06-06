@@ -62,23 +62,31 @@
 	--nt-badge-warning: #f9e2af;
 	--nt-badge-success: #a6e3a1;
 	--nt-badge-danger: #f38ba8;
-	--nt-danger: #f38ba8;
-	--nt-bg-surface: #313244;
-	--nt-bg-raised: #2a2a3d;
+	/* alias → tracks --nt-badge-danger (set by applyTheme at runtime) */
+	--nt-danger: var(--nt-badge-danger);
+	/* alias → tracks --nt-tab-hover (set by applyTheme at runtime) */
+	--nt-bg-surface: var(--nt-tab-hover);
+	/* derived surface — resolves live against --nt-bg and --nt-bg-surface */
+	--nt-bg-raised: color-mix(in srgb, var(--nt-bg) 50%, var(--nt-bg-surface));
+	/* set by applyTheme at runtime (dark: rgba(255,255,255,0.06); light: rgba(0,0,0,0.06)) */
 	--nt-hover: rgba(255, 255, 255, 0.06);
-	--nt-input-bg: #1e1e2e;
+	/* alias → tracks --nt-bg (set by applyTheme at runtime) */
+	--nt-input-bg: var(--nt-bg);
 
 	/* ── Tier 3 — Computed / derived ─────────────────────────────────── */
 
 	/* Text levels */
-	--nt-text: #cdd6f4;
+	/* alias → tracks --nt-fg (set by applyTheme at runtime) */
+	--nt-text: var(--nt-fg);
 	--nt-text-secondary: #585b70;
 	--nt-text-muted: #a6adc8;
-	--nt-fg-muted: #a6adc8;
+	/* alias → tracks --nt-text-muted (set by applyTheme at runtime) */
+	--nt-fg-muted: var(--nt-text-muted);
 
 	/* RGB components for transparent variants via rgba(var(--nt-*-rgb), alpha) */
 	--nt-accent-rgb: 137, 180, 250;
 	--nt-badge-rgb: 243, 139, 168;
+	/* set by applyTheme at runtime — RGB triple of --nt-badge-danger */
 	--nt-danger-rgb: 243, 139, 168;
 	--nt-green-rgb: 166, 227, 161;
 	--nt-yellow-rgb: 249, 226, 175;

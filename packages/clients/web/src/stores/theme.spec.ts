@@ -411,4 +411,55 @@ describe("useThemeStore", () => {
 			expect(setPropertyMock).toHaveBeenCalledWith("--nt-tab-bar-rgb", expect.any(String));
 		});
 	});
+
+	describe("new --nt-* alias tokens track theme switches", () => {
+		// --nt-text, --nt-fg-muted, --nt-danger, --nt-input-bg, --nt-bg-surface are pure CSS
+		// var() aliases defined in base.css; they track the source token automatically via
+		// CSS variable resolution (no JS needed). --nt-bg-raised uses color-mix().
+		// The following tokens require applyTheme() to set them explicitly:
+
+		it("applyTheme sets --nt-hover for dark theme", () => {
+			const store = useThemeStore();
+			store.applyTheme(catppuccinMocha); // catppuccin-mocha is a dark theme
+
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-hover", "rgba(255, 255, 255, 0.06)");
+		});
+
+		it("applyTheme sets --nt-hover for light theme", () => {
+			const store = useThemeStore();
+			const lightTheme = BUNDLED_THEMES["one-half-light"] as TermoraTheme;
+			store.applyTheme(lightTheme);
+
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-hover", "rgba(0, 0, 0, 0.06)");
+		});
+
+		it("applyTheme sets --nt-danger-rgb from badgeDanger", () => {
+			const store = useThemeStore();
+			store.applyTheme(catppuccinMocha);
+
+			// --nt-danger-rgb must be the RGB triple of the active theme's badgeDanger
+			const expectedRgb = hexToRgb(catppuccinMocha.ui.badgeDanger ?? "#f38ba8");
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-danger-rgb", expectedRgb);
+		});
+
+		it("applyTheme sets --nt-danger-rgb on every theme switch", () => {
+			const store = useThemeStore();
+
+			store.applyTheme(catppuccinMocha);
+			const afterMocha = setPropertyMock.mock.calls.filter(
+				(c: unknown[]) => c[0] === "--nt-danger-rgb",
+			);
+			expect(afterMocha.length).toBe(1);
+
+			setPropertyMock.mockClear();
+			store.applyTheme(nordTheme);
+			const afterNord = setPropertyMock.mock.calls.filter(
+				(c: unknown[]) => c[0] === "--nt-danger-rgb",
+			);
+			// Must be set again on the second theme switch
+			expect(afterNord.length).toBe(1);
+			// Value must be the RGB triple of that theme's effective badgeDanger
+			expect(afterNord[0]?.[1]).toBe(hexToRgb(nordTheme.ui.badgeDanger ?? "#f38ba8"));
+		});
+	});
 });
