@@ -88,6 +88,88 @@ describe("GET /api/host-groups", () => {
 		expect(names).toContain("Production");
 		expect(names).toContain("Staging");
 	});
+
+	it("returns groups with snake_case wire shape", async () => {
+		await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "WireShape", color: "#aabbcc" },
+		});
+
+		const res = await server.inject({ method: "GET", url: "/api/host-groups" });
+		expect(res.statusCode).toBe(200);
+		const body =
+			res.json<
+				Array<{
+					id: string;
+					name: string;
+					color: string | null;
+					sort_order: number;
+					created_at: string;
+					updated_at: string;
+				}>
+			>();
+		expect(body.length).toBe(1);
+		const g = body[0];
+		expect(typeof g.id).toBe("string");
+		expect(g.name).toBe("WireShape");
+		expect(g.color).toBe("#aabbcc");
+		expect(typeof g.sort_order).toBe("number");
+		expect(typeof g.created_at).toBe("string");
+		expect(typeof g.updated_at).toBe("string");
+	});
+
+	it("paginates with limit and offset", async () => {
+		for (const name of ["Grp-A", "Grp-B", "Grp-C"]) {
+			await server.inject({ method: "POST", url: "/api/host-groups", payload: { name } });
+		}
+
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/host-groups?limit=2&offset=0",
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{
+			data: Array<{ name: string }>;
+			total: number;
+			limit: number;
+			offset: number;
+		}>();
+		expect(body.data.length).toBe(2);
+		expect(body.total).toBe(3);
+		expect(body.limit).toBe(2);
+		expect(body.offset).toBe(0);
+	});
+
+	it("returns second page with offset", async () => {
+		for (const name of ["Page-A", "Page-B", "Page-C"]) {
+			await server.inject({ method: "POST", url: "/api/host-groups", payload: { name } });
+		}
+
+		const res = await server.inject({
+			method: "GET",
+			url: "/api/host-groups?limit=2&offset=2",
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ data: Array<{ name: string }>; total: number }>();
+		expect(body.data.length).toBe(1);
+		expect(body.total).toBe(3);
+		expect(body.data[0].name).toBe("Page-C");
+	});
+
+	it("returns VALIDATION_ERROR for invalid limit (0)", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=0" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
+
+	it("returns VALIDATION_ERROR for negative offset", async () => {
+		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=10&offset=-1" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ error?: { code: string } }>();
+		expect(body.error?.code).toBe("VALIDATION_ERROR");
+	});
 });
 
 // ─── POST /api/host-groups ────────────────────────────────────────────────────
@@ -447,5 +529,128 @@ describe("PUT /api/hosts/reorder", () => {
 		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── PUT /api/host-groups/reorder alias ──────────────────────────────────────
+
+describe("PUT /api/host-groups/reorder (backward-compat alias)", () => {
+	it("reorders via /reorder alias and persists sort_order", async () => {
+		const x = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "X-Alias" } })
+			.then((r) => r.json<{ id: string }>());
+		const y = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Y-Alias" } })
+			.then((r) => r.json<{ id: string }>());
+
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/reorder",
+			payload: { group_ids: [y.id, x.id] },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json<{ ok: boolean }>().ok).toBe(true);
+
+		// Verify persisted order via GET
+		const listRes = await server.inject({ method: "GET", url: "/api/host-groups" });
+		const groups = listRes.json<Array<{ id: string; name: string }>>();
+		expect(groups.map((g) => g.name)).toEqual(["Y-Alias", "X-Alias"]);
+	});
+
+	it("returns 400 when group_ids is an empty array (alias)", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/reorder",
+			payload: { group_ids: [] },
+		});
+		expect(res.statusCode).toBe(400);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("VALIDATION_ERROR");
+	});
+});
+
+// ─── PUT /api/host-groups/:id — persistence via follow-up GET ────────────────
+
+describe("PUT /api/host-groups/:id persistence", () => {
+	it("persisted name change is visible in list", async () => {
+		const createRes = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "PersistMe" },
+		});
+		const created = createRes.json<{ id: string }>();
+
+		await server.inject({
+			method: "PUT",
+			url: `/api/host-groups/${created.id}`,
+			payload: { name: "Persisted" },
+		});
+
+		const listRes = await server.inject({ method: "GET", url: "/api/host-groups" });
+		const groups = listRes.json<Array<{ id: string; name: string }>>();
+		const found = groups.find((g) => g.id === created.id);
+		expect(found?.name).toBe("Persisted");
+	});
+
+	it("returns 409 when renaming to a name that already exists", async () => {
+		await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "Taken" },
+		});
+		const otherRes = await server.inject({
+			method: "POST",
+			url: "/api/host-groups",
+			payload: { name: "Mover" },
+		});
+		const other = otherRes.json<{ id: string }>();
+
+		const res = await server.inject({
+			method: "PUT",
+			url: `/api/host-groups/${other.id}`,
+			payload: { name: "Taken" },
+		});
+		expect(res.statusCode).toBe(409);
+		const body = res.json<{ error: { code: string } }>();
+		expect(body.error.code).toBe("CONFLICT");
+	});
+});
+
+// ─── Reorder with unknown IDs ─────────────────────────────────────────────────
+
+describe("PUT /api/host-groups/order — unknown IDs", () => {
+	it("silently ignores unknown group ids (no-op UPDATE) and returns ok", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/order",
+			payload: { group_ids: ["01UNKNOWNIDXXXXXXXXXXX00001", "01UNKNOWNIDXXXXXXXXXXX00002"] },
+		});
+		// Route does not error on unknown IDs — silently no-ops the UPDATE rows
+		expect(res.statusCode).toBe(200);
+		expect(res.json<{ ok: boolean }>().ok).toBe(true);
+	});
+
+	it("known IDs mixed with unknown IDs — known group sort_order still updated", async () => {
+		const alpha = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Mix-Alpha" } })
+			.then((r) => r.json<{ id: string }>());
+		const beta = await server
+			.inject({ method: "POST", url: "/api/host-groups", payload: { name: "Mix-Beta" } })
+			.then((r) => r.json<{ id: string }>());
+
+		// Include a non-existent ID — should not cause an error
+		await server.inject({
+			method: "PUT",
+			url: "/api/host-groups/order",
+			payload: { group_ids: ["01GHOSTIDXXXXXXXXXXXXXXXX01", beta.id, alpha.id] },
+		});
+
+		const listRes = await server.inject({ method: "GET", url: "/api/host-groups" });
+		const groups = listRes.json<Array<{ id: string; name: string; sort_order: number }>>();
+		const a = groups.find((g) => g.id === alpha.id);
+		const b = groups.find((g) => g.id === beta.id);
+		// beta gets sort_order=1, alpha gets sort_order=2 (ghost occupies index 0 with no row)
+		expect(b?.sort_order).toBe(1);
+		expect(a?.sort_order).toBe(2);
 	});
 });
