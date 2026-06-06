@@ -62,16 +62,24 @@
 	--nt-badge-warning: #f9e2af;
 	--nt-badge-success: #a6e3a1;
 	--nt-badge-danger: #f38ba8;
+	--nt-danger: #f38ba8;
+	--nt-bg-surface: #313244;
+	--nt-bg-raised: #2a2a3d;
+	--nt-hover: rgba(255, 255, 255, 0.06);
+	--nt-input-bg: #1e1e2e;
 
 	/* ── Tier 3 — Computed / derived ─────────────────────────────────── */
 
 	/* Text levels */
+	--nt-text: #cdd6f4;
 	--nt-text-secondary: #585b70;
 	--nt-text-muted: #a6adc8;
+	--nt-fg-muted: #a6adc8;
 
 	/* RGB components for transparent variants via rgba(var(--nt-*-rgb), alpha) */
 	--nt-accent-rgb: 137, 180, 250;
 	--nt-badge-rgb: 243, 139, 168;
+	--nt-danger-rgb: 243, 139, 168;
 	--nt-green-rgb: 166, 227, 161;
 	--nt-yellow-rgb: 249, 226, 175;
 	--nt-fg-rgb: 205, 214, 244;
