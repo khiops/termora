@@ -138,6 +138,7 @@ export const useThemeStore = defineStore("theme", () => {
 		// RGB components for rgba() usage
 		root.setProperty("--nt-accent-rgb", hexToRgb(theme.ui.accent));
 		root.setProperty("--nt-badge-rgb", hexToRgb(theme.ui.badge));
+		root.setProperty("--nt-danger-rgb", hexToRgb(theme.ui.badgeDanger ?? "#f38ba8"));
 		root.setProperty("--nt-green-rgb", hexToRgb(theme.colors.green));
 		root.setProperty("--nt-yellow-rgb", hexToRgb(theme.colors.yellow));
 		root.setProperty("--nt-fg-rgb", hexToRgb(theme.colors.foreground));
@@ -146,15 +147,17 @@ export const useThemeStore = defineStore("theme", () => {
 		root.setProperty("--nt-host-rail-rgb", hexToRgb(theme.ui.hostRail));
 		root.setProperty("--nt-tab-bar-rgb", hexToRgb(theme.ui.tabBar));
 
-		// Overlays (dark vs light)
+		// Overlays and hover (dark vs light)
 		if (theme.type === "dark") {
 			root.setProperty("--nt-overlay", "rgba(0, 0, 0, 0.5)");
 			root.setProperty("--nt-overlay-heavy", "rgba(0, 0, 0, 0.7)");
 			root.setProperty("--nt-shadow", "0 4px 24px rgba(0, 0, 0, 0.6)");
+			root.setProperty("--nt-hover", "rgba(255, 255, 255, 0.06)");
 		} else {
 			root.setProperty("--nt-overlay", "rgba(0, 0, 0, 0.3)");
 			root.setProperty("--nt-overlay-heavy", "rgba(0, 0, 0, 0.5)");
 			root.setProperty("--nt-shadow", "0 4px 24px rgba(0, 0, 0, 0.15)");
+			root.setProperty("--nt-hover", "rgba(0, 0, 0, 0.06)");
 		}
 
 		// Notify xterm.js terminals of the color change
