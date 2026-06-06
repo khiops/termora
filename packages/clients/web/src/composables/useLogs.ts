@@ -20,7 +20,7 @@ interface FetchParams {
 export interface UseLogsOptions {
 	/** If set, fetch channel logs. If absent/undefined, fetch hub logs. */
 	channelId?: string;
-	/** Page size — default 100. */
+	/** Page size — default 100. B3: clamped to 1..1000. */
 	limit?: number;
 }
 
@@ -34,7 +34,10 @@ export interface UseLogsReturn {
 }
 
 export function useLogs(options: UseLogsOptions): UseLogsReturn {
-	const { channelId, limit = 100 } = options;
+	const { channelId } = options;
+	// B3: clamp limit to a sane integer range (1..1000)
+	const rawLimit = options.limit ?? 100;
+	const limit = Math.max(1, Math.min(1000, Math.trunc(rawLimit)));
 
 	const entries: Ref<LogEntry[]> = ref([]);
 	const total: Ref<number> = ref(0);
@@ -43,6 +46,12 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 
 	/** Last params used for fetch — stored so loadMore can append. */
 	let _lastParams: FetchParams = {};
+
+	/**
+	 * Monotonically increasing request generation counter.
+	 * B1/B2: only the response belonging to the latest generation is committed.
+	 */
+	let _generation = 0;
 
 	function buildUrl(params: FetchParams & { offset?: number }): string {
 		const base = hubBaseUrl();
@@ -67,6 +76,12 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 			error.value = "Not authenticated";
 			return;
 		}
+		// Snapshot the token so we detect both logout (null) and replacement (different value)
+		const tok = authStore.token;
+
+		// B1: claim a new generation before going async — any older in-flight
+		// response will see its generation is stale and skip committing.
+		const gen = ++_generation;
 
 		_lastParams = params;
 		loading.value = true;
@@ -75,8 +90,11 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 		try {
 			const url = buildUrl({ ...params, offset: 0 });
 			const res = await globalThis.fetch(url, {
-				headers: { Authorization: `Bearer ${authStore.token}` },
+				headers: { Authorization: `Bearer ${tok}` },
 			});
+
+			// B1: stale response guard — a newer fetch() superseded this one, or auth changed
+			if (gen !== _generation || authStore.token !== tok) return;
 
 			if (!res.ok) {
 				error.value = `Request failed: ${res.status} ${res.statusText}`;
@@ -84,20 +102,39 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 			}
 
 			const data = (await res.json()) as { entries: LogEntry[]; total: number };
+
+			// B1: re-check after the async json() parse
+			if (gen !== _generation || authStore.token !== tok) return;
+
 			entries.value = data.entries;
 			total.value = data.total;
 		} catch (err) {
+			if (gen !== _generation || authStore.token !== tok) return;
 			error.value = err instanceof Error ? err.message : "Unknown error";
 		} finally {
-			loading.value = false;
+			// Only clear loading if we are still the active generation
+			if (gen === _generation) {
+				loading.value = false;
+			}
 		}
 	}
 
 	async function loadMore(): Promise<void> {
 		const authStore = useAuthStore();
-		if (authStore.token === null) return;
+		if (authStore.token === null) {
+			// B4: match fetch()'s unauthenticated behavior — set error before returning
+			error.value = "Not authenticated";
+			return;
+		}
+		// Snapshot the token so we detect both logout (null) and replacement (different value)
+		const tok = authStore.token;
+
 		if (loading.value) return;
 		if (entries.value.length >= total.value) return;
+
+		// B2: snapshot the generation at the start of loadMore; if fetch() fires
+		// concurrently and bumps _generation, we discard the stale append.
+		const gen = _generation;
 
 		loading.value = true;
 		error.value = null;
@@ -105,8 +142,11 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 		try {
 			const url = buildUrl({ ..._lastParams, offset: entries.value.length });
 			const res = await globalThis.fetch(url, {
-				headers: { Authorization: `Bearer ${authStore.token}` },
+				headers: { Authorization: `Bearer ${tok}` },
 			});
+
+			// B2: stale append guard — also drop if auth changed mid-flight
+			if (gen !== _generation || authStore.token !== tok) return;
 
 			if (!res.ok) {
 				error.value = `Request failed: ${res.status} ${res.statusText}`;
@@ -114,12 +154,19 @@ export function useLogs(options: UseLogsOptions): UseLogsReturn {
 			}
 
 			const data = (await res.json()) as { entries: LogEntry[]; total: number };
+
+			// B2: re-check after async json() parse
+			if (gen !== _generation || authStore.token !== tok) return;
+
 			entries.value = [...entries.value, ...data.entries];
 			total.value = data.total;
 		} catch (err) {
+			if (gen !== _generation || authStore.token !== tok) return;
 			error.value = err instanceof Error ? err.message : "Unknown error";
 		} finally {
-			loading.value = false;
+			if (gen === _generation) {
+				loading.value = false;
+			}
 		}
 	}
 

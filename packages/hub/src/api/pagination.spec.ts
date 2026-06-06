@@ -207,7 +207,7 @@ describe("GET /api/host-groups pagination", () => {
 
 	it("rejects invalid limit", async () => {
 		const res = await server.inject({ method: "GET", url: "/api/host-groups?limit=abc" });
-		expect(res.statusCode).toBe(200);
+		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error: { code: string } }>();
 		expect(body.error.code).toBe("VALIDATION_ERROR");
 	});
