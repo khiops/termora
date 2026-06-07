@@ -1,4 +1,4 @@
-import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { playBellSound } from "./useBellSound.js";
 
 describe("playBellSound", () => {
@@ -16,7 +16,10 @@ describe("playBellSound", () => {
 
 		beforeEach(() => {
 			mockAudio = { play: vi.fn().mockResolvedValue(undefined), volume: 0 };
-			AudioSpy = vi.spyOn(globalThis, "Audio" as any).mockReturnValue(mockAudio as never);
+			AudioSpy = vi
+				// biome-ignore lint/suspicious/noExplicitAny: spying on the global Audio constructor with a partial test double; the real HTMLAudioElement ctor type does not match the mock and MockInstance<any> is needed to assign the spy
+				.spyOn(globalThis, "Audio" as any)
+				.mockReturnValue(mockAudio as never);
 			warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		});
 

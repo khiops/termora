@@ -28,6 +28,7 @@ function makeMockClient(stream: MockSshStream | null, execErr?: Error): SshClien
 				cb(execErr, null as unknown as MockSshStream);
 				return;
 			}
+			// biome-ignore lint/style/noNonNullAssertion: stream is guaranteed non-null here; the null branch returns early above
 			cb(undefined, stream!);
 		}),
 	} as unknown as SshClient;

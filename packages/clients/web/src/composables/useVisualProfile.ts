@@ -1,5 +1,5 @@
 import type { Host, VisualProfile } from "@termora/shared";
-import { type Ref, computed } from "vue";
+import { computed, type Ref } from "vue";
 import { DEFAULT_VISUAL_PROFILE, HEX_COLOR_RE } from "../utils/visual-presets.js";
 
 /**

@@ -5,7 +5,7 @@
  * and openBrowser (fire-and-forget execFile wrapper).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Mock node:child_process so we never spawn a real process
 vi.mock("node:child_process", () => ({

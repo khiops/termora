@@ -137,7 +137,6 @@ export function validateShell(shell: unknown): string | null {
 	}
 
 	// Shell metacharacters (injection risk even with execvp)
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional security check
 	const metaRe = /[;&|$`()<>\n\r]/;
 	if (metaRe.test(shell)) {
 		return "shell must be an executable path, not a command";

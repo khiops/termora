@@ -1,5 +1,5 @@
 import type { Ref } from "vue";
-import { onScopeDispose, watch } from "vue";
+import { onScopeDispose } from "vue";
 
 /**
  * Keyboard shortcuts for search toggles.

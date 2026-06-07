@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { chmod, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -87,7 +87,7 @@ function buildKeyEntry(name: string, filePath: string): SshKeyEntry | null {
 function containedPath(base: string, ...parts: string[]): string | null {
 	const resolvedBase = resolve(base);
 	const resolved = resolve(join(base, ...parts));
-	if (!resolved.startsWith(resolvedBase + "/") && resolved !== resolvedBase) {
+	if (!resolved.startsWith(`${resolvedBase}/`) && resolved !== resolvedBase) {
 		return null;
 	}
 	return resolved;
@@ -183,8 +183,8 @@ export function registerSshKeyRoutes(server: FastifyInstance, sshDir?: string): 
 		}
 		let relDir = "";
 		const fields = (request.body as Record<string, { value?: string }> | null) ?? {};
-		if (fields["dir"]?.value) {
-			relDir = fields["dir"].value;
+		if (fields.dir?.value) {
+			relDir = fields.dir.value;
 		}
 		const buffer = await file.toBuffer();
 		if (buffer.byteLength > MAX_KEY_UPLOAD_SIZE) {

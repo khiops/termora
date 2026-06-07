@@ -74,8 +74,8 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 			// Pending entry should exist with a non-null timer
 			const pending = ctx.pendingAuthPrompts.get(hostId);
 			expect(pending).toBeDefined();
-			expect(pending!.timer).not.toBeNull();
-			expect(pending!.clientId).toBe("c-a");
+			expect(pending?.timer).not.toBeNull();
+			expect(pending?.clientId).toBe("c-a");
 
 			// Advance fake timers by 60s — timeout should resolve the promise with null
 			vi.advanceTimersByTime(60_000);
@@ -209,14 +209,14 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 			// Simulate normal resolution: handleAuthPromptResponse clears timer + deletes entry
 			const pending = ctx.pendingAuthPrompts.get(hostId);
 			expect(pending).toBeDefined();
-			expect(pending!.timer).not.toBeNull();
+			expect(pending?.timer).not.toBeNull();
 
 			const timersBefore = vi.getTimerCount();
 
 			// Resolve normally (as handleAuthPromptResponse does)
-			if (pending!.timer !== null) clearTimeout(pending!.timer);
+			if (pending?.timer !== null) clearTimeout(pending?.timer);
 			ctx.pendingAuthPrompts.delete(hostId);
-			pending!.resolve("correct-secret");
+			pending?.resolve("correct-secret");
 
 			const timersAfter = vi.getTimerCount();
 
@@ -374,7 +374,7 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 		};
 		const handler = pendingRequests.get("req-1");
 		expect(handler).toBeDefined();
-		handler!(spawnOk);
+		handler?.(spawnOk);
 
 		const result = await spawnPromise;
 
@@ -553,7 +553,7 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 
 		// Agent responds with SPAWN_ERR
 		const handler = pendingRequests.get("req-err");
-		handler!({
+		handler?.({
 			type: "SPAWN_ERR",
 			requestId: "req-err",
 			code: "SHELL_NOT_FOUND",

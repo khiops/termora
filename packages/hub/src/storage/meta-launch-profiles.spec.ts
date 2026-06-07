@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
+import { openTestDatabases } from "./db.js";
 import { MetaDAL } from "./meta.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -417,7 +417,7 @@ describe("MetaDAL — Launch Profiles", () => {
 
 	describe("listHostProfiles — default appears first", () => {
 		it("default override profile is first in results", () => {
-			const p1 = dal.createLaunchProfile(makeProfile({ name: "A Profile", sortOrder: 0 }));
+			const _p1 = dal.createLaunchProfile(makeProfile({ name: "A Profile", sortOrder: 0 }));
 			const p2 = dal.createLaunchProfile(makeProfile({ name: "B Default", sortOrder: 1 }));
 
 			dal.upsertHostProfileOverride(localHostId, p2.id, "default");

@@ -53,7 +53,7 @@ export class ChannelLogger {
 		const entry: Record<string, unknown> = { t: offset, src, lvl: level, msg, ...extra };
 
 		if (this.firstWrite) {
-			entry["created_at"] = this.createdAt.toISOString();
+			entry.created_at = this.createdAt.toISOString();
 			this.firstWrite = false;
 			// Create file with 0o600 permissions on first write
 			try {
@@ -64,7 +64,7 @@ export class ChannelLogger {
 			}
 		}
 
-		const line = JSON.stringify(entry) + "\n";
+		const line = `${JSON.stringify(entry)}\n`;
 		try {
 			fs.appendFileSync(this.filePath, line);
 		} catch {

@@ -13,18 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
-import {
-	DEFAULT_PROFILE,
-	ELEVATION_METHODS_DARWIN,
-	ELEVATION_METHODS_LINUX,
-	ELEVATION_METHODS_WINDOWS,
-	TERMINAL_PROFILE_KEYS,
-	UI_CONFIG_SECTIONS,
-	deepMerge,
-	validateCustomCommand,
-} from "@termora/shared";
-import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG } from "@termora/shared";
-import { DEFAULT_LAYOUT_CONFIG } from "@termora/shared";
+import { edit, initSync } from "@rainbowatcher/toml-edit-js";
 import type {
 	AppearanceConfig,
 	CascadeResponse,
@@ -41,7 +30,19 @@ import type {
 	TitleConfig,
 	UiConfig,
 } from "@termora/shared";
-import { edit, initSync } from "@rainbowatcher/toml-edit-js";
+import {
+	DEFAULT_APPEARANCE,
+	DEFAULT_ELEVATION_CONFIG,
+	DEFAULT_LAYOUT_CONFIG,
+	DEFAULT_PROFILE,
+	deepMerge,
+	ELEVATION_METHODS_DARWIN,
+	ELEVATION_METHODS_LINUX,
+	ELEVATION_METHODS_WINDOWS,
+	TERMINAL_PROFILE_KEYS,
+	UI_CONFIG_SECTIONS,
+	validateCustomCommand,
+} from "@termora/shared";
 import type { MetaDAL } from "./storage/meta.js";
 
 // Initialize toml-edit-js WASM (sync — called once at module load)
@@ -180,8 +181,8 @@ export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
 	historySize: 20,
 };
 
-export { DEFAULT_LAYOUT_CONFIG };
 export type { LayoutConfig };
+export { DEFAULT_LAYOUT_CONFIG };
 
 export const DEFAULT_UI_CONFIG: UiConfig = {
 	onChannelDead: "readonly",
@@ -392,7 +393,7 @@ function snakeToCamel(s: string): string {
  * Nested objects (e.g. theme_overrides) are handled by remapping the key
  * and preserving the object value as-is.
  */
-function tomlSectionToProfile(section: Record<string, unknown>): Partial<TerminalProfile> {
+function _tomlSectionToProfile(section: Record<string, unknown>): Partial<TerminalProfile> {
 	const result: Record<string, unknown> = {};
 	for (const [key, val] of Object.entries(section)) {
 		result[snakeToCamel(key)] = val;
@@ -554,7 +555,7 @@ export const DEFAULT_CORS_ORIGINS: string[] = ["tauri://localhost", "http://taur
 export function corsOriginsToRegexps(patterns: string[]): RegExp[] {
 	return patterns.map((pattern) => {
 		// Escape all regex special chars except '*' (includes '-' for char-class safety)
-		const escaped = pattern.replace(/[$()+.?[\\\]^{|}\-]/g, "\\$&");
+		const escaped = pattern.replace(/[$()+.?[\\\]^{|}-]/g, "\\$&");
 		// Replace '*' with '\d+' — only matches numeric port sequences
 		const withPort = escaped.replace(/\*/g, "\\d+");
 		return new RegExp(`^${withPort}$`);

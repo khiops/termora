@@ -15,12 +15,19 @@
  *   7. Print final binary size.
  */
 
-import { execSync, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { execSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 export interface SeaBuildConfig {
 	/** Path to the bundled .cjs entry point */
@@ -51,20 +58,20 @@ export interface SeaBuildConfig {
 }
 
 /** The sentinel fuse string required by postject. */
-const SENTINEL_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
+const SENTINEL_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 
 /**
  * Run a child process synchronously.
  * Throws a descriptive Error if the process exits with a non-zero code.
  */
 function run(cmd: string, args: string[], label: string): void {
-	console.log(`[build-sea] ${label}: ${cmd} ${args.join(' ')}`);
-	const result = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+	console.log(`[build-sea] ${label}: ${cmd} ${args.join(" ")}`);
+	const result = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
 	if (result.error) {
 		throw new Error(`[build-sea] ${label} failed to start: ${result.error.message}`);
 	}
 	if (result.status !== 0) {
-		throw new Error(`[build-sea] ${label} exited with code ${result.status ?? 'null'}`);
+		throw new Error(`[build-sea] ${label} exited with code ${result.status ?? "null"}`);
 	}
 }
 
@@ -105,21 +112,26 @@ export function buildSeaConfigJson(cfg: SeaBuildConfig, blobPath: string): Recor
  * Download a Node.js binary for a target platform (cross-build).
  * Returns the path to the downloaded binary.
  */
-function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir: string, nodeVersion?: string): string {
+function downloadNodeBinary(
+	targetPlatform: string,
+	targetArch: string,
+	destDir: string,
+	nodeVersion?: string,
+): string {
 	const version = nodeVersion ?? process.env.TERMORA_NODE_VERSION ?? process.version; // e.g. "v22.14.0"
-	const platformMap: Record<string, string> = { win32: 'win', linux: 'linux', darwin: 'darwin' };
-	const archMap: Record<string, string> = { x64: 'x64', arm64: 'arm64' };
+	const platformMap: Record<string, string> = { win32: "win", linux: "linux", darwin: "darwin" };
+	const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
 	const plat = platformMap[targetPlatform] ?? targetPlatform;
 	const arch = archMap[targetArch] ?? targetArch;
 
-	const isWindows = targetPlatform === 'win32';
-	const ext = isWindows ? 'zip' : 'tar.gz';
+	const isWindows = targetPlatform === "win32";
+	const ext = isWindows ? "zip" : "tar.gz";
 	const dirName = `node-${version}-${plat}-${arch}`;
 	const fileName = `${dirName}.${ext}`;
 	const url = `https://nodejs.org/dist/${version}/${fileName}`;
 
 	const archivePath = join(destDir, fileName);
-	const nodeBinName = isWindows ? 'node.exe' : 'node';
+	const nodeBinName = isWindows ? "node.exe" : "node";
 	const extractedBin = join(destDir, dirName, nodeBinName);
 
 	if (existsSync(extractedBin)) {
@@ -128,21 +140,21 @@ function downloadNodeBinary(targetPlatform: string, targetArch: string, destDir:
 	}
 
 	console.log(`[build-sea] cross-build: downloading ${url}`);
-	execSync(`curl -sSL "${url}" -o "${archivePath}"`, { stdio: 'inherit' });
+	execSync(`curl -sSL "${url}" -o "${archivePath}"`, { stdio: "inherit" });
 
 	console.log(`[build-sea] cross-build: extracting ${fileName}`);
 	if (isWindows) {
 		// unzip on Linux to extract node.exe
 		execSync(`unzip -qo "${archivePath}" "${dirName}/${nodeBinName}" -d "${destDir}"`, {
-			stdio: 'inherit',
+			stdio: "inherit",
 		});
 	} else {
 		execSync(`tar -xzf "${archivePath}" -C "${destDir}" "${dirName}/bin/${nodeBinName}"`, {
-			stdio: 'inherit',
+			stdio: "inherit",
 		});
 	}
 
-	const finalPath = isWindows ? extractedBin : join(destDir, dirName, 'bin', nodeBinName);
+	const finalPath = isWindows ? extractedBin : join(destDir, dirName, "bin", nodeBinName);
 	console.log(`[build-sea] cross-build: node binary at ${finalPath}`);
 	return finalPath;
 }
@@ -159,11 +171,11 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 	// ------------------------------------------------------------------
 	// 1. Write sea-config.json to a temp location
 	// ------------------------------------------------------------------
-	const tmpBase = join(tmpdir(), `termora-sea-${randomBytes(8).toString('hex')}`);
+	const tmpBase = join(tmpdir(), `termora-sea-${randomBytes(8).toString("hex")}`);
 	mkdirSync(tmpBase, { recursive: true });
 
-	const configPath = join(tmpBase, 'sea-config.json');
-	const blobPath = join(tmpBase, 'sea-prep.blob');
+	const configPath = join(tmpBase, "sea-config.json");
+	const blobPath = join(tmpBase, "sea-prep.blob");
 
 	const seaConfig = buildSeaConfigJson(cfg, blobPath);
 	writeFileSync(configPath, JSON.stringify(seaConfig, null, 2));
@@ -174,7 +186,7 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 		// 2. Generate the SEA blob
 		// ------------------------------------------------------------------
 		const nodeBin = resolveNodeBinary();
-		run(nodeBin, ['--experimental-sea-config', configPath], 'generate blob');
+		run(nodeBin, ["--experimental-sea-config", configPath], "generate blob");
 
 		// ------------------------------------------------------------------
 		// 3. Copy the Node binary to the output location
@@ -196,24 +208,30 @@ export async function buildSeaBinary(cfg: SeaBuildConfig): Promise<void> {
 		// ------------------------------------------------------------------
 		// 4. macOS: strip codesign so postject can inject the blob
 		// ------------------------------------------------------------------
-		if (targetPlat === 'darwin' && process.platform === 'darwin') {
-			run('codesign', ['--remove-signature', cfg.outputBinary], 'codesign strip');
+		if (targetPlat === "darwin" && process.platform === "darwin") {
+			run("codesign", ["--remove-signature", cfg.outputBinary], "codesign strip");
 		}
 
 		// ------------------------------------------------------------------
 		// 5. Inject the SEA blob via postject
 		// ------------------------------------------------------------------
 		// postject is invoked via npx so it works even without a global install.
-		const postjectArgs = [cfg.outputBinary, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', SENTINEL_FUSE];
-		if (targetPlat === 'darwin') {
-			postjectArgs.push('--macho-segment-name', 'NODE_SEA');
+		const postjectArgs = [
+			cfg.outputBinary,
+			"NODE_SEA_BLOB",
+			blobPath,
+			"--sentinel-fuse",
+			SENTINEL_FUSE,
+		];
+		if (targetPlat === "darwin") {
+			postjectArgs.push("--macho-segment-name", "NODE_SEA");
 		}
-		run('npx', ['postject', ...postjectArgs], 'postject inject');
+		run("npx", ["postject", ...postjectArgs], "postject inject");
 
 		// ------------------------------------------------------------------
 		// 6. chmod +x on Linux/macOS
 		// ------------------------------------------------------------------
-		if (targetPlat !== 'win32') {
+		if (targetPlat !== "win32") {
 			chmodSync(cfg.outputBinary, 0o755);
 		}
 

@@ -1,5 +1,4 @@
-import type { ProtocolMessage } from "@termora/shared";
-import type { AuthPromptMessage } from "@termora/shared";
+import type { AuthPromptMessage, ProtocolMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigResolver } from "../config.js";
 import { openTestDatabases } from "../storage/db.js";
@@ -2903,8 +2902,9 @@ describe("SessionManager — elevation support", () => {
 			elevated: true,
 		});
 		expect(channelId).not.toBeNull();
+		if (!channelId) return;
 
-		const channel = dal.getChannel(channelId!);
+		const channel = dal.getChannel(channelId);
 		expect(channel?.elevated).toBe(true);
 		expect(channel?.elevationMethod).toBeDefined();
 	});
@@ -2923,8 +2923,9 @@ describe("SessionManager — elevation support", () => {
 			hostId: localHostId,
 		});
 		expect(channelId).not.toBeNull();
+		if (!channelId) return;
 
-		const channel = dal.getChannel(channelId!);
+		const channel = dal.getChannel(channelId);
 		expect(channel?.elevated).toBeFalsy();
 		expect(channel?.elevationMethod).toBeUndefined();
 	});
@@ -2946,6 +2947,7 @@ describe("SessionManager — elevation support", () => {
 			elevated: true,
 		});
 		expect(channelId).not.toBeNull();
+		if (!channelId) return;
 
 		// Verify cache was primed (composite key hostId:clientId)
 		const cache = getElevationCache();
@@ -2955,14 +2957,14 @@ describe("SessionManager — elevation support", () => {
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
 
 		// Restart the channel — cache hit → no new AUTH_PROMPT
-		const ok = await sm.restartChannel(channelId!);
+		const ok = await sm.restartChannel(channelId);
 		expect(ok).toBe(true);
 
 		const promptsAfter = received.filter((m) => m.type === "AUTH_PROMPT").length;
 		expect(promptsAfter).toBe(promptsBefore);
 
 		// Channel should be live in DB
-		const channel = dal.getChannel(channelId!);
+		const channel = dal.getChannel(channelId);
 		expect(channel?.status).toBe("live");
 	});
 
@@ -2983,6 +2985,7 @@ describe("SessionManager — elevation support", () => {
 			elevated: true,
 		});
 		expect(channelId).not.toBeNull();
+		if (!channelId) return;
 
 		// Expire the cache (composite key)
 		getElevationCache().set(`${localHostId}:c-restart02`, {
@@ -2994,7 +2997,7 @@ describe("SessionManager — elevation support", () => {
 		const promptsBefore = received.filter((m) => m.type === "AUTH_PROMPT").length;
 
 		// Restart — expired cache → passwordless fails → AUTH_PROMPT → auto-respond → success
-		const ok = await sm.restartChannel(channelId!, "c-restart02");
+		const ok = await sm.restartChannel(channelId, "c-restart02");
 		expect(ok).toBe(true);
 
 		// A new AUTH_PROMPT should have been sent for the restart
@@ -3005,7 +3008,7 @@ describe("SessionManager — elevation support", () => {
 		expect(getElevationCache().get(`${localHostId}:c-restart02`)?.secret).toBe("new-p@ss");
 
 		// Channel should be live in DB
-		const channel = dal.getChannel(channelId!);
+		const channel = dal.getChannel(channelId);
 		expect(channel?.status).toBe("live");
 	});
 
@@ -3042,6 +3045,7 @@ describe("SessionManager — elevation support", () => {
 			elevated: true,
 		});
 		expect(channelId).not.toBeNull();
+		if (!channelId) return;
 		spawnDone = true;
 
 		// Expire cache so restart will prompt (composite key)
@@ -3051,7 +3055,7 @@ describe("SessionManager — elevation support", () => {
 		});
 
 		// Restart — user cancels prompt → returns false
-		const ok = await sm.restartChannel(channelId!, "c-restart03");
+		const ok = await sm.restartChannel(channelId, "c-restart03");
 		expect(ok).toBe(false);
 
 		// ELEVATION_CANCELLED error sent to client

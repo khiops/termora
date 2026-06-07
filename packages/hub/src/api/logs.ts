@@ -88,7 +88,7 @@ function filterByLevel(
 	const minSev = LOG_SEVERITY[level];
 	if (minSev === undefined) return entries;
 	return entries.filter((e) => {
-		const lvl = e["lvl"];
+		const lvl = e.lvl;
 		if (typeof lvl !== "string") return false;
 		const sev = LOG_SEVERITY[lvl];
 		return sev !== undefined && sev >= minSev;
@@ -107,7 +107,7 @@ function filterChannelByTime(
 	const from = fromT !== undefined ? Number(fromT) : undefined;
 	const to = toT !== undefined ? Number(toT) : undefined;
 	return entries.filter((e) => {
-		const t = e["t"];
+		const t = e.t;
 		if (typeof t !== "number") return true;
 		if (from !== undefined && t < from) return false;
 		if (to !== undefined && t > to) return false;
@@ -127,7 +127,7 @@ function filterHubByTime(
 	const from = fromT !== undefined ? new Date(fromT).getTime() : undefined;
 	const to = toT !== undefined ? new Date(toT).getTime() : undefined;
 	return entries.filter((e) => {
-		const ts = e["ts"];
+		const ts = e.ts;
 		if (typeof ts !== "string") return true;
 		const t = new Date(ts).getTime();
 		if (Number.isNaN(t)) return true;
@@ -147,7 +147,7 @@ function filterBySearch(
 	if (!search) return entries;
 	const lower = search.toLowerCase();
 	return entries.filter((e) => {
-		const msg = e["msg"];
+		const msg = e.msg;
 		return typeof msg === "string" && msg.toLowerCase().includes(lower);
 	});
 }

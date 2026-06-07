@@ -51,13 +51,15 @@ describe("HubLogger", () => {
 
 		const lines = readLines(filePath);
 		expect(lines).toHaveLength(1);
-		const entry = lines[0]!;
-		expect(entry["lvl"]).toBe("info");
-		expect(entry["msg"]).toBe("hub started");
+		const entry = lines[0];
+		expect(entry).toBeDefined();
+		if (!entry) return;
+		expect(entry.lvl).toBe("info");
+		expect(entry.msg).toBe("hub started");
 		// ts is ISO 8601
-		expect(typeof entry["ts"]).toBe("string");
-		expect(() => new Date(entry["ts"] as string)).not.toThrow();
-		expect(new Date(entry["ts"] as string).toISOString()).toBe(entry["ts"]);
+		expect(typeof entry.ts).toBe("string");
+		expect(() => new Date(entry.ts as string)).not.toThrow();
+		expect(new Date(entry.ts as string).toISOString()).toBe(entry.ts);
 	});
 
 	it("filters out entries below configured level", () => {
@@ -70,8 +72,8 @@ describe("HubLogger", () => {
 		const filePath = path.join(tmpDir, "hub.jsonl");
 		const lines = readLines(filePath);
 		expect(lines).toHaveLength(2);
-		expect(lines[0]!["lvl"]).toBe("warn");
-		expect(lines[1]!["lvl"]).toBe("error");
+		expect(lines[0]?.lvl).toBe("warn");
+		expect(lines[1]?.lvl).toBe("error");
 	});
 
 	it("rotates to hub.jsonl.old when size exceeds 10 MB", () => {
@@ -98,8 +100,8 @@ describe("HubLogger", () => {
 
 		const filePath = path.join(tmpDir, "hub.jsonl");
 		const lines = readLines(filePath);
-		expect(lines[0]!["code"]).toBe(500);
-		expect(lines[0]!["component"]).toBe("ws");
+		expect(lines[0]?.code).toBe(500);
+		expect(lines[0]?.component).toBe("ws");
 	});
 
 	it("creates logsDir on first write if missing", () => {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import type { FontFamily, FontFile } from "@termora/shared";

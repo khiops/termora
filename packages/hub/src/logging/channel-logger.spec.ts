@@ -52,11 +52,13 @@ describe("ChannelLogger", () => {
 
 		const lines = readLines(filePath);
 		expect(lines).toHaveLength(1);
-		const entry = lines[0]!;
-		expect(typeof entry["t"]).toBe("number");
-		expect(entry["src"]).toBe("hub");
-		expect(entry["lvl"]).toBe("info");
-		expect(entry["msg"]).toBe("hello world");
+		const entry = lines[0];
+		expect(entry).toBeDefined();
+		if (!entry) return;
+		expect(typeof entry.t).toBe("number");
+		expect(entry.src).toBe("hub");
+		expect(entry.lvl).toBe("info");
+		expect(entry.msg).toBe("hello world");
 	});
 
 	it("first entry includes created_at ISO 8601 field", () => {
@@ -68,8 +70,8 @@ describe("ChannelLogger", () => {
 		const lines = readLines(filePath);
 
 		// Only the first line has created_at
-		expect(lines[0]!["created_at"]).toBe(createdAt.toISOString());
-		expect(lines[1]!["created_at"]).toBeUndefined();
+		expect(lines[0]?.created_at).toBe(createdAt.toISOString());
+		expect(lines[1]?.created_at).toBeUndefined();
 	});
 
 	it("filters out entries below configured level", () => {
@@ -82,8 +84,8 @@ describe("ChannelLogger", () => {
 		const filePath = path.join(tmpDir, "channels", "ch3.jsonl");
 		const lines = readLines(filePath);
 		expect(lines).toHaveLength(2);
-		expect(lines[0]!["lvl"]).toBe("info");
-		expect(lines[1]!["lvl"]).toBe("warn");
+		expect(lines[0]?.lvl).toBe("info");
+		expect(lines[1]?.lvl).toBe("warn");
 	});
 
 	it("stops writing when file exceeds maxSizeMb", () => {
@@ -118,8 +120,8 @@ describe("ChannelLogger", () => {
 
 		const filePath = path.join(tmpDir, "channels", "ch6.jsonl");
 		const lines = readLines(filePath);
-		expect(lines[0]!["code"]).toBe(42);
-		expect(lines[0]!["key"]).toBe("val");
+		expect(lines[0]?.code).toBe(42);
+		expect(lines[0]?.key).toBe("val");
 	});
 
 	it("t field is a non-negative numeric offset in ms", () => {
@@ -128,7 +130,7 @@ describe("ChannelLogger", () => {
 
 		const filePath = path.join(tmpDir, "channels", "ch7.jsonl");
 		const lines = readLines(filePath);
-		const t = lines[0]!["t"];
+		const t = lines[0]?.t;
 		expect(typeof t).toBe("number");
 		expect(t as number).toBeGreaterThanOrEqual(0);
 	});
@@ -141,6 +143,6 @@ describe("ChannelLogger", () => {
 		const filePath = path.join(tmpDir, "channels", "ch8.jsonl");
 		const lines = readLines(filePath);
 		// Last line should be the close entry
-		expect(lines.at(-1)!["msg"]).toBe("channel closed");
+		expect(lines.at(-1)?.msg).toBe("channel closed");
 	});
 });

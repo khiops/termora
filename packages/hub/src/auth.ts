@@ -1,6 +1,5 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
-	chmodSync,
 	closeSync,
 	existsSync,
 	fchmodSync,

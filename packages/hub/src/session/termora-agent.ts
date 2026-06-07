@@ -1,5 +1,5 @@
 import net from "node:net";
-import { type AgentChannelStateMessage, type ProtocolMessage, encodeFrame } from "@termora/shared";
+import { type AgentChannelStateMessage, encodeFrame, type ProtocolMessage } from "@termora/shared";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 

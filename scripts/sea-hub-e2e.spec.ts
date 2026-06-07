@@ -9,20 +9,31 @@
  * All tests skip gracefully when the binary has not been built yet.
  */
 
-import { type ChildProcess, spawn } from 'node:child_process';
-import { accessSync, existsSync, constants as fsConstants, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { type ChildProcess, spawn } from "node:child_process";
+import {
+	accessSync,
+	existsSync,
+	constants as fsConstants,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const ROOT = resolve(__dirname, '..');
-const SEA_DIR = join(ROOT, 'dist', 'sea');
-const SEA_BINARY = join(SEA_DIR, process.platform === 'win32' ? 'termora-hub.exe' : 'termora-hub');
-const AGENT_BINARY = join(SEA_DIR, process.platform === 'win32' ? 'termora-agent.exe' : 'termora-agent');
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = resolve(__dirname, "..");
+const SEA_DIR = join(ROOT, "dist", "sea");
+const SEA_BINARY = join(SEA_DIR, process.platform === "win32" ? "termora-hub.exe" : "termora-hub");
+const AGENT_BINARY = join(
+	SEA_DIR,
+	process.platform === "win32" ? "termora-agent.exe" : "termora-agent",
+);
 
 // ─── Availability ─────────────────────────────────────────────────────────────
 
@@ -63,7 +74,11 @@ function randomPort(): number {
  * Poll a URL until it returns a 2xx status or the timeout expires.
  * Returns the response on success, throws on timeout.
  */
-async function pollUntilReady(url: string, timeoutMs = 30_000, intervalMs = 300): Promise<Response> {
+async function pollUntilReady(
+	url: string,
+	timeoutMs = 30_000,
+	intervalMs = 300,
+): Promise<Response> {
 	const deadline = Date.now() + timeoutMs;
 	let lastErr: unknown;
 
@@ -77,7 +92,9 @@ async function pollUntilReady(url: string, timeoutMs = 30_000, intervalMs = 300)
 		await new Promise((r) => setTimeout(r, intervalMs));
 	}
 
-	throw new Error(`Hub at ${url} did not become ready within ${timeoutMs}ms. Last error: ${String(lastErr)}`);
+	throw new Error(
+		`Hub at ${url} did not become ready within ${timeoutMs}ms. Last error: ${String(lastErr)}`,
+	);
 }
 
 /**
@@ -86,8 +103,8 @@ async function pollUntilReady(url: string, timeoutMs = 30_000, intervalMs = 300)
  */
 async function startHub(extraEnv: Record<string, string> = {}): Promise<HubProcess> {
 	const port = randomPort();
-	const stateDir = mkdtempSync(join(tmpdir(), 'termora-hub-state-'));
-	const configDir = mkdtempSync(join(tmpdir(), 'termora-hub-config-'));
+	const stateDir = mkdtempSync(join(tmpdir(), "termora-hub-state-"));
+	const configDir = mkdtempSync(join(tmpdir(), "termora-hub-config-"));
 
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
@@ -95,20 +112,20 @@ async function startHub(extraEnv: Record<string, string> = {}): Promise<HubProce
 		XDG_CONFIG_HOME: configDir,
 		TERMORA_PORT: String(port),
 		// Disable browser opening during tests
-		TERMORA_OPEN: '0',
+		TERMORA_OPEN: "0",
 		// Suppress any TTY-related output noise
-		NO_COLOR: '1',
+		NO_COLOR: "1",
 		...extraEnv,
 	};
 
-	const proc = spawn(SEA_BINARY, ['start'], {
+	const proc = spawn(SEA_BINARY, ["start"], {
 		env,
-		stdio: ['ignore', 'pipe', 'pipe'],
+		stdio: ["ignore", "pipe", "pipe"],
 	});
 
 	// Collect stderr for diagnostics — don't let it block
 	const stderrLines: string[] = [];
-	proc.stderr?.on('data', (chunk: Buffer) => {
+	proc.stderr?.on("data", (chunk: Buffer) => {
 		stderrLines.push(chunk.toString());
 	});
 
@@ -118,14 +135,16 @@ async function startHub(extraEnv: Record<string, string> = {}): Promise<HubProce
 	try {
 		await pollUntilReady(`${baseUrl}/api/health`, 30_000);
 	} catch (err) {
-		proc.kill('SIGKILL');
+		proc.kill("SIGKILL");
 		throw new Error(
-			`Hub failed to start on port ${port}.\n` + `stderr: ${stderrLines.join('')}\n` + `original: ${String(err)}`,
+			`Hub failed to start on port ${port}.\n` +
+				`stderr: ${stderrLines.join("")}\n` +
+				`original: ${String(err)}`,
 		);
 	}
 
 	// Widen to EventEmitter-compatible type so .once/.on are available
-	const procEE = proc as unknown as import('node:events').EventEmitter & {
+	const procEE = proc as unknown as import("node:events").EventEmitter & {
 		exitCode: number | null;
 		kill(signal?: string): boolean;
 	};
@@ -136,11 +155,11 @@ async function startHub(extraEnv: Record<string, string> = {}): Promise<HubProce
 				resolve();
 				return;
 			}
-			procEE.once('exit', () => resolve());
-			procEE.kill('SIGTERM');
+			procEE.once("exit", () => resolve());
+			procEE.kill("SIGTERM");
 			// Force-kill after 5 s if SIGTERM is ignored
 			setTimeout(() => {
-				if (procEE.exitCode === null) procEE.kill('SIGKILL');
+				if (procEE.exitCode === null) procEE.kill("SIGKILL");
 			}, 5_000);
 		});
 
@@ -150,8 +169,8 @@ async function startHub(extraEnv: Record<string, string> = {}): Promise<HubProce
 /** Read the auth token from the config dir that the hub wrote at startup. */
 function readAuthToken(configDir: string): string {
 	// configDir is XDG_CONFIG_HOME; hub appends "termora/auth.json"
-	const authPath = join(configDir, 'termora', 'auth.json');
-	const raw = readFileSync(authPath, 'utf-8');
+	const authPath = join(configDir, "termora", "auth.json");
+	const raw = readFileSync(authPath, "utf-8");
 	const parsed = JSON.parse(raw) as { token: string };
 	return parsed.token;
 }
@@ -162,27 +181,27 @@ async function pairHub(hub: HubProcess): Promise<string> {
 
 	// Generate a pairing code (requires auth)
 	const pairRes = await fetch(`${hub.baseUrl}/api/pair`, {
-		method: 'POST',
+		method: "POST",
 		headers: {
 			Authorization: `Bearer ${authToken}`,
-			'Content-Type': 'application/json',
+			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({}),
 	});
 	expect(pairRes.status).toBe(201);
 	const pairBody = (await pairRes.json()) as { code: string };
-	expect(typeof pairBody.code).toBe('string');
+	expect(typeof pairBody.code).toBe("string");
 	expect(pairBody.code).toMatch(/^\d{6}$/);
 
 	// Exchange the code for a token (unauthenticated)
 	const verifyRes = await fetch(`${hub.baseUrl}/api/pair/verify`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ code: pairBody.code }),
 	});
 	expect(verifyRes.status).toBe(200);
 	const verifyBody = (await verifyRes.json()) as { token: string };
-	expect(typeof verifyBody.token).toBe('string');
+	expect(typeof verifyBody.token).toBe("string");
 	expect(verifyBody.token.length).toBeGreaterThan(0);
 
 	return verifyBody.token;
@@ -190,7 +209,7 @@ async function pairHub(hub: HubProcess): Promise<string> {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
+describe("termora-hub SEA binary E2E", { timeout: 120_000 }, () => {
 	let hub: HubProcess | null = null;
 
 	beforeEach(() => {
@@ -209,7 +228,7 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 
 	// ── Test 1: binary exists and is executable ───────────────────────────
 
-	it.skipIf(!RUN_SEA_TESTS)('binary exists and is executable', () => {
+	it.skipIf(!RUN_SEA_TESTS)("binary exists and is executable", () => {
 		expect(existsSync(SEA_BINARY)).toBe(true);
 
 		// Must be executable
@@ -222,20 +241,24 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 
 	// ── Test 2: hub starts and responds to /api/health ───────────────────
 
-	it.skipIf(!RUN_SEA_TESTS)('starts and responds to /api/health with status ok', { timeout: 60_000 }, async () => {
-		hub = await startHub();
+	it.skipIf(!RUN_SEA_TESTS)(
+		"starts and responds to /api/health with status ok",
+		{ timeout: 60_000 },
+		async () => {
+			hub = await startHub();
 
-		const res = await fetch(`${hub.baseUrl}/api/health`);
-		expect(res.status).toBe(200);
+			const res = await fetch(`${hub.baseUrl}/api/health`);
+			expect(res.status).toBe(200);
 
-		const body = (await res.json()) as { status: string };
-		expect(body.status).toBe('ok');
-	});
+			const body = (await res.json()) as { status: string };
+			expect(body.status).toBe("ok");
+		},
+	);
 
 	// ── Test 3: hub serves web UI from SEA assets ────────────────────────
 
 	it.skipIf(!RUN_SEA_TESTS)(
-		'serves web UI index.html and JS assets from SEA embedded assets',
+		"serves web UI index.html and JS assets from SEA embedded assets",
 		{ timeout: 60_000 },
 		async () => {
 			hub = await startHub();
@@ -244,8 +267,8 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 			const htmlRes = await fetch(`${hub.baseUrl}/`);
 			expect(htmlRes.status).toBe(200);
 
-			const contentType = htmlRes.headers.get('content-type') ?? '';
-			expect(contentType).toContain('text/html');
+			const contentType = htmlRes.headers.get("content-type") ?? "";
+			expect(contentType).toContain("text/html");
 
 			const html = await htmlRes.text();
 			expect(html).toContain('<div id="app">');
@@ -255,8 +278,8 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 			if (jsMatch?.[1]) {
 				const jsRes = await fetch(`${hub.baseUrl}${jsMatch[1]}`);
 				expect(jsRes.status).toBe(200);
-				const jsContentType = jsRes.headers.get('content-type') ?? '';
-				expect(jsContentType).toContain('javascript');
+				const jsContentType = jsRes.headers.get("content-type") ?? "";
+				expect(jsContentType).toContain("javascript");
 			} else {
 				// If no JS asset found in the HTML, just verify that the /assets/ path
 				// exists by checking that a 404 is returned (not a 500 or crash)
@@ -270,7 +293,7 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 	// ── Test 4: API requires authentication ──────────────────────────────
 
 	it.skipIf(!RUN_SEA_TESTS)(
-		'API routes require authentication — returns 401 without token',
+		"API routes require authentication — returns 401 without token",
 		{ timeout: 60_000 },
 		async () => {
 			hub = await startHub();
@@ -284,7 +307,7 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 	// ── Test 5: pairing flow works ────────────────────────────────────────
 
 	it.skipIf(!RUN_SEA_TESTS)(
-		'pairing flow: POST /api/pair → /api/pair/verify → authenticated /api/hosts',
+		"pairing flow: POST /api/pair → /api/pair/verify → authenticated /api/hosts",
 		{ timeout: 60_000 },
 		async () => {
 			hub = await startHub();
@@ -307,7 +330,7 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 	// ── Test 6: hub + agent integration (optional) ───────────────────────
 
 	it.skipIf(!RUN_SEA_TESTS || !existsSync(AGENT_BINARY))(
-		'agent binary is co-located with hub binary (resolver can find it)',
+		"agent binary is co-located with hub binary (resolver can find it)",
 		{ timeout: 60_000 },
 		async () => {
 			// Both binaries must be in the same dist/sea/ directory.
@@ -318,48 +341,52 @@ describe('termora-hub SEA binary E2E', { timeout: 120_000 }, () => {
 			expect(() => accessSync(AGENT_BINARY, fsConstants.X_OK)).not.toThrow();
 
 			// Both must live in the same directory
-			const hubDir = join(SEA_BINARY, '..');
-			const agentDir = join(AGENT_BINARY, '..');
+			const hubDir = join(SEA_BINARY, "..");
+			const agentDir = join(AGENT_BINARY, "..");
 			expect(resolve(agentDir)).toBe(resolve(hubDir));
 
 			// Start hub with PATH set to include dist/sea/ so the resolver finds agent
-			hub = await startHub({ PATH: `${SEA_DIR}:${process.env['PATH'] ?? ''}` });
+			hub = await startHub({ PATH: `${SEA_DIR}:${process.env.PATH ?? ""}` });
 
 			// Hub must still be healthy even with agent binary available
 			const res = await fetch(`${hub.baseUrl}/api/health`);
 			expect(res.status).toBe(200);
 
 			const body = (await res.json()) as { status: string };
-			expect(body.status).toBe('ok');
+			expect(body.status).toBe("ok");
 		},
 	);
 
 	// ── Test 7: hub writes auth.json on first start ───────────────────────
 
-	it.skipIf(!RUN_SEA_TESTS)('writes auth.json with a hex token on first start', { timeout: 60_000 }, async () => {
-		hub = await startHub();
-
-		const authPath = join(hub.configDir, 'termora', 'auth.json');
-		expect(existsSync(authPath)).toBe(true);
-
-		const raw = readFileSync(authPath, 'utf-8');
-		const parsed = JSON.parse(raw) as { token?: unknown };
-		expect(typeof parsed.token).toBe('string');
-
-		// Token must be a 64-char hex string (32 bytes × 2)
-		expect(parsed.token as string).toMatch(/^[0-9a-f]{64}$/);
-	});
-
-	// ── Test 8: hub creates databases on startup ──────────────────────────
-
 	it.skipIf(!RUN_SEA_TESTS)(
-		'creates meta.db and spool.db in the state directory on startup',
+		"writes auth.json with a hex token on first start",
 		{ timeout: 60_000 },
 		async () => {
 			hub = await startHub();
 
-			const metaDb = join(hub.stateDir, 'termora', 'meta.db');
-			const spoolDb = join(hub.stateDir, 'termora', 'spool.db');
+			const authPath = join(hub.configDir, "termora", "auth.json");
+			expect(existsSync(authPath)).toBe(true);
+
+			const raw = readFileSync(authPath, "utf-8");
+			const parsed = JSON.parse(raw) as { token?: unknown };
+			expect(typeof parsed.token).toBe("string");
+
+			// Token must be a 64-char hex string (32 bytes × 2)
+			expect(parsed.token as string).toMatch(/^[0-9a-f]{64}$/);
+		},
+	);
+
+	// ── Test 8: hub creates databases on startup ──────────────────────────
+
+	it.skipIf(!RUN_SEA_TESTS)(
+		"creates meta.db and spool.db in the state directory on startup",
+		{ timeout: 60_000 },
+		async () => {
+			hub = await startHub();
+
+			const metaDb = join(hub.stateDir, "termora", "meta.db");
+			const spoolDb = join(hub.stateDir, "termora", "spool.db");
 
 			expect(existsSync(metaDb)).toBe(true);
 			expect(existsSync(spoolDb)).toBe(true);

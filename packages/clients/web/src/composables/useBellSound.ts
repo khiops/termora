@@ -36,10 +36,7 @@ if (typeof window !== "undefined") {
  * - "custom": play an audio file from /public/sounds/
  * - "mute": no-op
  */
-export function playBellSound(config: {
-	sound: BellSound;
-	customSoundFile?: string;
-}): void {
+export function playBellSound(config: { sound: BellSound; customSoundFile?: string }): void {
 	if (config.sound === "mute") return;
 
 	if (config.sound === "system") {

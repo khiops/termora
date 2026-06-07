@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useNotificationStore } from "../stores/notifications.js";
 
 // Mock ws-client — we test the handler logic directly

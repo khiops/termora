@@ -1,4 +1,4 @@
-import { type ComputedRef, type Ref, onUnmounted, watch } from "vue";
+import { type ComputedRef, onUnmounted, watch } from "vue";
 import type { WsClient } from "../services/ws-client.js";
 import { useNotificationStore } from "../stores/notifications.js";
 

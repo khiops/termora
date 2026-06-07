@@ -108,7 +108,7 @@ describe("SSH key endpoints", () => {
 		s.addHook("onRequest", async (request, reply) => {
 			if (request.method === "OPTIONS") return;
 			const auth = request.headers.authorization;
-			if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== TEST_TOKEN) {
+			if (!auth?.startsWith("Bearer ") || auth.slice(7) !== TEST_TOKEN) {
 				return reply.code(401).send({ error: "AUTH_REQUIRED" });
 			}
 		});

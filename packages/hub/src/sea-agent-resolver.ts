@@ -79,4 +79,4 @@ export function resolveAgentBinaryPath(): string | null {
 }
 
 // Export internals for testing
-export { findInPath as _findInPath, AGENT_BINARY_NAME as _AGENT_BINARY_NAME };
+export { AGENT_BINARY_NAME as _AGENT_BINARY_NAME, findInPath as _findInPath };

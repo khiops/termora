@@ -11,17 +11,17 @@
  *   2. package.json `version` field (dev mode fallback)
  */
 
-import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 function resolveGitHash(): string {
 	try {
-		return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-			encoding: 'utf-8',
-			stdio: ['pipe', 'pipe', 'pipe'],
+		return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();
 	} catch {
-		return 'dev';
+		return "dev";
 	}
 }
 
@@ -42,10 +42,10 @@ function resolvePackageVersion(): string {
 	try {
 		const require = createRequire(import.meta.url);
 		// Works in both dev (source) and SEA (embedded package.json)
-		const pkg = require('../../package.json') as { version?: string };
-		return pkg.version ?? '0.0.0';
+		const pkg = require("../../package.json") as { version?: string };
+		return pkg.version ?? "0.0.0";
 	} catch {
-		return '0.0.0';
+		return "0.0.0";
 	}
 }
 

@@ -1,5 +1,5 @@
 import { DEFAULT_PROFILE, type TerminalProfile } from "@termora/shared";
-import { type Ref, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, type Ref, ref } from "vue";
 import { useAuthStore } from "../stores/auth.js";
 import { useConfigStore } from "../stores/config.js";
 import { hubBaseUrl } from "../utils/hub-url.js";

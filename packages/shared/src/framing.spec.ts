@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FrameReader, encodeFrame } from "./framing.js";
+import { encodeFrame, FrameReader } from "./framing.js";
 import type { OutputMessage, ProtocolMessage } from "./protocol.js";
 
 function makeOutput(channelId: string, seq: number): OutputMessage {

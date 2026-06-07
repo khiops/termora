@@ -108,7 +108,7 @@ export function useCommandPalette() {
 	const hostsStore = useHostsStore();
 	const channelsStore = useChannelsStore();
 	const writeLockStore = useWriteLockStore();
-	const authStore = useAuthStore();
+	const _authStore = useAuthStore();
 	const profilesStore = useProfilesStore();
 	const layout = useLayout();
 	const { recentIds, pushRecent } = useRecentPaletteItems();

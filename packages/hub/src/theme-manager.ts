@@ -1,12 +1,12 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { TermoraTheme } from "@termora/shared";
 import {
-	BUNDLED_THEMES,
 	BUNDLED_THEME_NAMES,
+	BUNDLED_THEMES,
 	THEME_NAME_REGEX,
 	validateTheme,
 } from "@termora/shared";
-import type { TermoraTheme } from "@termora/shared";
 
 export class ThemeManager {
 	private readonly configDir: string;

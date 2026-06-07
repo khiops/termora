@@ -12,13 +12,13 @@ import type {
 	ChannelCreatedMessage,
 	ChannelStateMessage,
 	DestroyMessage,
+	ElevationMethod,
 	ErrorMessage,
 	ProtocolMessage,
 	UiAttachOkMessage,
 	UiSpawnOkMessage,
 } from "@termora/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@termora/shared";
-import type { ElevationMethod } from "@termora/shared";
 import type { AgentConnection } from "./agent-connection.js";
 import type { ChannelState, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
@@ -707,7 +707,7 @@ export class ChannelLifecycleManager {
 		const { channel: deadChannel, hostId } = info;
 
 		const sessionEntry = this.ctx.sessions.get(hostId);
-		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		if (sessionEntry?.status !== "active") return false;
 		const agent = this.ctx.agents.get(hostId);
 		if (!agent?.connected) return false;
 

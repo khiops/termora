@@ -1,4 +1,4 @@
-import { type Ref, nextTick, ref } from "vue";
+import { nextTick, type Ref, ref } from "vue";
 
 export interface UseRenameOptions {
 	/** Called with the new trimmed value when it differs from the original. */

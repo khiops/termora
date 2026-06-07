@@ -108,7 +108,7 @@ function buildFileMap(manifest: StaticManifest): Map<string, { buf: Buffer; cont
 
 	for (const [relativePath, entry] of Object.entries(manifest)) {
 		// Normalise: remove leading slash if present, then prepend /
-		const key = "/" + relativePath.replace(/^\/+/, "");
+		const key = `/${relativePath.replace(/^\/+/, "")}`;
 		const buf = Buffer.from(entry.data, "base64");
 		map.set(key, { buf, contentType: entry.contentType });
 	}
@@ -203,7 +203,7 @@ export async function registerSeaStaticServing(app: FastifyInstance): Promise<bo
 // ────────────────────────────────────────────────────────────────────────────
 
 export {
+	buildFileMap as _buildFileMap,
 	detectSea as _detectSea,
 	loadStaticManifest as _loadStaticManifest,
-	buildFileMap as _buildFileMap,
 };

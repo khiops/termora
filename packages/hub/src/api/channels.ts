@@ -1,4 +1,4 @@
-import { isValidUlid, toSnakeCase } from "@termora/shared";
+import { type Channel, isValidUlid, toSnakeCase } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import type { SessionManager } from "../session/session-manager.js";
 import type { MetaDAL } from "../storage/meta.js";
@@ -17,7 +17,7 @@ export function registerChannelRoutes(
 		async (request) => {
 			const { host_id, session_id } = request.query;
 
-			let channels;
+			let channels: Channel[];
 			if (session_id) {
 				channels = metaDal.listChannels(session_id);
 			} else if (host_id) {

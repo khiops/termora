@@ -1,5 +1,5 @@
 import { DEFAULT_CHANNEL_NAME, generateId } from "@termora/shared";
-import { type Ref, computed } from "vue";
+import { computed, type Ref } from "vue";
 import { useChannelsStore } from "../stores/channels.js";
 import type { Tab } from "./useTabManager.js";
 

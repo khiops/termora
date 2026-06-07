@@ -6,8 +6,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openTestDatabases } from "../storage/db.js";
 import type { DatabaseManager } from "../storage/db.js";
+import { openTestDatabases } from "../storage/db.js";
 import { MetaDAL } from "../storage/meta.js";
 
 describe("ensureLocalHost (first-run onboarding)", () => {

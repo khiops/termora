@@ -1,5 +1,4 @@
 import type { Channel, ChannelCreatedMessage, ChannelGroup } from "@termora/shared";
-import { generateId } from "@termora/shared";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref } from "vue";
 import { hubBaseUrl } from "../utils/hub-url.js";
@@ -469,7 +468,7 @@ export const useChannelsStore = defineStore("channels", () => {
 		// Channels loaded — apply directly.
 		// Channels present in store but ABSENT from STATE_SYNC are dead
 		// (hub restarted, lost track of them).
-		const syncIds = new Set(syncChannels.map((s) => s.channelId));
+		const _syncIds = new Set(syncChannels.map((s) => s.channelId));
 		let changed = false;
 		const updated = channels.value.map((ch) => {
 			const sc = syncChannels.find((s) => s.channelId === ch.id);
