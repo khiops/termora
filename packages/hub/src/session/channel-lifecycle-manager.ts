@@ -20,7 +20,19 @@ import type {
 } from "@termora/shared";
 import { DEFAULT_CHANNEL_NAME, generateId, validateCustomCommand } from "@termora/shared";
 import type { AgentConnection } from "./agent-connection.js";
-import type { ChannelState, SharedSessionContext } from "./session-context.js";
+import {
+	clearContext,
+	clearElevationContextsForChannel,
+	clearElevationContextsForSession,
+	openContext,
+	prompt as promptCtx,
+	trackElevationContext,
+} from "./prompt-context.js";
+import type {
+	ChannelState,
+	ElevationPromptOwner,
+	SharedSessionContext,
+} from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
@@ -235,6 +247,7 @@ export class ChannelLifecycleManager {
 	destroyChannel(channelId: string): boolean {
 		const ch = this.ctx.channels.get(channelId);
 		if (!ch) return false;
+		this.clearElevationForChannel(channelId);
 
 		const agent = this.ctx.agents.get(ch.hostId);
 		if (agent?.connected) {
@@ -447,7 +460,13 @@ export class ChannelLifecycleManager {
 			}
 
 			// Prompt user
-			const promptFn = this._buildPromptAuth(promptClient);
+			const promptFn = this._buildPromptAuth(promptClient, {
+				hostId,
+				sessionId: sessionEntry.id,
+				owner: "channel-restart",
+				operationId: channelId,
+				channelId,
+			});
 			const host = this.ctx.metaDal.getHost(hostId);
 			const hostname = host?.sshHost ?? host?.label ?? hostId;
 			const secret = await promptFn(
@@ -629,6 +648,8 @@ export class ChannelLifecycleManager {
 	// ─── Session close ────────────────────────────────────────────────────────
 
 	closeSession(hostId: string, sessionId: string): void {
+		this.clearElevationForSession(sessionId);
+
 		// Cancel any pending reconnect timer for this host
 		const pendingTimer = this.ctx.reconnectTimers.get(hostId);
 		if (pendingTimer !== undefined) {
@@ -942,64 +963,80 @@ export class ChannelLifecycleManager {
 		return { method, customCommand };
 	}
 
-	private _buildPromptAuth(client: WsClient): import("./ssh-agent.js").AuthPromptFn {
+	private _buildPromptAuth(
+		client: WsClient,
+		owner?: ElevationPromptOwner,
+	): import("./ssh-agent.js").AuthPromptFn {
 		return async (hostId, promptType, message) => {
-			const promptMsg: AuthPromptMessage = {
+			// ── Elevation PromptContext path ──────────────────────────────────────
+			// Each call opens a dedicated elevation context (kind="elevation") with a
+			// fresh ULID as its id, owned by the requesting client.  The context is
+			// cleared (via clearContext) on timeout or on the abort/close paths wired
+			// by the caller (restartChannel already cleans up via the spawn path).
+			// The elevation cache write happens in the caller after the secret is returned.
+			// openContext generates its own ULID for "elevation" kind (acqId is only
+			// used for "session" kind).  Capture the returned context's id as the
+			// canonical contextId for all subsequent prompt() / clearContext() calls.
+			const context = openContext(this.ctx, "elevation", hostId, client.id);
+			const elevationCtxId = context.id;
+			if (owner) {
+				trackElevationContext(this.ctx, elevationCtxId, owner);
+			}
+
+			// Base payload — promptCtx() merges the real promptId + deliveryEpoch at send time.
+			const promptMsgBase: AuthPromptMessage = {
 				type: "AUTH_PROMPT",
 				hostId,
 				promptType,
 				message,
+				promptId: "", // placeholder; overwritten by prompt()
 			};
-			client.send(promptMsg);
-			return new Promise<string | null>((resolve) => {
-				// Ownership-aware prompt replacement (SEC: cross-client clobber prevention).
-				// Only cancel an existing pending prompt for this hostId when it is owned by
-				// the same client (sequential re-prompt from the same SPAWN path — safe to
-				// replace).  If a different client owns the existing entry, fail this new
-				// attempt gracefully with null WITHOUT touching the legitimate in-flight prompt.
-				const existing = this.ctx.pendingAuthPrompts.get(hostId);
-				if (existing) {
-					if (existing.clientId !== client.id) {
-						// Different client holds an in-flight prompt — do not clobber it.
-						resolve(null);
-						return;
-					}
-					if (existing.timer !== null) clearTimeout(existing.timer);
-					existing.resolve(null);
-				}
 
-				// 60-second server-side timeout: if the client disconnects or never
-				// responds, the promise resolves with null (= cancelled) instead of
-				// hanging forever.
-				const timer = setTimeout(() => {
-					const p = this.ctx.pendingAuthPrompts.get(hostId);
-					if (p) {
-						this.ctx.pendingAuthPrompts.delete(hostId);
-						p.resolve(null);
-					}
-				}, 60_000);
+			// send callback: resolve the owner client at send time and throw on
+			// delivery failure so prompt() can clean up the stored prompt.
+			const send = (routeClientId: string, msg: Record<string, unknown>) => {
+				const target = this.ctx.clients.get(routeClientId);
+				if (!target) throw new Error("prompt route client disconnected");
+				target.send(msg as unknown as AuthPromptMessage);
+			};
 
-				this.ctx.pendingAuthPrompts.set(hostId, {
-					resolve,
-					timer,
-					clientId: client.id,
-					resendPayload: promptMsg,
-				});
-			});
+			// prompt() arms the timeout, stores the in-flight entry, and returns a
+			// Promise resolved by respond() when the response arrives.
+			// null is returned on context.state === "CLOSED" (race guard).
+			const resultPromise = promptCtx(
+				this.ctx,
+				elevationCtxId,
+				"elevation",
+				promptMsgBase,
+				send,
+				60_000, // original elevation timeout: 60s (matches legacy _buildPromptAuth)
+			);
+
+			// If prompt() returned null (context already CLOSED), fail cleanly.
+			if (resultPromise === null) {
+				clearContext(this.ctx, elevationCtxId);
+				return null;
+			}
+
+			const result = await resultPromise;
+
+			// Context is self-cleaning after prompt resolves (clearPrompt removes the
+			// in-flight entry); clear the context shell itself when the prompt settles.
+			clearContext(this.ctx, elevationCtxId);
+
+			return result as string | null;
 		};
 	}
 
-	/**
-	 * Cancel all pending auth prompts for a disconnected client.
-	 * Must be called from the client disconnect handler (ws-handler.ts).
-	 */
-	cancelPendingAuthPromptsForClient(clientId: string): void {
-		for (const [hostId, pending] of this.ctx.pendingAuthPrompts.entries()) {
-			if (pending.clientId === clientId) {
-				if (pending.timer !== null) clearTimeout(pending.timer);
-				pending.resolve(null);
-				this.ctx.pendingAuthPrompts.delete(hostId);
-			}
-		}
+	private clearElevationForSession(sessionId: string): void {
+		clearElevationContextsForSession(this.ctx, sessionId, (routeClientId, msg) => {
+			this.ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+		});
+	}
+
+	private clearElevationForChannel(channelId: string): void {
+		clearElevationContextsForChannel(this.ctx, channelId, (routeClientId, msg) => {
+			this.ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+		});
 	}
 }

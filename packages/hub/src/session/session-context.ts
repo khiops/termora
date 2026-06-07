@@ -82,6 +82,53 @@ export interface PendingPrompt {
 	readonly resolve: (result: unknown) => void;
 	/** clientId of the WsClient currently owning this prompt (re-targetable on disconnect). */
 	clientId: string;
+	// PromptContext-owned prompt routing metadata.
+	/** Globally unique prompt id (ULID). Carried on wire, echoed in response. */
+	promptId?: string;
+	/** PromptContext id that owns this prompt. */
+	contextId?: string;
+	/** Discriminator for the prompt type. */
+	type?: "passphrase" | "host_verify" | "agent_verify" | "elevation";
+	/** Monotonic counter incremented on every (re)send / retarget. */
+	deliveryEpoch?: number;
+	/** Payload needed to re-send this prompt to a new route (retarget). */
+	resendPayload?: unknown;
+}
+
+// PromptContext types.
+
+/**
+ * PromptContext — stable owner of a prompt sequence for one connect/test/elevation flow.
+ *
+ * Owner identity:
+ *   - "session" kind: id === acqId of the SessionAcquisition that started it.
+ *   - "test" / "elevation" kinds: id is a fresh ULID.
+ *
+ * routeClientId is the single live client that receives prompts NOW. It is mutable
+ * via retarget() — all in-flight and future prompts of this context route to the
+ * current routeClientId.
+ *
+ * state transitions:
+ *   OPEN → clearContext() → CLOSED (terminal, all pending resolved null, all maps cleaned)
+ */
+export interface PromptContext {
+	readonly id: string;
+	readonly kind: "session" | "test" | "elevation";
+	readonly hostId: string;
+	/** The live client that receives this context's prompts. Mutable via retarget(). */
+	routeClientId: string;
+	/** Terminal flag — set synchronously in clearContext() before any async work. */
+	state: "OPEN" | "CLOSED";
+	/** Set of promptIds belonging to this context (in-flight). */
+	prompts: Set<string>;
+}
+
+export interface ElevationPromptOwner {
+	readonly hostId: string;
+	readonly sessionId: string;
+	readonly owner: "spawn" | "channel-restart";
+	readonly operationId: string;
+	readonly channelId?: string;
 }
 
 export interface ChannelState {
@@ -129,54 +176,10 @@ export interface SharedSessionContext {
 	restartTracking: Map<string, { count: number; windowStart: number }>;
 	/** requestId → callback for pending agent responses */
 	pendingRequests: Map<string, (msg: import("@termora/shared").ProtocolMessage) => void>;
-	/** hostId → pending auth prompt resolve + timeout */
-	pendingAuthPrompts: Map<
-		string,
-		{
-			resolve: (secret: string | null) => void;
-			timer: ReturnType<typeof setTimeout> | null;
-			/** clientId of the WsClient currently owning this prompt (re-targetable on disconnect). */
-			clientId: string;
-			/** Stored payload to re-send to a new owner client on prompt re-target. */
-			resendPayload: import("@termora/shared").AuthPromptMessage;
-		}
-	>;
-	/** promptId → pending host-key verification resolution */
-	pendingHostVerify: Map<
-		string,
-		{
-			hostId: string;
-			/** B3: ownerAcqId ties this prompt to the acquisition that issued it.
-			 * closeSession clears by ownerAcqId so a newer acq's prompt survives. */
-			ownerAcqId?: string;
-			/** clientId of the WsClient currently owning this prompt (re-targetable on disconnect). */
-			clientId: string;
-			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
-			timer: ReturnType<typeof setTimeout>;
-			/** Stored payload to re-send to a new owner client on prompt re-target. */
-			resendPayload: import("@termora/shared").HostVerifyMessage;
-		}
-	>;
 	/** '${hostname}:${port}' → fingerprint trusted for this session only (trust_once, not persisted) */
 	trustedOnceFingerprints: Map<string, string>;
 	/** Per-host SHA256 of agent binary trusted for this session only (trust_once). */
 	trustedAgentSha256: Map<string, string>;
-	/** Pending agent binary verification prompts, keyed by promptId. */
-	pendingAgentVerify: Map<
-		string,
-		{
-			hostId: string;
-			/** B3: ownerAcqId ties this prompt to the acquisition that issued it.
-			 * closeSession clears by ownerAcqId so a newer acq's prompt survives. */
-			ownerAcqId?: string;
-			/** clientId of the WsClient currently owning this prompt (re-targetable on disconnect). */
-			clientId: string;
-			resolve: (action: "trust_permanent" | "trust_once" | "reject") => void;
-			timer: ReturnType<typeof setTimeout>;
-			/** Stored payload to re-send to a new owner client on prompt re-target. */
-			resendPayload: import("@termora/shared").AgentBinaryVerifyMessage;
-		}
-	>;
 	/** channelId → timestamps of recent BELL messages (sliding window for rate limiting) */
 	bellTimestamps: Map<string, number[]>;
 	/** channelId → timestamps of recent NOTIFICATION messages (sliding window for rate limiting) */
@@ -224,4 +227,25 @@ export interface SharedSessionContext {
 	 * Each entry carries ownerAcqId for cleanup by owner identity (invariant 5).
 	 */
 	pendingPrompts: Map<string, PendingPrompt>;
+	// ── PromptContext routing layer ───────────────────────────────────────────
+	/**
+	 * contextId → PromptContext.
+	 * The new routing model: each connect/test/elevation flow owns one context.
+	 *
+	 * Required — initialized in SessionManager constructor.
+	 */
+	promptContexts: Map<string, PromptContext>;
+	/**
+	 * elevation PromptContext id → owning session/channel operation.
+	 * Used by closeSession()/destroyChannel() to cancel pending elevation prompts
+	 * without clearing independent test-connect contexts for the same host.
+	 */
+	elevationPromptOwners?: Map<string, ElevationPromptOwner>;
+	/**
+	 * promptId → contextId reverse index for O(1) response routing.
+	 * Populated by prompt(), cleared by respond() / clearContext().
+	 *
+	 * Required — initialized in SessionManager constructor.
+	 */
+	promptIndex: Map<string, string>;
 }

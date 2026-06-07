@@ -1,16 +1,24 @@
 import type { AgentSpawnOkMessage, ChannelCreatedMessage, ProtocolMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
-import type { SharedSessionContext } from "./session-context.js";
+import { clearContext, clientDisconnect, respond } from "./prompt-context.js";
+import type { PromptContext, SharedSessionContext } from "./session-context.js";
 import { StateBroadcaster } from "./state-broadcaster.js";
 
 // ─── Minimal context stub ─────────────────────────────────────────────────────
-// ChannelLifecycleManager only touches ctx.pendingAuthPrompts in _buildPromptAuth
-// and cancelPendingAuthPromptsForClient. We provide just that slice.
+// _buildPromptAuth uses PromptContext ops (openContext, promptCtx, clearContext).
+// We provide the full PromptCtxSlice surface so PromptContext ops work correctly.
 
-function makeMinimalCtx(): Pick<SharedSessionContext, "pendingAuthPrompts"> {
+function makeMinimalCtx(): Pick<
+	SharedSessionContext,
+	"promptContexts" | "promptIndex" | "pendingPrompts" | "clients" | "acquisitions"
+> {
 	return {
-		pendingAuthPrompts: new Map(),
+		promptContexts: new Map<string, PromptContext>(),
+		promptIndex: new Map<string, string>(),
+		pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+		clients: new Map(),
+		acquisitions: new Map() as SharedSessionContext["acquisitions"],
 	};
 }
 
@@ -23,10 +31,14 @@ function makeWsClient(id: string, onSend?: (msg: unknown) => void) {
 	};
 }
 
-// ─── SEC-015 Tests ────────────────────────────────────────────────────────────
+// ─── SEC-015 Tests (updated for PromptContext-based _buildPromptAuth) ─────────
+//
+// _buildPromptAuth now uses PromptContext ops.
+// Each call opens a dedicated "elevation" PromptContext, issues the prompt
+// via prompt(), and clears the context after the prompt settles.
 
 describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () => {
-	let ctx: Pick<SharedSessionContext, "pendingAuthPrompts">;
+	let ctx: ReturnType<typeof makeMinimalCtx>;
 	let lifecycle: ChannelLifecycleManager;
 
 	// Minimal broadcaster stub — only used by constructor, not by auth-prompt methods
@@ -34,24 +46,26 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 
 	beforeEach(() => {
 		ctx = makeMinimalCtx();
-		// Cast ctx: ChannelLifecycleManager only uses pendingAuthPrompts for these tests
+		// Cast ctx: ChannelLifecycleManager uses PromptContext slice for _buildPromptAuth
 		lifecycle = new ChannelLifecycleManager(ctx as unknown as SharedSessionContext, broadcaster);
 	});
 
 	afterEach(() => {
-		// Clean up any pending timers
-		for (const [, pending] of ctx.pendingAuthPrompts.entries()) {
-			if (pending.timer !== null) clearTimeout(pending.timer);
+		// Drain any open PromptContexts to prevent timer leaks.
+		for (const [id] of ctx.promptContexts) {
+			clearContext(ctx as unknown as SharedSessionContext, id);
 		}
-		ctx.pendingAuthPrompts.clear();
 	});
 
-	it("SEC-015-A: _buildPromptAuth registers a non-null timer in pendingAuthPrompts", async () => {
+	it("SEC-015-A: _buildPromptAuth opens a PromptContext and sends AUTH_PROMPT to the client", async () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {
 			const hostId = "host-001";
 			const sentMessages: unknown[] = [];
 			const client = makeWsClient("c-a", (m) => sentMessages.push(m));
+
+			// Wire the client into ctx so the send callback can reach it.
+			ctx.clients.set("c-a", client as never);
 
 			// Access _buildPromptAuth via cast (private method under test)
 			const buildPromptAuth = (
@@ -65,135 +79,40 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 			const promptFn = buildPromptAuth(client as never);
 
 			// Invoke the prompt function (does NOT await — we want to inspect mid-flight)
-			const promptPromise = promptFn(hostId, "password", "Enter password");
+			void promptFn(hostId, "elevation", "Enter sudo password");
 
-			// AUTH_PROMPT should have been sent to client
+			// AUTH_PROMPT should have been sent to the client.
 			expect(sentMessages).toHaveLength(1);
 			expect((sentMessages[0] as Record<string, unknown>).type).toBe("AUTH_PROMPT");
+			expect((sentMessages[0] as Record<string, unknown>).hostId).toBe(hostId);
+			expect((sentMessages[0] as Record<string, unknown>).promptType).toBe("elevation");
 
-			// Pending entry should exist with a non-null timer
-			const pending = ctx.pendingAuthPrompts.get(hostId);
-			expect(pending).toBeDefined();
-			expect(pending?.timer).not.toBeNull();
-			expect(pending?.clientId).toBe("c-a");
+			// A PromptContext must exist (kind="elevation").
+			expect(ctx.promptContexts.size).toBe(1);
+			const [, context] = [...ctx.promptContexts.entries()][0]!;
+			expect(context.kind).toBe("elevation");
+			expect(context.hostId).toBe(hostId);
+			expect(context.routeClientId).toBe("c-a");
 
-			// Advance fake timers by 60s — timeout should resolve the promise with null
-			vi.advanceTimersByTime(60_000);
+			// A pendingPrompt entry must exist with type="elevation".
+			expect(ctx.pendingPrompts.size).toBe(1);
+			const [, pp] = [...ctx.pendingPrompts.entries()][0]!;
+			expect(pp.type).toBe("elevation");
+			expect(pp.hostId).toBe(hostId);
 
-			const result = await promptPromise;
-			expect(result).toBeNull();
-
-			// Pending entry is cleaned up by the timer
-			expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+			expect(ctx.pendingPrompts.size).toBe(1);
 		} finally {
 			vi.useRealTimers();
 		}
 	});
 
-	it("SEC-015-B: _buildPromptAuth cancels an existing pending prompt for the same hostId (race guard)", async () => {
-		const hostId = "host-002";
-		const sentMessages: unknown[] = [];
-		const client = makeWsClient("c-b", (m) => sentMessages.push(m));
-
-		const buildPromptAuth = (
-			lifecycle as unknown as {
-				_buildPromptAuth: (
-					client: typeof client,
-				) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
-			}
-		)._buildPromptAuth.bind(lifecycle);
-
-		const promptFn = buildPromptAuth(client as never);
-
-		// First call: installs a pending entry
-		const firstPromise = promptFn(hostId, "password", "First prompt");
-
-		const firstPending = ctx.pendingAuthPrompts.get(hostId);
-		expect(firstPending).toBeDefined();
-
-		let firstResolved: string | null = "NOT_SET";
-		void firstPromise.then((v) => {
-			firstResolved = v;
-		});
-
-		// Second call for same hostId: should cancel first
-		const secondPromise = promptFn(hostId, "elevation", "Second prompt");
-
-		// First promise resolves with null (cancelled by race guard)
-		// Need multiple microtask flushes: inner promise resolves → outer async promise chains → .then() fires
-		await Promise.resolve();
-		await Promise.resolve();
-		await Promise.resolve();
-		expect(firstResolved).toBeNull();
-
-		// Second pending entry is now registered
-		const secondPending = ctx.pendingAuthPrompts.get(hostId);
-		expect(secondPending).toBeDefined();
-		expect(secondPending).not.toBe(firstPending);
-
-		// Clean up second promise
-		const sp = ctx.pendingAuthPrompts.get(hostId);
-		if (sp) {
-			if (sp.timer !== null) clearTimeout(sp.timer);
-			sp.resolve(null);
-			ctx.pendingAuthPrompts.delete(hostId);
-		}
-		await secondPromise;
-	});
-
-	it("SEC-015-C: cancelPendingAuthPromptsForClient resolves prompts only for the given clientId", async () => {
-		const hostId1 = "host-003";
-		const hostId2 = "host-004";
-		const clientA = "c-c-a";
-		const clientB = "c-c-b";
-
-		let resolvedA: string | null = "NOT_SET";
-		let resolvedB: string | null = "NOT_SET";
-
-		const timerA = setTimeout(() => {
-			/* no-op */
-		}, 60_000);
-		const timerB = setTimeout(() => {
-			/* no-op */
-		}, 60_000);
-
-		ctx.pendingAuthPrompts.set(hostId1, {
-			resolve: (s) => {
-				resolvedA = s;
-			},
-			timer: timerA,
-			clientId: clientA,
-		});
-		ctx.pendingAuthPrompts.set(hostId2, {
-			resolve: (s) => {
-				resolvedB = s;
-			},
-			timer: timerB,
-			clientId: clientB,
-		});
-
-		// Disconnect clientA
-		lifecycle.cancelPendingAuthPromptsForClient(clientA);
-
-		// clientA's prompt is cancelled
-		expect(resolvedA).toBeNull();
-		expect(ctx.pendingAuthPrompts.has(hostId1)).toBe(false);
-
-		// clientB's prompt is untouched
-		expect(resolvedB).toBe("NOT_SET");
-		expect(ctx.pendingAuthPrompts.has(hostId2)).toBe(true);
-
-		// Clean up clientB
-		clearTimeout(timerB);
-		ctx.pendingAuthPrompts.delete(hostId2);
-	});
-
-	it("SEC-015-D: timer is cleared (not leaked) when prompt is resolved normally", async () => {
+	it("SEC-015-B: _buildPromptAuth resolves with the client's answer when respond() is called", async () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {
-			const hostId = "host-005";
+			const hostId = "host-002";
 			const sentMessages: unknown[] = [];
-			const client = makeWsClient("c-d", (m) => sentMessages.push(m));
+			const client = makeWsClient("c-b", (m) => sentMessages.push(m));
+			ctx.clients.set("c-b", client as never);
 
 			const buildPromptAuth = (
 				lifecycle as unknown as {
@@ -204,32 +123,186 @@ describe("ChannelLifecycleManager — SEC-015 pending auth prompt security", () 
 			)._buildPromptAuth.bind(lifecycle);
 
 			const promptFn = buildPromptAuth(client as never);
-			const promptPromise = promptFn(hostId, "password", "Enter password");
+			const promptPromise = promptFn(hostId, "elevation", "Enter sudo password");
 
-			// Simulate normal resolution: handleAuthPromptResponse clears timer + deletes entry
-			const pending = ctx.pendingAuthPrompts.get(hostId);
-			expect(pending).toBeDefined();
-			expect(pending?.timer).not.toBeNull();
+			// Capture the promptId from the sent message.
+			expect(sentMessages).toHaveLength(1);
+			const promptId = (sentMessages[0] as Record<string, unknown>).promptId as string;
+			expect(promptId).toBeTruthy();
 
-			const timersBefore = vi.getTimerCount();
-
-			// Resolve normally (as handleAuthPromptResponse does)
-			if (pending?.timer !== null) clearTimeout(pending?.timer);
-			ctx.pendingAuthPrompts.delete(hostId);
-			pending?.resolve("correct-secret");
-
-			const timersAfter = vi.getTimerCount();
-
-			// Timer count should have decreased (timer was cleared)
-			expect(timersAfter).toBeLessThan(timersBefore);
+			// Simulate client response via respond().
+			const accepted = respond(
+				ctx as unknown as SharedSessionContext,
+				promptId,
+				"c-b",
+				undefined,
+				"sudo-password",
+			);
+			expect(accepted).toBe(true);
 
 			const result = await promptPromise;
-			expect(result).toBe("correct-secret");
+			expect(result).toBe("sudo-password");
 
-			// After the 60s would have elapsed, nothing bad happens
-			vi.advanceTimersByTime(60_000);
-			// pendingAuthPrompts is already empty — no double-resolve
-			expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+			// Context must be cleared after prompt settles.
+			expect(ctx.promptContexts.size).toBe(0);
+			expect(ctx.pendingPrompts.size).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("KIND-D8 _buildPromptAuth delivery failure cleans pending elevation prompt immediately", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		let hasSpy: { mockRestore: () => void } | undefined;
+		let getSpy: { mockRestore: () => void } | undefined;
+		try {
+			const hostId = "host-d8-clm";
+			const client = makeWsClient("c-d8-clm");
+			ctx.clients.set("c-d8-clm", client as never);
+			hasSpy = vi.spyOn(ctx.clients, "has").mockReturnValue(true);
+			getSpy = vi.spyOn(ctx.clients, "get").mockReturnValue(undefined);
+
+			const buildPromptAuth = (
+				lifecycle as unknown as {
+					_buildPromptAuth: (
+						client: typeof client,
+					) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
+				}
+			)._buildPromptAuth.bind(lifecycle);
+
+			const promptPromise = buildPromptAuth(client as never)(
+				hostId,
+				"elevation",
+				"Enter sudo password",
+			);
+
+			expect(ctx.pendingPrompts.size).toBe(0);
+			expect(ctx.promptIndex.size).toBe(0);
+			await expect(promptPromise).resolves.toBeNull();
+			expect(ctx.promptContexts.size).toBe(0);
+		} finally {
+			getSpy?.mockRestore();
+			hasSpy?.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it("KIND-D5 elevation owner disconnect clears instead of retargeting to a live follower", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const hostId = "host-003";
+			const oldMessages: unknown[] = [];
+			const followerMessages: unknown[] = [];
+			const oldClient = makeWsClient("c-c", (m) => oldMessages.push(m));
+			const followerClient = makeWsClient("c-follower", (m) => followerMessages.push(m));
+			ctx.clients.set("c-c", oldClient as never);
+			ctx.clients.set("c-follower", followerClient as never);
+
+			const acq = {
+				id: "acq-elev-retarget",
+				hostId,
+				state: "CONNECTING" as const,
+				controller: new AbortController(),
+				connectPromise: new Promise(() => {}),
+				_resolve: vi.fn(),
+				_reject: vi.fn(),
+				leases: new Set(),
+			};
+			const leaseOld = {
+				id: "lease-old",
+				hostId,
+				acqId: acq.id,
+				clientId: "c-c",
+				released: false,
+				_acq: acq,
+			};
+			const leaseFollower = {
+				id: "lease-follower",
+				hostId,
+				acqId: acq.id,
+				clientId: "c-follower",
+				released: false,
+				_acq: acq,
+			};
+			acq.leases.add(leaseOld);
+			acq.leases.add(leaseFollower);
+			ctx.acquisitions.set(hostId, acq as never);
+
+			const buildPromptAuth = (
+				lifecycle as unknown as {
+					_buildPromptAuth: (
+						client: typeof oldClient,
+					) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
+				}
+			)._buildPromptAuth.bind(lifecycle);
+
+			const promptPromise = buildPromptAuth(oldClient as never)(
+				hostId,
+				"elevation",
+				"Enter sudo password",
+			);
+
+			expect(oldMessages).toHaveLength(1);
+			const firstPrompt = oldMessages[0] as Record<string, unknown>;
+			const promptId = firstPrompt.promptId as string;
+			expect(promptId).toBeTruthy();
+
+			clientDisconnect(ctx as unknown as SharedSessionContext, "c-c", (clientId, msg) => {
+				ctx.clients.get(clientId)?.send(msg as ProtocolMessage);
+			});
+
+			expect(oldMessages).toContainEqual({ type: "PROMPT_CANCEL", promptId });
+			expect(followerMessages).toHaveLength(0);
+			expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+			expect(ctx.promptContexts.size).toBe(0);
+
+			const oldAccepted = respond(
+				ctx as unknown as SharedSessionContext,
+				promptId,
+				"c-c",
+				undefined,
+				"old-secret",
+			);
+			expect(oldAccepted).toBe(false);
+
+			await expect(promptPromise).resolves.toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("SEC-015-D: unanswered elevation prompt resolves null after 60s timeout (de-wedge)", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const hostId = "host-005";
+			const sentMessages: unknown[] = [];
+			const client = makeWsClient("c-d", (m) => sentMessages.push(m));
+			ctx.clients.set("c-d", client as never);
+
+			const buildPromptAuth = (
+				lifecycle as unknown as {
+					_buildPromptAuth: (
+						client: typeof client,
+					) => (hostId: string, promptType: string, message: string) => Promise<string | null>;
+				}
+			)._buildPromptAuth.bind(lifecycle);
+
+			const promptFn = buildPromptAuth(client as never);
+			const promptPromise = promptFn(hostId, "elevation", "Enter sudo password");
+
+			// Context and pending entry are live.
+			expect(ctx.promptContexts.size).toBe(1);
+			expect(ctx.pendingPrompts.size).toBe(1);
+
+			// Advance fake timers past 60s — timeout resolves null and clears the entry.
+			await vi.advanceTimersByTimeAsync(60_000);
+
+			// pendingPrompts entry is removed by the timeout handler.
+			expect(ctx.pendingPrompts.size).toBe(0);
+
+			const result = await promptPromise;
+			// null → spawn fails cleanly → no wedge.
+			expect(result).toBeNull();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -294,7 +367,6 @@ function makeSpawnCtx(overrides?: {
 		chunker,
 		sessions: new Map(),
 		agents: new Map(),
-		pendingAuthPrompts: new Map(),
 		hubLogger: null,
 		now,
 	};
@@ -324,7 +396,6 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 			chunker,
 			sessions: new Map(),
 			agents: new Map(),
-			pendingAuthPrompts: new Map(),
 			hubLogger: null,
 			primaryToken: null,
 		} as unknown as SharedSessionContext;
@@ -451,7 +522,6 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 			chunker,
 			sessions: new Map(),
 			agents: new Map(),
-			pendingAuthPrompts: new Map(),
 			hubLogger: null,
 			primaryToken: null,
 			configResolver: null,
@@ -519,7 +589,6 @@ describe("ChannelLifecycleManager — CHANNEL_CREATED broadcast (multi-client sy
 			chunker,
 			sessions: new Map(),
 			agents: new Map(),
-			pendingAuthPrompts: new Map(),
 			hubLogger: null,
 			primaryToken: null,
 		} as unknown as SharedSessionContext;

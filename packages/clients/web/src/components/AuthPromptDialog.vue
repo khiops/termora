@@ -17,6 +17,7 @@
 					type="password"
 					class="apd-input"
 					:placeholder="inputPlaceholder"
+					:data-prompt-id="prompt.promptId"
 					autocomplete="off"
 					@keydown.enter="handleSubmit"
 					@keydown.escape="handleCancel"
@@ -27,7 +28,7 @@
 					class="apd-remember"
 				>
 					<input
-						v-model="authPromptStore.rememberSession"
+						v-model="prompt.rememberSession"
 						type="checkbox"
 						class="apd-remember-checkbox"
 					/>
@@ -35,8 +36,16 @@
 				</label>
 
 				<div class="apd-actions">
-					<button class="apd-btn apd-cancel" @click="handleCancel">Cancel</button>
-					<button class="apd-btn apd-submit" @click="handleSubmit">Submit</button>
+					<button
+						class="apd-btn apd-cancel"
+						:data-prompt-id="prompt.promptId"
+						@click="handleCancel"
+					>Cancel</button>
+					<button
+						class="apd-btn apd-submit"
+						:data-prompt-id="prompt.promptId"
+						@click="handleSubmit"
+					>Submit</button>
 				</div>
 			</div>
 		</div>
@@ -88,15 +97,19 @@ watch(
 	{ immediate: true },
 );
 
-function handleSubmit(): void {
+function promptIdFromEvent(event: Event): string | undefined {
+	return (event.currentTarget as HTMLElement | null)?.dataset.promptId;
+}
+
+function handleSubmit(event: Event): void {
 	if (!prompt.value) return;
-	authPromptStore.respond(inputValue.value);
+	authPromptStore.respond(inputValue.value, promptIdFromEvent(event));
 	inputValue.value = "";
 }
 
-function handleCancel(): void {
+function handleCancel(event: Event): void {
 	if (!prompt.value) return;
-	authPromptStore.dismiss();
+	authPromptStore.dismiss(promptIdFromEvent(event));
 	inputValue.value = "";
 }
 </script>

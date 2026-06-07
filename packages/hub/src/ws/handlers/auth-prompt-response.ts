@@ -20,6 +20,30 @@ export function handleAuthPromptResponse(
 		});
 		return;
 	}
+	if (msg.promptId !== undefined && !isValidUlid(msg.promptId)) {
+		client.send({ type: "ERROR", code: "INVALID_INPUT", message: "Invalid promptId" });
+		return;
+	}
+	if (
+		msg.deliveryEpoch !== undefined &&
+		(typeof msg.deliveryEpoch !== "number" ||
+			!Number.isFinite(msg.deliveryEpoch) ||
+			msg.deliveryEpoch < 0)
+	) {
+		client.send({
+			type: "ERROR",
+			code: "INVALID_INPUT",
+			message: "deliveryEpoch must be a finite non-negative number",
+		});
+		return;
+	}
 
-	sessionManager.handleAuthPromptResponse(clientId, msg.hostId, msg.secret, msg.rememberSession);
+	sessionManager.handleAuthPromptResponse(
+		clientId,
+		msg.hostId,
+		msg.secret,
+		msg.rememberSession,
+		msg.promptId,
+		msg.deliveryEpoch,
+	);
 }

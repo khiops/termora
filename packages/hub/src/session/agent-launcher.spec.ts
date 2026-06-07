@@ -78,11 +78,14 @@ describe("connectOrLaunch", () => {
 	let socketPath: string;
 	let daemon: { server: net.Server; connections: net.Socket[] } | null = null;
 	let agent: TermoraAgent | null = null;
+	let oldXdgStateHome: string | undefined;
 
 	const config: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
 
 	beforeEach(async () => {
+		oldXdgStateHome = process.env.XDG_STATE_HOME;
 		tmpDir = await mkdtemp(path.join(os.tmpdir(), "termora-launcher-test-"));
+		process.env.XDG_STATE_HOME = tmpDir;
 		socketPath = getTestSocketPath();
 
 		// Reset spawn mock to default (no-op)
@@ -100,6 +103,11 @@ describe("connectOrLaunch", () => {
 			daemon = null;
 		}
 		await rm(tmpDir, { recursive: true, force: true });
+		if (oldXdgStateHome === undefined) {
+			delete process.env.XDG_STATE_HOME;
+		} else {
+			process.env.XDG_STATE_HOME = oldXdgStateHome;
+		}
 	});
 
 	describe("Given agent daemon already running", () => {

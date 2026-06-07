@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -36,15 +36,24 @@ vi.mock("../session/ssh-agent.js", () => {
 
 let dbs: DatabaseManager;
 let server: FastifyInstance;
+let configDir: string;
 
 beforeEach(async () => {
+	configDir = join(tmpdir(), `termora-config-spec-${Date.now()}-${Math.random()}`);
+	mkdirSync(configDir, { recursive: true });
 	dbs = openTestDatabases();
-	server = await createServer({ logger: false, dbManager: dbs, skipShellDiscovery: true });
+	server = await createServer({
+		logger: false,
+		dbManager: dbs,
+		skipShellDiscovery: true,
+		configDir,
+	});
 });
 
 afterEach(async () => {
 	await server.close();
 	dbs.close();
+	rmSync(configDir, { recursive: true, force: true });
 });
 
 // ─── PUT /api/config/ui — value type validation ───────────────────────────────
@@ -261,6 +270,7 @@ describe("PUT /api/config/ui — broadcastDisplayTitles integration", () => {
 	afterEach(async () => {
 		await miniServer.close();
 		testDbs.close();
+		rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	it("calls sessionManager.broadcastDisplayTitles() when title section is in body", async () => {

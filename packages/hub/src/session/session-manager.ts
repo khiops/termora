@@ -40,6 +40,15 @@ import { AgentConnectionManager } from "./agent-connection-manager.js";
 import { DeployError, getBinaryCacheDir } from "./agent-deployer.js";
 import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import { OutputChunker } from "./output-chunker.js";
+import {
+	clearContext,
+	clearElevationContextsForSession,
+	openContext,
+	clientDisconnect as promptClientDisconnect,
+	prompt as promptCtx,
+	reconnectContextId,
+	trackElevationContext,
+} from "./prompt-context.js";
 import * as Acq from "./session-acquisition.js";
 import type { Lease, SessionAcquisition, SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
@@ -99,11 +108,8 @@ export class SessionManager {
 			reconnectAbortControllers: new Map(),
 			restartTracking: new Map(),
 			pendingRequests: new Map(),
-			pendingAuthPrompts: new Map(),
-			pendingHostVerify: new Map(),
 			trustedOnceFingerprints: new Map(),
 			trustedAgentSha256: new Map(),
-			pendingAgentVerify: new Map(),
 			bellTimestamps: new Map(),
 			notificationTimestamps: new Map(),
 			elevationCache: new Map(),
@@ -114,6 +120,10 @@ export class SessionManager {
 			// P1/P2/P3 state machine — replaces acquiringSessions + sessionWaiters
 			acquisitions: new Map(),
 			pendingPrompts: new Map(),
+			// PromptContext routing layer — required, initialized here.
+			promptContexts: new Map(),
+			elevationPromptOwners: new Map(),
+			promptIndex: new Map(),
 			getWriteLockHolder: null,
 			metaDal,
 			spoolDal,
@@ -145,9 +155,15 @@ export class SessionManager {
 			if (!sessionBefore) return false;
 			const sessionId = sessionBefore.id;
 
-			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
-			const firstClient = ctx.clients.values().next().value;
+			// Need a WS client to construct prompt/deploy callbacks. The reconnect
+			// PromptContext routes by live ctx.clients at prompt time, not this captured client.
+			const firstClientId = [...ctx.clients.keys()].sort()[0];
+			const firstClient = firstClientId ? ctx.clients.get(firstClientId) : undefined;
 			if (!firstClient) return false;
+			const reconnectCtxId = reconnectContextId(sessionId);
+			const sendPromptCancel = (routeClientId: string, msg: Record<string, unknown>) => {
+				ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+			};
 
 			// Mirror scheduleReconnect's abort model: create an AbortController and
 			// register it so closeSession() (which aborts reconnectAbortControllers) can
@@ -157,15 +173,15 @@ export class SessionManager {
 			//
 			// Abort-before-overwrite: if scheduleReconnect already registered a controller
 			// for this host, abort it before overwriting — so its pending auth prompt is
-			// cleared at handoff time rather than left orphaned in pendingAuthPrompts.
+			// cleared at handoff time rather than left orphaned in PromptContext state.
 			const existingAcOnReconnect = ctx.reconnectAbortControllers.get(hostId);
 			if (existingAcOnReconnect) existingAcOnReconnect.abort();
 			const ac = new AbortController();
 			ctx.reconnectAbortControllers.set(hostId, ac);
 
 			try {
-				const promptAuth = this.sshMgr.buildPromptAuth(firstClient, ac.signal);
-				const deployOpts = this._buildDeployOpts(hostId, host, firstClient);
+				const promptAuth = this.sshMgr.buildPromptAuth(firstClient, ac.signal, reconnectCtxId);
+				const deployOpts = this._buildDeployOpts(hostId, host, firstClient, reconnectCtxId);
 				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
 
 				const storedFp = ctx.metaDal.getHostFingerprint(hostId);
@@ -205,6 +221,8 @@ export class SessionManager {
 					ctx.reconnectAbortControllers.delete(hostId);
 				}
 				return false;
+			} finally {
+				clearContext(ctx, reconnectCtxId, sendPromptCancel);
 			}
 		};
 
@@ -235,23 +253,10 @@ export class SessionManager {
 		this.ctx.titleDebounceTimers.clear();
 		for (const timer of this.ctx.processTitleDebounceTimers.values()) clearTimeout(timer);
 		this.ctx.processTitleDebounceTimers.clear();
-		for (const [hostId, pending] of this.ctx.pendingAuthPrompts) {
-			if (pending.timer !== null) clearTimeout(pending.timer);
-			this.ctx.pendingAuthPrompts.delete(hostId);
-			pending.resolve(null);
+		for (const contextId of [...this.ctx.promptContexts.keys()]) {
+			clearContext(this.ctx, contextId);
 		}
-		this.ctx.pendingAuthPrompts.clear();
-		for (const pending of this.ctx.pendingHostVerify.values()) {
-			clearTimeout(pending.timer);
-			pending.resolve("reject");
-		}
-		this.ctx.pendingHostVerify.clear();
-		for (const pending of this.ctx.pendingAgentVerify.values()) {
-			clearTimeout(pending.timer);
-			pending.resolve("reject");
-		}
-		this.ctx.pendingAgentVerify.clear();
-		// Clear unified pending-prompts map (host-key + passphrase migrated entries).
+		// Defensive sweep for any malformed pending prompt that is missing its context.
 		for (const [, p] of this.ctx.pendingPrompts) {
 			if (p.timer !== null) clearTimeout(p.timer);
 			p.resolve(null);
@@ -293,105 +298,14 @@ export class SessionManager {
 	}
 
 	removeClient(clientId: string): void {
-		// Prompt re-target: when the prompt owner disconnects, find another live
-		// lease-holder in the same acquisition that is still connected, and re-send
-		// the prompt to them.  If no live candidate exists, reject (fail-closed).
-		//
-		// Helper: given an ownerAcqId and hostId, find the first connected candidate
-		// clientId from the remaining leases of the owning acquisition.
-		const findCandidate = (ownerAcqId: string | undefined, hostId: string): string | null => {
-			if (!ownerAcqId) return null;
-			// The acq may have been committed (P2) already — search by hostId as a
-			// fallback to find any in-flight acq still referencing this host.
-			for (const [hId, acq] of this.ctx.acquisitions) {
-				if (hId !== hostId && acq.id !== ownerAcqId) continue;
-				if (acq.id !== ownerAcqId) continue;
-				for (const lease of acq.leases) {
-					if (lease.clientId !== clientId && this.ctx.clients.has(lease.clientId)) {
-						return lease.clientId;
-					}
-				}
-			}
-			return null;
-		};
-
-		// ── pendingAuthPrompts (keyed by hostId) ──────────────────────────────────
-		// Auth prompts use the unified pendingAuthPrompts map + the acq whose leader
-		// issued the buildPromptAuth closure.  We find the acq via ctx.acquisitions
-		// keyed by hostId directly.
-		for (const [hostId, pending] of this.ctx.pendingAuthPrompts) {
-			if (pending.clientId !== clientId) continue;
-
-			// Find the owning acq (keyed by hostId — always present while CONNECTING).
-			const acq = this.ctx.acquisitions.get(hostId);
-			const candidateId = acq
-				? (() => {
-						for (const lease of acq.leases) {
-							if (lease.clientId !== clientId && this.ctx.clients.has(lease.clientId)) {
-								return lease.clientId;
-							}
-						}
-						return null;
-					})()
-				: null;
-
-			if (candidateId !== null) {
-				// Re-target: transfer ownership to the candidate and re-send the prompt.
-				const newClient = this.ctx.clients.get(candidateId);
-				if (newClient) {
-					pending.clientId = candidateId;
-					newClient.send(pending.resendPayload);
-					continue; // keep the pending entry alive
-				}
-			}
-			// No live candidate — fail-closed (original Fix 3 behavior).
-			if (pending.timer !== null) clearTimeout(pending.timer);
-			this.ctx.pendingAuthPrompts.delete(hostId);
-			pending.resolve(null);
-		}
-
-		// ── pendingHostVerify (keyed by promptId) ─────────────────────────────────
-		for (const [promptId, pending] of this.ctx.pendingHostVerify) {
-			if (pending.clientId !== clientId) continue;
-
-			const candidateId = findCandidate(pending.ownerAcqId, pending.hostId);
-			if (candidateId !== null) {
-				const newClient = this.ctx.clients.get(candidateId);
-				if (newClient) {
-					pending.clientId = candidateId;
-					newClient.send(pending.resendPayload);
-					continue;
-				}
-			}
-			// No live candidate — reject (resolve "reject" keeps fail-closed semantics).
-			clearTimeout(pending.timer);
-			this.ctx.pendingHostVerify.delete(promptId);
-			pending.resolve("reject");
-		}
-
-		// ── pendingAgentVerify (keyed by promptId) ────────────────────────────────
-		for (const [promptId, pending] of this.ctx.pendingAgentVerify) {
-			if (pending.clientId !== clientId) continue;
-
-			const candidateId = findCandidate(pending.ownerAcqId, pending.hostId);
-			if (candidateId !== null) {
-				const newClient = this.ctx.clients.get(candidateId);
-				if (newClient) {
-					pending.clientId = candidateId;
-					newClient.send(pending.resendPayload);
-					continue;
-				}
-			}
-			// No live candidate — reject.
-			clearTimeout(pending.timer);
-			this.ctx.pendingAgentVerify.delete(promptId);
-			pending.resolve("reject");
-		}
+		promptClientDisconnect(this.ctx, clientId, (newClientId, msg) => {
+			const newClient = this.ctx.clients.get(newClientId);
+			newClient?.send(msg as unknown as ProtocolMessage);
+		});
 
 		// broadcaster.removeClient runs LAST — after all retargeting — so that
-		// ctx.clients still contains the departing client during the loops above
-		// (needed for candidate lookup) and prompts have already been retargeted
-		// or resolved before the broadcaster clears channel attachments.
+		// ctx.clients still contains the departing client while PromptContext ops
+		// send PROMPT_CANCEL and retarget prompts.
 		this.broadcaster.removeClient(clientId);
 	}
 
@@ -453,52 +367,17 @@ export class SessionManager {
 		// Returns the closed acq so we can clear its prompts by ownerAcqId (invariant 5).
 		const closedAcq = Acq.close(this.ctx, hostId);
 
-		// Clear host-key and agent-verify prompts: first by ownerAcqId (new unified map),
-		// then by hostId on the legacy maps (invariant 5 — cleared by owner identity).
+		const clearSend = (routeClientId: string, msg: Record<string, unknown>) => {
+			this.ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+		};
+
+		// Acquisition-owned prompts are cleared by the acquisition id. Reconnect
+		// prompts are owned by the live session id and cleared separately.
 		if (closedAcq) {
-			for (const [promptId, p] of this.ctx.pendingPrompts) {
-				if (p.ownerAcqId === closedAcq.id) {
-					if (p.timer !== null) clearTimeout(p.timer);
-					this.ctx.pendingPrompts.delete(promptId);
-					p.resolve(null);
-				}
-			}
+			clearContext(this.ctx, closedAcq.id, clearSend);
 		}
-
-		// Legacy maps: clear by ownerAcqId when present (B3 fix — prevents evicting a
-		// newer acq's prompt); fall back to hostId for entries without an owner tag.
-		for (const [promptId, pending] of this.ctx.pendingHostVerify) {
-			const matchByOwner = closedAcq && pending.ownerAcqId === closedAcq.id;
-			const matchByHost = !pending.ownerAcqId && pending.hostId === hostId;
-			if (matchByOwner || matchByHost) {
-				clearTimeout(pending.timer);
-				this.ctx.pendingHostVerify.delete(promptId);
-				pending.resolve("reject");
-			}
-		}
-		for (const [promptId, pending] of this.ctx.pendingAgentVerify) {
-			const matchByOwner = closedAcq && pending.ownerAcqId === closedAcq.id;
-			const matchByHost = !pending.ownerAcqId && pending.hostId === hostId;
-			if (matchByOwner || matchByHost) {
-				clearTimeout(pending.timer);
-				this.ctx.pendingAgentVerify.delete(promptId);
-				pending.resolve("reject");
-			}
-		}
-
-		// Catch-all: clear any pending auth prompt for this host, regardless of
-		// which reconnect controller owned it.  This closes the controller-ownership
-		// edge-case (codex gate finding) where an overwritten controller's abort
-		// listener never fires, leaving a pendingAuthPrompts entry alive after close.
-		// Safe to call unconditionally: if no entry exists, the Map.get returns
-		// undefined and we skip.  resolve(null) is idempotent on an already-settled
-		// Promise (JS Promises ignore extra resolutions).
-		const orphanedAuthPrompt = this.ctx.pendingAuthPrompts.get(hostId);
-		if (orphanedAuthPrompt) {
-			if (orphanedAuthPrompt.timer !== null) clearTimeout(orphanedAuthPrompt.timer);
-			this.ctx.pendingAuthPrompts.delete(hostId);
-			orphanedAuthPrompt.resolve(null);
-		}
+		clearContext(this.ctx, reconnectContextId(sessionId), clearSend);
+		clearElevationContextsForSession(this.ctx, sessionId, clearSend);
 
 		this.lifecycle.closeSession(hostId, sessionId);
 	}
@@ -695,6 +574,7 @@ export class SessionManager {
 									err instanceof Error ? err : new Error("SSH connection failed"),
 								);
 							}
+							clearContext(this.ctx, connectingAcq.id);
 							connectFailed = true;
 							return null;
 						}
@@ -713,6 +593,7 @@ export class SessionManager {
 							// the acq is simultaneously deleted (no dual-authority window).
 							this.ctx.agents.set(hostId, connectedAgent);
 							Acq.commit(this.ctx, connectingAcq, sessionState);
+							clearContext(this.ctx, connectingAcq.id);
 							agent = connectedAgent;
 							session = sessionState;
 						} else {
@@ -724,6 +605,7 @@ export class SessionManager {
 								this.ctx.sessions.delete(hostId);
 							}
 							connectingAcq._reject(new Error("SSH connect aborted"));
+							clearContext(this.ctx, connectingAcq.id);
 							connectFailed = true;
 							client.send({
 								type: "ERROR",
@@ -732,7 +614,9 @@ export class SessionManager {
 							} satisfies ErrorMessage);
 							return null;
 						}
-					} catch {
+					} catch (err) {
+						Acq.fail(this.ctx, connectingAcq, err instanceof Error ? err : new Error(String(err)));
+						clearContext(this.ctx, connectingAcq.id);
 						connectFailed = true;
 						return null;
 					} finally {
@@ -993,13 +877,46 @@ export class SessionManager {
 						return firstResult.channelId;
 					}
 
-					const promptFn = this.sshMgr.buildPromptAuth(client);
-					const hostname = host.sshHost ?? host.label ?? hostId;
-					const secret = await promptFn(
+					// ── Task 3: Elevation retry — "elevation" PromptContext (guard E) ────────
+					// Open a dedicated elevation context owned by the spawn operation.
+					// Route = the requesting client. Always cleared on every terminal path.
+					const elevCtx = openContext(this.ctx, "elevation", hostId, clientId);
+					const elevCtxId = elevCtx.id;
+					trackElevationContext(this.ctx, elevCtxId, {
 						hostId,
+						sessionId: session.id,
+						owner: "spawn",
+						operationId: requestId,
+					});
+					const elevSend = (routeClientId: string, msg: Record<string, unknown>) => {
+						const target = this.ctx.clients.get(routeClientId);
+						if (!target) throw new Error("prompt route client disconnected");
+						target.send(msg as unknown as import("@termora/shared").AuthPromptMessage);
+					};
+					const hostname = host.sshHost ?? host.label ?? hostId;
+					const elevPayload: import("@termora/shared").AuthPromptMessage = {
+						type: "AUTH_PROMPT",
+						hostId,
+						promptType: "elevation",
+						message: `Enter password for elevated shell on ${hostname}`,
+						promptId: "",
+					};
+					const elevPromise = promptCtx(
+						this.ctx,
+						elevCtxId,
 						"elevation",
-						`Enter password for elevated shell on ${hostname}`,
+						elevPayload,
+						elevSend,
+						60_000,
 					);
+					let secret: string | null;
+					if (elevPromise === null) {
+						secret = null;
+					} else {
+						secret = (await elevPromise) as string | null;
+					}
+					// Guard E: always clear the elevation context.
+					clearContext(this.ctx, elevCtxId, elevSend);
 					if (secret === null) {
 						client.send({
 							type: "ERROR",
@@ -1239,8 +1156,17 @@ export class SessionManager {
 		hostId: string,
 		secret: string | null,
 		rememberSession?: boolean,
+		promptId?: string,
+		deliveryEpoch?: number,
 	): void {
-		this.sshMgr.handleAuthPromptResponse(clientId, hostId, secret, rememberSession);
+		this.sshMgr.handleAuthPromptResponse(
+			clientId,
+			hostId,
+			secret,
+			rememberSession,
+			promptId,
+			deliveryEpoch,
+		);
 	}
 
 	handleHostVerifyResponse(
@@ -1286,10 +1212,6 @@ export class SessionManager {
 
 	get pendingRequests(): SharedSessionContext["pendingRequests"] {
 		return this.ctx.pendingRequests;
-	}
-
-	get pendingAuthPrompts(): SharedSessionContext["pendingAuthPrompts"] {
-		return this.ctx.pendingAuthPrompts;
 	}
 
 	get agentCapabilities(): SharedSessionContext["agentCapabilities"] {
@@ -1356,7 +1278,7 @@ export class SessionManager {
 		signal?: AbortSignal,
 		ownerAcqId?: string,
 	): Promise<import("./agent-connection.js").AgentConnection> {
-		const promptAuth = this.sshMgr.buildPromptAuth(client, signal);
+		const promptAuth = this.sshMgr.buildPromptAuth(client, signal, ownerAcqId);
 
 		const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
 		const sshHostname = host.sshHost?.includes("@")

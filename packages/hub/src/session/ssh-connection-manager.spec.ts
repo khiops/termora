@@ -1,6 +1,14 @@
+import type { TestConnectMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SharedSessionContext } from "./session-context.js";
-import { SshAgent } from "./ssh-agent.js";
+import {
+	clearContext,
+	clientDisconnect,
+	openContext,
+	prompt as promptCtx,
+	reconnectContextId,
+} from "./prompt-context.js";
+import type { PromptContext, SharedSessionContext } from "./session-context.js";
+import { type AuthPromptFn, SshAgent } from "./ssh-agent.js";
 import { SshConnectionManager } from "./ssh-connection-manager.js";
 
 // Deferred promise helper — lets tests resolve/reject mock Promises on demand.
@@ -43,10 +51,24 @@ vi.mock("./ssh-agent.js", async (importOriginal) => {
 });
 
 /** Minimal context slice needed by buildPromptAuth / handleAuthPromptResponse. */
-function makeCtx(): Pick<SharedSessionContext, "pendingAuthPrompts" | "passphraseCache"> {
+function makeCtx(): Pick<
+	SharedSessionContext,
+	| "passphraseCache"
+	| "promptContexts"
+	| "promptIndex"
+	| "pendingPrompts"
+	| "clients"
+	| "channels"
+	| "acquisitions"
+> {
 	return {
-		pendingAuthPrompts: new Map(),
 		passphraseCache: new Map(),
+		promptContexts: new Map<string, PromptContext>(),
+		promptIndex: new Map<string, string>(),
+		pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+		clients: new Map(),
+		channels: new Map() as SharedSessionContext["channels"],
+		acquisitions: new Map() as SharedSessionContext["acquisitions"],
 	};
 }
 
@@ -63,6 +85,21 @@ function makeClient(id: string) {
 	return { id, send: vi.fn() } as never;
 }
 
+function registerClient(
+	ctx: ReturnType<typeof makeCtx>,
+	id: string,
+): ReturnType<typeof makeClient> {
+	const client = makeClient(id);
+	ctx.clients.set(id, client as never);
+	return client;
+}
+
+function onlyPromptId(ctx: Pick<SharedSessionContext, "pendingPrompts">): string {
+	const promptId = [...ctx.pendingPrompts.keys()][0];
+	if (!promptId) throw new Error("expected a pending prompt");
+	return promptId;
+}
+
 describe("SshConnectionManager — passphrase cache", () => {
 	it("buildPromptAuth returns cached passphrase immediately (no send)", async () => {
 		const ctx = makeCtx();
@@ -71,7 +108,7 @@ describe("SshConnectionManager — passphrase cache", () => {
 
 		ctx.passphraseCache.set(hostId, { secret: "cached-pass", expiresAt: Date.now() + 60_000 });
 
-		const client = makeClient("c1");
+		const client = registerClient(ctx, "c1");
 		const promptAuth = mgr.buildPromptAuth(client);
 		const result = await promptAuth(hostId, "passphrase", "Enter passphrase");
 
@@ -86,7 +123,7 @@ describe("SshConnectionManager — passphrase cache", () => {
 
 		ctx.passphraseCache.set(hostId, { secret: "stale", expiresAt: Date.now() - 1 });
 
-		const client = makeClient("c2");
+		const client = registerClient(ctx, "c2");
 		const promptAuth = mgr.buildPromptAuth(client);
 
 		const promise = promptAuth(hostId, "passphrase", "Enter passphrase");
@@ -95,7 +132,7 @@ describe("SshConnectionManager — passphrase cache", () => {
 		);
 		expect(ctx.passphraseCache.has(hostId)).toBe(false);
 
-		ctx.pendingAuthPrompts.get(hostId)?.resolve(null);
+		mgr.handleAuthPromptResponse("c2", hostId, null);
 		await promise;
 	});
 
@@ -106,7 +143,7 @@ describe("SshConnectionManager — passphrase cache", () => {
 
 		ctx.passphraseCache.set(hostId, { secret: "cached-pass", expiresAt: Date.now() + 60_000 });
 
-		const client = makeClient("c3");
+		const client = registerClient(ctx, "c3");
 		const promptAuth = mgr.buildPromptAuth(client);
 
 		const promise = promptAuth(hostId, "password", "Enter password");
@@ -114,23 +151,36 @@ describe("SshConnectionManager — passphrase cache", () => {
 			expect.objectContaining({ type: "AUTH_PROMPT", hostId, promptType: "password" }),
 		);
 
-		ctx.pendingAuthPrompts.get(hostId)?.resolve(null);
+		mgr.handleAuthPromptResponse("c3", hostId, null);
 		await promise;
 	});
 
-	it("handleAuthPromptResponse with rememberSession=true stores in passphraseCache", () => {
+	it("KIND-D6 session password response does not write passphraseCache", async () => {
+		const ctx = makeCtx();
+		const mgr = makeMgr(ctx);
+		const hostId = "host-3b";
+
+		const client = registerClient(ctx, "c3b");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "password", "test");
+
+		mgr.handleAuthPromptResponse("c3b", hostId, "ssh-password", true);
+		await expect(promise).resolves.toBe("ssh-password");
+
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+	});
+
+	it("KIND-D6 session passphrase response with rememberSession=true stores in passphraseCache", async () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-4";
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: vi.fn(),
-			timer: null,
-			clientId: "c4",
-			resendPayload: { type: "AUTH_PROMPT", hostId, promptType: "password", message: "test" },
-		});
+		const client = registerClient(ctx, "c4");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "passphrase", "test");
 
 		mgr.handleAuthPromptResponse("c4", hostId, "my-passphrase", true);
+		await expect(promise).resolves.toBe("my-passphrase");
 
 		expect(ctx.passphraseCache.has(hostId)).toBe(true);
 		const cached = ctx.passphraseCache.get(hostId)!;
@@ -138,20 +188,18 @@ describe("SshConnectionManager — passphrase cache", () => {
 		expect(cached.expiresAt).toBeGreaterThan(Date.now());
 	});
 
-	it("handleAuthPromptResponse TTL is approximately 15 minutes", () => {
+	it("handleAuthPromptResponse TTL is approximately 15 minutes", async () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-4b";
 		const before = Date.now();
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: vi.fn(),
-			timer: null,
-			clientId: "c4b",
-			resendPayload: { type: "AUTH_PROMPT", hostId, promptType: "password", message: "test" },
-		});
+		const client = registerClient(ctx, "c4b");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "passphrase", "test");
 
 		mgr.handleAuthPromptResponse("c4b", hostId, "pass", true);
+		await promise;
 
 		const { expiresAt } = ctx.passphraseCache.get(hostId)!;
 		const ttlMs = expiresAt - before;
@@ -159,19 +207,17 @@ describe("SshConnectionManager — passphrase cache", () => {
 		expect(ttlMs).toBeLessThanOrEqual(15 * 60 * 1000 + 100);
 	});
 
-	it("handleAuthPromptResponse with rememberSession=false caches for 60s (TOFU retry)", () => {
+	it("handleAuthPromptResponse with rememberSession=false caches passphrase for 60s", async () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-5";
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: vi.fn(),
-			timer: null,
-			clientId: "c5",
-			resendPayload: { type: "AUTH_PROMPT", hostId, promptType: "password", message: "test" },
-		});
+		const client = registerClient(ctx, "c5");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "passphrase", "test");
 
 		mgr.handleAuthPromptResponse("c5", hostId, "my-passphrase", false);
+		await promise;
 
 		expect(ctx.passphraseCache.has(hostId)).toBe(true);
 		const cached = ctx.passphraseCache.get(hostId)!;
@@ -180,19 +226,17 @@ describe("SshConnectionManager — passphrase cache", () => {
 		expect(cached.expiresAt).toBeLessThanOrEqual(Date.now() + 61_000);
 	});
 
-	it("handleAuthPromptResponse does not cache when secret is null", () => {
+	it("handleAuthPromptResponse does not cache when secret is null", async () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-6";
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: vi.fn(),
-			timer: null,
-			clientId: "c6",
-			resendPayload: { type: "AUTH_PROMPT", hostId, promptType: "password", message: "test" },
-		});
+		const client = registerClient(ctx, "c6");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "passphrase", "test");
 
 		mgr.handleAuthPromptResponse("c6", hostId, null, true);
+		await promise;
 
 		expect(ctx.passphraseCache.has(hostId)).toBe(false);
 	});
@@ -201,37 +245,113 @@ describe("SshConnectionManager — passphrase cache", () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-7";
-		const resolveSpy = vi.fn();
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: resolveSpy,
-			timer: null,
-			clientId: "c7-owner",
-		});
+		const client = registerClient(ctx, "c7-owner");
+		const promptAuth = mgr.buildPromptAuth(client);
+		void promptAuth(hostId, "passphrase", "test");
+		const promptId = onlyPromptId(ctx);
 
 		mgr.handleAuthPromptResponse("c7-attacker", hostId, "stolen", true);
 
-		expect(resolveSpy).not.toHaveBeenCalled();
 		expect(ctx.passphraseCache.has(hostId)).toBe(false);
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		clearContext(ctx as SharedSessionContext, [...ctx.promptContexts.keys()][0]!);
 	});
 
-	it("handleAuthPromptResponse omitted rememberSession defaults to no-cache", () => {
+	it("handleAuthPromptResponse omitted rememberSession defaults to short passphrase cache", async () => {
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-8";
 
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: vi.fn(),
-			timer: null,
-			clientId: "c8",
-			resendPayload: { type: "AUTH_PROMPT", hostId, promptType: "password", message: "test" },
-		});
+		const client = registerClient(ctx, "c8");
+		const promptAuth = mgr.buildPromptAuth(client);
+		const promise = promptAuth(hostId, "passphrase", "test");
 
 		mgr.handleAuthPromptResponse("c8", hostId, "pass");
+		await promise;
 
-		// Always cached for 60s (TOFU retry), even without rememberSession
+		// Real session passphrases keep the short retry cache even without rememberSession.
 		expect(ctx.passphraseCache.has(hostId)).toBe(true);
+	});
+
+	it("KIND-D6 accepted TEST_CONNECT passphrase response does not write passphraseCache", async () => {
+		const ctx = makeCtx();
+		const mgr = makeMgr(ctx);
+		const hostId = "host-test-cache";
+		const client = registerClient(ctx, "c-test-cache");
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId,
+			hostname: "attacker.example.test",
+			port: 22,
+			sshAuth: "key",
+		};
+
+		vi.spyOn(
+			mgr as unknown as {
+				_testSshConnectivity: (
+					msg: TestConnectMessage,
+					promptAuth: AuthPromptFn,
+				) => Promise<{ ok: boolean; message?: string }>;
+			},
+			"_testSshConnectivity",
+		).mockImplementation(async (_msg, promptAuth) => {
+			const secret = await promptAuth(hostId, "passphrase", "Enter passphrase");
+			return { ok: secret !== null };
+		});
+
+		const testPromise = mgr.handleTestConnect("c-test-cache", msg);
+		await Promise.resolve();
+		const promptId = onlyPromptId(ctx);
+
+		mgr.handleAuthPromptResponse("c-test-cache", hostId, "test-secret", true, promptId);
+		await testPromise;
+
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+		expect(client.send).toHaveBeenCalledWith({ type: "TEST_CONNECT_OK", hostId });
+	});
+
+	it("KIND-D6 TEST_CONNECT passphrase prompt ignores existing session passphraseCache", async () => {
+		const ctx = makeCtx();
+		const mgr = makeMgr(ctx);
+		const hostId = "host-test-cache-read";
+		const client = registerClient(ctx, "c-test-cache-read");
+		ctx.passphraseCache.set(hostId, {
+			secret: "cached-session-passphrase",
+			expiresAt: Date.now() + 60_000,
+		});
+		const msg: TestConnectMessage = {
+			type: "TEST_CONNECT",
+			hostId,
+			hostname: "attacker.example.test",
+			port: 22,
+			sshAuth: "key",
+		};
+
+		vi.spyOn(
+			mgr as unknown as {
+				_testSshConnectivity: (
+					msg: TestConnectMessage,
+					promptAuth: AuthPromptFn,
+				) => Promise<{ ok: boolean; message?: string }>;
+			},
+			"_testSshConnectivity",
+		).mockImplementation(async (_msg, promptAuth) => {
+			const secret = await promptAuth(hostId, "passphrase", "Enter passphrase");
+			return { ok: secret !== null };
+		});
+
+		const testPromise = mgr.handleTestConnect("c-test-cache-read", msg);
+		await Promise.resolve();
+		const promptId = onlyPromptId(ctx);
+
+		expect(client.send).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "AUTH_PROMPT", hostId, promptType: "passphrase" }),
+		);
+		mgr.handleAuthPromptResponse("c-test-cache-read", hostId, null, false, promptId);
+		await testPromise;
+
+		expect(ctx.passphraseCache.get(hostId)?.secret).toBe("cached-session-passphrase");
 	});
 });
 
@@ -245,7 +365,6 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 
 		const ctx = {
 			passphraseCache: new Map([[hostId, { secret: passphrase, expiresAt: Date.now() + 60_000 }]]),
-			pendingAuthPrompts: new Map(),
 			sessions: new Map([[hostId, { id: "session-1", status: "reconnecting" }]]),
 			reconnectTimers: new Map(),
 			reconnectAbortControllers: new Map(),
@@ -310,7 +429,6 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		const ctx = {
 			// Cache is empty — no passphrase stored
 			passphraseCache: new Map(),
-			pendingAuthPrompts: new Map(),
 		} as unknown as SharedSessionContext;
 
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
@@ -329,7 +447,6 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		const hostId = "host-reconnect-expired";
 		const ctx = {
 			passphraseCache: new Map([[hostId, { secret: "stale-secret", expiresAt: Date.now() - 1 }]]),
-			pendingAuthPrompts: new Map(),
 		} as unknown as SharedSessionContext;
 
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
@@ -350,7 +467,6 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 			passphraseCache: new Map([
 				[hostId, { secret: "irrelevant", expiresAt: Date.now() + 60_000 }],
 			]),
-			pendingAuthPrompts: new Map(),
 		} as unknown as SharedSessionContext;
 
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
@@ -362,29 +478,87 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 	});
 });
 
-// ─── B3 regression: pendingHostVerify / pendingAgentVerify carry ownerAcqId ───
-//
-// Break 3 (8fba4b4 before fix): pendingHostVerify and pendingAgentVerify entries
-// had no ownerAcqId. closeSession cleared them by bare hostId, so a newer acq's
-// pending prompt would be cleared when an older acq's session was closed → host
-// stuck waiting for a prompt that was already resolved (rejected) by the stale
-// close path. Fixed by storing ownerAcqId in each entry and clearing by identity.
+describe("SshConnectionManager — reconnect PromptContext routing", () => {
+	it("R1: reconnect buildPromptAuth retargets to live follower and rejects old-route response", async () => {
+		// Mutation caught: if reconnect buildPromptAuth opens a bare hostId/legacy prompt
+		// bound to the captured client, clientDisconnect cannot move the prompt to the
+		// follower and the old client can still resolve it.
+		const ctx = makeCtx();
+		const mgr = makeMgr(ctx);
+		const hostId = "host-reconnect-route";
+		const sessionId = "session-reconnect-route";
+		const contextId = reconnectContextId(sessionId);
+		const oldClient = registerClient(ctx, "client-a-old");
+		const follower = registerClient(ctx, "client-b-follower");
+		ctx.channels.set("channel-reconnect-route", {
+			sessionId,
+			hostId,
+			status: "live",
+			clients: new Set(["client-a-old", "client-b-follower"]),
+			shell: "/bin/sh",
+			cols: 80,
+			rows: 24,
+			dynamicTitle: null,
+			processTitle: null,
+			displayTitle: "reconnect",
+		});
 
-describe("B3 regression: pendingHostVerify cleared by ownerAcqId, newer prompt survives", () => {
-	it("promptHostKeyVerify stores ownerAcqId in the pendingHostVerify entry", () => {
-		// Mutation oracle: omitting ownerAcqId from the set() call leaves the entry
-		// without an identity tag → hostId-based clear removes newer acq's entry.
+		const promptAuth = mgr.buildPromptAuth(oldClient, undefined, contextId);
+		const promptPromise = promptAuth(hostId, "passphrase", "Enter passphrase");
+
+		expect(oldClient.send).toHaveBeenCalledTimes(1);
+		const oldPrompt = vi.mocked(oldClient.send).mock.calls[0]?.[0] as Record<string, unknown>;
+		const promptId = oldPrompt.promptId as string;
+		expect(promptId).toBeTruthy();
+		expect(oldPrompt.deliveryEpoch).toBe(1);
+
+		clientDisconnect(ctx as SharedSessionContext, "client-a-old", (clientId, msg) => {
+			ctx.clients.get(clientId)?.send(msg as never);
+		});
+
+		expect(oldClient.send).toHaveBeenCalledWith({ type: "PROMPT_CANCEL", promptId });
+		expect(follower.send).toHaveBeenCalledTimes(1);
+		const followerPrompt = vi.mocked(follower.send).mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(followerPrompt.promptId).toBe(promptId);
+		expect(followerPrompt.deliveryEpoch).toBe(2);
+
+		mgr.handleAuthPromptResponse("client-a-old", hostId, "stale-secret", false, promptId, 1);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		mgr.handleAuthPromptResponse("client-b-follower", hostId, "fresh-secret", false, promptId, 2);
+		await expect(promptPromise).resolves.toBe("fresh-secret");
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+		expect(ctx.passphraseCache.get(hostId)?.secret).toBe("fresh-secret");
+	});
+});
+
+// ─── B3 regression: host-verify contexts cleared by ownerAcqId, newer survives ───
+//
+// Break 3 (8fba4b4 before fix): host-verify prompts had no owner identity tag.
+// closeSession cleared by bare hostId, so a newer acq's prompt was evicted when an
+// older acq's session closed → host stuck awaiting a prompt already rejected.
+// Fix: host-verify now uses PromptContext (contextId === acqId); clearContext(ctx, acqId)
+// clears only the stale acq's context, leaving a newer acq's context intact.
+
+describe("B3 regression: host-verify context cleared by ownerAcqId, newer prompt survives", () => {
+	it("promptHostKeyVerify opens a PromptContext keyed by ownerAcqId and stores prompt in pendingPrompts", () => {
+		// Mutation oracle: if ownerAcqId is not used as contextId, a different key is
+		// stored and clearContext(ctx, acqId) cannot find it → stale prompt survives close.
 		const ctx = {
-			pendingHostVerify: new Map(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
+			clients: new Map() as SharedSessionContext["clients"],
 			trustedOnceFingerprints: new Map(),
 			hubLogger: null,
 		} as unknown as SharedSessionContext;
 
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
 		const client = makeClient("c-b3");
+		ctx.clients.set("c-b3", client as never);
 
-		// Start a prompt tagged with the owner acq id.
-		// Signature: (client, hostId, hostname, oldFingerprint, newFingerprint, firstConnect?, ownerAcqId?)
 		const ownerAcqId = "acq-b3-owner";
 		void mgr.promptHostKeyVerify(
 			client,
@@ -396,92 +570,100 @@ describe("B3 regression: pendingHostVerify cleared by ownerAcqId, newer prompt s
 			ownerAcqId,
 		);
 
-		// Entry must exist with the correct ownerAcqId.
-		const entries = [...ctx.pendingHostVerify.values()];
-		expect(entries).toHaveLength(1);
-		expect(entries[0].ownerAcqId).toBe(ownerAcqId);
+		// A PromptContext must exist keyed by the ownerAcqId.
+		expect(ctx.promptContexts.has(ownerAcqId)).toBe(true);
+		// A prompt entry must be in pendingPrompts with ownerAcqId as contextId.
+		expect(ctx.pendingPrompts.size).toBe(1);
+		const [, entry] = [...ctx.pendingPrompts.entries()][0]!;
+		expect(entry.contextId).toBe(ownerAcqId);
+		expect(entry.hostId).toBe("host-b3");
 
-		// Cleanup: reject the pending prompt so the timer doesn't linger.
-		for (const [id, entry] of ctx.pendingHostVerify) {
-			clearTimeout(entry.timer);
-			ctx.pendingHostVerify.delete(id);
-			entry.resolve("reject");
-		}
+		// Cleanup: clearContext drains the timer and resolves null.
+		clearContext(ctx, ownerAcqId);
 	});
 
-	it("clearing by ownerAcqId leaves a newer acq's pendingHostVerify entry intact", () => {
-		// Mutation oracle: clearing by hostId (not ownerAcqId) would delete both entries.
+	it("clearContext(staleAcqId) leaves the newer acq's prompt context intact", async () => {
+		// Mutation oracle: clearing by hostId would evict both contexts; clearing only
+		// the stale contextId leaves the newer acq's context and its prompts alive.
 		const ctx = {
-			pendingHostVerify: new Map(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
+			clients: new Map() as SharedSessionContext["clients"],
 			trustedOnceFingerprints: new Map(),
 			hubLogger: null,
 		} as unknown as SharedSessionContext;
 
-		const _mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-
 		const staleAcqId = "acq-b3-stale";
 		const newerAcqId = "acq-b3-newer";
+		ctx.clients.set("c-b3-stale", makeClient("c-b3-stale") as never);
+		ctx.clients.set("c-b3-newer", makeClient("c-b3-newer") as never);
 
-		// Register two pending prompts for the same hostId from different acquisitions.
-		// We inject them directly (avoids real timer expiry in test environment).
-		const staleResolve = vi.fn();
-		const newerResolve = vi.fn();
-		const dummyVerifyMsg = {
-			type: "HOST_VERIFY" as const,
-			hostId: "host-b3",
-			fingerprint: "SHA256:dummy",
-			algorithm: "SHA256",
-			promptId: "prompt-b3-stale",
-		};
-		ctx.pendingHostVerify.set("prompt-b3-stale", {
-			hostId: "host-b3",
-			ownerAcqId: staleAcqId,
-			clientId: "c-b3-stale",
-			resolve: staleResolve,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: dummyVerifyMsg,
-		});
-		ctx.pendingHostVerify.set("prompt-b3-newer", {
-			hostId: "host-b3",
-			ownerAcqId: newerAcqId,
-			clientId: "c-b3-newer",
-			resolve: newerResolve,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: { ...dummyVerifyMsg, promptId: "prompt-b3-newer" },
-		});
+		// Open two contexts (one per acq) for the same host.
+		openContext(ctx, "session", "host-b3", "c-b3-stale", staleAcqId);
+		openContext(ctx, "session", "host-b3", "c-b3-newer", newerAcqId);
 
-		// Simulate closeSession clearing by ownerAcqId (the fixed path).
-		for (const [promptId, entry] of ctx.pendingHostVerify) {
-			if (entry.ownerAcqId === staleAcqId) {
-				clearTimeout(entry.timer);
-				ctx.pendingHostVerify.delete(promptId);
-				entry.resolve("reject");
-			}
-		}
+		// Issue a prompt in each context.
+		const stalePromise = promptCtx(
+			ctx,
+			staleAcqId,
+			"host_verify",
+			{
+				type: "HOST_VERIFY",
+				hostId: "host-b3",
+				fingerprint: "SHA256:s",
+				algorithm: "SHA256",
+				promptId: "",
+			},
+			() => {},
+		)!;
+		const newerPromise = promptCtx(
+			ctx,
+			newerAcqId,
+			"host_verify",
+			{
+				type: "HOST_VERIFY",
+				hostId: "host-b3",
+				fingerprint: "SHA256:n",
+				algorithm: "SHA256",
+				promptId: "",
+			},
+			() => {},
+		)!;
 
-		// INVARIANT: stale prompt cleared; newer prompt for same host survives.
-		expect(ctx.pendingHostVerify.has("prompt-b3-stale")).toBe(false);
-		expect(staleResolve).toHaveBeenCalledWith("reject");
-		expect(ctx.pendingHostVerify.has("prompt-b3-newer")).toBe(true);
-		expect(newerResolve).not.toHaveBeenCalled();
+		// closeSession clears only the stale acq's context.
+		clearContext(ctx, staleAcqId);
+
+		// INVARIANT: stale context is gone, stale promise resolves null.
+		expect(ctx.promptContexts.has(staleAcqId)).toBe(false);
+		await expect(stalePromise).resolves.toBeNull();
+
+		// INVARIANT: newer context survives with its prompt still pending.
+		expect(ctx.promptContexts.has(newerAcqId)).toBe(true);
+		expect(ctx.pendingPrompts.size).toBe(1);
 
 		// Cleanup.
-		for (const [id, entry] of ctx.pendingHostVerify) {
-			clearTimeout(entry.timer);
-			ctx.pendingHostVerify.delete(id);
-			entry.resolve("reject");
-		}
+		clearContext(ctx, newerAcqId);
+		await newerPromise;
 	});
 
-	it("buildBinaryVerifyPrompt stores ownerAcqId in the pendingAgentVerify entry", () => {
+	it("buildBinaryVerifyPrompt stores ownerAcqId in the pendingPrompts entry", () => {
 		// Mutation oracle: same as above but for the agent-binary-verify flow.
+		// Production now routes through PromptContext ops — assert the prompt landed
+		// in pendingPrompts (keyed by the assigned promptId) with ownerAcqId as the contextId.
 		const ctx = {
-			pendingAgentVerify: new Map(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
+			clients: new Map() as SharedSessionContext["clients"],
 			hubLogger: null,
 		} as unknown as SharedSessionContext;
 
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
 		const client = makeClient("c-b3-agent");
+		ctx.clients.set("c-b3-agent", client as never);
 		const ownerAcqId = "acq-b3-agent-owner";
 
 		const verifyFn = mgr.buildBinaryVerifyPrompt(client, ownerAcqId);
@@ -496,24 +678,23 @@ describe("B3 regression: pendingHostVerify cleared by ownerAcqId, newer prompt s
 			false,
 		);
 
-		const entries = [...ctx.pendingAgentVerify.values()];
-		expect(entries).toHaveLength(1);
-		expect(entries[0].ownerAcqId).toBe(ownerAcqId);
+		// A PromptContext must exist keyed by ownerAcqId.
+		expect(ctx.promptContexts.has(ownerAcqId)).toBe(true);
+		// The prompt entry in pendingPrompts must carry ownerAcqId as its contextId.
+		expect(ctx.pendingPrompts.size).toBe(1);
+		const [, entry] = [...ctx.pendingPrompts.entries()][0]!;
+		expect(entry.contextId).toBe(ownerAcqId);
+		expect(entry.hostId).toBe("host-b3a");
 
-		// Cleanup.
-		for (const [id, entry] of ctx.pendingAgentVerify) {
-			clearTimeout(entry.timer);
-			ctx.pendingAgentVerify.delete(id);
-			entry.resolve("reject");
-		}
+		// Cleanup: clearContext drains the timer and resolves null.
+		clearContext(ctx, ownerAcqId);
 	});
 });
 
 // ─── Auth prompt timeout — prevents permanent host wedge ─────────────────────
 //
-// Mutation oracle: not arming the timer (keeping timer: null) leaves the
-// pendingAuthPrompts entry alive forever → acquiringSessions never clears →
-// all future SPAWNs for that host wedge.
+// Mutation oracle: not arming the timer leaves the pending PromptContext entry
+// alive forever → the connect promise never resolves → all future SPAWNs wedge.
 describe("SshConnectionManager — auth prompt timeout de-wedges host", () => {
 	afterEach(() => {
 		vi.useRealTimers();
@@ -523,41 +704,27 @@ describe("SshConnectionManager — auth prompt timeout de-wedges host", () => {
 		vi.useFakeTimers();
 
 		const hostId = "host-timeout-1";
-		const ctx = makeCtx() as ReturnType<typeof makeCtx> & {
-			pendingAuthPrompts: SharedSessionContext["pendingAuthPrompts"];
-		};
+		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
-		const client = makeClient("c-timeout-1");
-
-		// Simulate a stub acquiringSessions map to prove de-wedge (the real acquire
-		// promise would clear itself via .finally(); here we verify the core mechanism:
-		// the pending entry is removed so any subsequent SPAWN can proceed).
-		const pendingAuthPrompts = ctx.pendingAuthPrompts as Map<
-			string,
-			{
-				resolve: (v: string | null) => void;
-				timer: ReturnType<typeof setTimeout> | null;
-				clientId: string;
-			}
-		>;
+		const client = registerClient(ctx, "c-timeout-1");
 
 		// Invoke buildPromptAuth — this sends AUTH_PROMPT and registers the pending entry.
 		const promptAuth = mgr.buildPromptAuth(client);
 		const promptPromise = promptAuth(hostId, "passphrase", "Enter passphrase");
 
 		// Entry must be registered with an armed timer (not null).
-		const pending = pendingAuthPrompts.get(hostId);
+		const promptId = onlyPromptId(ctx);
+		const pending = ctx.pendingPrompts.get(promptId);
 		expect(pending).toBeDefined();
 		expect(pending?.timer).not.toBeNull();
-		// Entry exists — host is "wedged" until the timer fires or client responds.
-		expect(pendingAuthPrompts.has(hostId)).toBe(true);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
 
 		// Advance fake timers past AUTH_PROMPT_TIMEOUT_MS (120 000 ms).
 		// The async variant flushes the microtask queue so the resolved promise chain runs.
 		await vi.advanceTimersByTimeAsync(120_000);
 
 		// The timeout callback must have: (1) deleted the entry, (2) resolved null.
-		expect(pendingAuthPrompts.has(hostId)).toBe(false);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
 
 		const result = await promptPromise;
 		// null → SSH connect fails cleanly → acquire promise rejects → .finally clears acquiringSessions.
@@ -570,10 +737,11 @@ describe("SshConnectionManager — auth prompt timeout de-wedges host", () => {
 		const hostId = "host-timeout-answered";
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
-		const client = makeClient("c-timeout-answered");
+		const client = registerClient(ctx, "c-timeout-answered");
 
 		const promptAuth = mgr.buildPromptAuth(client);
 		const promptPromise = promptAuth(hostId, "passphrase", "Enter passphrase");
+		const promptId = onlyPromptId(ctx);
 
 		// Respond before the timer fires.
 		mgr.handleAuthPromptResponse("c-timeout-answered", hostId, "the-secret");
@@ -585,11 +753,11 @@ describe("SshConnectionManager — auth prompt timeout de-wedges host", () => {
 		// Must resolve to the user-supplied secret, not null from the timeout.
 		expect(result).toBe("the-secret");
 		// Entry was cleaned up by handleAuthPromptResponse.
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
 	});
 });
 
-// ─── Fix 1: hostId stored in pendingHostVerify + pendingAgentVerify ──────────
+// ─── Fix 1: hostId stored in pending verify prompts ─────────────────────────
 //
 // Mutation oracle: omitting `hostId` from the stored entry means closeSession()
 // cannot identify which pending prompts belong to the closing host — the prompts
@@ -599,19 +767,23 @@ describe("SshConnectionManager — auth prompt timeout de-wedges host", () => {
 describe("SshConnectionManager — hostId stored in pending verify maps", () => {
 	function makeVerifyCtx() {
 		return {
-			pendingAuthPrompts: new Map(),
 			passphraseCache: new Map(),
-			pendingHostVerify: new Map() as SharedSessionContext["pendingHostVerify"],
-			pendingAgentVerify: new Map() as SharedSessionContext["pendingAgentVerify"],
+			// PromptContext layer — required now that host-verify uses the ops.
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			clients: new Map() as SharedSessionContext["clients"],
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
 			hubLogger: null,
 		} as unknown as SharedSessionContext;
 	}
 
-	it("F1a: promptHostKeyVerify stores hostId in pendingHostVerify entry", async () => {
+	it("F1a: promptHostKeyVerify stores hostId in pendingPrompts entry (via PromptContext ops)", async () => {
 		vi.useFakeTimers();
 		const ctx = makeVerifyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
 		const client = makeClient("c-hkv-1");
+		ctx.clients.set("c-hkv-1", client as never);
 
 		// Start a verify prompt and don't respond — we only care about the stored entry.
 		const _verifyPromise = mgr.promptHostKeyVerify(
@@ -623,22 +795,23 @@ describe("SshConnectionManager — hostId stored in pending verify maps", () => 
 			true,
 		);
 
-		// The pending entry must carry the hostId so closeSession can clear it by host.
-		expect(ctx.pendingHostVerify.size).toBe(1);
-		const [, entry] = [...ctx.pendingHostVerify.entries()][0];
-		// Mutation oracle: without storing hostId the field is undefined, and
-		// closeSession's hostId filter skips every entry → prompts survive abort.
+		// The pending entry must carry the hostId so clearContext can clear it by owner.
+		// Mutation oracle: without passing hostId to openContext, the context stores the
+		// wrong hostId → clearContext cannot associate it with the closing host.
+		expect(ctx.pendingPrompts.size).toBe(1);
+		const [, entry] = [...ctx.pendingPrompts.entries()][0]!;
 		expect(entry.hostId).toBe("host-hkv-1");
 		expect(typeof entry.resolve).toBe("function");
 
 		vi.useRealTimers();
 	});
 
-	it("F1b: buildBinaryVerifyPrompt stores hostId in pendingAgentVerify entry", async () => {
+	it("F1b: buildBinaryVerifyPrompt stores hostId in pendingPrompts entry (via PromptContext ops)", async () => {
 		vi.useFakeTimers();
 		const ctx = makeVerifyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
 		const client = makeClient("c-abv-1");
+		ctx.clients.set("c-abv-1", client as never);
 
 		const promptFn = mgr.buildBinaryVerifyPrompt(client);
 		// Start a verify prompt — don't resolve it.
@@ -652,12 +825,14 @@ describe("SshConnectionManager — hostId stored in pending verify maps", () => 
 			false,
 		);
 
-		// The pending entry must carry the hostId.
-		expect(ctx.pendingAgentVerify.size).toBe(1);
-		const [, entry] = [...ctx.pendingAgentVerify.entries()][0];
-		// Mutation oracle: without hostId, closeSession cannot filter by host and
-		// the entry remains alive — agent trust persists post-abort.
+		// Production now routes agent-verify through PromptContext ops (same as host-verify).
+		// The pending entry must carry the hostId so clearContext can filter by host.
+		// Mutation oracle: without hostId in pendingPrompts, closeSession cannot associate
+		// the entry with the closing host — agent trust persists post-abort.
+		expect(ctx.pendingPrompts.size).toBe(1);
+		const [, entry] = [...ctx.pendingPrompts.entries()][0]!;
 		expect(entry.hostId).toBe("host-abv-1");
+		expect(typeof entry.resolve).toBe("function");
 
 		vi.useRealTimers();
 	});
@@ -690,7 +865,6 @@ describe("Fix A: reconnect abort-awareness — closeSession during in-flight sta
 			reconnectTimers,
 			reconnectAbortControllers,
 			passphraseCache: new Map(),
-			pendingAuthPrompts: new Map(),
 			metaDal: {
 				getHost: vi.fn().mockReturnValue({
 					id: hostId,
@@ -843,179 +1017,218 @@ describe("Fix A: reconnect abort-awareness — closeSession during in-flight sta
 
 function makeVerifyOnlyCtx() {
 	return {
-		pendingAuthPrompts: new Map(),
 		passphraseCache: new Map(),
-		pendingHostVerify: new Map() as SharedSessionContext["pendingHostVerify"],
-		pendingAgentVerify: new Map() as SharedSessionContext["pendingAgentVerify"],
+		// PromptContext routing layer — required now that host-verify uses the ops.
+		promptContexts: new Map<string, PromptContext>(),
+		promptIndex: new Map<string, string>(),
+		pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+		clients: new Map() as SharedSessionContext["clients"],
+		acquisitions: new Map() as SharedSessionContext["acquisitions"],
 		hubLogger: null,
 	} as unknown as SharedSessionContext;
 }
 
 describe("handleHostVerifyResponse — prompt-owner clientId enforcement", () => {
-	it("correct owner resolves the pending entry and clears it", () => {
+	// Helper: open a PromptContext and issue a host_verify prompt via the ops.
+	// Returns { promptId, resolvedValue }.
+	// Mutation oracle contract: the returned promise resolves only when respond() is
+	// called with the correct clientId — a wrong-client call must leave it pending.
+	function setupHostVerifyPrompt(
+		ctx: SharedSessionContext,
+		contextId: string,
+		hostId: string,
+		ownerClientId: string,
+	): { promptId: string; promise: Promise<unknown> } {
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId) as never);
+		openContext(ctx, "session", hostId, ownerClientId, contextId);
+		const payload = {
+			type: "HOST_VERIFY",
+			hostId,
+			fingerprint: "SHA256:abc",
+			algorithm: "SHA256",
+			promptId: "", // overridden by prompt()
+		};
+		// Snapshot pendingPrompts keys before and after to find the assigned promptId.
+		const before = new Set(ctx.pendingPrompts.keys());
+		const promise = promptCtx(ctx, contextId, "host_verify", payload, (_cId, _msg) => {})!;
+		const promptId = [...ctx.pendingPrompts.keys()].find((k) => !before.has(k))!;
+		return { promptId, promise };
+	}
+
+	it("correct owner resolves the pending entry and clears it", async () => {
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-hv-owner";
-		const resolveSpy = vi.fn();
+		const { promptId, promise } = setupHostVerifyPrompt(
+			ctx,
+			"ctx-hv-owner",
+			"host-hv-1",
+			"owner-client",
+		);
 
-		ctx.pendingHostVerify.set(promptId, {
-			hostId: "host-hv-1",
-			clientId: "owner-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {
-				type: "HOST_VERIFY",
-				hostId: "host-hv-1",
-				fingerprint: "SHA256:abc",
-				algorithm: "SHA256",
-				promptId,
-			} as never,
-		});
+		const accepted = mgr.handleHostVerifyResponse(promptId, "trust_permanent", "owner-client");
+		// respond() returns true on accept.
+		// Note: handleHostVerifyResponse wraps respondCtx which returns boolean but our
+		// method returns void — verify by observing state changes instead.
+		void accepted;
 
-		mgr.handleHostVerifyResponse(promptId, "trust_permanent", "owner-client");
-
-		// Mutation oracle: resolveSpy called — the entry is consumed.
-		expect(resolveSpy).toHaveBeenCalledWith("trust_permanent");
-		expect(ctx.pendingHostVerify.has(promptId)).toBe(false);
+		// Mutation oracle: promise resolves to "trust_permanent".
+		// Entry cleared from pendingPrompts and promptIndex.
+		await expect(promise).resolves.toBe("trust_permanent");
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+		expect(ctx.promptIndex.has(promptId)).toBe(false);
 	});
 
-	it("wrong clientId is rejected — pending entry intact, no trust persisted", () => {
+	it("wrong clientId is rejected — pending entry intact, no trust persisted", async () => {
+		vi.useFakeTimers();
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-hv-rogue";
-		const resolveSpy = vi.fn();
-
-		ctx.pendingHostVerify.set(promptId, {
-			hostId: "host-hv-2",
-			clientId: "owner-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {
-				type: "HOST_VERIFY",
-				hostId: "host-hv-2",
-				fingerprint: "SHA256:abc",
-				algorithm: "SHA256",
-				promptId,
-			} as never,
-		});
+		const { promptId, promise } = setupHostVerifyPrompt(
+			ctx,
+			"ctx-hv-rogue",
+			"host-hv-2",
+			"owner-client",
+		);
 
 		// Rogue client submits trust_permanent — must be silently dropped.
 		mgr.handleHostVerifyResponse(promptId, "trust_permanent", "rogue-client");
 
-		// Mutation oracle: if the guard is removed, resolveSpy IS called and the
-		// entry disappears — both assertions below would fail.
-		expect(resolveSpy).not.toHaveBeenCalled();
-		expect(ctx.pendingHostVerify.has(promptId)).toBe(true);
+		// Mutation oracle: if the SEC-003 guard is removed, the entry is resolved and
+		// pendingPrompts loses the key — both assertions below would fail.
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		expect(ctx.promptIndex.has(promptId)).toBe(true);
 
-		// Cleanup.
-		const entry = ctx.pendingHostVerify.get(promptId)!;
-		clearTimeout(entry.timer);
-		ctx.pendingHostVerify.delete(promptId);
+		// Cleanup: resolve via the correct owner to drain the timer.
+		mgr.handleHostVerifyResponse(promptId, "reject", "owner-client");
+		await promise;
+		vi.useRealTimers();
 	});
 
-	it("after re-target to new owner, OLD owner response is rejected and NEW owner response is accepted", () => {
+	it("after re-target, OLD owner response is rejected and NEW owner response is accepted", async () => {
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-hv-retarget";
-		const resolveSpy = vi.fn();
+		const { promptId, promise } = setupHostVerifyPrompt(
+			ctx,
+			"ctx-hv-retarget",
+			"host-hv-3",
+			"old-client",
+		);
 
-		// Prompt was re-targeted: entry.clientId now reflects the CURRENT (new) owner.
-		ctx.pendingHostVerify.set(promptId, {
-			hostId: "host-hv-3",
-			clientId: "new-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {
-				type: "HOST_VERIFY",
-				hostId: "host-hv-3",
-				fingerprint: "SHA256:abc",
-				algorithm: "SHA256",
-				promptId,
-			} as never,
-		});
+		// Simulate a retarget: update the context's routeClientId to "new-client".
+		// (In production this is done by retarget() inside clientDisconnect().)
+		const context = ctx.promptContexts.get("ctx-hv-retarget")!;
+		context.routeClientId = "new-client";
 
-		// Old owner's stale response — rejected.
+		// Old owner's stale response — rejected (SEC-003: routeClientId is now "new-client").
 		mgr.handleHostVerifyResponse(promptId, "trust_permanent", "old-client");
-		expect(resolveSpy).not.toHaveBeenCalled();
-		expect(ctx.pendingHostVerify.has(promptId)).toBe(true);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true); // still pending
 
 		// New owner's response — accepted.
 		mgr.handleHostVerifyResponse(promptId, "trust_once", "new-client");
-		expect(resolveSpy).toHaveBeenCalledWith("trust_once");
-		expect(ctx.pendingHostVerify.has(promptId)).toBe(false);
+		// Mutation oracle: promise resolves to "trust_once", entry is cleared.
+		await expect(promise).resolves.toBe("trust_once");
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
 	});
 });
 
 describe("handleAgentVerifyResponse — prompt-owner clientId enforcement", () => {
-	it("correct owner resolves the pending entry and clears it", () => {
+	// Helper: open a PromptContext and issue an agent_verify prompt via the ops.
+	// Mirrors setupHostVerifyPrompt above — same ownership semantics, different payload type.
+	// Mutation oracle contract: the returned promise resolves only when respond() is
+	// called with the correct clientId — a wrong-client call must leave it pending.
+	function setupAgentVerifyPrompt(
+		ctx: SharedSessionContext,
+		contextId: string,
+		hostId: string,
+		ownerClientId: string,
+	): { promptId: string; promise: Promise<unknown> } {
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId) as never);
+		openContext(ctx, "session", hostId, ownerClientId, contextId);
+		const payload = {
+			type: "AGENT_BINARY_VERIFY",
+			hostId,
+			hostname: "myhost.example.com",
+			remotePath: "/usr/bin/termora-agent",
+			remoteSha256: "SHA256:abc",
+			os: "linux",
+			arch: "x64",
+			mismatch: false,
+			promptId: "", // overridden by prompt()
+		};
+		// Snapshot pendingPrompts keys before and after to find the assigned promptId.
+		const before = new Set(ctx.pendingPrompts.keys());
+		const promise = promptCtx(ctx, contextId, "agent_verify", payload, (_cId, _msg) => {})!;
+		const promptId = [...ctx.pendingPrompts.keys()].find((k) => !before.has(k))!;
+		return { promptId, promise };
+	}
+
+	it("correct owner resolves the pending entry and clears it", async () => {
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-av-owner";
-		const resolveSpy = vi.fn();
-
-		ctx.pendingAgentVerify.set(promptId, {
-			hostId: "host-av-1",
-			clientId: "owner-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {} as never,
-		});
+		const { promptId, promise } = setupAgentVerifyPrompt(
+			ctx,
+			"ctx-av-owner",
+			"host-av-1",
+			"owner-client",
+		);
 
 		mgr.handleAgentVerifyResponse(promptId, "trust_permanent", "owner-client");
 
-		expect(resolveSpy).toHaveBeenCalledWith("trust_permanent");
-		expect(ctx.pendingAgentVerify.has(promptId)).toBe(false);
+		// Mutation oracle: promise resolves to "trust_permanent".
+		// Entry cleared from pendingPrompts and promptIndex.
+		await expect(promise).resolves.toBe("trust_permanent");
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+		expect(ctx.promptIndex.has(promptId)).toBe(false);
 	});
 
-	it("wrong clientId is rejected — pending entry intact, no trust persisted", () => {
+	it("wrong clientId is rejected — pending entry intact, no trust persisted", async () => {
+		vi.useFakeTimers();
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-av-rogue";
-		const resolveSpy = vi.fn();
+		const { promptId, promise } = setupAgentVerifyPrompt(
+			ctx,
+			"ctx-av-rogue",
+			"host-av-2",
+			"owner-client",
+		);
 
-		ctx.pendingAgentVerify.set(promptId, {
-			hostId: "host-av-2",
-			clientId: "owner-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {} as never,
-		});
-
-		// Rogue client — must be silently dropped.
+		// Rogue client submits trust_permanent — must be silently dropped.
 		mgr.handleAgentVerifyResponse(promptId, "trust_permanent", "rogue-client");
 
-		expect(resolveSpy).not.toHaveBeenCalled();
-		expect(ctx.pendingAgentVerify.has(promptId)).toBe(true);
+		// Mutation oracle: if the SEC-003 guard is removed, the entry is resolved and
+		// pendingPrompts loses the key — both assertions below would fail.
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		expect(ctx.promptIndex.has(promptId)).toBe(true);
 
-		// Cleanup.
-		const entry = ctx.pendingAgentVerify.get(promptId)!;
-		clearTimeout(entry.timer);
-		ctx.pendingAgentVerify.delete(promptId);
+		// Cleanup: resolve via the correct owner to drain the timer.
+		mgr.handleAgentVerifyResponse(promptId, "reject", "owner-client");
+		await promise;
+		vi.useRealTimers();
 	});
 
-	it("after re-target to new owner, OLD owner response is rejected and NEW owner response is accepted", () => {
+	it("after re-target to new owner, OLD owner response is rejected and NEW owner response is accepted", async () => {
 		const ctx = makeVerifyOnlyCtx();
 		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
-		const promptId = "prompt-av-retarget";
-		const resolveSpy = vi.fn();
+		const { promptId, promise } = setupAgentVerifyPrompt(
+			ctx,
+			"ctx-av-retarget",
+			"host-av-3",
+			"old-client",
+		);
 
-		ctx.pendingAgentVerify.set(promptId, {
-			hostId: "host-av-3",
-			clientId: "new-client",
-			resolve: resolveSpy,
-			timer: setTimeout(() => {}, 9999),
-			resendPayload: {} as never,
-		});
+		// Simulate a retarget: update the context's routeClientId to "new-client".
+		// (In production this is done by retarget() inside clientDisconnect().)
+		const context = ctx.promptContexts.get("ctx-av-retarget")!;
+		context.routeClientId = "new-client";
 
-		// Old owner rejected.
+		// Old owner's stale response — rejected (SEC-003: routeClientId is now "new-client").
 		mgr.handleAgentVerifyResponse(promptId, "trust_permanent", "old-client");
-		expect(resolveSpy).not.toHaveBeenCalled();
-		expect(ctx.pendingAgentVerify.has(promptId)).toBe(true);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true); // still pending
 
-		// New owner accepted.
+		// New owner's response — accepted.
 		mgr.handleAgentVerifyResponse(promptId, "reject", "new-client");
-		expect(resolveSpy).toHaveBeenCalledWith("reject");
-		expect(ctx.pendingAgentVerify.has(promptId)).toBe(false);
+		// Mutation oracle: promise resolves to "reject", entry is cleared.
+		await expect(promise).resolves.toBe("reject");
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
 	});
 });
 
@@ -1024,8 +1237,8 @@ describe("handleAgentVerifyResponse — prompt-owner clientId enforcement", () =
 // Codex gate finding: when scheduleReconnect fires a second time for the same
 // hostId before the first attempt has settled, the old AbortController is silently
 // overwritten by ctx.reconnectAbortControllers.set(hostId, newAc). The displaced
-// controller is never aborted, so its signal.addEventListener("abort", …) listener
-// (armed by buildPromptAuth) never fires → the pendingAuthPrompts entry is orphaned
+// controller is never aborted, so its signal.addEventListener("abort", ...) listener
+// (armed by buildPromptAuth) never fires → the PromptContext entry is orphaned
 // and survives session close.
 //
 // Fix: abort the existing controller BEFORE writing the new one so the listener
@@ -1070,7 +1283,6 @@ describe("Fix B: abort-before-overwrite — scheduleReconnect aborts displaced c
 		const ctx = {
 			reconnectAbortControllers: new Map([[hostId, firstAc]]),
 			reconnectTimers: new Map(),
-			pendingAuthPrompts: new Map(),
 			passphraseCache: new Map(),
 			sessions: new Map(),
 			agents: new Map(),
@@ -1104,205 +1316,727 @@ describe("Fix B: abort-before-overwrite — scheduleReconnect aborts displaced c
 		expect(secondAc.signal.aborted).toBe(false);
 	});
 
-	it("B2: displaced controller abort fires the abort-listener, clearing pendingAuthPrompts", async () => {
+	it("B2: displaced controller abort fires the abort-listener, clearing the PromptContext", async () => {
 		// This test verifies that the signal abort listener registered by buildPromptAuth
 		// fires when the first controller is aborted by the overwrite guard, clearing
-		// the pendingAuthPrompts entry immediately at handoff time.
+		// the pending prompt immediately at handoff time.
 		//
 		// Mutation oracle: omitting the existingAc.abort() call means the listener
-		// never fires and the Map entry survives — detectable by pendingAuthPrompts.has().
-		//
-		// NOTE: promptAuth is an async function — its body runs as a microtask after the
-		// call.  We must await a tick (Promise.resolve()) before the listener is armed
-		// in the pending entry, then abort.
+		// never fires and the pendingPrompts entry survives.
 
 		const hostId = "host-B2-listener";
-		const ctx = {
-			pendingAuthPrompts: new Map(),
-			passphraseCache: new Map(),
-		} as unknown as SharedSessionContext;
+		const ctx = makeCtx();
 
-		const mgr = new SshConnectionManager(ctx, null as never, null as never, null as never);
+		const mgr = makeMgr(ctx);
 
-		// Arm a first AbortController and build a promptAuth closure that registers
-		// the abort listener with resolve-identity guard.
 		const firstAc = new AbortController();
-		const client = makeClient("c-B2");
+		const client = registerClient(ctx, "c-B2");
 		const promptAuth = mgr.buildPromptAuth(client, firstAc.signal);
 
-		// Call promptAuth (async) — body runs on next microtask tick.
-		void promptAuth(hostId, "passphrase", "Enter passphrase");
-
-		// Flush the microtask queue so the async body executes, arms the pending entry
-		// and registers the abort listener before we abort the controller.
-		await Promise.resolve();
-
-		// Entry must now be in the map.
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
-
-		// NOTE: do NOT vi.spyOn(entry, "resolve") here — the abort listener inside
-		// buildPromptAuth checks `pending.resolve === resolve` (closure identity guard).
-		// Replacing entry.resolve with a spy breaks that identity check and the listener
-		// would bail without clearing the entry.  We verify clearing via Map.has() instead.
+		const promptPromise = promptAuth(hostId, "passphrase", "Enter passphrase");
+		const promptId = onlyPromptId(ctx);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
 
 		// Simulate the abort-before-overwrite: the second reconnect attempt aborts
 		// the first controller before writing its own.
 		// AbortSignal listeners fire synchronously on abort() in Node.js 20+.
 		firstAc.abort();
 
-		// After abort, the listener (resolve-identity guarded) must have:
-		// 1. cleared the timer
-		// 2. deleted the pendingAuthPrompts entry
-		// 3. called resolve(null) — verified indirectly via map removal
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+		await expect(promptPromise).resolves.toBeNull();
 	});
 });
 
 // ─── SEC: cross-client prompt clobber prevention ────────────────────────────
 //
-// Codex gate finding: buildPromptAuth unconditionally cancelled any existing
-// pendingAuthPrompts entry for the same hostId, regardless of which client
-// owned it. A second WS client could send TEST_CONNECT for a host with a
-// live in-flight SSH auth prompt and force the real acquisition's prompt to
-// resolve null, silently aborting another client's SSH session startup.
+// Codex gate finding: buildPromptAuth unconditionally cancelled an existing
+// auth prompt for the same hostId, regardless of which client owned it. A second
+// WS client could force the real acquisition's prompt to resolve null, silently
+// aborting another client's SSH session startup.
 //
-// Fix: ownership-aware prompt replacement — same client may replace its own
-// entry (sequential re-prompt); a different client must fail gracefully with
-// null WITHOUT touching the existing entry.
+// Fix: prompt ownership is by PromptContext + promptId. Same-host prompts from
+// different contexts do not clobber each other, and responses are accepted only
+// from the current route client.
 
 describe("SEC: cross-client prompt clobber prevention — buildPromptAuth", () => {
 	it("C1 (cross-client): client B attempting to arm a prompt for a host locked by client A leaves A's prompt intact", async () => {
-		// Mutation oracle: the unconditional existingPrompt.resolve(null) path fires for
-		// a different-client entry → A's resolveSpy IS called with null and the entry is
-		// removed. The fix means resolveSpy is NOT called and the entry survives.
+		// Mutation oracle: any hostId-keyed replacement would remove A's prompt when
+		// B arms its own prompt for the same host.
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-C1-cross";
 
-		// Client A arms a prompt and is waiting for the user's response.
-		const resolveSpy = vi.fn();
-		const timerA = setTimeout(() => {}, 9_999);
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: resolveSpy,
-			timer: timerA,
-			clientId: "client-A",
-			resendPayload: {
-				type: "AUTH_PROMPT",
-				hostId,
-				promptType: "password",
-				message: "Enter password",
-			},
-		});
+		const clientA = registerClient(ctx, "client-A");
+		const promptAuthA = mgr.buildPromptAuth(clientA, undefined, "acq-C1-A");
+		const promiseA = promptAuthA(hostId, "password", "Enter password");
+		const promptIdA = onlyPromptId(ctx);
 
 		// Client B builds a promptAuth and attempts to arm a prompt for the same host.
-		const clientB = makeClient("client-B");
+		const clientB = registerClient(ctx, "client-B");
 		const promptAuthB = mgr.buildPromptAuth(clientB);
-		const resultB = await promptAuthB(hostId, "password", "Enter password");
+		const promiseB = promptAuthB(hostId, "password", "Enter password");
+		const promptIds = [...ctx.pendingPrompts.keys()];
+		expect(promptIds).toHaveLength(2);
+		expect(ctx.pendingPrompts.has(promptIdA)).toBe(true);
+		const promptIdB = promptIds.find((id) => id !== promptIdA)!;
 
-		// INVARIANT 1: A's resolve must NOT have been called — prompt survives.
-		// Mutation oracle: without the ownership check, resolveSpy IS called with null.
-		expect(resolveSpy).not.toHaveBeenCalled();
+		mgr.handleAuthPromptResponse("client-B", hostId, null, false, promptIdB);
+		await expect(promiseB).resolves.toBeNull();
 
-		// INVARIANT 2: A's entry must still be in the map (not clobbered by B).
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
-		expect(ctx.pendingAuthPrompts.get(hostId)?.clientId).toBe("client-A");
-
-		// INVARIANT 3: B's attempt fails gracefully with null (no hang).
-		expect(resultB).toBeNull();
-
-		// INVARIANT 4: B's clientId must NOT appear in the map (entry was not overwritten).
-		expect(ctx.pendingAuthPrompts.get(hostId)?.clientId).not.toBe("client-B");
-
-		// Cleanup.
-		clearTimeout(timerA);
-		ctx.pendingAuthPrompts.delete(hostId);
+		// A's prompt must still be pending after B's prompt resolves.
+		expect(ctx.pendingPrompts.has(promptIdA)).toBe(true);
+		mgr.handleAuthPromptResponse("client-A", hostId, "secret-A", false, promptIdA);
+		await expect(promiseA).resolves.toBe("secret-A");
 	});
 
-	it("C2 (same-client sequential re-prompt): client A replacing its own entry resolves old null and arms new entry", async () => {
-		// Mutation oracle: if same-client replacement is blocked, the old entry stays and
-		// A cannot re-prompt after a passphrase cache miss → authentication hangs.
+	it("C2 (same-client sequential re-prompt): prompt ids isolate timers for both prompts", async () => {
+		// Mutation oracle: hostId-keyed timers would let one prompt timeout delete
+		// or resolve the other prompt for the same client/host.
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-C2-same";
 
-		// Client A arms a first prompt.
-		const clientA = makeClient("client-A");
+		const clientA = registerClient(ctx, "client-A");
 		const promptAuthA = mgr.buildPromptAuth(clientA);
 
-		// Start first prompt (unanswered — we'll replace it).
 		const firstPromise = promptAuthA(hostId, "password", "Enter password");
-
-		// Flush microtasks so the first entry is registered.
-		await Promise.resolve();
-
-		// Spy on the first entry's resolve BEFORE calling promptAuth again.
-		const firstEntry = ctx.pendingAuthPrompts.get(hostId);
-		expect(firstEntry).toBeDefined();
-		expect(firstEntry?.clientId).toBe("client-A");
-		const firstResolveSpy = vi.spyOn(firstEntry!, "resolve");
-
-		// Client A re-prompts for the same host (sequential re-prompt).
+		const firstPromptId = onlyPromptId(ctx);
 		const secondPromise = promptAuthA(hostId, "password", "Enter password again");
+		const secondPromptId = [...ctx.pendingPrompts.keys()].find((id) => id !== firstPromptId)!;
 
-		// Flush microtasks so the second prompt arms itself.
-		await Promise.resolve();
+		expect(ctx.pendingPrompts.has(firstPromptId)).toBe(true);
+		expect(ctx.pendingPrompts.has(secondPromptId)).toBe(true);
 
-		// INVARIANT 1: old entry's resolve must have been called with null (replaced).
-		// Note: spy wraps the function; resolve-identity guard in abort listener won't
-		// fire here (we're testing replacement, not abort listener). The spy is on the
-		// stored resolve, which buildPromptAuth calls directly during replacement.
-		expect(firstResolveSpy).toHaveBeenCalledWith(null);
+		mgr.handleAuthPromptResponse("client-A", hostId, "second", false, secondPromptId);
+		await expect(secondPromise).resolves.toBe("second");
+		expect(ctx.pendingPrompts.has(firstPromptId)).toBe(true);
 
-		// INVARIANT 2: the first promise resolves to null (replaced).
+		mgr.handleAuthPromptResponse("client-A", hostId, null, false, firstPromptId);
 		await expect(firstPromise).resolves.toBeNull();
-
-		// INVARIANT 3: the map now has A's NEW entry (not the old one).
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
-		expect(ctx.pendingAuthPrompts.get(hostId)?.clientId).toBe("client-A");
-
-		// Cleanup: resolve second promise.
-		ctx.pendingAuthPrompts.get(hostId)?.resolve(null);
-		await secondPromise;
-		ctx.pendingAuthPrompts.delete(hostId);
 	});
 
 	it("C3 (re-targeted entry): when entry.clientId has been reassigned to a follower, a third-party client must not clobber it", async () => {
 		// When a client disconnects, its pending auth prompt is re-targeted to a
-		// follower client (clientId field updated in-place). The re-targeted owner is
-		// the legitimate owner. A different client must still not be able to clobber it.
+		// follower client. The re-targeted owner is the legitimate owner. A different
+		// client must still not be able to resolve or clobber it.
 		const ctx = makeCtx();
 		const mgr = makeMgr(ctx);
 		const hostId = "host-C3-retarget";
 
-		// Simulate a re-targeted entry: originalClient disconnected, entry re-targeted
-		// to followerClient.
-		const resolveSpy = vi.fn();
-		const timerFollower = setTimeout(() => {}, 9_999);
-		ctx.pendingAuthPrompts.set(hostId, {
-			resolve: resolveSpy,
-			timer: timerFollower,
-			clientId: "follower-client",
-			resendPayload: {
+		const follower = registerClient(ctx, "follower-client");
+		const promptAuth = mgr.buildPromptAuth(follower, undefined, "acq-C3");
+		const promptPromise = promptAuth(hostId, "passphrase", "Enter passphrase");
+		const promptId = onlyPromptId(ctx);
+		ctx.promptContexts.get("acq-C3")!.routeClientId = "follower-client";
+
+		// A third-party client (neither original nor follower) tries to arm a prompt.
+		const rogue = registerClient(ctx, "rogue-client");
+		const promptAuthRogue = mgr.buildPromptAuth(rogue);
+		const roguePromise = promptAuthRogue(hostId, "passphrase", "Enter passphrase");
+		const roguePromptId = [...ctx.pendingPrompts.keys()].find((id) => id !== promptId)!;
+
+		mgr.handleAuthPromptResponse("rogue-client", hostId, "rogue-secret", false, promptId);
+
+		// INVARIANT: follower's prompt is NOT resolved by rogue.
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+
+		mgr.handleAuthPromptResponse("rogue-client", hostId, null, false, roguePromptId);
+		await roguePromise;
+		mgr.handleAuthPromptResponse("follower-client", hostId, "follower-secret", false, promptId);
+		await expect(promptPromise).resolves.toBe("follower-secret");
+	});
+});
+
+// ─── handleAuthPromptResponse: promptId path + back-compat scan ─────────────
+//
+// After migration, handleAuthPromptResponse has three routes:
+//   1. promptId present → routes via respondCtx() (new clients / PromptContext path)
+//   2. promptId absent → scans promptContexts for in-flight passphrase by hostId
+//
+// Route 1 and 2 preserve the passphrase cache write (60s / 15min).
+
+describe("SshConnectionManager — handleAuthPromptResponse: promptId route (new clients)", () => {
+	// ctx needs the full PromptCtxSlice for respond() to work.
+	function makePromptCtx(): Pick<
+		SharedSessionContext,
+		| "passphraseCache"
+		| "promptContexts"
+		| "promptIndex"
+		| "pendingPrompts"
+		| "clients"
+		| "acquisitions"
+	> {
+		return {
+			passphraseCache: new Map(),
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			clients: new Map(),
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
+		};
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("D1: promptId present → respondCtx() resolves the in-flight passphrase prompt", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-d1";
+		const ownerClientId = "c-d1";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		// Open a passphrase PromptContext (as buildPromptAuth would with acqId).
+		const contextId = "acq-d1";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+
+		const sentMessages: unknown[] = [];
+		const send = (cid: string, msg: Record<string, unknown>) => {
+			void cid;
+			sentMessages.push(msg);
+		};
+
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
 				type: "AUTH_PROMPT",
 				hostId,
 				promptType: "passphrase",
-				message: "Enter passphrase",
+				message: "Passphrase:",
+				promptId: "",
 			},
-		});
+			send,
+		)!;
 
-		// A third-party client (neither original nor follower) tries to arm a prompt.
-		const rogue = makeClient("rogue-client");
-		const promptAuthRogue = mgr.buildPromptAuth(rogue);
-		const resultRogue = await promptAuthRogue(hostId, "passphrase", "Enter passphrase");
+		// Capture the promptId from the sent message.
+		expect(sentMessages).toHaveLength(1);
+		const promptId = (sentMessages[0] as Record<string, unknown>).promptId as string;
+		expect(promptId).toBeTruthy();
 
-		// INVARIANT: follower's prompt is NOT cancelled; rogue's attempt fails with null.
-		expect(resolveSpy).not.toHaveBeenCalled();
-		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
-		expect(ctx.pendingAuthPrompts.get(hostId)?.clientId).toBe("follower-client");
-		expect(resultRogue).toBeNull();
+		// Respond via handleAuthPromptResponse WITH promptId (new wire path).
+		mgr.handleAuthPromptResponse(
+			ownerClientId,
+			hostId,
+			"my-passphrase",
+			false,
+			promptId,
+			undefined,
+		);
 
-		// Cleanup.
-		clearTimeout(timerFollower);
-		ctx.pendingAuthPrompts.delete(hostId);
+		const result = await resultPromise;
+		expect(result).toBe("my-passphrase");
+
+		// Cache must be written (60s TTL, no rememberSession).
+		expect(ctx.passphraseCache.get(hostId)?.secret).toBe("my-passphrase");
+		expect(ctx.passphraseCache.get(hostId)!.expiresAt).toBeLessThanOrEqual(Date.now() + 61_000);
+	});
+
+	it("D2: promptId present + rememberSession=true stores 15-min cache", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-d2";
+		const ownerClientId = "c-d2";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const contextId = "acq-d2";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+
+		const sentMessages: unknown[] = [];
+		const send = (_cid: string, msg: Record<string, unknown>) => sentMessages.push(msg);
+
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		)!;
+
+		const promptId = (sentMessages[0] as Record<string, unknown>).promptId as string;
+		const before = Date.now();
+		mgr.handleAuthPromptResponse(ownerClientId, hostId, "long-pass", true, promptId, undefined);
+		await resultPromise;
+
+		const ttl = ctx.passphraseCache.get(hostId)!.expiresAt - before;
+		expect(ttl).toBeGreaterThanOrEqual(15 * 60 * 1000 - 100);
+		expect(ttl).toBeLessThanOrEqual(15 * 60 * 1000 + 200);
+	});
+
+	it("D3: wrong clientId via promptId route is rejected (SEC-003 via respondCtx)", async () => {
+		vi.useFakeTimers();
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-d3";
+		const ownerClientId = "c-d3";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const contextId = "acq-d3";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+
+		const sentMessages: unknown[] = [];
+		const send = (_cid: string, msg: Record<string, unknown>) => sentMessages.push(msg);
+
+		promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		);
+
+		const promptId = (sentMessages[0] as Record<string, unknown>).promptId as string;
+
+		// Attacker uses the wrong clientId.
+		mgr.handleAuthPromptResponse("attacker", hostId, "stolen", false, promptId, undefined);
+
+		// Pending entry must remain (SEC-003: respondCtx rejected).
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		// Cleanup
+		clearContext(ctx as SharedSessionContext, contextId);
+	});
+
+	it("D4: promptId route caches only passphrase prompt responses, not elevation", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-d4";
+		const ownerClientId = "c-d4";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const sentMessages: unknown[] = [];
+		const send = (_cid: string, msg: Record<string, unknown>) => sentMessages.push(msg);
+
+		const elevationContext = openContext(
+			ctx as SharedSessionContext,
+			"elevation",
+			hostId,
+			ownerClientId,
+		);
+		const elevationPromise = promptCtx(
+			ctx as SharedSessionContext,
+			elevationContext.id,
+			"elevation",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "elevation",
+				message: "Enter sudo password",
+				promptId: "",
+			},
+			send,
+		);
+		if (elevationPromise === null) throw new Error("expected elevation prompt");
+
+		const elevationPrompt = sentMessages[0] as Record<string, unknown>;
+		mgr.handleAuthPromptResponse(
+			ownerClientId,
+			hostId,
+			"sudo-secret",
+			true,
+			elevationPrompt.promptId as string,
+			elevationPrompt.deliveryEpoch as number,
+		);
+
+		await expect(elevationPromise).resolves.toBe("sudo-secret");
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		sentMessages.length = 0;
+		const passphraseContextId = "acq-d4";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, passphraseContextId);
+		const passphrasePromise = promptCtx(
+			ctx as SharedSessionContext,
+			passphraseContextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		);
+		if (passphrasePromise === null) throw new Error("expected passphrase prompt");
+
+		const passphrasePrompt = sentMessages[0] as Record<string, unknown>;
+		mgr.handleAuthPromptResponse(
+			ownerClientId,
+			hostId,
+			"ssh-pass",
+			false,
+			passphrasePrompt.promptId as string,
+			passphrasePrompt.deliveryEpoch as number,
+		);
+
+		await expect(passphrasePromise).resolves.toBe("ssh-pass");
+		expect(ctx.passphraseCache.get(hostId)?.secret).toBe("ssh-pass");
+	});
+
+	it("KIND-D6 promptId route resolves session password response without passphraseCache write", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-d6-password";
+		const ownerClientId = "c-d6-password";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const contextId = "acq-d6-password";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+		const sentMessages: unknown[] = [];
+		const send = (_cid: string, msg: Record<string, unknown>) => sentMessages.push(msg);
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "password",
+				message: "Password:",
+				promptId: "",
+			},
+			send,
+		);
+		if (resultPromise === null) throw new Error("expected password prompt");
+
+		const prompt = sentMessages[0] as Record<string, unknown>;
+		mgr.handleAuthPromptResponse(
+			ownerClientId,
+			hostId,
+			"ssh-password",
+			true,
+			prompt.promptId as string,
+			prompt.deliveryEpoch as number,
+		);
+
+		await expect(resultPromise).resolves.toBe("ssh-password");
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+	});
+});
+
+describe("SshConnectionManager — handleAuthPromptResponse: back-compat scan (no promptId)", () => {
+	function makePromptCtx(): Pick<
+		SharedSessionContext,
+		| "passphraseCache"
+		| "promptContexts"
+		| "promptIndex"
+		| "pendingPrompts"
+		| "clients"
+		| "acquisitions"
+	> {
+		return {
+			passphraseCache: new Map(),
+			promptContexts: new Map<string, PromptContext>(),
+			promptIndex: new Map<string, string>(),
+			pendingPrompts: new Map() as SharedSessionContext["pendingPrompts"],
+			clients: new Map(),
+			acquisitions: new Map() as SharedSessionContext["acquisitions"],
+		};
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("E1: no promptId → scans promptContexts by hostId/type and resolves in-flight passphrase", async () => {
+		// Mutation oracle: removing the back-compat scan causes the route to fall
+		// through and resolve nothing — the promise hangs.
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e1";
+		const ownerClientId = "c-e1";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		// Open a passphrase PromptContext (as buildPromptAuth does with acqId).
+		const contextId = "acq-e1";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+
+		const sentMessages: unknown[] = [];
+		const send = (_cid: string, msg: Record<string, unknown>) => sentMessages.push(msg);
+
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		)!;
+
+		// Respond WITHOUT promptId (back-compat wire format from old PWA clients).
+		mgr.handleAuthPromptResponse(ownerClientId, hostId, "secret-pass", false);
+
+		const result = await resultPromise;
+		expect(result).toBe("secret-pass");
+
+		// Cache is written (60s TTL).
+		expect(ctx.passphraseCache.get(hostId)?.secret).toBe("secret-pass");
+	});
+
+	it("E2: no promptId + rememberSession=true stores 15-min cache via scan path", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e2";
+		const ownerClientId = "c-e2";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const contextId = "acq-e2";
+		openContext(ctx as SharedSessionContext, "session", hostId, ownerClientId, contextId);
+
+		const send = (_cid: string, msg: Record<string, unknown>) => void msg;
+
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			contextId,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		)!;
+
+		const before = Date.now();
+		mgr.handleAuthPromptResponse(ownerClientId, hostId, "session-pass", true);
+		await resultPromise;
+
+		const ttl = ctx.passphraseCache.get(hostId)!.expiresAt - before;
+		expect(ttl).toBeGreaterThanOrEqual(15 * 60 * 1000 - 100);
+		expect(ttl).toBeLessThanOrEqual(15 * 60 * 1000 + 200);
+	});
+
+	it("E3: no promptId + no in-flight PromptContext is a no-op and does not cache", () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e3";
+
+		mgr.handleAuthPromptResponse("c-e3", hostId, "legacy-secret", false);
+
+		expect(ctx.pendingPrompts.size).toBe(0);
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+	});
+
+	it("E4: no promptId elevation response resolves without writing passphraseCache", async () => {
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e4";
+		const ownerClientId = "c-e4";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const elevationContext = openContext(
+			ctx as SharedSessionContext,
+			"elevation",
+			hostId,
+			ownerClientId,
+		);
+		const send = (_cid: string, msg: Record<string, unknown>) => void msg;
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			elevationContext.id,
+			"elevation",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "elevation",
+				message: "Enter sudo password",
+				promptId: "",
+			},
+			send,
+		);
+		if (resultPromise === null) throw new Error("expected elevation prompt");
+
+		mgr.handleAuthPromptResponse(ownerClientId, hostId, "sudo-secret", true);
+
+		await expect(resultPromise).resolves.toBe("sudo-secret");
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+	});
+
+	it("KIND-D7 no promptId response is rejected when two same-host prompts match", async () => {
+		// Mutation oracle: first-match fallback resolves one of these prompts and
+		// writes a cache entry instead of rejecting the ambiguous response.
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e-d7-ambiguous";
+		const ownerClientId = "c-e-d7";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+
+		const contextA = openContext(
+			ctx as SharedSessionContext,
+			"session",
+			hostId,
+			ownerClientId,
+			"acq-e-d7-a",
+		);
+		const contextB = openContext(
+			ctx as SharedSessionContext,
+			"session",
+			hostId,
+			ownerClientId,
+			"acq-e-d7-b",
+		);
+		const send = (_cid: string, msg: Record<string, unknown>) => void msg;
+		const promiseA = promptCtx(
+			ctx as SharedSessionContext,
+			contextA.id,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase A:",
+				promptId: "",
+			},
+			send,
+		);
+		const promiseB = promptCtx(
+			ctx as SharedSessionContext,
+			contextB.id,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase B:",
+				promptId: "",
+			},
+			send,
+		);
+		if (promiseA === null || promiseB === null) throw new Error("expected passphrase prompts");
+		const promptIds = [...ctx.pendingPrompts.keys()];
+		expect(promptIds).toHaveLength(2);
+
+		mgr.handleAuthPromptResponse(ownerClientId, hostId, "ambiguous-secret", true);
+
+		expect(ctx.pendingPrompts.size).toBe(2);
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		clearContext(ctx as SharedSessionContext, contextA.id);
+		clearContext(ctx as SharedSessionContext, contextB.id);
+		await Promise.all([expect(promiseA).resolves.toBeNull(), expect(promiseB).resolves.toBeNull()]);
+	});
+
+	it("KIND-D7 no promptId response cannot resolve a prompt routed to another client", async () => {
+		// Mutation oracle: hostId-only fallback lets client-b answer client-a's
+		// operation-owned prompt.
+		const ctx = makePromptCtx();
+		const mgr = new SshConnectionManager(
+			ctx as SharedSessionContext,
+			null as never,
+			null as never,
+			null as never,
+		);
+		const hostId = "host-e-d7-owner";
+		const ownerClientId = "c-e-d7-owner";
+
+		ctx.clients.set(ownerClientId, makeClient(ownerClientId));
+		ctx.clients.set("c-e-d7-other", makeClient("c-e-d7-other"));
+
+		const context = openContext(ctx as SharedSessionContext, "test", hostId, ownerClientId);
+		const send = (_cid: string, msg: Record<string, unknown>) => void msg;
+		const resultPromise = promptCtx(
+			ctx as SharedSessionContext,
+			context.id,
+			"passphrase",
+			{
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Passphrase:",
+				promptId: "",
+			},
+			send,
+		);
+		if (resultPromise === null) throw new Error("expected test prompt");
+		const promptId = onlyPromptId(ctx);
+
+		mgr.handleAuthPromptResponse("c-e-d7-other", hostId, "stolen", true);
+
+		expect(ctx.pendingPrompts.has(promptId)).toBe(true);
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		clearContext(ctx as SharedSessionContext, context.id);
+		await expect(resultPromise).resolves.toBeNull();
 	});
 });

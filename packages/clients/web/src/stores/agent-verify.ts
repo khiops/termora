@@ -25,7 +25,14 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 	}
 
 	function handleAgentVerify(msg: AgentBinaryVerifyMessage): void {
+		// Do not enqueue a duplicate promptId
+		if (pendingPrompts.value.some((p) => p.promptId === msg.promptId)) return;
 		pendingPrompts.value = [...pendingPrompts.value, { ...msg }];
+	}
+
+	/** Drop the queued prompt whose promptId matches the cancelled one. */
+	function handlePromptCancel(promptId: string): void {
+		pendingPrompts.value = pendingPrompts.value.filter((p) => p.promptId !== promptId);
 	}
 
 	function handleDeployError(message: string, hostId?: string): void {
@@ -36,7 +43,23 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		deployError.value = null;
 	}
 
-	function respond(action: "trust_permanent" | "trust_once" | "reject"): void {
+	function isCurrentPrompt(promptId: string | undefined, action: string): boolean {
+		const req = pendingPrompts.value[0];
+		if (!req) return false;
+		const currentPromptId = (req as { promptId?: string }).promptId;
+		if (promptId === undefined || currentPromptId === undefined || currentPromptId === promptId) {
+			return true;
+		}
+		console.warn("[agent-verify] ignoring stale prompt action", {
+			action,
+			promptId,
+			currentPromptId,
+		});
+		return false;
+	}
+
+	function respond(action: "trust_permanent" | "trust_once" | "reject", promptId?: string): void {
+		if (!isCurrentPrompt(promptId, action)) return;
 		const req = pendingPrompts.value[0];
 		if (!req) return;
 		_wsClient?.send({
@@ -48,19 +71,20 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		pendingPrompts.value = pendingPrompts.value.slice(1);
 	}
 
-	function trustPermanently(): void {
-		respond("trust_permanent");
+	function trustPermanently(promptId?: string): void {
+		respond("trust_permanent", promptId);
 	}
 
-	function trustOnce(): void {
-		respond("trust_once");
+	function trustOnce(promptId?: string): void {
+		respond("trust_once", promptId);
 	}
 
-	function reject(): void {
-		respond("reject");
+	function reject(promptId?: string): void {
+		respond("reject", promptId);
 	}
 
-	function dismiss(): void {
+	function dismiss(promptId?: string): void {
+		if (!isCurrentPrompt(promptId, "dismiss")) return;
 		pendingPrompts.value = pendingPrompts.value.slice(1);
 	}
 
@@ -69,6 +93,7 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		deployError,
 		setWsClient,
 		handleAgentVerify,
+		handlePromptCancel,
 		handleDeployError,
 		clearDeployError,
 		respond,

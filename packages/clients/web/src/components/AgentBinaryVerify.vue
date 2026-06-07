@@ -66,9 +66,21 @@
 
 				<div class="abv-actions">
 					<span class="abv-countdown">Auto-reject in {{ remaining }}s</span>
-					<button class="abv-btn abv-reject" @click="handleReject">Reject</button>
-					<button class="abv-btn abv-trust-once" @click="handleTrustOnce">Trust Once</button>
-					<button class="abv-btn abv-accept" @click="handleAccept">Trust Permanently</button>
+					<button
+						class="abv-btn abv-reject"
+						:data-prompt-id="prompt.promptId"
+						@click="handleReject"
+					>Reject</button>
+					<button
+						class="abv-btn abv-trust-once"
+						:data-prompt-id="prompt.promptId"
+						@click="handleTrustOnce"
+					>Trust Once</button>
+					<button
+						class="abv-btn abv-accept"
+						:data-prompt-id="prompt.promptId"
+						@click="handleAccept"
+					>Trust Permanently</button>
 				</div>
 			</div>
 		</div>
@@ -102,13 +114,14 @@ watch(
 		if (prompt) {
 			deadline = Date.now() + TIMEOUT_MS;
 			remaining.value = 30;
+			const promptId = prompt.promptId;
 			interval = setInterval(() => {
 				const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
 				remaining.value = left;
 				if (left <= 0) {
 					clearInterval(interval!);
 					interval = null;
-					store.reject();
+					store.reject(promptId);
 				}
 			}, 250);
 		}
@@ -138,16 +151,20 @@ async function copyNew(): Promise<void> {
 	}, 1500);
 }
 
-function handleAccept(): void {
-	store.trustPermanently();
+function promptIdFromEvent(event: MouseEvent): string | undefined {
+	return (event.currentTarget as HTMLElement | null)?.dataset.promptId;
 }
 
-function handleTrustOnce(): void {
-	store.trustOnce();
+function handleAccept(event: MouseEvent): void {
+	store.trustPermanently(promptIdFromEvent(event));
 }
 
-function handleReject(): void {
-	store.reject();
+function handleTrustOnce(event: MouseEvent): void {
+	store.trustOnce(promptIdFromEvent(event));
+}
+
+function handleReject(event: MouseEvent): void {
+	store.reject(promptIdFromEvent(event));
 }
 </script>
 
