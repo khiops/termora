@@ -14,12 +14,21 @@ import type {
 	HostVerifyMessage,
 	TestConnectMessage,
 } from "@termora/shared";
-import { generateId } from "@termora/shared";
 import { Client as SshClient } from "ssh2";
 import type { AgentConnectionManager } from "./agent-connection-manager.js";
 import { type BinaryVerifyPromptFn, getBinaryCacheDir } from "./agent-deployer.js";
 import type { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
-import type { SharedSessionContext } from "./session-context.js";
+import {
+	clearContext,
+	isReconnectContextId,
+	openContext,
+	pickReconnectRouteCandidate,
+	pickRouteCandidate,
+	prompt as promptCtx,
+	reconnectSessionId,
+	respond as respondCtx,
+} from "./prompt-context.js";
+import type { PromptContext, SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 import {
 	type AuthPromptFn,
@@ -32,7 +41,10 @@ import type { StateBroadcaster } from "./state-broadcaster.js";
 /** Reconnect backoff steps in ms (capped at 30s, total budget 5 min) */
 const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 const RECONNECT_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
-const HOST_KEY_MISMATCH_TIMEOUT_MS = 30_000;
+const HOST_KEY_MISMATCH_TIMEOUT_MS = 30_000; // original 30 s timeout for host-key + agent-binary verify
+const AUTH_PROMPT_TIMEOUT_MS = 120_000; // 2 min — unanswered prompt must not wedge the host
+type PendingPromptEntry =
+	SharedSessionContext["pendingPrompts"] extends Map<string, infer P> ? P : never;
 
 export class SshConnectionManager {
 	constructor(
@@ -42,9 +54,101 @@ export class SshConnectionManager {
 		private readonly agentMgr: AgentConnectionManager,
 	) {}
 
+	private _authPromptWireType(
+		promptEntry: PendingPromptEntry | undefined,
+	): "password" | "passphrase" | "elevation" | undefined {
+		const promptType = (promptEntry?.resendPayload as { promptType?: unknown } | undefined)
+			?.promptType;
+		if (promptType === "password" || promptType === "passphrase" || promptType === "elevation") {
+			return promptType;
+		}
+		return undefined;
+	}
+
+	private _isCacheableSessionPassphrase(promptEntry: PendingPromptEntry | undefined): boolean {
+		if (promptEntry?.type !== "passphrase") return false;
+		const contextId = promptEntry.contextId;
+		const context = contextId ? this.ctx.promptContexts.get(contextId) : undefined;
+		return context?.kind === "session" && this._authPromptWireType(promptEntry) === "passphrase";
+	}
+
+	private _cacheAcceptedPassphrase(
+		promptEntry: PendingPromptEntry | undefined,
+		fallbackHostId: string,
+		secret: string | null,
+		rememberSession: boolean | undefined,
+	): void {
+		if (secret === null || !this._isCacheableSessionPassphrase(promptEntry)) return;
+		const ttl = rememberSession === true ? 15 * 60 * 1000 : 60 * 1000;
+		this.ctx.passphraseCache.set(promptEntry?.hostId ?? fallbackHostId, {
+			secret,
+			expiresAt: Date.now() + ttl,
+		});
+	}
+
+	private _resolveLegacyAuthPromptId(clientId: string, hostId: string): string | null {
+		const matches: string[] = [];
+		for (const [, context] of this.ctx.promptContexts) {
+			if (context.state !== "OPEN") continue;
+			if (context.hostId !== hostId) continue;
+			if (context.routeClientId !== clientId) continue;
+
+			for (const promptId of context.prompts) {
+				const promptEntry = this.ctx.pendingPrompts.get(promptId);
+				if (promptEntry?.hostId !== hostId) continue;
+				if (promptEntry.type !== "passphrase" && promptEntry.type !== "elevation") continue;
+				matches.push(promptId);
+			}
+		}
+
+		if (matches.length === 1) return matches[0] ?? null;
+
+		this.ctx.hubLogger?.log("warn", "ssh-connection: AUTH_PROMPT_RESPONSE ignored", {
+			hostId,
+			clientId,
+			reason: matches.length === 0 ? "no_matching_prompt" : "ambiguous_prompt",
+			matchCount: matches.length,
+		});
+		return null;
+	}
+
+	private _getOrOpenSessionPromptContext(
+		contextId: string | undefined,
+		hostId: string,
+		client: WsClient,
+	): PromptContext | null {
+		if (contextId === undefined) {
+			if (!this.ctx.clients.has(client.id)) return null;
+			return openContext(this.ctx, "session", hostId, client.id);
+		}
+
+		const existing = this.ctx.promptContexts.get(contextId);
+		if (existing && existing.state === "OPEN") {
+			if (this.ctx.clients.has(existing.routeClientId)) return existing;
+			const candidate = pickRouteCandidate(this.ctx, contextId, existing.routeClientId);
+			if (!candidate) {
+				clearContext(this.ctx, contextId);
+				return null;
+			}
+			existing.routeClientId = candidate;
+			return existing;
+		}
+
+		if (isReconnectContextId(contextId)) {
+			const sessionId = reconnectSessionId(contextId);
+			if (!sessionId) return null;
+			const candidate = pickReconnectRouteCandidate(this.ctx, hostId, sessionId);
+			if (!candidate) return null;
+			return openContext(this.ctx, "session", hostId, candidate, contextId);
+		}
+
+		if (!this.ctx.clients.has(client.id)) return null;
+		return openContext(this.ctx, "session", hostId, client.id, contextId);
+	}
+
 	// ─── Auth prompt ─────────────────────────────────────────────────────────
 
-	buildPromptAuth(client: WsClient): AuthPromptFn {
+	buildPromptAuth(client: WsClient, signal?: AbortSignal, acqId?: string): AuthPromptFn {
 		return async (hostId, promptType, message) => {
 			// Cache hit: return cached passphrase without prompting the UI
 			if (promptType === "passphrase") {
@@ -63,11 +167,48 @@ export class SshConnectionManager {
 					this.ctx.passphraseCache.delete(hostId);
 				}
 			}
-			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
-			client.send(promptMsg);
-			return new Promise<string | null>((resolve) => {
-				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
-			});
+			// If the connect was already aborted before we even arm a prompt, bail immediately.
+			if (signal?.aborted) return null;
+
+			const context = this._getOrOpenSessionPromptContext(acqId, hostId, client);
+			if (!context) return null;
+			const clearOnSettle = acqId === undefined;
+
+			// Base payload — prompt() will merge the real promptId + deliveryEpoch at send time.
+			const promptMsgBase: AuthPromptMessage = {
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType,
+				message,
+				promptId: "", // placeholder; prompt() overwrites with the real promptId
+			};
+
+			// send callback: resolve the client from ctx at send time so retargeted
+			// sends (after a clientDisconnect retarget) reach the new route owner.
+			const send = (routeClientId: string, msg: Record<string, unknown>) => {
+				const target = this.ctx.clients.get(routeClientId);
+				if (!target) throw new Error("prompt route client disconnected");
+				target.send(msg as unknown as AuthPromptMessage);
+			};
+
+			const abortListener = () => clearContext(this.ctx, context.id, send);
+			signal?.addEventListener("abort", abortListener, { once: true });
+			try {
+				const result = await promptCtx(
+					this.ctx,
+					context.id,
+					"passphrase",
+					promptMsgBase,
+					send,
+					AUTH_PROMPT_TIMEOUT_MS,
+				);
+				return result as string | null;
+			} finally {
+				signal?.removeEventListener("abort", abortListener);
+				if (clearOnSettle) {
+					clearContext(this.ctx, context.id, send);
+				}
+			}
 		};
 	}
 
@@ -76,24 +217,35 @@ export class SshConnectionManager {
 		hostId: string,
 		secret: string | null,
 		rememberSession?: boolean,
+		promptId?: string,
+		deliveryEpoch?: number,
 	): void {
-		const pending = this.ctx.pendingAuthPrompts.get(hostId);
-		if (!pending) return;
-		// SEC-003: only the client that triggered the prompt may respond
-		if (pending.clientId !== clientId) return;
-		if (pending.timer !== null) clearTimeout(pending.timer);
-		this.ctx.pendingAuthPrompts.delete(hostId);
-		// Always cache the passphrase for at least 60s so TOFU retries
-		// can reuse it without re-prompting the user.  If rememberSession
-		// is true, extend to the full 15 min TTL.
-		if (secret !== null) {
-			const ttl = rememberSession === true ? 15 * 60 * 1000 : 60 * 1000;
-			this.ctx.passphraseCache.set(hostId, {
-				secret,
-				expiresAt: Date.now() + ttl,
-			});
+		// ── promptId path (new web clients that echo promptId) ───────────────────
+		// respond() enforces SEC-003 (clientId === routeClientId) and optionally
+		// epoch. On accept we cache only real session passphrase prompts.
+		if (promptId !== undefined) {
+			// Read the pending prompt before respond() clears it; cache eligibility
+			// depends on the prompt's owning context kind and wire promptType.
+			const pp = this.ctx.pendingPrompts.get(promptId);
+			const accepted = respondCtx(this.ctx, promptId, clientId, deliveryEpoch, secret);
+			if (accepted) this._cacheAcceptedPassphrase(pp, hostId, secret, rememberSession);
+			return;
 		}
-		pending.resolve(secret);
+
+		// ── Back-compat path (old clients without promptId) ──────────────────────
+		// Resolve only an exact single in-flight passphrase/elevation prompt for this
+		// host that is addressable by this route client.
+		const resolvedPromptId = this._resolveLegacyAuthPromptId(clientId, hostId);
+
+		if (resolvedPromptId !== null) {
+			// Route via PromptContext ops (SEC-003 enforced inside respond()).
+			const pp = this.ctx.pendingPrompts.get(resolvedPromptId);
+			const accepted = respondCtx(this.ctx, resolvedPromptId, clientId, undefined, secret);
+			if (accepted) this._cacheAcceptedPassphrase(pp, hostId, secret, rememberSession);
+			return;
+		}
+
+		return;
 	}
 
 	// ─── Host key mismatch ────────────────────────────────────────────────────
@@ -110,31 +262,53 @@ export class SshConnectionManager {
 		oldFingerprint: string,
 		newFingerprint: string,
 		firstConnect = false,
+		ownerAcqId?: string,
 	): Promise<"trust_permanent" | "trust_once" | "reject"> {
-		const promptId = generateId();
-		const verifyMsg: HostVerifyMessage = {
+		const context = this._getOrOpenSessionPromptContext(ownerAcqId, hostId, client);
+		if (!context) return "reject";
+		const clearOnSettle = ownerAcqId === undefined;
+
+		// Base payload — promptId will be overridden by prompt() with the real ULID.
+		const verifyMsgBase: Omit<HostVerifyMessage, "promptId"> & { promptId: string } = {
 			type: "HOST_VERIFY",
 			hostId,
 			fingerprint: newFingerprint,
 			algorithm: "SHA256",
 			...(oldFingerprint ? { oldFingerprint } : {}),
-			promptId,
+			promptId: "", // placeholder; prompt() overwrites with the real promptId
 			...(firstConnect ? { firstConnect: true } : {}),
 		};
-		client.send(verifyMsg);
 
-		return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
-			const timer = setTimeout(() => {
-				this.ctx.pendingHostVerify.delete(promptId);
-				this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", {
-					hostId,
-					hostname,
-				});
-				resolve("reject");
-			}, HOST_KEY_MISMATCH_TIMEOUT_MS);
+		// send callback: prompt() merges promptId + deliveryEpoch onto the payload,
+		// then passes the routeClientId. Resolve the client from ctx at send time so
+		// retargeted sends (after a clientDisconnect retarget) reach the new owner.
+		const send = (routeClientId: string, msg: Record<string, unknown>) => {
+			const target = this.ctx.clients.get(routeClientId);
+			if (!target) throw new Error("prompt route client disconnected");
+			target.send(msg as unknown as HostVerifyMessage);
+		};
 
-			this.ctx.pendingHostVerify.set(promptId, { resolve, timer });
-		});
+		const result = await promptCtx(
+			this.ctx,
+			context.id,
+			"host_verify",
+			verifyMsgBase,
+			send,
+			HOST_KEY_MISMATCH_TIMEOUT_MS,
+		);
+		if (clearOnSettle) {
+			clearContext(this.ctx, context.id, send);
+		}
+
+		// promptCtx resolves null on timeout (clearContext / send failure).
+		if (result === null) {
+			this.ctx.hubLogger?.log("warn", "ssh-connection: HOST_VERIFY timeout, rejecting", {
+				hostId,
+				hostname,
+			});
+			return "reject";
+		}
+		return result as "trust_permanent" | "trust_once" | "reject";
 	}
 
 	/**
@@ -144,17 +318,20 @@ export class SshConnectionManager {
 	handleHostVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId: string,
 	): void {
-		const pending = this.ctx.pendingHostVerify.get(promptId);
-		if (!pending) return;
-		clearTimeout(pending.timer);
-		this.ctx.pendingHostVerify.delete(promptId);
-		pending.resolve(action);
+		// Delegate to the PromptContext ops. respond() enforces:
+		//   - SEC-003: clientId must match context.routeClientId (current route owner)
+		//   - Guard B: ignored if context is CLOSED
+		//   - Guard D (epoch): skipped here — HOST_VERIFY_RESPONSE carries no deliveryEpoch
+		//     yet (back-compat path; epoch enforcement added when web echoes it).
+		// Returns false silently when rejected (wrong client, unknown promptId, etc.).
+		respondCtx(this.ctx, promptId, clientId, undefined, action);
 	}
 
 	// ─── Agent binary verify ──────────────────────────────────────────────────
 
-	buildBinaryVerifyPrompt(client: WsClient): BinaryVerifyPromptFn {
+	buildBinaryVerifyPrompt(client: WsClient, ownerAcqId?: string): BinaryVerifyPromptFn {
 		return async (
 			hostId: string,
 			hostname: string,
@@ -165,10 +342,14 @@ export class SshConnectionManager {
 			mismatch: boolean,
 			pinnedSha256?: string,
 		): Promise<"trust_permanent" | "trust_once" | "reject"> => {
-			const promptId = generateId();
-			const msg: AgentBinaryVerifyMessage = {
+			const context = this._getOrOpenSessionPromptContext(ownerAcqId, hostId, client);
+			if (!context) return "reject";
+			const clearOnSettle = ownerAcqId === undefined;
+
+			// Base payload — prompt() merges the real promptId + deliveryEpoch at send time.
+			const verifyMsgBase: Omit<AgentBinaryVerifyMessage, "promptId"> & { promptId: string } = {
 				type: "AGENT_BINARY_VERIFY",
-				promptId,
+				promptId: "", // placeholder; prompt() overwrites with the real promptId
 				hostId,
 				hostname,
 				remotePath,
@@ -178,35 +359,50 @@ export class SshConnectionManager {
 				mismatch,
 				...(pinnedSha256 ? { pinnedSha256 } : {}),
 			};
-			client.send(msg);
 
-			return new Promise<"trust_permanent" | "trust_once" | "reject">((resolve) => {
-				const timer = setTimeout(() => {
-					this.ctx.pendingAgentVerify.delete(promptId);
-					this.ctx.hubLogger?.log(
-						"warn",
-						"ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting",
-						{
-							hostname,
-						},
-					);
-					resolve("reject");
-				}, 30_000);
+			// send callback: resolve the client from ctx at send time so retargeted sends
+			// (after a clientDisconnect retarget) reach the new route owner.
+			const send = (routeClientId: string, msg: Record<string, unknown>) => {
+				const target = this.ctx.clients.get(routeClientId);
+				if (!target) throw new Error("prompt route client disconnected");
+				target.send(msg as unknown as AgentBinaryVerifyMessage);
+			};
 
-				this.ctx.pendingAgentVerify.set(promptId, { resolve, timer });
-			});
+			const result = await promptCtx(
+				this.ctx,
+				context.id,
+				"agent_verify",
+				verifyMsgBase,
+				send,
+				HOST_KEY_MISMATCH_TIMEOUT_MS,
+			);
+			if (clearOnSettle) {
+				clearContext(this.ctx, context.id, send);
+			}
+
+			// promptCtx resolves null on timeout (clearContext / send failure).
+			if (result === null) {
+				this.ctx.hubLogger?.log("warn", "ssh-connection: AGENT_BINARY_VERIFY timeout, rejecting", {
+					hostname,
+				});
+				return "reject";
+			}
+			return result as "trust_permanent" | "trust_once" | "reject";
 		};
 	}
 
 	handleAgentVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId: string,
 	): void {
-		const pending = this.ctx.pendingAgentVerify.get(promptId);
-		if (!pending) return;
-		clearTimeout(pending.timer);
-		this.ctx.pendingAgentVerify.delete(promptId);
-		pending.resolve(action);
+		// Delegate to the PromptContext ops. respond() enforces:
+		//   - SEC-003: clientId must match context.routeClientId (current route owner)
+		//   - Guard B: ignored if context is CLOSED
+		//   - Guard D (epoch): skipped here — AGENT_BINARY_VERIFY_RESPONSE carries no
+		//     deliveryEpoch yet (back-compat path; epoch enforcement added when web echoes it).
+		// Returns false silently when rejected (wrong client, unknown promptId, etc.).
+		respondCtx(this.ctx, promptId, clientId, undefined, action);
 	}
 
 	/**
@@ -253,14 +449,33 @@ export class SshConnectionManager {
 		const timer = setTimeout(async () => {
 			this.ctx.reconnectTimers.delete(hostId);
 
+			// Currency check before any async work: bail if session was closed
+			// or superseded by a newer session while the timer was pending.
 			const session = this.ctx.sessions.get(hostId);
-			if (!session || session.status === "closed") return;
+			if (!session || session.status === "closed" || session.id !== sessionId) return;
 
 			const host = this.ctx.metaDal.getHost(hostId);
 			if (!host) {
-				this.lifecycle.closeSession(hostId, sessionId);
+				// Only close if this is still the session we were reconnecting.
+				if (this.ctx.sessions.get(hostId)?.id === sessionId) {
+					this.lifecycle.closeSession(hostId, sessionId);
+				}
 				return;
 			}
+
+			// Create an AbortController for this in-flight attempt and register it so
+			// closeSession() can abort a start() that is still awaiting the SSH handshake.
+			// Invariant 10: the controller is identity-checked so a stale abort cannot
+			// clobber a newer reconnect attempt that replaced this one.
+			//
+			// Abort-before-overwrite: if a prior reconnect attempt registered a controller
+			// for this host but never cleared it (e.g. overwritten by a second reconnect
+			// path racing in), abort it now so its pending auth prompt is cleared at
+			// handoff time — preventing an orphaned PromptContext entry.
+			const existingAc = this.ctx.reconnectAbortControllers.get(hostId);
+			if (existingAc) existingAc.abort();
+			const ac = new AbortController();
+			this.ctx.reconnectAbortControllers.set(hostId, ac);
 
 			try {
 				const binaryCache = getBinaryCacheDir();
@@ -280,9 +495,9 @@ export class SshConnectionManager {
 					onOsDetected: (hid, os, arch) => {
 						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
 					},
-					// No promptBinaryVerify — reconnect is non-interactive
+					// No promptBinaryVerify — reconnect is non-interactive.
 					// If binary is untrusted, deploy will throw AGENT_BINARY_UNTRUSTED
-					// and reconnect will retry or give up (existing retry logic)
+					// and reconnect will retry or give up (existing retry logic).
 					onAgentPinned: (hid, sha256) => {
 						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
 					},
@@ -295,16 +510,45 @@ export class SshConnectionManager {
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
 				const hostKey = `${sshHostname}:${host.sshPort ?? 22}`;
 				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostKey);
-				await sshAgent.start(storedFp, sessionFp);
+
+				// Thread the abort signal into start() so closeSession() can cancel mid-handshake.
+				await sshAgent.start(storedFp, sessionFp, ac.signal);
+
+				// Post-await currency/abort re-check (invariant 10).
+				// closeSession() may have fired while start() was awaiting the SSH handshake.
+				// Do NOT wire/store/reAttach if the session is no longer current or was aborted.
+				if (
+					ac.signal.aborted ||
+					this.ctx.reconnectAbortControllers.get(hostId) !== ac ||
+					this.ctx.sessions.get(hostId)?.id !== sessionId
+				) {
+					sshAgent.close();
+					return;
+				}
+
+				// Clear the controller — attempt settled successfully.
+				this.ctx.reconnectAbortControllers.delete(hostId);
+
 				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);
 				this.ctx.agents.set(hostId, sshAgent);
 
 				this.lifecycle.reAttachChannels(hostId, sessionId, sshAgent);
 			} catch {
+				// Clear the controller on failure (aborted or real error).
+				if (this.ctx.reconnectAbortControllers.get(hostId) === ac) {
+					this.ctx.reconnectAbortControllers.delete(hostId);
+				}
+
+				// If the attempt was aborted by closeSession(), do nothing — session is already closed.
+				if (ac.signal.aborted) return;
+
 				const nextElapsed = Date.now() - startTime;
 				if (nextElapsed >= RECONNECT_TIMEOUT_MS) {
-					this.lifecycle.closeSession(hostId, sessionId);
+					// Only close if this is still the session we were reconnecting.
+					if (this.ctx.sessions.get(hostId)?.id === sessionId) {
+						this.lifecycle.closeSession(hostId, sessionId);
+					}
 				} else {
 					this.scheduleReconnect(hostId, sessionId, attemptIndex + 1, startTime);
 				}
@@ -319,7 +563,42 @@ export class SshConnectionManager {
 		const client = this.ctx.clients.get(clientId);
 		if (!client) return;
 
-		const promptAuth = this.buildPromptAuth(client);
+		// ── Task 2: Test-connect isolation (invariant 1) ──────────────────────────
+		// Open a dedicated "test" PromptContext scoped to this client and this request.
+		// A concurrent TEST_CONNECT from another client cannot touch this context.
+		// The context is always cleared (via clearContext) on success, failure, or timeout.
+		const testCtx = openContext(this.ctx, "test", msg.hostId, clientId);
+		const testCtxId = testCtx.id;
+
+		const deliverySend = (routeClientId: string, m: Record<string, unknown>) => {
+			const target = this.ctx.clients.get(routeClientId);
+			if (!target) throw new Error("prompt route client disconnected");
+			target.send(m as unknown as AuthPromptMessage);
+		};
+		const clearSend = (routeClientId: string, m: Record<string, unknown>) => {
+			this.ctx.clients.get(routeClientId)?.send(m as unknown as AuthPromptMessage);
+		};
+
+		// Build a promptAuth that uses the "test" PromptContext instead of the legacy path.
+		const promptAuth: AuthPromptFn = async (hostId, promptType, message) => {
+			const promptMsgBase: AuthPromptMessage = {
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType,
+				message,
+				promptId: "",
+			};
+
+			const result = await promptCtx(
+				this.ctx,
+				testCtxId,
+				"passphrase",
+				promptMsgBase,
+				deliverySend,
+				AUTH_PROMPT_TIMEOUT_MS,
+			);
+			return result as string | null;
+		};
 
 		try {
 			const result = await this._testSshConnectivity(msg, promptAuth);
@@ -338,6 +617,9 @@ export class SshConnectionManager {
 				hostId: msg.hostId,
 				message: err instanceof Error ? err.message : "Connection test failed",
 			});
+		} finally {
+			// Guard E: clear the test context on every terminal path.
+			clearContext(this.ctx, testCtxId, clearSend);
 		}
 	}
 

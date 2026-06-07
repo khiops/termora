@@ -1,6 +1,7 @@
 import type { AgentBinaryVerifyMessage } from "@termora/shared";
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { ref } from "vue";
+import { usePromptQueue } from "../composables/usePromptQueue.js";
 import type { IWsClient } from "../services/ws-client.js";
 
 /**
@@ -13,19 +14,19 @@ import type { IWsClient } from "../services/ws-client.js";
 export interface AgentVerifyRequest extends AgentBinaryVerifyMessage {}
 
 export const useAgentVerifyStore = defineStore("agentVerify", () => {
-	const pendingPrompts = ref<AgentVerifyRequest[]>([]);
+	const { currentPrompt, enqueue, handlePromptCancel, resolveHead, withHeadPrompt } =
+		usePromptQueue<AgentVerifyRequest>({
+			stalePromptWarning: "[agent-verify] ignoring stale prompt action",
+		});
 	const deployError = ref<{ message: string; hostId?: string } | null>(null);
 	let _wsClient: IWsClient | null = null;
-
-	// Current prompt is always the first in the queue
-	const currentPrompt = computed(() => pendingPrompts.value[0] ?? null);
 
 	function setWsClient(client: IWsClient): void {
 		_wsClient = client;
 	}
 
 	function handleAgentVerify(msg: AgentBinaryVerifyMessage): void {
-		pendingPrompts.value = [...pendingPrompts.value, { ...msg }];
+		enqueue({ ...msg });
 	}
 
 	function handleDeployError(message: string, hostId?: string): void {
@@ -36,32 +37,41 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		deployError.value = null;
 	}
 
-	function respond(action: "trust_permanent" | "trust_once" | "reject"): void {
-		const req = pendingPrompts.value[0];
-		if (!req) return;
-		_wsClient?.send({
-			type: "AGENT_BINARY_VERIFY_RESPONSE",
-			promptId: req.promptId,
+	function respond(action: "trust_permanent" | "trust_once" | "reject", promptId?: string): void {
+		withHeadPrompt(
+			promptId,
+			(req) => {
+				_wsClient?.send({
+					type: "AGENT_BINARY_VERIFY_RESPONSE",
+					promptId: req.promptId,
+					action,
+				});
+				resolveHead();
+			},
 			action,
-		});
-		// Remove the first item from the queue — next one shows automatically
-		pendingPrompts.value = pendingPrompts.value.slice(1);
+		);
 	}
 
-	function trustPermanently(): void {
-		respond("trust_permanent");
+	function trustPermanently(promptId?: string): void {
+		respond("trust_permanent", promptId);
 	}
 
-	function trustOnce(): void {
-		respond("trust_once");
+	function trustOnce(promptId?: string): void {
+		respond("trust_once", promptId);
 	}
 
-	function reject(): void {
-		respond("reject");
+	function reject(promptId?: string): void {
+		respond("reject", promptId);
 	}
 
-	function dismiss(): void {
-		pendingPrompts.value = pendingPrompts.value.slice(1);
+	function dismiss(promptId?: string): void {
+		withHeadPrompt(
+			promptId,
+			() => {
+				resolveHead();
+			},
+			"dismiss",
+		);
 	}
 
 	return {
@@ -69,6 +79,7 @@ export const useAgentVerifyStore = defineStore("agentVerify", () => {
 		deployError,
 		setWsClient,
 		handleAgentVerify,
+		handlePromptCancel,
 		handleDeployError,
 		clearDeployError,
 		respond,

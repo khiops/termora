@@ -8,6 +8,21 @@ import { Server, type Server as SshServer } from "ssh2";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthPromptFn, SshAgent } from "./ssh-agent.js";
 
+// ─── Mock agent-deployer.js for Fix B deploy-fallback tests ─────────────────
+// The mock is hoisted but defaults to letting the real module through. Tests
+// that need controlled deploy behaviour configure the mock per-test below.
+vi.mock("./agent-deployer.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./agent-deployer.js")>();
+	return {
+		...actual,
+		deployAgentIfNeeded: vi.fn().mockResolvedValue({
+			remotePath: "termora-agent --stdio",
+			os: null,
+			arch: null,
+		}),
+	};
+});
+
 const TEST_TIMEOUT = 10_000;
 
 // Generate a host key once for all tests in this module.
@@ -602,6 +617,228 @@ describe("SshAgent — TOFU host key verification", () => {
 
 			// SHA256: prefix followed by base64 (standard chars + padding)
 			expect(agent.lastKeyVerification.capturedFingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]+=*$/);
+		},
+		TEST_TIMEOUT,
+	);
+});
+
+// ─── Deploy failure rejects start() — no unverified-binary fallback ───────────
+//
+// On a non-DeployError infrastructure failure the deploy .catch() must REJECT.
+// It must NOT fall back to exec'ing whatever `termora-agent` is on the remote PATH:
+// the deployer may have detected a mismatched/unverified binary (the one the
+// replacement was meant to overwrite), so running it would be a security bypass on
+// first-use / unpinned hosts. DeployError (user rejection) propagates. Separately, a
+// channel that closes before the agent HELLO must reject fast rather than hang.
+
+describe("deploy failure rejects start() — no unverified-binary fallback", () => {
+	let agentsB: SshAgent[] = [];
+	let serversB: SshServer[] = [];
+
+	afterEach(async () => {
+		for (const agent of agentsB) {
+			try {
+				agent.close();
+			} catch {
+				// ignore
+			}
+		}
+		agentsB = [];
+		await Promise.all(
+			serversB.map(
+				(srv) =>
+					new Promise<void>((resolve) => {
+						srv.close(() => resolve());
+					}),
+			),
+		);
+		serversB = [];
+		vi.resetAllMocks();
+	});
+
+	it(
+		"non-DeployError infra failure → start() rejects (no fallback to an unverified binary)",
+		async () => {
+			// The mock SSH server WOULD answer HELLO if a fallback exec ran — so a resolve
+			// here would prove an unverified binary was executed. start() must REJECT instead.
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new Error("SFTP upload failed: connection reset"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			serversB.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = {
+				binaryCache: "/tmp/fake-cache",
+				hostname: "127.0.0.1",
+			};
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsB.push(agent);
+
+			// Mutation: a runAgent fallback in the deploy catch would resolve with the HELLO.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(/deployment failed/i);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"DeployError still rejects start() — user-initiated rejection propagates",
+		async () => {
+			// If DeployError were also caught and fell back to runAgent, user
+			// rejections (e.g. user denied an unknown binary) would be silently
+			// ignored — a security regression. DeployError must propagate.
+			const { deployAgentIfNeeded, DeployError } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new DeployError("AGENT_BINARY_REJECTED", "user denied unknown agent binary"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			serversB.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = {
+				binaryCache: "/tmp/fake-cache",
+				hostname: "127.0.0.1",
+			};
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsB.push(agent);
+
+			// start() must reject WITH the DeployError — it propagates, no runAgent fallback.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(DeployError);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"channel closed before HELLO → start() rejects fast (no hang)",
+		async () => {
+			// No deployOptions → runAgent("termora-agent --stdio") runs directly. The server
+			// ends the exec channel without sending HELLO (remote command exited / binary
+			// missing). start() must reject via the channel-close guard, not hang.
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.end();
+			});
+			serversB.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+
+			const agent = new SshAgent(makeHost(port), undefined);
+			agentsB.push(agent);
+
+			// Mutation: removing the stream "close" rejectOnce makes start() hang to HELLO timeout.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(
+				/closed before HELLO|HELLO timeout/i,
+			);
+		},
+		TEST_TIMEOUT,
+	);
+});
+
+// ─── Fix C: deploy failure must not leak the authenticated SSH connection ──
+//
+// Both DeployError (user rejection) and infra failures must call cleanup()
+// before rejectOnce() so the authenticated ssh2 Client is destroyed/ended.
+// Without cleanup(), repeated failed deploys exhaust the remote's connection
+// and file-descriptor limits (socket/session exhaustion).
+//
+// Strategy: spy on the SshAgent `cleanup` method; arrange deploy to reject
+// with each error kind; assert cleanup was called before the rejection settles.
+// Mutation oracle: removing the cleanup() call(s) from the .catch() block
+// leaves the spy un-called while start() still rejects — verifying the spy
+// catches the omission.
+
+describe("deploy failure → cleanup() called before rejection (Fix C)", () => {
+	let agentsC: SshAgent[] = [];
+	let serversC: SshServer[] = [];
+
+	afterEach(async () => {
+		for (const agent of agentsC) {
+			try {
+				agent.close();
+			} catch {
+				// ignore
+			}
+		}
+		agentsC = [];
+		await Promise.all(
+			serversC.map(
+				(srv) =>
+					new Promise<void>((resolve) => {
+						srv.close(() => resolve());
+					}),
+			),
+		);
+		serversC = [];
+		vi.resetAllMocks();
+	});
+
+	it(
+		"C1: infra failure (non-DeployError) → cleanup() called before rejection",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new Error("SFTP upload failed: connection reset"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				// Would answer HELLO if runAgent fallback ran — verifies cleanup path
+				stream.write(makeHelloFrame());
+			});
+			serversC.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = { binaryCache: "/tmp/fake-cache", hostname: "127.0.0.1" };
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsC.push(agent);
+
+			// Spy on cleanup — it should be called before start() rejects.
+			const cleanupSpy = vi.spyOn(agent as unknown as { cleanup(): void }, "cleanup");
+
+			// Mutation oracle: without the cleanup() call, cleanupSpy is never called
+			// and the SSH connection stays open after the rejection.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(/deployment failed/i);
+
+			expect(cleanupSpy).toHaveBeenCalled();
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"C2: DeployError (user rejection) → cleanup() called before rejection",
+		async () => {
+			const { deployAgentIfNeeded, DeployError } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new DeployError("AGENT_BINARY_REJECTED", "user denied unknown agent binary"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			serversC.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = { binaryCache: "/tmp/fake-cache", hostname: "127.0.0.1" };
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsC.push(agent);
+
+			// Spy on cleanup — it should be called before start() rejects.
+			const cleanupSpy = vi.spyOn(agent as unknown as { cleanup(): void }, "cleanup");
+
+			// Mutation oracle: without the cleanup() call, cleanupSpy is never called
+			// and the authenticated SSH connection is leaked after user rejection.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(DeployError);
+
+			expect(cleanupSpy).toHaveBeenCalled();
 		},
 		TEST_TIMEOUT,
 	);

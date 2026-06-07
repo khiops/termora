@@ -120,7 +120,7 @@ export async function buildSshConnectConfig(
 			}
 			const secret = await promptAuth(hostId, "passphrase", `Enter passphrase for ${auth.keyPath}`);
 			console.error(
-				`[termora-ssh] passphrase obtained: ${secret ? `yes (length ${secret.length})` : "null (cancelled)"}`,
+				`[termora-ssh] passphrase obtained: ${secret ? "yes (length " + secret.length + ")" : "null (cancelled)"}`,
 			);
 			if (secret === null) {
 				throw new Error("Authentication cancelled by user");
@@ -230,13 +230,23 @@ export class SshAgent extends AgentConnection {
 	 * @param storedFingerprint - The trusted fingerprint from the DB (null = first connect / TOFU).
 	 *   When provided and the server key doesn't match, the connection is rejected and
 	 *   the returned HostKeyVerification will have `mismatch: true`.
+	 * @param sessionTrustedFingerprint - Fingerprint trusted for this session only (trust_once).
+	 * @param signal - Optional AbortSignal. When aborted, the SSH connect is cancelled:
+	 *   the underlying ssh2 Client is destroyed and the returned promise rejects with
+	 *   an AbortError. Any pending auth prompt for this host is also cleared.
 	 */
 	async start(
 		storedFingerprint?: string | null,
 		sessionTrustedFingerprint?: string | null,
+		signal?: AbortSignal,
 	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
 		if (!this.host.sshHost) {
 			throw new Error("Host has no sshHost configured");
+		}
+
+		// Bail early if already aborted before any async work.
+		if (signal?.aborted) {
+			throw Object.assign(new Error("SSH connect aborted"), { name: "AbortError" });
 		}
 
 		const parsed = parseSshHost(this.host.sshHost);
@@ -250,6 +260,8 @@ export class SshAgent extends AgentConnection {
 		const client = new Client();
 		this.client = client;
 
+		// If aborted while building the connect config (which may prompt for auth),
+		// destroy the client and reject before proceeding.
 		const connectConfig = await buildSshConnectConfig(
 			{ method: authMethod, keyPath: this.host.sshKeyPath ?? undefined },
 			hostname,
@@ -258,6 +270,11 @@ export class SshAgent extends AgentConnection {
 			this.promptAuth ?? undefined,
 			this.host.id,
 		);
+
+		if (signal?.aborted) {
+			this.cleanup();
+			throw Object.assign(new Error("SSH connect aborted"), { name: "AbortError" });
+		}
 
 		// TOFU host key verification.
 		// The verifier populates this object synchronously before the connect attempt resolves.
@@ -308,6 +325,25 @@ export class SshAgent extends AgentConnection {
 					resolve({ hello: msg, keyVerification });
 				};
 
+				// Abort handler: destroy the ssh2 client immediately and reject.
+				// Registered with { once: true } so it fires at most once even if abort
+				// is already set (addEventListener fires synchronously in that case).
+				if (signal) {
+					const onAbort = (): void => {
+						// client.destroy() terminates the TCP socket immediately without
+						// waiting for the SSH close handshake — correct for cancellation.
+						try {
+							client.destroy();
+						} catch {
+							// ignore errors during forced teardown
+						}
+						this.client = null;
+						this.channelOpen = false;
+						rejectOnce(Object.assign(new Error("SSH connect aborted"), { name: "AbortError" }));
+					};
+					signal.addEventListener("abort", onAbort, { once: true });
+				}
+
 				// Use `on` (not `once`) so subsequent ssh2 error events (e.g.
 				// KEY_EXCHANGE_FAILED / { code: 3 } emitted after hostVerifier rejection)
 				// are also handled and don't become unhandled EventEmitter throws.
@@ -343,6 +379,12 @@ export class SshAgent extends AgentConnection {
 					// SEC-014: zero credentials immediately after successful auth
 					if (connectConfig.password) connectConfig.password = "";
 					if (connectConfig.passphrase) connectConfig.passphrase = "";
+					// If aborted between TCP connect and the 'ready' event, tear down and bail.
+					if (signal?.aborted) {
+						this.cleanup();
+						rejectOnce(Object.assign(new Error("SSH connect aborted"), { name: "AbortError" }));
+						return;
+					}
 					// Attach stream handler — called after deploy (or immediately if no deploy needed).
 					const runAgent = (agentPath: string): void => {
 						// Start HELLO timeout NOW — deploy phase is complete, agent is being exec'd.
@@ -374,6 +416,11 @@ export class SshAgent extends AgentConnection {
 								this.channel = null;
 								this.channelOpen = false;
 								client.end();
+								// If the channel closed before the agent HELLO arrived, the remote
+								// command exited (e.g. binary missing / immediate failure). Reject so
+								// start() fails fast instead of hanging. rejectOnce is settled-once, so
+								// this is a no-op once HELLO has already resolved the normal path.
+								rejectOnce(new Error("Agent channel closed before HELLO"));
 							});
 
 							stream.on("error", (streamErr: Error) => {
@@ -406,6 +453,14 @@ export class SshAgent extends AgentConnection {
 								if (result.os && result.arch) {
 									this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);
 								}
+								// Check abort after the deploy await — deploy can take tens of seconds.
+								if (signal?.aborted) {
+									this.cleanup();
+									rejectOnce(
+										Object.assign(new Error("SSH connect aborted"), { name: "AbortError" }),
+									);
+									return;
+								}
 								console.error(
 									`[termora-ssh] deploy result: remotePath=${result.remotePath} os=${result.os ?? "unknown"} arch=${result.arch ?? "unknown"}`,
 								);
@@ -413,21 +468,29 @@ export class SshAgent extends AgentConnection {
 								runAgent(result.remotePath);
 							})
 							.catch((deployErr: unknown) => {
-								// User-initiated rejections must propagate — no fallback
+								// User-initiated rejections must propagate — no fallback.
 								if (deployErr instanceof DeployError) {
 									console.error(
 										`[termora-ssh] deploy result: rejected by user (${deployErr.code})`,
 									);
+									this.cleanup();
 									rejectOnce(deployErr);
 									return;
 								}
-								// Infrastructure failures: propagate — don't silently fall back to an agent that isn't there
+								// SECURITY: do NOT fall back to running a possibly-unverified binary after a
+								// deploy/replacement failure. The deployer may have detected a mismatched or
+								// unverifiable remote agent (the binary the replacement was meant to overwrite);
+								// exec'ing whatever `termora-agent` is on PATH would bypass the integrity/update
+								// policy on first-use and unpinned hosts. Reject with a clear error. (A best-effort
+								// fallback for manually-installed agents was considered but rejected — running an
+								// unverified binary is the larger risk. See #43.)
 								const deployErrMsg =
 									deployErr instanceof Error ? deployErr.message : String(deployErr);
 								console.error(`[termora-ssh] deploy result: failed — ${deployErrMsg}`);
 								console.warn(
 									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErrMsg}`,
 								);
+								this.cleanup();
 								rejectOnce(new Error(`Agent deployment failed: ${deployErrMsg}`));
 							});
 					} else {

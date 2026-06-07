@@ -39,14 +39,9 @@ export class StateBroadcaster {
 		for (const channelId of [...client.attachedChannels]) {
 			this.detachClient(clientId, channelId);
 		}
-		// Cancel any pending auth prompts initiated by this client
-		for (const [hostId, pending] of this.ctx.pendingAuthPrompts) {
-			if (pending.clientId === clientId) {
-				if (pending.timer !== null) clearTimeout(pending.timer);
-				this.ctx.pendingAuthPrompts.delete(hostId);
-				pending.resolve(null);
-			}
-		}
+		// NOTE: auth-prompt cancellation/retargeting is owned by SessionManager.removeClient,
+		// which must run BEFORE this call. Do NOT cancel prompts here — the retarget logic
+		// in session-manager.removeClient needs the pending entries to still be present.
 		this.ctx.clients.delete(clientId);
 	}
 

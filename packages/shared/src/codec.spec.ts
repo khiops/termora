@@ -219,4 +219,67 @@ describe("encodeMessage / decodeMessage round-trip", () => {
 		const decoded = decodeMessage(encodeMessage(msg));
 		expect(decoded).toEqual(msg);
 	});
+
+	it("round-trips an AUTH_PROMPT message without optional fields (back-compat)", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_PROMPT",
+			hostId: "host-1",
+			promptType: "passphrase",
+			message: "Enter passphrase for key:",
+		};
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded).toEqual(msg);
+	});
+
+	it("round-trips an AUTH_PROMPT message with promptId and deliveryEpoch", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_PROMPT",
+			hostId: "host-1",
+			promptType: "passphrase",
+			message: "Enter passphrase for key:",
+			promptId: "01HXYZ1234567890ABCDEF",
+			deliveryEpoch: 1_700_000_000_000,
+		};
+		const decoded = decodeMessage(encodeMessage(msg)) as typeof msg;
+		expect(decoded.type).toBe("AUTH_PROMPT");
+		expect(decoded.promptId).toBe("01HXYZ1234567890ABCDEF");
+		expect(decoded.deliveryEpoch).toBe(1_700_000_000_000);
+		expect(decoded.hostId).toBe("host-1");
+	});
+
+	it("round-trips an AUTH_PROMPT_RESPONSE with promptId and deliveryEpoch", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: "host-1",
+			secret: "my-passphrase",
+			rememberSession: true,
+			promptId: "01HXYZ1234567890ABCDEF",
+			deliveryEpoch: 1_700_000_000_000,
+		};
+		const decoded = decodeMessage(encodeMessage(msg)) as typeof msg;
+		expect(decoded.type).toBe("AUTH_PROMPT_RESPONSE");
+		expect(decoded.promptId).toBe("01HXYZ1234567890ABCDEF");
+		expect(decoded.deliveryEpoch).toBe(1_700_000_000_000);
+		expect(decoded.secret).toBe("my-passphrase");
+		expect(decoded.rememberSession).toBe(true);
+	});
+
+	it("round-trips an AUTH_PROMPT_RESPONSE without optional fields (back-compat)", () => {
+		const msg: ProtocolMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: "host-1",
+			secret: null,
+		};
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded).toEqual(msg);
+	});
+
+	it("round-trips a PROMPT_CANCEL message", () => {
+		const msg: ProtocolMessage = {
+			type: "PROMPT_CANCEL",
+			promptId: "01HXYZ1234567890ABCDEF",
+		};
+		const decoded = decodeMessage(encodeMessage(msg));
+		expect(decoded).toEqual(msg);
+	});
 });

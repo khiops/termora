@@ -8,6 +8,8 @@ import {
 	isValidUlid,
 } from "@termora/shared";
 import { describe, expect, it, vi } from "vitest";
+import { handleAuthPromptResponse as handleAuthPromptResponseMessage } from "./handlers/auth-prompt-response.js";
+import type { WsHandlerContext } from "./handlers/types.js";
 
 /** Known token used across auth tests */
 const TEST_TOKEN = "a".repeat(64);
@@ -264,6 +266,28 @@ describe("ws-handler input validation", () => {
 
 describe("ws-handler AUTH_PROMPT_RESPONSE routing", () => {
 	const VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+	const VALID_PROMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+
+	function makeAuthPromptResponseContext(): {
+		ctx: WsHandlerContext;
+		client: { send: ReturnType<typeof vi.fn> };
+		sessionManager: { handleAuthPromptResponse: ReturnType<typeof vi.fn> };
+	} {
+		const client = { send: vi.fn() };
+		const sessionManager = { handleAuthPromptResponse: vi.fn() };
+
+		return {
+			ctx: {
+				clientId: "client-1",
+				client,
+				log: {} as never,
+				sessionManager,
+				writeLockManager: {} as never,
+			} as WsHandlerContext,
+			client,
+			sessionManager,
+		};
+	}
 
 	it("AUTH_PROMPT_RESPONSE message round-trips through codec", () => {
 		const msg: AuthPromptResponseMessage = {
@@ -301,28 +325,88 @@ describe("ws-handler AUTH_PROMPT_RESPONSE routing", () => {
 		expect(isValidUlid(VALID_ULID)).toBe(true);
 	});
 
-	it("handleAuthPromptResponse is called on SessionManager with correct args", () => {
-		// Simulate the ws-handler dispatch logic for AUTH_PROMPT_RESPONSE
-		const mockSessionManager = {
-			handleAuthPromptResponse: vi.fn(),
-		};
-
-		const apr: AuthPromptResponseMessage = {
+	it("forwards promptId and deliveryEpoch to SessionManager", () => {
+		const { ctx, client, sessionManager } = makeAuthPromptResponseContext();
+		const msg: AuthPromptResponseMessage = {
 			type: "AUTH_PROMPT_RESPONSE",
 			hostId: VALID_ULID,
 			secret: "hunter2",
+			rememberSession: true,
+			promptId: VALID_PROMPT_ID,
+			deliveryEpoch: 2,
 		};
 
-		if (!isValidUlid(apr.hostId)) {
-			throw new Error("should not reach here");
-		}
-		mockSessionManager.handleAuthPromptResponse("client-1", apr.hostId, apr.secret);
+		handleAuthPromptResponseMessage(msg, ctx);
 
-		expect(mockSessionManager.handleAuthPromptResponse).toHaveBeenCalledOnce();
-		expect(mockSessionManager.handleAuthPromptResponse).toHaveBeenCalledWith(
+		expect(client.send).not.toHaveBeenCalled();
+		expect(sessionManager.handleAuthPromptResponse).toHaveBeenCalledOnce();
+		expect(sessionManager.handleAuthPromptResponse).toHaveBeenCalledWith(
 			"client-1",
 			VALID_ULID,
 			"hunter2",
+			true,
+			VALID_PROMPT_ID,
+			2,
+		);
+	});
+
+	it("rejects invalid promptId before dispatching", () => {
+		const { ctx, client, sessionManager } = makeAuthPromptResponseContext();
+		const msg: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: "hunter2",
+			promptId: "not-a-ulid",
+		};
+
+		handleAuthPromptResponseMessage(msg, ctx);
+
+		expect(sessionManager.handleAuthPromptResponse).not.toHaveBeenCalled();
+		expect(client.send).toHaveBeenCalledWith({
+			type: "ERROR",
+			code: "INVALID_INPUT",
+			message: "Invalid promptId",
+		});
+	});
+
+	it("rejects invalid deliveryEpoch before dispatching", () => {
+		const { ctx, client, sessionManager } = makeAuthPromptResponseContext();
+		const msg: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: "hunter2",
+			deliveryEpoch: Number.NaN,
+		};
+
+		handleAuthPromptResponseMessage(msg, ctx);
+
+		expect(sessionManager.handleAuthPromptResponse).not.toHaveBeenCalled();
+		expect(client.send).toHaveBeenCalledWith({
+			type: "ERROR",
+			code: "INVALID_INPUT",
+			message: "deliveryEpoch must be a finite non-negative number",
+		});
+	});
+
+	it("forwards responses without promptId for back-compat clients", () => {
+		const { ctx, client, sessionManager } = makeAuthPromptResponseContext();
+		const msg: AuthPromptResponseMessage = {
+			type: "AUTH_PROMPT_RESPONSE",
+			hostId: VALID_ULID,
+			secret: null,
+		};
+
+		handleAuthPromptResponseMessage(msg, ctx);
+
+		expect(client.send).not.toHaveBeenCalled();
+		expect(sessionManager.handleAuthPromptResponse).toHaveBeenCalledOnce();
+		expect(sessionManager.handleAuthPromptResponse).toHaveBeenCalledWith(
+			"client-1",
+			VALID_ULID,
+			null,
+			undefined,
+			undefined,
+			undefined,
 		);
 	});
 });

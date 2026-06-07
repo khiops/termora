@@ -384,8 +384,18 @@ export class AgentConnectionManager {
 			this.ctx.hubLogger?.log("info", "agent-connection-manager: agent closed", { hostId });
 			const session = this.ctx.sessions.get(hostId);
 			const host = this.ctx.metaDal.getHost(hostId);
-			this.ctx.agents.delete(hostId);
-			this.ctx.agentCapabilities.delete(hostId);
+			// Fix C (invariant 10): identity-guard ALL side effects — not just agents.delete.
+			// A stale close from a REPLACED agent must not trigger disconnect/reconnect for
+			// the new agent's session.  Compute once, apply to every branch below.
+			const isCurrentAgent = this.ctx.agents.get(hostId) === agent;
+			if (isCurrentAgent) {
+				this.ctx.agents.delete(hostId);
+				// agentCapabilities is keyed to the same agent generation — clear it too.
+				this.ctx.agentCapabilities.delete(hostId);
+			}
+
+			// Guard: stale close events from replaced agents produce no further side effects.
+			if (!isCurrentAgent) return;
 
 			if (!session) return;
 

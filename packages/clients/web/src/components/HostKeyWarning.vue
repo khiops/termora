@@ -51,9 +51,21 @@
 				</div>
 
 				<div class="hkw-actions">
-					<button class="hkw-btn hkw-reject" @click="handleReject">Reject</button>
-					<button class="hkw-btn hkw-trust-once" @click="handleTrustOnce">Trust Once</button>
-					<button class="hkw-btn hkw-accept" @click="handleAccept">
+					<button
+						class="hkw-btn hkw-reject"
+						:data-prompt-id="prompt.promptId"
+						@click="handleReject"
+					>Reject</button>
+					<button
+						class="hkw-btn hkw-trust-once"
+						:data-prompt-id="prompt.promptId"
+						@click="handleTrustOnce"
+					>Trust Once</button>
+					<button
+						class="hkw-btn hkw-accept"
+						:data-prompt-id="prompt.promptId"
+						@click="handleAccept"
+					>
 						{{ prompt.firstConnect ? 'Trust Permanently' : 'Accept New Key' }}
 					</button>
 				</div>
@@ -90,16 +102,20 @@ async function copyNew(): Promise<void> {
 	}, 1500);
 }
 
-function handleAccept(): void {
-	store.accept();
+function promptIdFromEvent(event: MouseEvent): string | undefined {
+	return (event.currentTarget as HTMLElement | null)?.dataset.promptId;
 }
 
-function handleTrustOnce(): void {
-	store.trustOnce();
+function handleAccept(event: MouseEvent): void {
+	store.accept(promptIdFromEvent(event));
 }
 
-function handleReject(): void {
-	store.reject();
+function handleTrustOnce(event: MouseEvent): void {
+	store.trustOnce(promptIdFromEvent(event));
+}
+
+function handleReject(event: MouseEvent): void {
+	store.reject(promptIdFromEvent(event));
 }
 </script>
 

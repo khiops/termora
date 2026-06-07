@@ -74,6 +74,8 @@ export const useSessionStore = defineStore("session", () => {
 		agentVerifyStore.setWsClient(wsClient);
 		_registerAgentVerifyHandlers(agentVerifyStore);
 
+		_registerPromptCancelHandlers(authPromptStore, hostVerifyStore, agentVerifyStore);
+
 		const hostsStore = useHostsStore();
 		_registerSessionHandlers(hostsStore);
 
@@ -200,7 +202,13 @@ export const useSessionStore = defineStore("session", () => {
 	): void {
 		wsClient.on("AUTH_PROMPT", (msg) => {
 			if (msg.type === "AUTH_PROMPT") {
-				authPromptStore.handleAuthPrompt(msg.hostId, msg.promptType, msg.message);
+				authPromptStore.handleAuthPrompt(
+					msg.hostId,
+					msg.promptType,
+					msg.message,
+					msg.promptId,
+					msg.deliveryEpoch,
+				);
 			}
 		});
 	}
@@ -259,6 +267,24 @@ export const useSessionStore = defineStore("session", () => {
 				// SSH_HOST_KEY_REJECTED, etc.) are surfaced as error toasts.
 				const toastStore = useToastStore();
 				toastStore.show("error", msg.message, 10_000);
+			}
+		});
+	}
+
+	/**
+	 * Wire up PROMPT_CANCEL messages — dispatches the cancelled promptId to all
+	 * three prompt stores so whichever holds it dismisses that dialog.
+	 */
+	function _registerPromptCancelHandlers(
+		authPromptStore: ReturnType<typeof useAuthPromptStore>,
+		hostVerifyStore: ReturnType<typeof useHostVerifyStore>,
+		agentVerifyStore: ReturnType<typeof useAgentVerifyStore>,
+	): void {
+		wsClient.on("PROMPT_CANCEL", (msg) => {
+			if (msg.type === "PROMPT_CANCEL") {
+				authPromptStore.handlePromptCancel(msg.promptId);
+				hostVerifyStore.handlePromptCancel(msg.promptId);
+				agentVerifyStore.handlePromptCancel(msg.promptId);
 			}
 		});
 	}
