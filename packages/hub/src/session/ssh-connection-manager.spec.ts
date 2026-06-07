@@ -116,7 +116,9 @@ describe("SshConnectionManager — passphrase cache", () => {
 		mgr.handleAuthPromptResponse("c4", hostId, "my-passphrase", true);
 
 		expect(ctx.passphraseCache.has(hostId)).toBe(true);
-		const cached = ctx.passphraseCache.get(hostId)!;
+		const cached = ctx.passphraseCache.get(hostId);
+		expect(cached).toBeDefined();
+		if (!cached) return;
 		expect(cached.secret).toBe("my-passphrase");
 		expect(cached.expiresAt).toBeGreaterThan(Date.now());
 	});
@@ -135,7 +137,10 @@ describe("SshConnectionManager — passphrase cache", () => {
 
 		mgr.handleAuthPromptResponse("c4b", hostId, "pass", true);
 
-		const { expiresAt } = ctx.passphraseCache.get(hostId)!;
+		const cached2 = ctx.passphraseCache.get(hostId);
+		expect(cached2).toBeDefined();
+		if (!cached2) return;
+		const { expiresAt } = cached2;
 		const ttlMs = expiresAt - before;
 		expect(ttlMs).toBeGreaterThanOrEqual(15 * 60 * 1000 - 100);
 		expect(ttlMs).toBeLessThanOrEqual(15 * 60 * 1000 + 100);
@@ -155,10 +160,12 @@ describe("SshConnectionManager — passphrase cache", () => {
 		mgr.handleAuthPromptResponse("c5", hostId, "my-passphrase", false);
 
 		expect(ctx.passphraseCache.has(hostId)).toBe(true);
-		const cached = ctx.passphraseCache.get(hostId)!;
-		expect(cached.secret).toBe("my-passphrase");
+		const cached3 = ctx.passphraseCache.get(hostId);
+		expect(cached3).toBeDefined();
+		if (!cached3) return;
+		expect(cached3.secret).toBe("my-passphrase");
 		// Short TTL (60s), not 15min
-		expect(cached.expiresAt).toBeLessThanOrEqual(Date.now() + 61_000);
+		expect(cached3.expiresAt).toBeLessThanOrEqual(Date.now() + 61_000);
 	});
 
 	it("handleAuthPromptResponse does not cache when secret is null", () => {
@@ -267,7 +274,7 @@ describe("SshConnectionManager — reconnect cache-only promptAuth", () => {
 		expect(capturedSshAgentArgs).not.toBeNull();
 
 		// Second arg is the promptAuth callback — must be non-undefined (mutation sentinel)
-		const promptAuth = capturedSshAgentArgs![1];
+		const promptAuth = capturedSshAgentArgs?.[1];
 		expect(promptAuth).toBeDefined();
 		expect(typeof promptAuth).toBe("function");
 

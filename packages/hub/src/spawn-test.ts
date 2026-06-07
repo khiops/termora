@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { decodeMessage, encodeMessage } from "@termora/shared";
 import type { ProtocolMessage } from "@termora/shared";
+import { decodeMessage, encodeMessage } from "@termora/shared";
 
 const auth = JSON.parse(readFileSync(join(homedir(), ".config/termora/auth.json"), "utf8"));
 const hostId = process.argv[2] || "local";
@@ -27,6 +27,7 @@ req.on("upgrade", (_, socket) => {
 		if (payload.length < 126) header.push(0x80 | payload.length);
 		else header.push(0x80 | 126, (payload.length >> 8) & 0xff, payload.length & 0xff);
 		const masked = Buffer.alloc(payload.length);
+		// biome-ignore lint/style/noNonNullAssertion: Buffer indexed access within bounds guaranteed by loop condition
 		for (let i = 0; i < payload.length; i++) masked[i] = payload[i]! ^ mask[i % 4]!;
 		socket.write(Buffer.concat([Buffer.from(header), mask, masked]));
 	}
@@ -35,11 +36,14 @@ req.on("upgrade", (_, socket) => {
 	socket.on("data", (chunk: Buffer) => {
 		buf = Buffer.concat([buf, chunk]);
 		while (buf.length >= 2) {
+			// biome-ignore lint/style/noNonNullAssertion: buf.length >= 2 guarantees indices 0,1 exist
 			const firstByte = buf[0]!;
+			// biome-ignore lint/style/noNonNullAssertion: buf.length >= 2 guarantees indices 0,1 exist
 			let payloadLen = buf[1]! & 0x7f;
 			let offset = 2;
 			if (payloadLen === 126) {
 				if (buf.length < 4) return;
+				// biome-ignore lint/style/noNonNullAssertion: buf.length >= 4 guaranteed by the check above
 				payloadLen = (buf[2]! << 8) | buf[3]!;
 				offset = 4;
 			} else if (payloadLen === 127) {
@@ -61,7 +65,10 @@ req.on("upgrade", (_, socket) => {
 							500,
 						);
 					} else if (msg.type === "SPAWN_OK") {
-						console.log("✅ SPAWN_OK! channelId:", (msg as any).channelId);
+						console.log(
+							"✅ SPAWN_OK! channelId:",
+							(msg as import("@termora/shared").UiSpawnOkMessage).channelId,
+						);
 						socket.end();
 						process.exit(0);
 					} else if (msg.type === "SPAWN_ERR" || msg.type === "ERROR") {

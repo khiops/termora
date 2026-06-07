@@ -1,8 +1,8 @@
-import { THEME_NAME_REGEX } from "@termora/shared";
 import type { TermoraTheme } from "@termora/shared";
+import { THEME_NAME_REGEX } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
-import { ThemeError } from "../theme-manager.js";
 import type { ThemeManager } from "../theme-manager.js";
+import { ThemeError } from "../theme-manager.js";
 
 export function registerThemeRoutes(server: FastifyInstance, themeManager: ThemeManager): void {
 	// ─── Theme CRUD ──────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import type { InjectionKey } from "vue";
-import { type Ref, computed, ref, shallowRef } from "vue";
+import { computed, type Ref, ref, shallowRef } from "vue";
 import type { PaneNode } from "./useLayout.js";
 import { collectTerminalChannelIds } from "./useLayout.js";
 

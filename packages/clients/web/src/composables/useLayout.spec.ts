@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, nextTick } from "vue";
+import type { PaneNode } from "./useLayout.js";
 import {
 	collectTerminalChannelIds,
 	countPanes,
@@ -10,7 +11,6 @@ import {
 	resolveTabLabel,
 	useLayout,
 } from "./useLayout.js";
-import type { PaneNode } from "./useLayout.js";
 
 let layout: ReturnType<typeof useLayout>;
 let scope: ReturnType<typeof effectScope>;
@@ -48,11 +48,11 @@ function openTabs(...labels: string[]): string[] {
 }
 
 /** Check that every leaf in a pane tree is vacant. */
-function isAllVacant(node: PaneNode | null | undefined): boolean {
+function _isAllVacant(node: PaneNode | null | undefined): boolean {
 	if (node === null || node === undefined) return false;
 	if (node.type === "vacant") return true;
 	if (node.type === "terminal") return false;
-	return isAllVacant(node.first) && isAllVacant(node.second);
+	return _isAllVacant(node.first) && _isAllVacant(node.second);
 }
 
 /** Get the layout root for the tab that was opened for channelId. */

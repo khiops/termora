@@ -1,5 +1,5 @@
-import { decodeMessage, encodeMessage } from "@termora/shared";
 import type { ProtocolMessage } from "@termora/shared";
+import { decodeMessage, encodeMessage } from "@termora/shared";
 
 type MessageListener = (msg: ProtocolMessage) => void;
 

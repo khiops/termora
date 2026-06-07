@@ -1,4 +1,4 @@
-import { type Ref, onScopeDispose, watch } from "vue";
+import { onScopeDispose, type Ref, watch } from "vue";
 
 const DEFAULT_TITLE = "termora";
 

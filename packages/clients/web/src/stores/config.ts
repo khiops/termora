@@ -2,7 +2,6 @@ import {
 	type ChannelsConfig,
 	DEFAULT_PROFILE,
 	type FontFamily,
-	type FontFile,
 	type NotificationConfig,
 	type PanesConfig,
 	type SearchConfig,

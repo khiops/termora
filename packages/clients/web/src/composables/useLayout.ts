@@ -1,32 +1,32 @@
 import { generateId } from "@termora/shared";
 import { ref, watch } from "vue";
+import type { PaneNode } from "./usePaneTree.js";
 import {
-	MAX_PANE_COUNT,
 	ensurePaneIds,
 	findFirstLeafPaneId,
+	MAX_PANE_COUNT,
 	truncateToMaxPanes,
 	usePaneTree,
 } from "./usePaneTree.js";
-import type { PaneNode } from "./usePaneTree.js";
-import { useTabManager } from "./useTabManager.js";
 import type { Tab } from "./useTabManager.js";
+import { useTabManager } from "./useTabManager.js";
 
 // ---------------------------------------------------------------------------
 // Re-export types and helpers so existing consumers importing from useLayout
 // continue to work without any import path changes.
 // ---------------------------------------------------------------------------
 
-export type { PaneNode, DropZone, NodePath } from "./usePaneTree.js";
-export type { Tab } from "./useTabManager.js";
+export type { DropZone, NodePath, PaneNode } from "./usePaneTree.js";
 export {
-	findFirstLeafPaneId,
-	findChannelByPaneId,
-	countPanes,
 	collectTerminalChannelIds,
-	resolveTabLabel,
+	countPanes,
+	findChannelByPaneId,
+	findFirstLeafPaneId,
 	purgeDeadTabs,
 	purgeOrphanedTabs,
+	resolveTabLabel,
 } from "./usePaneTree.js";
+export type { Tab } from "./useTabManager.js";
 
 // ---------------------------------------------------------------------------
 // localStorage persistence key

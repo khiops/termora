@@ -5,8 +5,8 @@ import { showSimpleNotification } from "../composables/useDesktopNotifications.j
 import { WsClient } from "../services/ws-client.js";
 import { hubWsUrl } from "../utils/hub-url.js";
 import { useAgentVerifyStore } from "./agent-verify.js";
-import { useAuthPromptStore } from "./auth-prompt.js";
 import { useAuthStore } from "./auth.js";
+import { useAuthPromptStore } from "./auth-prompt.js";
 import { useChannelsStore } from "./channels.js";
 import { useConfigStore } from "./config.js";
 import { useHostVerifyStore } from "./host-verify.js";

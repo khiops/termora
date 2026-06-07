@@ -1,5 +1,5 @@
-import { BUNDLED_THEMES } from "@termora/shared";
 import type { TermoraTheme } from "@termora/shared";
+import { BUNDLED_THEMES } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hexToRgb, useThemeStore } from "./theme.js";

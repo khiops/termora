@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	PRIMARY_TOKEN_ID,
 	checkPermissions,
 	createToken,
 	hashToken,
 	initAuth,
 	listTokens,
+	PRIMARY_TOKEN_ID,
 	revokeToken,
 	touchToken,
 	upsertPrimaryToken,

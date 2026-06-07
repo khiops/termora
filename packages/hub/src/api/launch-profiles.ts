@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { toSnakeCase, validateShell } from "@termora/shared";
 import type { LaunchProfile } from "@termora/shared";
+import { toSnakeCase, validateShell } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import {
 	findWindowsTerminalSettingsPath,

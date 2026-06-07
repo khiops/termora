@@ -1,6 +1,6 @@
 import type { TerminalProfile } from "@termora/shared";
 import type { CSSProperties } from "vue";
-import { type Ref, computed, ref } from "vue";
+import { computed, type Ref, ref } from "vue";
 
 /**
  * Composable: reactive wallpaper style computation for a terminal pane.

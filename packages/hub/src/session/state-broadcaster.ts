@@ -18,7 +18,7 @@ import type {
 	StateSyncMessage,
 } from "@termora/shared";
 import { DEFAULT_CHANNEL_NAME, resolveChannelDisplayName } from "@termora/shared";
-import type { ChannelState, SessionState, SharedSessionContext } from "./session-context.js";
+import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 
 const TITLE_DEBOUNCE_MS = 100;
@@ -153,7 +153,7 @@ export class StateBroadcaster {
 	/** If all clients detached from all channels of a host, session → detached */
 	checkSessionDetached(hostId: string): void {
 		const session = this.ctx.sessions.get(hostId);
-		if (!session || session.status !== "active") return;
+		if (session?.status !== "active") return;
 
 		// Check if any channel for this session is still live
 		for (const ch of this.ctx.channels.values()) {

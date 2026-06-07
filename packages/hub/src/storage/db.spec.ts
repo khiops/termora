@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
+import { openTestDatabases } from "./db.js";
 
 describe("openTestDatabases", () => {
 	let dbs: DatabaseManager;

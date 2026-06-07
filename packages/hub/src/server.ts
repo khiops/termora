@@ -1,28 +1,28 @@
-import * as path from 'node:path';
-import cors from '@fastify/cors';
-import fastifyHelmet from '@fastify/helmet';
-import websocket from '@fastify/websocket';
-import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from '@termora/shared';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import Fastify from 'fastify';
-import { registerChannelRoutes } from './api/channels.js';
-import { registerConfigRoutes } from './api/config.js';
-import { registerFontRoutes } from './api/fonts.js';
-import { registerGroupRoutes } from './api/groups.js';
-import { registerHostGroupRoutes } from './api/host-groups.js';
-import { registerHostRoutes } from './api/hosts.js';
-import { registerLaunchProfileRoutes } from './api/launch-profiles.js';
-import { registerLogRoutes } from './api/logs.js';
-import { registerPairRoutes } from './api/pair.js';
-import { registerSessionRoutes } from './api/sessions.js';
-import { registerSshKeyRoutes } from './api/ssh-keys.js';
-import { registerThemeRoutes } from './api/themes.js';
-import { registerTokenRoutes } from './api/tokens.js';
-import { registerWallpaperRoutes } from './api/wallpapers.js';
-import { touchToken, upsertPrimaryToken, validateTokenRecord } from './auth.js';
-import { BUILD_HASH, HUB_VERSION } from './build-version.js';
-import { getConfigDir, getStateDir } from './cli.js';
-import type { AuthConfig } from './config.js';
+import * as path from "node:path";
+import cors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
+import websocket from "@fastify/websocket";
+import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@termora/shared";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import Fastify from "fastify";
+import { registerChannelRoutes } from "./api/channels.js";
+import { registerConfigRoutes } from "./api/config.js";
+import { registerFontRoutes } from "./api/fonts.js";
+import { registerGroupRoutes } from "./api/groups.js";
+import { registerHostGroupRoutes } from "./api/host-groups.js";
+import { registerHostRoutes } from "./api/hosts.js";
+import { registerLaunchProfileRoutes } from "./api/launch-profiles.js";
+import { registerLogRoutes } from "./api/logs.js";
+import { registerPairRoutes } from "./api/pair.js";
+import { registerSessionRoutes } from "./api/sessions.js";
+import { registerSshKeyRoutes } from "./api/ssh-keys.js";
+import { registerThemeRoutes } from "./api/themes.js";
+import { registerTokenRoutes } from "./api/tokens.js";
+import { registerWallpaperRoutes } from "./api/wallpapers.js";
+import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
+import { BUILD_HASH, HUB_VERSION } from "./build-version.js";
+import { getConfigDir, getStateDir } from "./cli.js";
+import type { AuthConfig } from "./config.js";
 import {
 	ConfigResolver,
 	corsOriginsToRegexps,
@@ -30,17 +30,17 @@ import {
 	loadCorsOrigins,
 	loadGcConfig,
 	matchCorsOrigin,
-} from './config.js';
-import type { HubLogger } from './logging/hub-logger.js';
-import type { LoggerRegistry } from './logging/index.js';
-import { registerSeaStaticServing } from './sea-static-server.js';
-import { SessionManager } from './session/session-manager.js';
-import { seedShellProfiles } from './shell-discovery.js';
-import type { DatabaseManager } from './storage/db.js';
-import { MetaDAL } from './storage/meta.js';
-import { migrateLegacyShellDefaults } from './storage/migrate-launch-profiles.js';
-import { ThemeManager } from './theme-manager.js';
-import { registerWsRoutes } from './ws/ws-handler.js';
+} from "./config.js";
+import type { HubLogger } from "./logging/hub-logger.js";
+import type { LoggerRegistry } from "./logging/index.js";
+import { registerSeaStaticServing } from "./sea-static-server.js";
+import { SessionManager } from "./session/session-manager.js";
+import { seedShellProfiles } from "./shell-discovery.js";
+import type { DatabaseManager } from "./storage/db.js";
+import { MetaDAL } from "./storage/meta.js";
+import { migrateLegacyShellDefaults } from "./storage/migrate-launch-profiles.js";
+import { ThemeManager } from "./theme-manager.js";
+import { registerWsRoutes } from "./ws/ws-handler.js";
 
 /**
  * Mutable set of exact CORS origins allowed by the server.
@@ -88,10 +88,10 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 				defaultSrc: ["'self'"],
 				scriptSrc: ["'self'"],
 				styleSrc: ["'self'", "'unsafe-inline'"],
-				connectSrc: ["'self'", 'ws:', 'wss:'],
-				imgSrc: ["'self'", 'data:', 'blob:'],
-				fontSrc: ["'self'", 'data:'],
-				workerSrc: ["'self'", 'blob:'],
+				connectSrc: ["'self'", "ws:", "wss:"],
+				imgSrc: ["'self'", "data:", "blob:"],
+				fontSrc: ["'self'", "data:"],
+				workerSrc: ["'self'", "blob:"],
 			},
 		},
 		crossOriginEmbedderPolicy: false,
@@ -106,19 +106,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	//          by addCorsOrigins() in main.ts after startServer() returns the actual port.
 	const configDir = options?.configDir ?? getConfigDir();
 	// SEC-027: load auth config once and reuse across all call sites
-	const authConfig = options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
+	const authConfig =
+		options?.authConfig !== undefined ? options.authConfig : loadAuthConfig(configDir);
 
 	// Determine origin patterns for this server instance.
 	// When corsOrigins is overridden (tests), use that list exclusively.
 	// Otherwise, load from config.toml — user patterns may include wildcards.
-	const corsPatterns = options?.corsOrigins !== undefined ? options.corsOrigins : loadCorsOrigins(configDir);
+	const corsPatterns =
+		options?.corsOrigins !== undefined ? options.corsOrigins : loadCorsOrigins(configDir);
 
 	// Repopulate the module-level Set. Hub is a singleton — one server per process.
 	_corsAllowedOrigins.clear();
 	// Wildcard patterns go to regex matching; exact strings go into the Set for O(1) lookup.
 	const wildcardPatterns: string[] = [];
 	for (const o of corsPatterns) {
-		if (o.includes('*')) {
+		if (o.includes("*")) {
 			wildcardPatterns.push(o);
 		} else {
 			_corsAllowedOrigins.add(o);
@@ -135,8 +137,8 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
 			cb(null, matched);
 		},
-		methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-		allowedHeaders: ['Content-Type', 'Authorization'],
+		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+		allowedHeaders: ["Content-Type", "Authorization"],
 		credentials: true,
 	});
 
@@ -153,42 +155,42 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			upsertPrimaryToken(db, primaryToken);
 		}
 
-		server.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+		server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
 			// CORS preflight is handled by @fastify/cors — skip auth.
-			if (request.method === 'OPTIONS') return;
+			if (request.method === "OPTIONS") return;
 
 			// Parse pathname from the raw URL to avoid query-string or path-traversal bypasses.
-			const pathname = new URL(request.url, 'http://localhost').pathname;
+			const pathname = new URL(request.url, "http://localhost").pathname;
 
 			// Unauthenticated endpoints — exact pathname match
-			if (pathname === '/api/health') return;
-			if (pathname === '/api/pair/verify') return;
-			if (pathname === '/api/fonts' && request.method === 'GET') return;
-			if (pathname === '/api/wallpapers' && request.method === 'GET') return;
+			if (pathname === "/api/health") return;
+			if (pathname === "/api/pair/verify") return;
+			if (pathname === "/api/fonts" && request.method === "GET") return;
+			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
-			if (pathname === '/ws' || pathname.startsWith('/ws/')) return;
+			if (pathname === "/ws" || pathname.startsWith("/ws/")) return;
 
 			// Static assets (index.html, JS bundles, etc.) do not require auth —
 			// the UI itself handles the pairing/auth flow on first load.
-			if (!pathname.startsWith('/api/')) return;
+			if (!pathname.startsWith("/api/")) return;
 
 			const authHeader = request.headers.authorization;
 			if (!authHeader) {
-				server.log.warn({ url: pathname }, 'auth: missing Authorization header');
+				server.log.warn({ url: pathname }, "auth: missing Authorization header");
 				return reply.code(401).send({
-					error: 'AUTH_REQUIRED',
-					message: 'Authorization header required',
+					error: "AUTH_REQUIRED",
+					message: "Authorization header required",
 				});
 			}
 
-			const [scheme, token] = authHeader.split(' ');
-			if (scheme !== 'Bearer' || !token) {
-				server.log.warn({ url: pathname }, 'auth: malformed Authorization header');
+			const [scheme, token] = authHeader.split(" ");
+			if (scheme !== "Bearer" || !token) {
+				server.log.warn({ url: pathname }, "auth: malformed Authorization header");
 				return reply.code(401).send({
-					error: 'AUTH_REQUIRED',
-					message: 'Authorization header must be: Bearer <token>',
+					error: "AUTH_REQUIRED",
+					message: "Authorization header must be: Bearer <token>",
 				});
 			}
 
@@ -196,39 +198,39 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 				// DB-backed validation: checks expiry and revocation status
 				const record = validateTokenRecord(db, token);
 				if (!record) {
-					server.log.warn({ url: pathname }, 'auth: invalid, expired, or revoked token');
+					server.log.warn({ url: pathname }, "auth: invalid, expired, or revoked token");
 					return reply.code(401).send({
-						error: 'AUTH_INVALID',
-						message: 'Invalid, expired, or revoked token',
+						error: "AUTH_INVALID",
+						message: "Invalid, expired, or revoked token",
 					});
 				}
 				// Sliding-window expiry refresh + last_used_at update (best-effort, non-blocking)
 				try {
 					touchToken(db, record.id, ttlDays);
 				} catch (err) {
-					server.log.warn({ err, tokenId: record.id }, 'touchToken failed');
+					server.log.warn({ err, tokenId: record.id }, "touchToken failed");
 				}
-				server.log.debug({ url: pathname, tokenId: record.id }, 'auth: accepted');
+				server.log.debug({ url: pathname, tokenId: record.id }, "auth: accepted");
 			} else {
 				// DB is required for token validation — fail closed to prevent
 				// skipping expiry/revocation checks.
-				server.log.warn({ url: pathname }, 'auth: database unavailable');
+				server.log.warn({ url: pathname }, "auth: database unavailable");
 				return reply.code(500).send({
-					error: 'SERVER_ERROR',
-					message: 'Database unavailable',
+					error: "SERVER_ERROR",
+					message: "Database unavailable",
 				});
 			}
 		});
 	}
 
 	// Health endpoint — unauthenticated, always available for debugging
-	server.get('/api/health', async () => {
-		return { status: 'ok', version: HUB_VERSION, build: BUILD_HASH };
+	server.get("/api/health", async () => {
+		return { status: "ok", version: HUB_VERSION, build: BUILD_HASH };
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
-		const fastifyMultipart = (await import('@fastify/multipart')).default;
+		const fastifyMultipart = (await import("@fastify/multipart")).default;
 		await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
 
 		await server.register(websocket);
@@ -261,10 +263,10 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		migrateLegacyShellDefaults(metaDal, configResolver);
 
 		// First-run: ensure the built-in "local" host exists
-		const wasNew = !metaDal.getHostByLabel('local');
+		const wasNew = !metaDal.getHostByLabel("local");
 		await sessionManager.ensureLocalHost();
 		if (wasNew) {
-			server.log.info('Created default local host');
+			server.log.info("Created default local host");
 		}
 
 		// First-run: auto-detect and seed launch profiles from available shells.
@@ -279,7 +281,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 							profilesCreated: result.profilesCreated,
 							shells: result.profiles.map((p) => p.shell),
 						},
-						'auto-detected and created launch profiles for available shells',
+						"auto-detected and created launch profiles for available shells",
 					);
 				}
 			});
@@ -319,9 +321,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		await registerUserFonts(server, configDir);
 		await registerUserSounds(server, configDir);
 		await registerUserWallpapers(server, configDir);
-		const logsDir = options.logsDir ?? path.join(getStateDir(), 'logs');
+		const logsDir = options.logsDir ?? path.join(getStateDir(), "logs");
 		await registerLogRoutes(server, logsDir);
-		server.addHook('onClose', async () => {
+		server.addHook("onClose", async () => {
 			await sessionManager.shutdown();
 		});
 	}
@@ -336,8 +338,11 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	return server;
 }
 
-export async function startServer(server: FastifyInstance, options?: ServerOptions): Promise<string> {
-	const host = options?.host ?? '127.0.0.1';
+export async function startServer(
+	server: FastifyInstance,
+	options?: ServerOptions,
+): Promise<string> {
+	const host = options?.host ?? "127.0.0.1";
 	const basePort = options?.port ?? DEFAULT_PORT;
 	const maxPort = basePort + 99; // zero_conf: try up to 100 ports
 
@@ -345,11 +350,14 @@ export async function startServer(server: FastifyInstance, options?: ServerOptio
 		try {
 			const address = await server.listen({ host, port });
 			if (port !== basePort) {
-				server.log.info({ basePort, port }, 'hub: port unavailable, using zero_conf port');
+				server.log.info({ basePort, port }, "hub: port unavailable, using zero_conf port");
 			}
 			return address;
 		} catch (err: unknown) {
-			const isAddrInUse = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+			const isAddrInUse =
+				err instanceof Error &&
+				"code" in err &&
+				(err as NodeJS.ErrnoException).code === "EADDRINUSE";
 			if (!isAddrInUse || port === maxPort) {
 				throw err;
 			}
@@ -377,19 +385,19 @@ export async function startServer(server: FastifyInstance, options?: ServerOptio
  * drop .woff2 files in there.
  */
 async function registerUserFonts(server: FastifyInstance, configDir: string): Promise<void> {
-	const { mkdirSync } = await import('node:fs');
-	const { join } = await import('node:path');
-	const fontsDir = join(configDir, 'fonts');
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const fontsDir = join(configDir, "fonts");
 	mkdirSync(fontsDir, { recursive: true });
 
-	const fastifyStatic = (await import('@fastify/static')).default;
+	const fastifyStatic = (await import("@fastify/static")).default;
 	await server.register(fastifyStatic, {
 		root: fontsDir,
-		prefix: '/public/fonts/',
+		prefix: "/public/fonts/",
 		decorateReply: false, // required for multiple @fastify/static plugins
 	});
 
-	server.log.info({ fontsDir }, 'serving user fonts from config dir');
+	server.log.info({ fontsDir }, "serving user fonts from config dir");
 }
 
 /**
@@ -400,19 +408,19 @@ async function registerUserFonts(server: FastifyInstance, configDir: string): Pr
  * drop audio files in there for custom bell sounds.
  */
 async function registerUserSounds(server: FastifyInstance, configDir: string): Promise<void> {
-	const { mkdirSync } = await import('node:fs');
-	const { join } = await import('node:path');
-	const soundsDir = join(configDir, 'sounds');
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const soundsDir = join(configDir, "sounds");
 	mkdirSync(soundsDir, { recursive: true });
 
-	const fastifyStatic = (await import('@fastify/static')).default;
+	const fastifyStatic = (await import("@fastify/static")).default;
 	await server.register(fastifyStatic, {
 		root: soundsDir,
-		prefix: '/public/sounds/',
+		prefix: "/public/sounds/",
 		decorateReply: false, // required for multiple @fastify/static plugins
 	});
 
-	server.log.info({ soundsDir }, 'serving user sounds from config dir');
+	server.log.info({ soundsDir }, "serving user sounds from config dir");
 }
 
 /**
@@ -420,49 +428,52 @@ async function registerUserSounds(server: FastifyInstance, configDir: string): P
  * from the config directory's `wallpapers/` subdirectory.
  */
 async function registerUserWallpapers(server: FastifyInstance, configDir: string): Promise<void> {
-	const { mkdirSync } = await import('node:fs');
-	const { join } = await import('node:path');
-	const wallpapersDir = join(configDir, 'wallpapers');
+	const { mkdirSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const wallpapersDir = join(configDir, "wallpapers");
 	mkdirSync(wallpapersDir, { recursive: true });
 
-	const fastifyStatic = (await import('@fastify/static')).default;
+	const fastifyStatic = (await import("@fastify/static")).default;
 	await server.register(fastifyStatic, {
 		root: wallpapersDir,
-		prefix: '/public/wallpapers/',
+		prefix: "/public/wallpapers/",
 		decorateReply: false,
 		setHeaders: (res) => {
-			res.setHeader('X-Content-Type-Options', 'nosniff');
+			res.setHeader("X-Content-Type-Options", "nosniff");
 		},
 	});
 
-	server.log.info({ wallpapersDir }, 'serving user wallpapers from config dir');
+	server.log.info({ wallpapersDir }, "serving user wallpapers from config dir");
 }
 
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
-	const { existsSync } = await import('node:fs');
-	const { join, dirname } = await import('node:path');
-	const { fileURLToPath } = await import('node:url');
+	const { existsSync } = await import("node:fs");
+	const { join, dirname } = await import("node:path");
+	const { fileURLToPath } = await import("node:url");
 
 	// Resolve static/ relative to this source file:
 	// - In the compiled dist/ tree: dist/server.js → ../../static/ (i.e. package root/static/)
 	// - In source under src/: src/server.ts → ../../static/ (same result)
 	const thisFile = fileURLToPath(import.meta.url);
-	const staticDir = join(dirname(thisFile), '..', 'static');
+	const staticDir = join(dirname(thisFile), "..", "static");
 
 	if (!existsSync(staticDir)) {
-		server.log.debug({ staticDir }, 'static dir not found — skipping static file serving (dev mode)');
+		server.log.debug(
+			{ staticDir },
+			"static dir not found — skipping static file serving (dev mode)",
+		);
 		return;
 	}
 
 	// Lazy import so @fastify/static is not loaded when the dir is absent
-	const fastifyStatic = (await import('@fastify/static')).default;
+	const fastifyStatic = (await import("@fastify/static")).default;
 	await server.register(fastifyStatic, {
 		root: staticDir,
-		prefix: '/',
+		prefix: "/",
 		// SPA fallback: serve index.html for any path not matching a real file
 		// so that Vue Router client-side routes work after a hard refresh.
 		wildcard: false,
 	});
 
-	server.log.info({ staticDir }, 'serving web UI from static dir');
+	server.log.info({ staticDir }, "serving web UI from static dir");
 }

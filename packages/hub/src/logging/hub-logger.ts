@@ -34,7 +34,7 @@ export class HubLogger {
 			...extra,
 		};
 
-		const line = JSON.stringify(entry) + "\n";
+		const line = `${JSON.stringify(entry)}\n`;
 		try {
 			fs.appendFileSync(this.filePath, line, { mode: 0o600 });
 		} catch {

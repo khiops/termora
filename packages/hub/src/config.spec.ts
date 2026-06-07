@@ -2,9 +2,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonMap } from "@iarna/toml";
-import { DEFAULT_APPEARANCE, DEFAULT_ELEVATION_CONFIG, generateId } from "@termora/shared";
-import { DEFAULT_PROFILE, deepMerge } from "@termora/shared";
-import type { AppearanceConfig, CascadeResponse, ElevationMethod } from "@termora/shared";
+import type { CascadeResponse, ElevationMethod } from "@termora/shared";
+import {
+	DEFAULT_APPEARANCE,
+	DEFAULT_ELEVATION_CONFIG,
+	DEFAULT_PROFILE,
+	deepMerge,
+	generateId,
+} from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,8 +31,8 @@ import {
 	loadUiConfig,
 } from "./config.js";
 import { createServer } from "./server.js";
-import { openTestDatabases } from "./storage/db.js";
 import type { DatabaseManager } from "./storage/db.js";
+import { openTestDatabases } from "./storage/db.js";
 import { MetaDAL } from "./storage/meta.js";
 
 // ─── Mock agents so no real PTY / SSH is spawned ─────────────────────────────

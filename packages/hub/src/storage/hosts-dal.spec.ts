@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openTestDatabases } from "./db.js";
 import type { DatabaseManager } from "./db.js";
+import { openTestDatabases } from "./db.js";
 import { HostsDAL } from "./hosts-dal.js";
 
 describe("HostsDAL — agent SHA256 pinning", () => {

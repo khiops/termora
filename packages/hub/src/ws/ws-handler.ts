@@ -23,7 +23,6 @@ import { touchToken, validateTokenRecord } from "../auth.js";
 import type { SessionManager, WsClient } from "../session/session-manager.js";
 import { WriteLockManager } from "../session/write-lock.js";
 import {
-	type WsHandlerContext,
 	handleAgentBinaryVerifyResponse,
 	handleAttach,
 	handleAuthPromptResponse,
@@ -39,6 +38,7 @@ import {
 	handleWriteForce,
 	handleWriteGrant,
 	handleWriteRelease,
+	type WsHandlerContext,
 } from "./handlers/index.js";
 
 export async function registerWsRoutes(

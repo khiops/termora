@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { PROTOCOL_VERSION, type ProtocolMessage, encodeFrame } from "@termora/shared";
+import { encodeFrame, PROTOCOL_VERSION, type ProtocolMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TermoraAgent } from "./termora-agent.js";
 import { getTestSocketPath } from "./test-socket-path.js";
@@ -122,7 +122,7 @@ describe("TermoraAgent", () => {
 				async () => {
 					daemon = await createMockDaemon(socketPath);
 
-					const readyMessages: ProtocolMessage[] = [];
+					const _readyMessages: ProtocolMessage[] = [];
 					const connectPromise = TermoraAgent.connectLocal(socketPath);
 
 					agent = await connectPromise;
@@ -132,7 +132,7 @@ describe("TermoraAgent", () => {
 					expect(agent).toBeInstanceOf(TermoraAgent);
 
 					// Verify HELLO was received by collecting messages
-					const messages = await new Promise<ProtocolMessage[]>((resolve) => {
+					const _messages = await new Promise<ProtocolMessage[]>((resolve) => {
 						const collected: ProtocolMessage[] = [];
 						// Messages already emitted before we listen — check CHANNEL_STATE_END
 						// arrives after HELLO (both sent by mock daemon on connect)

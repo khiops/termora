@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { PROTOCOL_VERSION, type ProtocolMessage, encodeFrame } from "@termora/shared";
+import { encodeFrame, PROTOCOL_VERSION, type ProtocolMessage } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TermoraAgent } from "./termora-agent.js";
 import { getTestSocketPath } from "./test-socket-path.js";

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -6,8 +6,8 @@ import path from "node:path";
 import {
 	type AgentConfig,
 	DEFAULT_AGENT_CONFIG,
-	PROTOCOL_VERSION,
 	encodeFrame,
+	PROTOCOL_VERSION,
 } from "@termora/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TermoraAgent } from "./termora-agent.js";
@@ -297,7 +297,7 @@ describe("connectOrLaunch", () => {
 				expect(existsSync(missingParent)).toBe(false);
 
 				let dirCreatedBeforeSpawn = false;
-				mockSpawnImpl = (...args: unknown[]) => {
+				mockSpawnImpl = (..._args: unknown[]) => {
 					// At this point launchDaemon has already run mkdirSync — check it.
 					dirCreatedBeforeSpawn = existsSync(missingParent);
 					// Start the mock daemon so waitForSocket succeeds.

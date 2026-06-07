@@ -15,13 +15,13 @@ function makeTmpDir(): string {
 function writeChannelLog(logsDir: string, channelId: string, lines: object[]): void {
 	const dir = path.join(logsDir, "channels");
 	fs.mkdirSync(dir, { recursive: true });
-	const content = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+	const content = `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`;
 	fs.writeFileSync(path.join(dir, `${channelId}.jsonl`), content);
 }
 
 function writeHubLog(logsDir: string, lines: object[]): void {
 	fs.mkdirSync(logsDir, { recursive: true });
-	const content = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+	const content = `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`;
 	fs.writeFileSync(path.join(logsDir, "hub.jsonl"), content);
 }
 
@@ -366,13 +366,12 @@ describe("streaming correctness — readline vs slurp parity", () => {
 		// Ensure downstream filter chain works identically after the async read
 		const dir = path.join(logsDir, "channels");
 		fs.mkdirSync(dir, { recursive: true });
-		const content =
-			[
-				JSON.stringify({ t: 0, src: "hub", lvl: "info", msg: "noise" }),
-				JSON.stringify({ t: 1, src: "hub", lvl: "warn", msg: "important warning" }),
-				JSON.stringify({ t: 2, src: "hub", lvl: "error", msg: "important error" }),
-				JSON.stringify({ t: 3, src: "hub", lvl: "warn", msg: "other warn" }),
-			].join("\n") + "\n";
+		const content = `${[
+			JSON.stringify({ t: 0, src: "hub", lvl: "info", msg: "noise" }),
+			JSON.stringify({ t: 1, src: "hub", lvl: "warn", msg: "important warning" }),
+			JSON.stringify({ t: 2, src: "hub", lvl: "error", msg: "important error" }),
+			JSON.stringify({ t: 3, src: "hub", lvl: "warn", msg: "other warn" }),
+		].join("\n")}\n`;
 		fs.writeFileSync(path.join(dir, `${CHANNEL_ID}.jsonl`), content);
 
 		const res = await app.inject({

@@ -89,7 +89,7 @@ export class MetaDAL {
 	}
 
 	updateHostOsArch(id: string, os: HostOs, arch: HostArch): void {
-		return this.hosts.updateHostOsArch(id, os, arch);
+		this.hosts.updateHostOsArch(id, os, arch);
 	}
 
 	getHostAgentSha256(id: string): string | null {
@@ -97,7 +97,7 @@ export class MetaDAL {
 	}
 
 	updateHostAgentSha256(id: string, sha256: string | null): void {
-		return this.hosts.updateHostAgentSha256(id, sha256);
+		this.hosts.updateHostAgentSha256(id, sha256);
 	}
 
 	getHostFingerprint(hostId: string): string | null {
@@ -105,7 +105,7 @@ export class MetaDAL {
 	}
 
 	updateHostFingerprint(hostId: string, fingerprint: string): void {
-		return this.hosts.updateHostFingerprint(hostId, fingerprint);
+		this.hosts.updateHostFingerprint(hostId, fingerprint);
 	}
 
 	deleteHost(id: string): boolean {
@@ -133,7 +133,7 @@ export class MetaDAL {
 	}
 
 	reorderHosts(groupId: string | null, hostIds: string[]): void {
-		return this.hosts.reorderHosts(groupId, hostIds);
+		this.hosts.reorderHosts(groupId, hostIds);
 	}
 
 	duplicateHost(id: string): Host | null {
@@ -165,11 +165,11 @@ export class MetaDAL {
 	}
 
 	reorderHostGroups(groupIds: string[]): void {
-		return this.hosts.reorderHostGroups(groupIds);
+		this.hosts.reorderHostGroups(groupIds);
 	}
 
 	migrateHostGroupData(): void {
-		return this.hosts.migrateHostGroupData();
+		this.hosts.migrateHostGroupData();
 	}
 
 	getHostProfile(id: string): string | null {
@@ -181,7 +181,7 @@ export class MetaDAL {
 	}
 
 	updateHostDiscoveredShells(hostId: string, shells: string[], defaultShell?: string): void {
-		return this.hosts.updateHostDiscoveredShells(hostId, shells, defaultShell);
+		this.hosts.updateHostDiscoveredShells(hostId, shells, defaultShell);
 	}
 
 	// ─── Groups ─────────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ export class MetaDAL {
 	}
 
 	reorderGroups(hostId: string, groupIds: string[]): void {
-		return this.channelGroups.reorderGroups(hostId, groupIds);
+		this.channelGroups.reorderGroups(hostId, groupIds);
 	}
 
 	renameGroup(id: string, name: string): boolean {
@@ -213,7 +213,7 @@ export class MetaDAL {
 	// ─── Sessions ───────────────────────────────────────────────────────────
 
 	createSession(input: CreateSessionInput): void {
-		return this.sessions.createSession(input);
+		this.sessions.createSession(input);
 	}
 
 	getSession(id: string): Session | undefined {
@@ -225,11 +225,11 @@ export class MetaDAL {
 	}
 
 	updateSessionStatus(id: string, status: SessionStatus): void {
-		return this.sessions.updateSessionStatus(id, status);
+		this.sessions.updateSessionStatus(id, status);
 	}
 
 	deleteSession(id: string): void {
-		return this.sessions.deleteSession(id);
+		this.sessions.deleteSession(id);
 	}
 
 	markAllSessionsClosed(): number {
@@ -243,7 +243,7 @@ export class MetaDAL {
 	// ─── Channels ───────────────────────────────────────────────────────────
 
 	createChannel(input: CreateChannelInput): void {
-		return this.channels.createChannel(input);
+		this.channels.createChannel(input);
 	}
 
 	getChannel(id: string): Channel | undefined {
@@ -261,7 +261,7 @@ export class MetaDAL {
 	}
 
 	updateChannelStatus(id: string, status: ChannelStatus, exitCode?: number): void {
-		return this.channels.updateChannelStatus(id, status, exitCode);
+		this.channels.updateChannelStatus(id, status, exitCode);
 	}
 
 	updateChannelDimensions(id: string, cols: number, rows: number): boolean {
@@ -273,11 +273,11 @@ export class MetaDAL {
 	}
 
 	updateDynamicTitle(channelId: string, title: string): void {
-		return this.channels.updateDynamicTitle(channelId, title);
+		this.channels.updateDynamicTitle(channelId, title);
 	}
 
 	updateProcessTitle(channelId: string, title: string): void {
-		return this.channels.updateProcessTitle(channelId, title);
+		this.channels.updateProcessTitle(channelId, title);
 	}
 
 	updateChannelConfig(
@@ -294,7 +294,7 @@ export class MetaDAL {
 	}
 
 	deleteChannel(id: string): void {
-		return this.channels.deleteChannel(id);
+		this.channels.deleteChannel(id);
 	}
 
 	getChannelProfile(id: string): string | null {
@@ -346,13 +346,13 @@ export class MetaDAL {
 	}
 
 	updateCacheIndex(channelId: string, snapshotChunkId: string, lastSeq: number): void {
-		return this.channels.updateCacheIndex(channelId, snapshotChunkId, lastSeq);
+		this.channels.updateCacheIndex(channelId, snapshotChunkId, lastSeq);
 	}
 
 	// ─── Pairing Codes ───────────────────────────────────────────────────────
 
 	createPairingCode(id: string, code: string, createdAt: string, expiresAt: string): void {
-		return this.pairingCodes.createPairingCode(id, code, createdAt, expiresAt);
+		this.pairingCodes.createPairingCode(id, code, createdAt, expiresAt);
 	}
 
 	getPairingCodeByCode(code: string): PairingCodeRow | undefined {
@@ -360,7 +360,7 @@ export class MetaDAL {
 	}
 
 	markPairingCodeUsed(id: string, usedAt: string, usedByIp: string): void {
-		return this.pairingCodes.markPairingCodeUsed(id, usedAt, usedByIp);
+		this.pairingCodes.markPairingCodeUsed(id, usedAt, usedByIp);
 	}
 
 	countActivePairingCodes(): number {
@@ -368,7 +368,7 @@ export class MetaDAL {
 	}
 
 	cleanExpiredPairingCodes(): void {
-		return this.pairingCodes.cleanExpiredPairingCodes();
+		this.pairingCodes.cleanExpiredPairingCodes();
 	}
 
 	// ─── Pair Rate Limits ────────────────────────────────────────────────────
@@ -378,7 +378,7 @@ export class MetaDAL {
 	}
 
 	cleanExpiredPairRates(windowMs: number): void {
-		return this.pairRateLimits.cleanExpired(windowMs);
+		this.pairRateLimits.cleanExpired(windowMs);
 	}
 
 	// ─── Launch Profiles ─────────────────────────────────────────────────────
@@ -412,7 +412,7 @@ export class MetaDAL {
 	}
 
 	reorderLaunchProfiles(ids: string[]): void {
-		return this.launchProfiles.reorderLaunchProfiles(ids);
+		this.launchProfiles.reorderLaunchProfiles(ids);
 	}
 
 	listHostProfiles(
@@ -428,12 +428,7 @@ export class MetaDAL {
 		overrideType: string,
 		sortOrder?: number,
 	): void {
-		return this.launchProfiles.upsertHostProfileOverride(
-			hostId,
-			profileId,
-			overrideType,
-			sortOrder,
-		);
+		this.launchProfiles.upsertHostProfileOverride(hostId, profileId, overrideType, sortOrder);
 	}
 
 	deleteHostProfileOverride(hostId: string, profileId: string): boolean {

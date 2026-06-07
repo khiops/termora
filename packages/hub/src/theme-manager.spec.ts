@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUNDLED_THEMES, BUNDLED_THEME_NAMES } from "@termora/shared";
 import type { TermoraTheme } from "@termora/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BUNDLED_THEME_NAMES, BUNDLED_THEMES } from "@termora/shared";
+import { beforeEach, describe, expect, it } from "vitest";
 import { ThemeError, ThemeManager } from "./theme-manager.js";
 
 const VALID_CUSTOM_THEME: TermoraTheme = {

@@ -11,7 +11,10 @@
 		"node": ">=20"
 	},
 	"type": "module",
-	"files": ["dist", "src/storage/migrations"],
+	"files": [
+		"dist",
+		"src/storage/migrations"
+	],
 	"exports": {
 		".": "./dist/index.js",
 		"./cli": "./dist/cli.js"

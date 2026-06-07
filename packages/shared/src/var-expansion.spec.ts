@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: test data intentionally contains literal ${} to exercise the expansion-under-test
 import { describe, expect, it } from "vitest";
 import { expandVars } from "./var-expansion.js";
 

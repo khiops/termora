@@ -9,11 +9,9 @@
 import type {
 	AgentBinaryVerifyMessage,
 	AuthPromptMessage,
-	ErrorMessage,
 	HostArch,
 	HostOs,
 	HostVerifyMessage,
-	ProtocolMessage,
 	TestConnectMessage,
 } from "@termora/shared";
 import { generateId } from "@termora/shared";
@@ -25,9 +23,9 @@ import type { SharedSessionContext } from "./session-context.js";
 import type { WsClient } from "./session-manager.js";
 import {
 	type AuthPromptFn,
+	buildSshConnectConfig,
 	SshAgent,
 	type SshAgentDeployOptions,
-	buildSshConnectConfig,
 } from "./ssh-agent.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 

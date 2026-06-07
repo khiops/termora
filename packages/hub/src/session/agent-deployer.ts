@@ -1,22 +1,25 @@
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import type { HostArch, HostOs } from '@termora/shared';
-import type { SFTPWrapper, Client as SshClient } from 'ssh2';
-import type { OsDetectResult } from './os-detect.js';
-import { parseUnameOutput, parseWindowsArchOutput } from './os-detect.js';
-import { sshExec } from './ssh-exec.js';
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { HostArch, HostOs } from "@termora/shared";
+import type { SFTPWrapper, Client as SshClient } from "ssh2";
+import type { OsDetectResult } from "./os-detect.js";
+import { parseUnameOutput, parseWindowsArchOutput } from "./os-detect.js";
+import { sshExec } from "./ssh-exec.js";
 
 export type { OsDetectResult };
 
 export class DeployError extends Error {
 	constructor(
-		public readonly code: 'AGENT_BINARY_REJECTED' | 'AGENT_BINARY_UNTRUSTED' | 'AGENT_NOT_AVAILABLE',
+		public readonly code:
+			| "AGENT_BINARY_REJECTED"
+			| "AGENT_BINARY_UNTRUSTED"
+			| "AGENT_NOT_AVAILABLE",
 		message: string,
 	) {
 		super(message);
-		this.name = 'DeployError';
+		this.name = "DeployError";
 	}
 }
 
@@ -30,7 +33,7 @@ export type BinaryVerifyPromptFn = (
 	arch: HostArch,
 	mismatch: boolean,
 	pinnedSha256?: string,
-) => Promise<'trust_permanent' | 'trust_once' | 'reject'>;
+) => Promise<"trust_permanent" | "trust_once" | "reject">;
 
 export interface DeployOptions {
 	binaryCache: string;
@@ -57,15 +60,15 @@ export interface DeployResult {
 
 /** Common paths to check when which/where are not available */
 const COMMON_AGENT_PATHS_UNIX = [
-	'$HOME/.local/bin/termora-agent',
-	'/usr/local/bin/termora-agent',
-	'/usr/bin/termora-agent',
-	'/opt/khiops/termora-agent',
+	"$HOME/.local/bin/termora-agent",
+	"/usr/local/bin/termora-agent",
+	"/usr/bin/termora-agent",
+	"/opt/khiops/termora-agent",
 ];
 
 const COMMON_AGENT_PATHS_WINDOWS = [
-	'%LOCALAPPDATA%\\termora\\termora-agent.exe',
-	'%ProgramFiles%\\termora\\termora-agent.exe',
+	"%LOCALAPPDATA%\\termora\\termora-agent.exe",
+	"%ProgramFiles%\\termora\\termora-agent.exe",
 ];
 
 /**
@@ -75,7 +78,7 @@ const COMMON_AGENT_PATHS_WINDOWS = [
 export async function checkRemoteAgent(client: SshClient): Promise<string | null> {
 	// 1. Try which (Linux/macOS)
 	try {
-		const { stdout, exitCode } = await sshExec(client, 'which termora-agent');
+		const { stdout, exitCode } = await sshExec(client, "which termora-agent");
 		if (exitCode === 0) {
 			const p = stdout.trim();
 			if (p) return p;
@@ -86,7 +89,7 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 
 	// 2. Try where (Windows)
 	try {
-		const { stdout, exitCode } = await sshExec(client, 'where termora-agent');
+		const { stdout, exitCode } = await sshExec(client, "where termora-agent");
 		if (exitCode === 0) {
 			const firstLine = stdout.split(/\r?\n/)[0]?.trim();
 			if (firstLine) return firstLine;
@@ -98,7 +101,10 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 	// 3. Try common Unix paths via test -x
 	for (const rawPath of COMMON_AGENT_PATHS_UNIX) {
 		try {
-			const { stdout: resolved, exitCode } = await sshExec(client, `test -x "${rawPath}" && echo "${rawPath}"`);
+			const { stdout: resolved, exitCode } = await sshExec(
+				client,
+				`test -x "${rawPath}" && echo "${rawPath}"`,
+			);
 			if (exitCode === 0 && resolved.trim()) return resolved.trim();
 		} catch {
 			// ignore
@@ -112,7 +118,7 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 	for (const rawPath of COMMON_AGENT_PATHS_WINDOWS) {
 		try {
 			const { stdout, exitCode } = await sshExec(client, `if exist "${rawPath}" echo ok`);
-			if (exitCode === 0 && stdout.trim() === 'ok') return rawPath;
+			if (exitCode === 0 && stdout.trim() === "ok") return rawPath;
 		} catch {
 			// ignore
 		}
@@ -128,7 +134,7 @@ export async function checkRemoteAgent(client: SshClient): Promise<string | null
 export async function detectRemoteOsArch(client: SshClient): Promise<OsDetectResult | null> {
 	// 1. Try uname -sm (Linux / macOS)
 	try {
-		const { stdout, exitCode } = await sshExec(client, 'uname -sm');
+		const { stdout, exitCode } = await sshExec(client, "uname -sm");
 		if (exitCode === 0) {
 			const result = parseUnameOutput(stdout);
 			if (result) return result;
@@ -139,7 +145,7 @@ export async function detectRemoteOsArch(client: SshClient): Promise<OsDetectRes
 
 	// 2. Try Windows PROCESSOR_ARCHITECTURE
 	try {
-		const { stdout, exitCode } = await sshExec(client, 'echo %PROCESSOR_ARCHITECTURE%');
+		const { stdout, exitCode } = await sshExec(client, "echo %PROCESSOR_ARCHITECTURE%");
 		if (exitCode === 0) {
 			const result = parseWindowsArchOutput(stdout);
 			if (result) return result;
@@ -201,16 +207,20 @@ function sftpChmod(sftp: SFTPWrapper, remotePath: string, mode: number): Promise
  * Ensures the parent directory exists, uploads with fastPut (streaming),
  * then chmod 755 the binary.
  */
-export async function uploadAgentBinary(client: SshClient, localPath: string, remotePath: string): Promise<void> {
+export async function uploadAgentBinary(
+	client: SshClient,
+	localPath: string,
+	remotePath: string,
+): Promise<void> {
 	const sftp = await openSftp(client);
 	try {
 		// Ensure parent directory exists (ignore failures — will fail at fastPut if real error)
-		const parentDir = remotePath.includes('/')
-			? remotePath.slice(0, remotePath.lastIndexOf('/'))
-			: remotePath.includes('\\')
-				? remotePath.slice(0, remotePath.lastIndexOf('\\'))
-				: '.';
-		if (parentDir && parentDir !== '.') {
+		const parentDir = remotePath.includes("/")
+			? remotePath.slice(0, remotePath.lastIndexOf("/"))
+			: remotePath.includes("\\")
+				? remotePath.slice(0, remotePath.lastIndexOf("\\"))
+				: ".";
+		if (parentDir && parentDir !== ".") {
 			await sftpMkdir(sftp, parentDir);
 		}
 
@@ -230,15 +240,15 @@ export async function uploadAgentBinary(client: SshClient, localPath: string, re
  */
 async function resolveRemoteHome(client: SshClient): Promise<string> {
 	try {
-		const { stdout, exitCode } = await sshExec(client, 'echo $HOME');
+		const { stdout, exitCode } = await sshExec(client, "echo $HOME");
 		if (exitCode === 0) {
 			const home = stdout.trim();
-			if (home && home !== '$HOME') return home;
+			if (home && home !== "$HOME") return home;
 		}
 	} catch {
 		// ignore
 	}
-	return '~';
+	return "~";
 }
 
 /**
@@ -246,8 +256,8 @@ async function resolveRemoteHome(client: SshClient): Promise<string> {
  * Expands ~ using the actual remote home directory.
  */
 async function resolveRemotePath(client: SshClient, os: HostOs): Promise<string> {
-	if (os === 'windows') {
-		return '%LOCALAPPDATA%\\termora\\termora-agent.exe';
+	if (os === "windows") {
+		return "%LOCALAPPDATA%\\termora\\termora-agent.exe";
 	}
 	const home = await resolveRemoteHome(client);
 	return `${home}/.local/bin/termora-agent`;
@@ -307,8 +317,8 @@ export async function deployAgentIfNeeded(
 			const detected = await detectRemoteOsArch(client);
 			if (!detected) {
 				throw new Error(
-					'Cannot detect remote OS/arch for agent deployment. ' +
-						'Set os/arch on the host manually or check SSH connectivity.',
+					"Cannot detect remote OS/arch for agent deployment. " +
+						"Set os/arch on the host manually or check SSH connectivity.",
 				);
 			}
 			os = detected.os;
@@ -319,7 +329,8 @@ export async function deployAgentIfNeeded(
 		const remoteSha = await getRemoteSha256(client, existingPath, os);
 
 		// 1c. Do we have a local binary for this OS/arch?
-		const binaryName = os === 'windows' ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
+		const binaryName =
+			os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
 		const localBinary = join(binaryCache, binaryName);
 
 		if (existsSync(localBinary)) {
@@ -344,7 +355,7 @@ export async function deployAgentIfNeeded(
 		if (remoteSha === null) {
 			// Cannot verify, treat as untrusted
 			throw new DeployError(
-				'AGENT_BINARY_UNTRUSTED',
+				"AGENT_BINARY_UNTRUSTED",
 				`Cannot compute SHA256 for remote agent at ${existingPath}. Upload a known-good binary or verify the remote agent manually.`,
 			);
 		}
@@ -362,7 +373,7 @@ export async function deployAgentIfNeeded(
 		// Need to prompt
 		if (!promptBinaryVerify) {
 			throw new DeployError(
-				'AGENT_BINARY_UNTRUSTED',
+				"AGENT_BINARY_UNTRUSTED",
 				`Remote agent at ${existingPath} (sha256: ${remoteSha}) cannot be verified — no verification prompt registered.`,
 			);
 		}
@@ -379,17 +390,17 @@ export async function deployAgentIfNeeded(
 			pinnedSha256 ?? undefined,
 		);
 
-		if (action === 'trust_permanent') {
+		if (action === "trust_permanent") {
 			onAgentPinned?.(hostId, remoteSha);
 			return { deployed: false, remotePath: existingPath, os, arch };
 		}
-		if (action === 'trust_once') {
+		if (action === "trust_once") {
 			onAgentTrustOnce?.(hostId, remoteSha);
 			return { deployed: false, remotePath: existingPath, os, arch };
 		}
 		// action === "reject"
 		throw new DeployError(
-			'AGENT_BINARY_REJECTED',
+			"AGENT_BINARY_REJECTED",
 			`User rejected remote agent binary at ${existingPath} (sha256: ${remoteSha}).`,
 		);
 	}
@@ -403,8 +414,8 @@ export async function deployAgentIfNeeded(
 		const detected = await detectRemoteOsArch(client);
 		if (!detected) {
 			throw new Error(
-				'Cannot detect remote OS/arch for agent deployment. ' +
-					'Set os/arch on the host manually or check SSH connectivity.',
+				"Cannot detect remote OS/arch for agent deployment. " +
+					"Set os/arch on the host manually or check SSH connectivity.",
 			);
 		}
 		os = detected.os;
@@ -412,11 +423,12 @@ export async function deployAgentIfNeeded(
 	}
 
 	// 3. Locate the binary in the local cache
-	const binaryName = os === 'windows' ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
+	const binaryName =
+		os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
 	const localBinary = join(binaryCache, binaryName);
 	if (!existsSync(localBinary)) {
 		throw new DeployError(
-			'AGENT_NOT_AVAILABLE',
+			"AGENT_NOT_AVAILABLE",
 			`Agent binary not found in cache: ${localBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
 		);
 	}
@@ -435,11 +447,11 @@ export async function deployAgentIfNeeded(
  * Uses the same XDG / platform-aware logic as getStateDir() in cli.ts.
  */
 export function getBinaryCacheDir(): string {
-	if (process.platform === 'win32') {
-		return join(process.env.LOCALAPPDATA ?? '', 'termora', 'binaries');
+	if (process.platform === "win32") {
+		return join(process.env.LOCALAPPDATA ?? "", "termora", "binaries");
 	}
-	const stateBase = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state');
-	return join(stateBase, 'termora', 'binaries');
+	const stateBase = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
+	return join(stateBase, "termora", "binaries");
 }
 
 /**
@@ -447,13 +459,18 @@ export function getBinaryCacheDir(): string {
  * or PowerShell's Get-FileHash (Windows) over SSH.
  * Returns the lowercase hex digest, or null on failure.
  */
-export async function getRemoteSha256(client: SshClient, remotePath: string, os: HostOs): Promise<string | null> {
+export async function getRemoteSha256(
+	client: SshClient,
+	remotePath: string,
+	os: HostOs,
+): Promise<string | null> {
 	try {
-		const escapedPath = os === 'windows' ? remotePath.replace(/'/g, "''") : remotePath.replace(/'/g, "'\\''");
+		const escapedPath =
+			os === "windows" ? remotePath.replace(/'/g, "''") : remotePath.replace(/'/g, "'\\''");
 		let cmd: string;
-		if (os === 'windows') {
+		if (os === "windows") {
 			cmd = `powershell -c "(Get-FileHash '${escapedPath}' -Algorithm SHA256).Hash.ToLower()"`;
-		} else if (os === 'darwin') {
+		} else if (os === "darwin") {
 			// macOS ships shasum (not sha256sum); same output format: "hash  filename"
 			cmd = `shasum -a 256 '${escapedPath}'`;
 		} else {
@@ -478,7 +495,7 @@ export async function getRemoteSha256(client: SshClient, remotePath: string, os:
 export function getLocalSha256(localPath: string): string | null {
 	try {
 		const data = readFileSync(localPath);
-		return createHash('sha256').update(data).digest('hex');
+		return createHash("sha256").update(data).digest("hex");
 	} catch {
 		return null;
 	}
