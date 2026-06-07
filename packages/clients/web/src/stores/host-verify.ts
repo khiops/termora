@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { usePromptQueue } from "../composables/usePromptQueue.js";
 import type { IWsClient } from "../services/ws-client.js";
 
 export interface HostVerifyRequest {
@@ -23,11 +23,11 @@ export interface HostVerifyRequest {
  * PROMPT_CANCEL removes a specific entry by promptId.
  */
 export const useHostVerifyStore = defineStore("hostVerify", () => {
-	const pendingPrompts = ref<HostVerifyRequest[]>([]);
+	const { currentPrompt, enqueue, handlePromptCancel, resolveHead, withHeadPrompt } =
+		usePromptQueue<HostVerifyRequest>({
+			stalePromptWarning: "[host-verify] ignoring stale prompt action",
+		});
 	let _wsClient: IWsClient | null = null;
-
-	// Current prompt is always the first in the queue
-	const currentPrompt = computed(() => pendingPrompts.value[0] ?? null);
 
 	// Legacy alias: components that bind `pendingPrompt` keep working
 	const pendingPrompt = currentPrompt;
@@ -45,53 +45,31 @@ export const useHostVerifyStore = defineStore("hostVerify", () => {
 		promptId: string,
 		firstConnect = false,
 	): void {
-		// Do not enqueue a duplicate promptId
-		if (pendingPrompts.value.some((p) => p.promptId === promptId)) return;
-		pendingPrompts.value = [
-			...pendingPrompts.value,
-			{
-				hostId,
-				hostname,
-				fingerprint,
-				algorithm,
-				oldFingerprint,
-				promptId,
-				...(firstConnect ? { firstConnect: true } : {}),
-			},
-		];
-	}
-
-	/** Drop the queued prompt whose promptId matches the cancelled one. */
-	function handlePromptCancel(promptId: string): void {
-		pendingPrompts.value = pendingPrompts.value.filter((p) => p.promptId !== promptId);
-	}
-
-	function isCurrentPrompt(promptId: string | undefined, action: string): boolean {
-		const req = pendingPrompts.value[0];
-		if (!req) return false;
-		const currentPromptId = (req as { promptId?: string }).promptId;
-		if (promptId === undefined || currentPromptId === undefined || currentPromptId === promptId) {
-			return true;
-		}
-		console.warn("[host-verify] ignoring stale prompt action", {
-			action,
+		enqueue({
+			hostId,
+			hostname,
+			fingerprint,
+			algorithm,
+			oldFingerprint,
 			promptId,
-			currentPromptId,
+			...(firstConnect ? { firstConnect: true } : {}),
 		});
-		return false;
 	}
 
 	function respond(action: "trust_permanent" | "trust_once" | "reject", promptId?: string): void {
-		if (!isCurrentPrompt(promptId, action)) return;
-		const req = pendingPrompts.value[0];
-		if (!req) return;
-		_wsClient?.send({
-			type: "HOST_VERIFY_RESPONSE",
-			hostId: req.hostId,
+		withHeadPrompt(
+			promptId,
+			(req) => {
+				_wsClient?.send({
+					type: "HOST_VERIFY_RESPONSE",
+					hostId: req.hostId,
+					action,
+					promptId: req.promptId,
+				});
+				resolveHead();
+			},
 			action,
-			promptId: req.promptId,
-		});
-		pendingPrompts.value = pendingPrompts.value.slice(1);
+		);
 	}
 
 	function accept(promptId?: string): void {

@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed } from "vue";
+import { usePromptQueue } from "../composables/usePromptQueue.js";
 import type { IWsClient } from "../services/ws-client.js";
 
 export interface AuthPromptRequest {
@@ -25,11 +26,12 @@ export interface AuthPromptRequest {
  * next (if any). PROMPT_CANCEL removes a specific entry by promptId.
  */
 export const useAuthPromptStore = defineStore("authPrompt", () => {
-	const pendingPrompts = ref<AuthPromptRequest[]>([]);
+	const { currentPrompt, enqueue, handlePromptCancel, resolveHead, withHeadPrompt } =
+		usePromptQueue<AuthPromptRequest>({
+			getFallbackKey: (prompt) => prompt.hostId,
+			stalePromptWarning: "[auth-prompt] ignoring stale prompt action",
+		});
 	let _wsClient: IWsClient | null = null;
-
-	// Current prompt is always the first in the queue
-	const currentPrompt = computed(() => pendingPrompts.value[0] ?? null);
 
 	const rememberSession = computed({
 		get: () => currentPrompt.value?.rememberSession ?? false,
@@ -54,56 +56,32 @@ export const useAuthPromptStore = defineStore("authPrompt", () => {
 		promptId?: string,
 		deliveryEpoch?: number,
 	): void {
-		// Key for dedup/cancel: use promptId when present, fall back to hostId
-		const key = promptId ?? hostId;
-		// Do not enqueue a duplicate that is already in the queue
-		if (pendingPrompts.value.some((p) => (p.promptId ?? p.hostId) === key)) return;
-		pendingPrompts.value = [
-			...pendingPrompts.value,
-			{
-				hostId,
-				promptType,
-				message,
-				rememberSession: false,
-				...(promptId !== undefined ? { promptId } : {}),
-				...(deliveryEpoch !== undefined ? { deliveryEpoch } : {}),
-			},
-		];
-	}
-
-	/** Drop the queued prompt whose promptId matches the cancelled one. */
-	function handlePromptCancel(promptId: string): void {
-		pendingPrompts.value = pendingPrompts.value.filter((p) => p.promptId !== promptId);
-	}
-
-	function isCurrentPrompt(promptId: string | undefined, action: string): boolean {
-		const req = pendingPrompts.value[0];
-		if (!req) return false;
-		if (promptId === undefined || req.promptId === undefined || req.promptId === promptId) {
-			return true;
-		}
-		console.warn("[auth-prompt] ignoring stale prompt action", {
-			action,
-			promptId,
-			currentPromptId: req.promptId,
+		enqueue({
+			hostId,
+			promptType,
+			message,
+			rememberSession: false,
+			...(promptId !== undefined ? { promptId } : {}),
+			...(deliveryEpoch !== undefined ? { deliveryEpoch } : {}),
 		});
-		return false;
 	}
 
 	function respond(secret: string | null, promptId?: string): void {
-		if (!isCurrentPrompt(promptId, secret === null ? "dismiss" : "respond")) return;
-		const req = pendingPrompts.value[0];
-		if (!req) return;
-		_wsClient?.send({
-			type: "AUTH_PROMPT_RESPONSE",
-			hostId: req.hostId,
-			secret,
-			rememberSession: req.rememberSession ?? false,
-			...(req.promptId !== undefined ? { promptId: req.promptId } : {}),
-			...(req.deliveryEpoch !== undefined ? { deliveryEpoch: req.deliveryEpoch } : {}),
-		});
-		// Remove the first item from the queue — next one shows automatically
-		pendingPrompts.value = pendingPrompts.value.slice(1);
+		withHeadPrompt(
+			promptId,
+			(req) => {
+				_wsClient?.send({
+					type: "AUTH_PROMPT_RESPONSE",
+					hostId: req.hostId,
+					secret,
+					rememberSession: req.rememberSession ?? false,
+					...(req.promptId !== undefined ? { promptId: req.promptId } : {}),
+					...(req.deliveryEpoch !== undefined ? { deliveryEpoch: req.deliveryEpoch } : {}),
+				});
+				resolveHead();
+			},
+			secret === null ? "dismiss" : "respond",
+		);
 	}
 
 	function dismiss(promptId?: string): void {
