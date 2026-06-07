@@ -635,6 +635,13 @@ export class ChannelLifecycleManager {
 			clearTimeout(pendingTimer);
 			this.ctx.reconnectTimers.delete(hostId);
 		}
+		// Abort any in-flight reconnect start() so it cannot wire/store the agent
+		// after the session is already closed (invariant 10).
+		const reconnectAc = this.ctx.reconnectAbortControllers.get(hostId);
+		if (reconnectAc !== undefined) {
+			reconnectAc.abort();
+			this.ctx.reconnectAbortControllers.delete(hostId);
+		}
 		// Mark all channels for this session as dead
 		for (const [channelId, ch] of this.ctx.channels.entries()) {
 			if (ch.hostId !== hostId || ch.status === "dead") continue;
@@ -707,7 +714,7 @@ export class ChannelLifecycleManager {
 		const { channel: deadChannel, hostId } = info;
 
 		const sessionEntry = this.ctx.sessions.get(hostId);
-		if (sessionEntry?.status !== "active") return false;
+		if (!sessionEntry || sessionEntry.status !== "active") return false;
 		const agent = this.ctx.agents.get(hostId);
 		if (!agent?.connected) return false;
 
@@ -964,7 +971,12 @@ export class ChannelLifecycleManager {
 					}
 				}, 60_000);
 
-				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer, clientId: client.id });
+				this.ctx.pendingAuthPrompts.set(hostId, {
+					resolve,
+					timer,
+					clientId: client.id,
+					resendPayload: promptMsg,
+				});
 			});
 		};
 	}

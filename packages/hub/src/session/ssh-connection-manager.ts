@@ -9,9 +9,11 @@
 import type {
 	AgentBinaryVerifyMessage,
 	AuthPromptMessage,
+	ErrorMessage,
 	HostArch,
 	HostOs,
 	HostVerifyMessage,
+	ProtocolMessage,
 	TestConnectMessage,
 } from "@termora/shared";
 import { generateId } from "@termora/shared";
@@ -33,6 +35,7 @@ import type { StateBroadcaster } from "./state-broadcaster.js";
 const RECONNECT_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 const RECONNECT_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
 const HOST_KEY_MISMATCH_TIMEOUT_MS = 30_000;
+const AUTH_PROMPT_TIMEOUT_MS = 120_000; // 2 min — unanswered prompt must not wedge the host
 
 export class SshConnectionManager {
 	constructor(
@@ -44,7 +47,7 @@ export class SshConnectionManager {
 
 	// ─── Auth prompt ─────────────────────────────────────────────────────────
 
-	buildPromptAuth(client: WsClient): AuthPromptFn {
+	buildPromptAuth(client: WsClient, signal?: AbortSignal): AuthPromptFn {
 		return async (hostId, promptType, message) => {
 			// Cache hit: return cached passphrase without prompting the UI
 			if (promptType === "passphrase") {
@@ -63,10 +66,46 @@ export class SshConnectionManager {
 					this.ctx.passphraseCache.delete(hostId);
 				}
 			}
+			// If the connect was already aborted before we even arm a prompt, bail immediately.
+			if (signal?.aborted) return null;
+			// Fix 1: if a prompt is already pending for this hostId, cancel it before
+			// arming a new one.  Without this, the old timer fires later and deletes
+			// the NEW entry, permanently wedging the host for the rest of its TTL.
+			const existingPrompt = this.ctx.pendingAuthPrompts.get(hostId);
+			if (existingPrompt) {
+				if (existingPrompt.timer !== null) clearTimeout(existingPrompt.timer);
+				this.ctx.pendingAuthPrompts.delete(hostId);
+				existingPrompt.resolve(null);
+			}
 			const promptMsg: AuthPromptMessage = { type: "AUTH_PROMPT", hostId, promptType, message };
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
-				this.ctx.pendingAuthPrompts.set(hostId, { resolve, timer: null, clientId: client.id });
+				const timer = setTimeout(() => {
+					this.ctx.pendingAuthPrompts.delete(hostId);
+					resolve(null);
+				}, AUTH_PROMPT_TIMEOUT_MS);
+				this.ctx.pendingAuthPrompts.set(hostId, {
+					resolve,
+					timer,
+					clientId: client.id,
+					resendPayload: promptMsg,
+				});
+				// If the connect is aborted while the user is answering, clear the prompt
+				// immediately so it doesn't linger in pendingAuthPrompts.
+				if (signal) {
+					signal.addEventListener(
+						"abort",
+						() => {
+							const pending = this.ctx.pendingAuthPrompts.get(hostId);
+							if (pending && pending.clientId === client.id) {
+								if (pending.timer !== null) clearTimeout(pending.timer);
+								this.ctx.pendingAuthPrompts.delete(hostId);
+								resolve(null);
+							}
+						},
+						{ once: true },
+					);
+				}
 			});
 		};
 	}
@@ -110,6 +149,7 @@ export class SshConnectionManager {
 		oldFingerprint: string,
 		newFingerprint: string,
 		firstConnect = false,
+		ownerAcqId?: string,
 	): Promise<"trust_permanent" | "trust_once" | "reject"> {
 		const promptId = generateId();
 		const verifyMsg: HostVerifyMessage = {
@@ -133,7 +173,14 @@ export class SshConnectionManager {
 				resolve("reject");
 			}, HOST_KEY_MISMATCH_TIMEOUT_MS);
 
-			this.ctx.pendingHostVerify.set(promptId, { resolve, timer });
+			this.ctx.pendingHostVerify.set(promptId, {
+				hostId,
+				...(ownerAcqId !== undefined ? { ownerAcqId } : {}),
+				clientId: client.id,
+				resolve,
+				timer,
+				resendPayload: verifyMsg,
+			});
 		});
 	}
 
@@ -144,9 +191,13 @@ export class SshConnectionManager {
 	handleHostVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId?: string,
 	): void {
 		const pending = this.ctx.pendingHostVerify.get(promptId);
 		if (!pending) return;
+		// Response auth: only the current owner clientId may answer (mirrors SEC-003).
+		// clientId is optional for backward compat with callers not yet updated.
+		if (clientId !== undefined && pending.clientId !== clientId) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingHostVerify.delete(promptId);
 		pending.resolve(action);
@@ -154,7 +205,7 @@ export class SshConnectionManager {
 
 	// ─── Agent binary verify ──────────────────────────────────────────────────
 
-	buildBinaryVerifyPrompt(client: WsClient): BinaryVerifyPromptFn {
+	buildBinaryVerifyPrompt(client: WsClient, ownerAcqId?: string): BinaryVerifyPromptFn {
 		return async (
 			hostId: string,
 			hostname: string,
@@ -193,7 +244,14 @@ export class SshConnectionManager {
 					resolve("reject");
 				}, 30_000);
 
-				this.ctx.pendingAgentVerify.set(promptId, { resolve, timer });
+				this.ctx.pendingAgentVerify.set(promptId, {
+					hostId,
+					...(ownerAcqId !== undefined ? { ownerAcqId } : {}),
+					clientId: client.id,
+					resolve,
+					timer,
+					resendPayload: msg,
+				});
 			});
 		};
 	}
@@ -201,9 +259,13 @@ export class SshConnectionManager {
 	handleAgentVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId?: string,
 	): void {
 		const pending = this.ctx.pendingAgentVerify.get(promptId);
 		if (!pending) return;
+		// Response auth: only the current owner clientId may answer (mirrors SEC-003).
+		// clientId is optional for backward compat with callers not yet updated.
+		if (clientId !== undefined && pending.clientId !== clientId) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingAgentVerify.delete(promptId);
 		pending.resolve(action);
@@ -253,6 +315,8 @@ export class SshConnectionManager {
 		const timer = setTimeout(async () => {
 			this.ctx.reconnectTimers.delete(hostId);
 
+			// Currency check before any async work: bail if session was closed
+			// while the timer was pending.
 			const session = this.ctx.sessions.get(hostId);
 			if (!session || session.status === "closed") return;
 
@@ -261,6 +325,13 @@ export class SshConnectionManager {
 				this.lifecycle.closeSession(hostId, sessionId);
 				return;
 			}
+
+			// Create an AbortController for this in-flight attempt and register it so
+			// closeSession() can abort a start() that is still awaiting the SSH handshake.
+			// Invariant 10: the controller is identity-checked so a stale abort cannot
+			// clobber a newer reconnect attempt that replaced this one.
+			const ac = new AbortController();
+			this.ctx.reconnectAbortControllers.set(hostId, ac);
 
 			try {
 				const binaryCache = getBinaryCacheDir();
@@ -280,9 +351,9 @@ export class SshConnectionManager {
 					onOsDetected: (hid, os, arch) => {
 						this.ctx.metaDal.updateHostOsArch(hid, os, arch);
 					},
-					// No promptBinaryVerify — reconnect is non-interactive
+					// No promptBinaryVerify — reconnect is non-interactive.
 					// If binary is untrusted, deploy will throw AGENT_BINARY_UNTRUSTED
-					// and reconnect will retry or give up (existing retry logic)
+					// and reconnect will retry or give up (existing retry logic).
 					onAgentPinned: (hid, sha256) => {
 						this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
 					},
@@ -295,13 +366,39 @@ export class SshConnectionManager {
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
 				const hostKey = `${sshHostname}:${host.sshPort ?? 22}`;
 				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostKey);
-				await sshAgent.start(storedFp, sessionFp);
+
+				// Thread the abort signal into start() so closeSession() can cancel mid-handshake.
+				await sshAgent.start(storedFp, sessionFp, ac.signal);
+
+				// Post-await currency/abort re-check (invariant 10).
+				// closeSession() may have fired while start() was awaiting the SSH handshake.
+				// Do NOT wire/store/reAttach if the session is no longer current or was aborted.
+				if (
+					ac.signal.aborted ||
+					this.ctx.reconnectAbortControllers.get(hostId) !== ac ||
+					this.ctx.sessions.get(hostId)?.id !== sessionId
+				) {
+					sshAgent.close();
+					return;
+				}
+
+				// Clear the controller — attempt settled successfully.
+				this.ctx.reconnectAbortControllers.delete(hostId);
+
 				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
 				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);
 				this.ctx.agents.set(hostId, sshAgent);
 
 				this.lifecycle.reAttachChannels(hostId, sessionId, sshAgent);
 			} catch {
+				// Clear the controller on failure (aborted or real error).
+				if (this.ctx.reconnectAbortControllers.get(hostId) === ac) {
+					this.ctx.reconnectAbortControllers.delete(hostId);
+				}
+
+				// If the attempt was aborted by closeSession(), do nothing — session is already closed.
+				if (ac.signal.aborted) return;
+
 				const nextElapsed = Date.now() - startTime;
 				if (nextElapsed >= RECONNECT_TIMEOUT_MS) {
 					this.lifecycle.closeSession(hostId, sessionId);

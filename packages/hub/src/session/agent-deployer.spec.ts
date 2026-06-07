@@ -786,6 +786,7 @@ describe("getBinaryCacheDir", () => {
 			const result = getBinaryCacheDir();
 			expect(result).toBe("/custom/state/termora/binaries");
 		} finally {
+			// biome-ignore lint/performance/noDelete: env var removal requires delete
 			if (orig === undefined) delete process.env.XDG_STATE_HOME;
 			else process.env.XDG_STATE_HOME = orig;
 		}
@@ -793,6 +794,7 @@ describe("getBinaryCacheDir", () => {
 
 	it("returns path under ~/.local/state when XDG_STATE_HOME is not set", () => {
 		const orig = process.env.XDG_STATE_HOME;
+		// biome-ignore lint/performance/noDelete: env var removal requires delete
 		delete process.env.XDG_STATE_HOME;
 		try {
 			const result = getBinaryCacheDir();

@@ -17,12 +17,12 @@ import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
 	AgentConfig,
+	AgentLogMessage,
 	AgentSpawnMessage,
 	ElevationMethod,
 	ErrorMessage,
 	Host,
 	InputMessage,
-	LaunchProfile,
 	ProtocolMessage,
 	ResizeMessage,
 	StateSyncMessage,
@@ -41,7 +41,8 @@ import { AgentConnectionManager } from "./agent-connection-manager.js";
 import { DeployError, getBinaryCacheDir } from "./agent-deployer.js";
 import { ChannelLifecycleManager } from "./channel-lifecycle-manager.js";
 import { OutputChunker } from "./output-chunker.js";
-import type { SharedSessionContext } from "./session-context.js";
+import * as Acq from "./session-acquisition.js";
+import type { Lease, SessionAcquisition, SharedSessionContext } from "./session-context.js";
 import { SnapshotScheduler } from "./snapshot-scheduler.js";
 import { SpoolGarbageCollector } from "./spool-gc.js";
 import type { SshAgentDeployOptions } from "./ssh-agent.js";
@@ -71,13 +72,13 @@ export class SessionManager {
 	private readonly gc: SpoolGarbageCollector;
 
 	constructor(
-		dbManager: DatabaseManager,
+		private dbManager: DatabaseManager,
 		gcConfig?: GcConfig,
 		agentConfig?: AgentConfig,
 		configResolver?: ConfigResolver,
 		hubLogger?: HubLogger,
 		loggerRegistry?: LoggerRegistry,
-		_logsDir?: string,
+		logsDir?: string,
 	) {
 		const metaDal = new MetaDAL(dbManager.meta);
 		const spoolDal = new SpoolDAL(dbManager.spool);
@@ -96,6 +97,7 @@ export class SessionManager {
 			channels: new Map(),
 			clients: new Map(),
 			reconnectTimers: new Map(),
+			reconnectAbortControllers: new Map(),
 			restartTracking: new Map(),
 			pendingRequests: new Map(),
 			pendingAuthPrompts: new Map(),
@@ -110,6 +112,9 @@ export class SessionManager {
 			agentCapabilities: new Map(),
 			titleDebounceTimers: new Map(),
 			processTitleDebounceTimers: new Map(),
+			// P1/P2/P3 state machine — replaces acquiringSessions + sessionWaiters
+			acquisitions: new Map(),
+			pendingPrompts: new Map(),
 			getWriteLockHolder: null,
 			metaDal,
 			spoolDal,
@@ -133,7 +138,7 @@ export class SessionManager {
 		// Wire reconnect callback for restartChannel on SSH hosts
 		this.lifecycle.onReconnectAgent = async (hostId: string): Promise<boolean> => {
 			const host = ctx.metaDal.getHost(hostId);
-			if (host?.type !== "ssh") return false;
+			if (!host || host.type !== "ssh") return false;
 
 			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
 			const firstClient = ctx.clients.values().next().value;
@@ -186,6 +191,8 @@ export class SessionManager {
 	async shutdown(): Promise<void> {
 		for (const timer of this.ctx.reconnectTimers.values()) clearTimeout(timer);
 		this.ctx.reconnectTimers.clear();
+		for (const ac of this.ctx.reconnectAbortControllers.values()) ac.abort();
+		this.ctx.reconnectAbortControllers.clear();
 		for (const timer of this.ctx.titleDebounceTimers.values()) clearTimeout(timer);
 		this.ctx.titleDebounceTimers.clear();
 		for (const timer of this.ctx.processTitleDebounceTimers.values()) clearTimeout(timer);
@@ -196,6 +203,22 @@ export class SessionManager {
 			pending.resolve(null);
 		}
 		this.ctx.pendingAuthPrompts.clear();
+		for (const pending of this.ctx.pendingHostVerify.values()) {
+			clearTimeout(pending.timer);
+			pending.resolve("reject");
+		}
+		this.ctx.pendingHostVerify.clear();
+		for (const pending of this.ctx.pendingAgentVerify.values()) {
+			clearTimeout(pending.timer);
+			pending.resolve("reject");
+		}
+		this.ctx.pendingAgentVerify.clear();
+		// Clear unified pending-prompts map (host-key + passphrase migrated entries).
+		for (const [, p] of this.ctx.pendingPrompts) {
+			if (p.timer !== null) clearTimeout(p.timer);
+			p.resolve(null);
+		}
+		this.ctx.pendingPrompts.clear();
 		this.ctx.elevationCache.clear();
 		this.ctx.agentCapabilities.clear();
 		this.ctx.scheduler.shutdown();
@@ -206,6 +229,9 @@ export class SessionManager {
 		this.ctx.clients.clear();
 		this.ctx.channels.clear();
 		this.ctx.sessions.clear();
+		// Abort all in-flight acquisitions via the state-machine primitive.
+		// P1: shutdownAll sets CLOSING synchronously on each before rejecting.
+		Acq.shutdownAll(this.ctx);
 	}
 
 	// ─── DAL accessors ────────────────────────────────────────────────────────
@@ -230,6 +256,101 @@ export class SessionManager {
 
 	removeClient(clientId: string): void {
 		this.broadcaster.removeClient(clientId);
+
+		// Prompt re-target: when the prompt owner disconnects, find another live
+		// lease-holder in the same acquisition that is still connected, and re-send
+		// the prompt to them.  If no live candidate exists, reject (fail-closed).
+		//
+		// Helper: given an ownerAcqId and hostId, find the first connected candidate
+		// clientId from the remaining leases of the owning acquisition.
+		const findCandidate = (ownerAcqId: string | undefined, hostId: string): string | null => {
+			if (!ownerAcqId) return null;
+			// The acq may have been committed (P2) already — search by hostId as a
+			// fallback to find any in-flight acq still referencing this host.
+			for (const [hId, acq] of this.ctx.acquisitions) {
+				if (hId !== hostId && acq.id !== ownerAcqId) continue;
+				if (acq.id !== ownerAcqId) continue;
+				for (const lease of acq.leases) {
+					if (lease.clientId !== clientId && this.ctx.clients.has(lease.clientId)) {
+						return lease.clientId;
+					}
+				}
+			}
+			return null;
+		};
+
+		// ── pendingAuthPrompts (keyed by hostId) ──────────────────────────────────
+		// Auth prompts use the unified pendingAuthPrompts map + the acq whose leader
+		// issued the buildPromptAuth closure.  We find the acq via ctx.acquisitions
+		// keyed by hostId directly.
+		for (const [hostId, pending] of this.ctx.pendingAuthPrompts) {
+			if (pending.clientId !== clientId) continue;
+
+			// Find the owning acq (keyed by hostId — always present while CONNECTING).
+			const acq = this.ctx.acquisitions.get(hostId);
+			const candidateId = acq
+				? (() => {
+						for (const lease of acq.leases) {
+							if (lease.clientId !== clientId && this.ctx.clients.has(lease.clientId)) {
+								return lease.clientId;
+							}
+						}
+						return null;
+					})()
+				: null;
+
+			if (candidateId !== null) {
+				// Re-target: transfer ownership to the candidate and re-send the prompt.
+				const newClient = this.ctx.clients.get(candidateId);
+				if (newClient) {
+					pending.clientId = candidateId;
+					newClient.send(pending.resendPayload);
+					continue; // keep the pending entry alive
+				}
+			}
+			// No live candidate — fail-closed (original Fix 3 behavior).
+			if (pending.timer !== null) clearTimeout(pending.timer);
+			this.ctx.pendingAuthPrompts.delete(hostId);
+			pending.resolve(null);
+		}
+
+		// ── pendingHostVerify (keyed by promptId) ─────────────────────────────────
+		for (const [promptId, pending] of this.ctx.pendingHostVerify) {
+			if (pending.clientId !== clientId) continue;
+
+			const candidateId = findCandidate(pending.ownerAcqId, pending.hostId);
+			if (candidateId !== null) {
+				const newClient = this.ctx.clients.get(candidateId);
+				if (newClient) {
+					pending.clientId = candidateId;
+					newClient.send(pending.resendPayload);
+					continue;
+				}
+			}
+			// No live candidate — reject (resolve "reject" keeps fail-closed semantics).
+			clearTimeout(pending.timer);
+			this.ctx.pendingHostVerify.delete(promptId);
+			pending.resolve("reject");
+		}
+
+		// ── pendingAgentVerify (keyed by promptId) ────────────────────────────────
+		for (const [promptId, pending] of this.ctx.pendingAgentVerify) {
+			if (pending.clientId !== clientId) continue;
+
+			const candidateId = findCandidate(pending.ownerAcqId, pending.hostId);
+			if (candidateId !== null) {
+				const newClient = this.ctx.clients.get(candidateId);
+				if (newClient) {
+					pending.clientId = candidateId;
+					newClient.send(pending.resendPayload);
+					continue;
+				}
+			}
+			// No live candidate — reject.
+			clearTimeout(pending.timer);
+			this.ctx.pendingAgentVerify.delete(promptId);
+			pending.resolve("reject");
+		}
 	}
 
 	getClientsForChannel(channelId: string): WsClient[] {
@@ -284,13 +405,57 @@ export class SessionManager {
 			this.ctx.agents.delete(hostId);
 		}
 
+		// P1: Abort in-flight acquisition synchronously via state-machine primitive.
+		// close() sets CLOSING before abort — joins are refused from that moment.
+		// Does NOT consume leases; waiters' outer finally still calls release() harmlessly.
+		// Returns the closed acq so we can clear its prompts by ownerAcqId (invariant 5).
+		const closedAcq = Acq.close(this.ctx, hostId);
+
+		// Clear host-key and agent-verify prompts: first by ownerAcqId (new unified map),
+		// then by hostId on the legacy maps (invariant 5 — cleared by owner identity).
+		if (closedAcq) {
+			for (const [promptId, p] of this.ctx.pendingPrompts) {
+				if (p.ownerAcqId === closedAcq.id) {
+					if (p.timer !== null) clearTimeout(p.timer);
+					this.ctx.pendingPrompts.delete(promptId);
+					p.resolve(null);
+				}
+			}
+		}
+
+		// Legacy maps: clear by ownerAcqId when present (B3 fix — prevents evicting a
+		// newer acq's prompt); fall back to hostId for entries without an owner tag.
+		for (const [promptId, pending] of this.ctx.pendingHostVerify) {
+			const matchByOwner = closedAcq && pending.ownerAcqId === closedAcq.id;
+			const matchByHost = !pending.ownerAcqId && pending.hostId === hostId;
+			if (matchByOwner || matchByHost) {
+				clearTimeout(pending.timer);
+				this.ctx.pendingHostVerify.delete(promptId);
+				pending.resolve("reject");
+			}
+		}
+		for (const [promptId, pending] of this.ctx.pendingAgentVerify) {
+			const matchByOwner = closedAcq && pending.ownerAcqId === closedAcq.id;
+			const matchByHost = !pending.ownerAcqId && pending.hostId === hostId;
+			if (matchByOwner || matchByHost) {
+				clearTimeout(pending.timer);
+				this.ctx.pendingAgentVerify.delete(promptId);
+				pending.resolve("reject");
+			}
+		}
+
 		this.lifecycle.closeSession(hostId, sessionId);
 	}
 
 	// ─── WS message handlers ──────────────────────────────────────────────────
 
 	/** Build SshAgentDeployOptions for a given host + WS client. */
-	private _buildDeployOpts(hostId: string, host: Host, client: WsClient): SshAgentDeployOptions {
+	private _buildDeployOpts(
+		hostId: string,
+		host: Host,
+		client: WsClient,
+		ownerAcqId?: string,
+	): SshAgentDeployOptions {
 		const sshHostname = host.sshHost?.includes("@")
 			? (host.sshHost.split("@")[1] ?? host.sshHost)
 			: (host.sshHost ?? host.label);
@@ -305,7 +470,7 @@ export class SessionManager {
 			onOsDetected: (hid, os, arch) => {
 				this.ctx.metaDal.updateHostOsArch(hid, os, arch);
 			},
-			promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client),
+			promptBinaryVerify: this.sshMgr.buildBinaryVerifyPrompt(client, ownerAcqId),
 			onAgentPinned: (hid, sha256) => {
 				this.ctx.metaDal.updateHostAgentSha256(hid, sha256);
 			},
@@ -349,274 +514,405 @@ export class SessionManager {
 			type: host.type,
 			label: host.label,
 		});
-		const session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
-		this.ctx.hubLogger?.log("debug", "handleSpawn: session", {
-			sessionId: session.id,
-			status: session.status,
-		});
 
 		let agent = this.ctx.agents.get(hostId);
 		this.ctx.hubLogger?.log("debug", "handleSpawn: existing agent", {
 			connected: agent?.connected ?? false,
 		});
-		if (!agent?.connected) {
-			if (host.type === "ssh") {
-				const promptAuth = this.sshMgr.buildPromptAuth(client);
 
-				const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
-				const sshHostname = host.sshHost?.includes("@")
-					? (host.sshHost.split("@")[1] ?? host.sshHost)
-					: (host.sshHost ?? host.label);
-				const sshPort = host.sshPort ?? 22;
-				const hostKey = `${sshHostname}:${sshPort}`;
-				const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
+		// ── Acquire or join the session-acquisition state machine ─────────────────
+		// For SSH hosts with no live agent: coalesce via the acquisition map.
+		// P1: the slot is claimed SYNCHRONOUSLY (no await between the map check and
+		//     the map.set) so two concurrent SPAWNs cannot both see empty and each
+		//     create their own "starting" session.
+		// biome-ignore lint/style/noNonNullAssertion: assigned before use on all non-null-returning paths
+		let session: import("./session-context.js").SessionState = undefined!;
+		// lease is held until the outer finally runs — invariant 2.
+		let lease: Lease | null = null;
+		// acq reference kept for identity re-validation after awaits — invariant 7.
+		let acq: SessionAcquisition | null = null;
 
-				const deployOpts = this._buildDeployOpts(hostId, host, client);
+		// ── Single outer try/finally — release the lease on EVERY exit path ─────────
+		// Invariant 2: the try wraps the entire acquisition + spawn body so all early
+		// returns (follower error, leader error, session-currency checks, guard fails)
+		// pass through the finally.  release() is idempotent (invariant 6) so the
+		// existing inner releases on connect-failure paths are harmless belt-and-suspenders.
+		// Invariant 3: release checks leases.size===0 && no channels → reap if needed.
+		try {
+			// B1: outer try wraps all paths that hold a lease (B1 fix — every early return hits this finally)
+			if (!agent?.connected && host.type === "ssh") {
+				// ── SSH: no live agent — use acquisition state machine ────────────────
+				const existing = this.ctx.acquisitions.get(hostId);
 
-				console.error(`[termora-ssh] creating SshAgent for host ${host.id}`);
-				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
-
-				console.error(`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label}`);
-				try {
-					console.error("[termora-ssh] deploying agent...");
-					await sshAgent.start(storedFingerprint, sessionTrustedFp);
-					console.error("[termora-ssh] agent deployed, exec starting");
-					console.error("[termora-ssh] SSH connection established");
-				} catch (err) {
-					console.error(
-						`[termora-ssh] SSH error: ${err instanceof Error ? err.message : String(err)}`,
-					);
-					// Handle deploy errors (user rejection, binary not available)
-					if (err instanceof DeployError) {
-						client.send({
-							type: "ERROR",
-							code: err.code,
-							message: err.message,
+				if (existing !== undefined) {
+					// ── Follower: join the in-flight acquisition ───────────────────────
+					// P1: join() is synchronous; returns null if CLOSING/FAILED (invariant 9).
+					const joined = Acq.join(existing, clientId);
+					if (joined !== null) {
+						// Follower successfully joined — hold the lease.
+						lease = joined;
+						acq = existing;
+						this.ctx.hubLogger?.log("debug", "handleSpawn: follower joining in-flight acquire", {
 							hostId,
-						} satisfies ErrorMessage);
-						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
-						return null;
-					}
-
-					const kv = sshAgent.lastKeyVerification;
-					if (kv.tofu || kv.mismatch) {
-						const action = await this.sshMgr.promptHostKeyVerify(
-							client,
-							hostId,
-							host.sshHost ?? host.label,
-							kv.mismatch ? (storedFingerprint ?? "") : "",
-							kv.capturedFingerprint,
-							kv.tofu,
-						);
-						if (action === "reject") {
-							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+							acqId: acq.id,
+						});
+						try {
+							session = await acq.connectPromise;
+						} catch (err) {
+							// Leader reported failure — relay to this client too.
 							client.send({
 								type: "ERROR",
-								code: "SSH_HOST_KEY_REJECTED",
-								message: "SSH host key rejected by user",
+								code: "SSH_CONNECT_FAILED",
+								message: err instanceof Error ? err.message : "SSH connection failed",
 							} satisfies ErrorMessage);
 							return null;
 						}
-						const retryFp = kv.capturedFingerprint;
-						if (action === "trust_permanent") {
-							this.ctx.metaDal.updateHostFingerprint(hostId, retryFp);
-						} else {
-							this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
-						}
-						const retryAgent = new SshAgent(host, promptAuth, deployOpts);
-						console.error(`[termora-ssh] creating SshAgent for host ${host.id} (retry)`);
-						console.error(
-							`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label} (retry)`,
-						);
-						try {
-							console.error("[termora-ssh] deploying agent...");
-							await retryAgent.start(
-								action === "trust_permanent" ? retryFp : null,
-								action === "trust_once" ? retryFp : undefined,
-							);
-							console.error("[termora-ssh] agent deployed, exec starting");
-							console.error("[termora-ssh] SSH connection established");
-						} catch (retryErr) {
-							console.error(
-								`[termora-ssh] SSH error: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
-							);
-							this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
-							if (retryErr instanceof DeployError) {
-								client.send({
-									type: "ERROR",
-									code: retryErr.code,
-									message: retryErr.message,
-									hostId,
-								} satisfies ErrorMessage);
-							} else {
-								client.send({
-									type: "ERROR",
-									code: "SSH_CONNECT_FAILED",
-									message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
-								} satisfies ErrorMessage);
-							}
+						// Re-validate: session must still be current after the await (invariant 7).
+						const curAfterFollow = this.ctx.sessions.get(hostId);
+						if (!curAfterFollow || curAfterFollow.id !== session.id) {
+							client.send({
+								type: "ERROR",
+								code: "SSH_CONNECT_FAILED",
+								message: "SSH session was closed during connect",
+							} satisfies ErrorMessage);
 							return null;
 						}
-						this.broadcaster.updateSessionStatus(hostId, session.id, "active");
-						this.agentMgr.wireAgentEvents(hostId, session.id, retryAgent);
-						this.ctx.agents.set(hostId, retryAgent);
-						agent = retryAgent;
-					} else {
-						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						agent = this.ctx.agents.get(hostId);
+						if (!agent?.connected) {
+							client.send({
+								type: "ERROR",
+								code: "SSH_CONNECT_FAILED",
+								message: "SSH connection failed",
+							} satisfies ErrorMessage);
+							return null;
+						}
+						// Fall through to the spawn section with lease held.
+					}
+				}
+
+				// Leader branch: either no existing acq, or follower join was refused (terminal acq).
+				if (lease === null) {
+					// P1: acquire() sets ctx.acquisitions[hostId] = acq SYNCHRONOUSLY, before any
+					// await — this is the critical section that prevents double-session creation.
+					const acquired = Acq.acquire(this.ctx, hostId, clientId);
+					acq = acquired.acq;
+					lease = acquired.lease;
+
+					this.ctx.hubLogger?.log("debug", "handleSpawn: leader acquiring SSH session", {
+						hostId,
+						acqId: acq.id,
+					});
+
+					const connectingAcq = acq; // capture for identity checks below
+					let connectFailed = false;
+					try {
+						// getOrCreateSession is async; the session object is created here.
+						const sessionState = await this.agentMgr.getOrCreateSession(hostId, true);
+						// B4 fix: _connectSshAgent returns the wired agent WITHOUT setting
+						// ctx.agents — we set it here, atomically with commit(), so no
+						// concurrent SPAWN can observe "agent live + acq live" simultaneously.
+						let connectedAgent: import("./agent-connection.js").AgentConnection;
+						try {
+							connectedAgent = await this._connectSshAgent(
+								hostId,
+								host,
+								client,
+								sessionState.id,
+								connectingAcq.controller.signal,
+								connectingAcq.id, // B3: ownerAcqId for prompt identity tracking
+							);
+						} catch (err) {
+							// On connect failure: remove the session if it was freshly started.
+							if (sessionState.status === "starting") {
+								this.broadcaster.updateSessionStatus(hostId, sessionState.id, "closed");
+								this.ctx.sessions.delete(hostId);
+							}
+							// P1: fail() is synchronous — sets FAILED, removes from map, rejects waiters.
+							if (this.ctx.acquisitions.get(hostId) === connectingAcq) {
+								Acq.fail(
+									this.ctx,
+									connectingAcq,
+									err instanceof Error ? err : new Error("SSH connection failed"),
+								);
+							} else {
+								connectingAcq._reject(
+									err instanceof Error ? err : new Error("SSH connection failed"),
+								);
+							}
+							connectFailed = true;
+							return null;
+						}
+
+						// Connect succeeded — commit: P1 synchronous guarded step (invariant 7).
+						// Guard: map identity + state + signal + session currency.
+						// B4 fix: ctx.agents.set is done HERE, inside the guard, atomically with
+						// commit() — no microtask gap between "agent visible" and "acq deleted".
+						if (
+							this.ctx.acquisitions.get(hostId) === connectingAcq &&
+							connectingAcq.state === "CONNECTING" &&
+							!connectingAcq.controller.signal.aborted &&
+							this.ctx.sessions.get(hostId)?.id === sessionState.id
+						) {
+							// P2: set agent + commit atomically — agent becomes visible only when
+							// the acq is simultaneously deleted (no dual-authority window).
+							this.ctx.agents.set(hostId, connectedAgent);
+							Acq.commit(this.ctx, connectingAcq, sessionState);
+							agent = connectedAgent;
+							session = sessionState;
+						} else {
+							// Guard failed — session aborted/replaced during connect (invariant 7).
+							// connectedAgent was wired but the acq is stale — close it.
+							connectedAgent.close();
+							const curSession = this.ctx.sessions.get(hostId);
+							if (curSession?.id === sessionState.id) {
+								this.ctx.sessions.delete(hostId);
+							}
+							connectingAcq._reject(new Error("SSH connect aborted"));
+							connectFailed = true;
+							client.send({
+								type: "ERROR",
+								code: "SSH_CONNECT_FAILED",
+								message: "SSH session was closed during connect",
+							} satisfies ErrorMessage);
+							return null;
+						}
+					} catch {
+						connectFailed = true;
+						return null;
+					} finally {
+						// If connect failed, release the leader lease immediately so the acq can
+						// be reaped. The outer finally will see lease.released===true and no-op.
+						if (connectFailed && lease !== null && !lease.released) {
+							Acq.release(this.ctx, lease, () =>
+								[...this.ctx.channels.values()].some((ch) => ch.sessionId === session?.id),
+							);
+						}
+					}
+
+					// Re-validate after leader's own await (invariant 7 belt-and-suspenders).
+					const curAfterLead = this.ctx.sessions.get(hostId);
+					if (!curAfterLead || curAfterLead.id !== session.id) {
 						client.send({
 							type: "ERROR",
 							code: "SSH_CONNECT_FAILED",
-							message: err instanceof Error ? err.message : "SSH connection failed",
+							message: "SSH session was closed during connect",
+						} satisfies ErrorMessage);
+						return null;
+					}
+					if (!agent?.connected) {
+						client.send({
+							type: "ERROR",
+							code: "SSH_CONNECT_FAILED",
+							message: "SSH connection failed",
 						} satisfies ErrorMessage);
 						return null;
 					}
 				}
-
-				if (agent == null) {
-					// First connection succeeded without TOFU/mismatch prompt
-					this.broadcaster.updateSessionStatus(hostId, session.id, "active");
-					this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
-					this.ctx.agents.set(hostId, sshAgent);
-					agent = sshAgent;
-				}
 			} else {
-				this.ctx.hubLogger?.log("debug", "handleSpawn: local host — connecting to daemon agent", {
+				// ── Non-SSH or SSH with live agent — fast path ────────────────────────
+				session = await this.agentMgr.getOrCreateSession(hostId, host.type === "ssh");
+			}
+
+			// ── Post-acquisition spawn body ───────────────────────────────────────────
+			{
+				// ── Client-disconnect guard ───────────────────────────────────────────────
+				if (!this.ctx.clients.has(clientId)) {
+					const sessionHasChannels = [...this.ctx.channels.values()].some(
+						(ch) => ch.sessionId === session.id,
+					);
+					if (lease !== null && !lease.released) {
+						// SSH path: attempt reap via the lease. If the acq was already committed
+						// (P2 — deleted from map), release() returns false; Fix A guarantees it
+						// STILL removes this lease from acq.leases so the size is accurate.
+						const reaped = Acq.release(this.ctx, lease, () => sessionHasChannels);
+						lease = null; // outer finally will no-op
+						if (reaped) {
+							// Reap fired (abort signal set) — the abort listener in _connectSshAgent
+							// will close the agent when it observes the signal. No extra close needed.
+							return null;
+						}
+						// release() returned false: acq was committed (P2, not in map). Fix A:
+						// release() already removed this lease from acq.leases, so acq.leases.size
+						// now reflects only the remaining in-flight followers.  If size > 0, at
+						// least one follower is still holding its lease — do not close the session.
+						if (acq !== null && acq.leases.size > 0) {
+							// Followers in-flight — do NOT close the session under them.
+							return null;
+						}
+					}
+					// Sole-requester close: acq was committed (agent wired) but the requesting
+					// client is gone and no channels/followers exist — close the agent + session.
+					if (!sessionHasChannels && this.ctx.sessions.get(hostId)?.id === session.id) {
+						const agentToClose = this.ctx.agents.get(hostId);
+						if (agentToClose) {
+							agentToClose.close();
+							this.ctx.agents.delete(hostId);
+						}
+						this.broadcaster.updateSessionStatus(hostId, session.id, "closed");
+						this.ctx.sessions.delete(hostId);
+					}
+					return null;
+				}
+
+				this.ctx.hubLogger?.log("debug", "handleSpawn: session", {
+					sessionId: session.id,
+					status: session.status,
+				});
+
+				if (!agent?.connected) {
+					if (host.type !== "ssh") {
+						this.ctx.hubLogger?.log(
+							"debug",
+							"handleSpawn: local host — connecting to daemon agent",
+							{
+								hostId,
+							},
+						);
+						agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
+						this.ctx.hubLogger?.log("debug", "handleSpawn: daemon agent connected", { hostId });
+					}
+				}
+
+				// biome-ignore lint/style/noNonNullAssertion: invariant — all failure paths returned null above
+				const readyAgent = agent!;
+
+				this.ctx.hubLogger?.log("debug", "handleSpawn: agent ready, building SPAWN message", {
 					hostId,
 				});
-				agent = await this.agentMgr.connectDaemonAgent(hostId, session.id);
-				this.ctx.hubLogger?.log("debug", "handleSpawn: daemon agent connected", { hostId });
-			}
-		}
+				const requestId = generateId();
+				const cols = msg.cols ?? 80;
+				const rows = msg.rows ?? 24;
 
-		this.ctx.hubLogger?.log("debug", "handleSpawn: agent ready, building SPAWN message", {
-			hostId,
-		});
-		const requestId = generateId();
-		const cols = msg.cols ?? 80;
-		const rows = msg.rows ?? 24;
+				// ── Launch profile resolution ─────────────────────────────────────────
+				let resolvedShell = msg.shell ?? undefined;
+				let resolvedArgs = msg.args ?? [];
+				let resolvedCwd = msg.cwd ?? undefined;
+				let resolvedEnv: Record<string, string> = msg.env ?? {};
+				let resolvedDirectProcess = msg.directProcess ?? false;
+				let resolvedElevated = msg.elevated ?? false;
+				let resolvedLaunchProfileId: string | undefined;
 
-		// ── Launch profile resolution ─────────────────────────────────────────
-		let resolvedShell = msg.shell ?? undefined;
-		let resolvedArgs = msg.args ?? [];
-		let resolvedCwd = msg.cwd ?? undefined;
-		let resolvedEnv: Record<string, string> = msg.env ?? {};
-		let resolvedDirectProcess = msg.directProcess ?? false;
-		let resolvedElevated = msg.elevated ?? false;
-		let resolvedLaunchProfileId: string | undefined;
-
-		if (msg.launchProfileId) {
-			const profile = this.ctx.metaDal.getLaunchProfile(msg.launchProfileId);
-			if (profile) {
-				resolvedShell = msg.shell ?? profile.shell;
-				resolvedArgs = msg.args ?? profile.args ?? [];
-				resolvedCwd = msg.cwd ?? profile.cwd ?? resolvedCwd;
-				resolvedEnv = { ...(profile.env ?? {}), ...(msg.env ?? {}) };
-				resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
-				resolvedElevated = msg.elevated ?? profile.elevated;
-				resolvedLaunchProfileId = profile.id;
-			}
-		}
-
-		// ── First-profile fallback: if no shell resolved yet, use sort_order=0 profile ──
-		if (resolvedShell === undefined) {
-			let firstProfile: LaunchProfile | undefined;
-			if (host.type === "ssh") {
-				// Use per-host profiles for SSH hosts (filtered by remote OS)
-				const hostOs = host.os ?? "linux";
-				const hostProfiles = this.ctx.metaDal.listHostProfiles(hostId, hostOs);
-				firstProfile = hostProfiles[0];
-			} else {
-				// Local host: use global profiles
-				firstProfile = this.ctx.metaDal.listLaunchProfiles(1)[0];
-			}
-			if (firstProfile !== undefined) {
-				resolvedShell = firstProfile.shell;
-				if (resolvedArgs.length === 0 && firstProfile.args) {
-					resolvedArgs = firstProfile.args;
+				if (msg.launchProfileId) {
+					const profile = this.ctx.metaDal.getLaunchProfile(msg.launchProfileId);
+					if (profile) {
+						resolvedShell = msg.shell ?? profile.shell;
+						resolvedArgs = msg.args ?? profile.args ?? [];
+						resolvedCwd = msg.cwd ?? profile.cwd ?? resolvedCwd;
+						resolvedEnv = { ...(profile.env ?? {}), ...(msg.env ?? {}) };
+						resolvedDirectProcess = msg.directProcess ?? profile.mode === "process";
+						resolvedElevated = msg.elevated ?? profile.elevated;
+						resolvedLaunchProfileId = profile.id;
+					}
 				}
-				// Also apply env from the fallback profile (e.g. TERM=xterm-256color)
-				if (Object.keys(resolvedEnv).length === 0 && firstProfile.env) {
-					resolvedEnv = { ...firstProfile.env };
+
+				// ── First-profile fallback ────────────────────────────────────────────
+				if (resolvedShell === undefined) {
+					const firstProfile =
+						host.type === "ssh"
+							? this.ctx.metaDal.listHostProfiles(hostId, host.os ?? "linux")[0]
+							: this.ctx.metaDal.listLaunchProfiles(1)[0];
+					if (firstProfile !== undefined) {
+						resolvedShell = firstProfile.shell;
+						if (resolvedArgs.length === 0 && firstProfile.args) {
+							resolvedArgs = firstProfile.args;
+						}
+						if (Object.keys(resolvedEnv).length === 0 && firstProfile.env) {
+							resolvedEnv = { ...firstProfile.env };
+						}
+					}
 				}
-			}
-			// If STILL no shell (SSH host with no profiles), leave resolvedShell undefined.
-			// The SPAWN message will go without shell, and the agent will use $SHELL.
-		}
 
-		// ── Elevation checks ──────────────────────────────────────────────────
-		if (resolvedElevated) {
-			if (host.type === "ssh") {
-				this.ctx.hubLogger?.log(
-					"warn",
-					"ERR-04: elevation not supported over SSH, spawning without elevation",
-					{
-						hostId,
-					},
-				);
-				resolvedElevated = false;
-			}
-		}
+				// ── Elevation checks ──────────────────────────────────────────────────
+				if (resolvedElevated) {
+					if (host.type === "ssh") {
+						this.ctx.hubLogger?.log(
+							"warn",
+							"ERR-04: elevation not supported over SSH, spawning without elevation",
+							{ hostId },
+						);
+						resolvedElevated = false;
+					}
+				}
 
-		if (resolvedElevated) {
-			const caps = this.ctx.agentCapabilities.get(hostId) ?? [];
-			if (!caps.includes("launch-profiles")) {
-				this.ctx.hubLogger?.log(
-					"warn",
-					"ERR-05: agent does not advertise launch-profiles capability, spawning without elevation",
-					{ hostId },
-				);
-				resolvedElevated = false;
-			}
-		}
+				if (resolvedElevated) {
+					const caps = this.ctx.agentCapabilities.get(hostId) ?? [];
+					if (!caps.includes("launch-profiles")) {
+						this.ctx.hubLogger?.log(
+							"warn",
+							"ERR-05: agent does not advertise launch-profiles capability, spawning without elevation",
+							{ hostId },
+						);
+						resolvedElevated = false;
+					}
+				}
 
-		// ── Resolve terminal profile for env mode ─────────────────────────────
-		const terminalProfile = this.ctx.configResolver
-			? this.ctx.configResolver.resolve(hostId)
-			: null;
-		const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
+				const terminalProfile = this.ctx.configResolver
+					? this.ctx.configResolver.resolve(hostId)
+					: null;
+				const resolvedEnvMode = terminalProfile?.envMode ?? "inherit";
 
-		// ── Build base spawn message ──────────────────────────────────────────
-		const baseSpawnMsg: AgentSpawnMessage = {
-			type: "SPAWN",
-			requestId,
-			...(resolvedShell !== undefined ? { shell: resolvedShell } : {}),
-			...(resolvedArgs.length > 0 && { args: resolvedArgs }),
-			...(resolvedCwd !== undefined ? { cwd: resolvedCwd } : {}),
-			env: resolvedEnv,
-			cols,
-			rows,
-			...(resolvedDirectProcess && { directProcess: true }),
-			envMode: resolvedEnvMode,
-		};
+				const baseSpawnMsg: AgentSpawnMessage = {
+					type: "SPAWN",
+					requestId,
+					...(resolvedShell !== undefined ? { shell: resolvedShell } : {}),
+					...(resolvedArgs.length > 0 && { args: resolvedArgs }),
+					...(resolvedCwd !== undefined ? { cwd: resolvedCwd } : {}),
+					env: resolvedEnv,
+					cols,
+					rows,
+					...(resolvedDirectProcess && { directProcess: true }),
+					envMode: resolvedEnvMode,
+				};
 
-		// ── Elevated spawn ────────────────────────────────────────────────────
-		if (resolvedElevated) {
-			const rawMethod = this.ctx.configResolver
-				? this.ctx.configResolver.resolveElevationMethod(host.elevationMethod)
-				: process.platform === "win32"
-					? "gsudo"
-					: "sudo";
-			const elevCfg = this._resolveElevationConfig(host.customCommand, rawMethod);
-			if ("validationError" in elevCfg) {
-				client.send(elevCfg.validationError);
-				return null;
-			}
-			const { method, customCommand } = elevCfg;
+				// ── Elevated spawn ────────────────────────────────────────────────────
+				if (resolvedElevated) {
+					const rawMethod = this.ctx.configResolver
+						? this.ctx.configResolver.resolveElevationMethod(host.elevationMethod)
+						: process.platform === "win32"
+							? "gsudo"
+							: "sudo";
+					const elevCfg = this._resolveElevationConfig(host.customCommand, rawMethod);
+					if ("validationError" in elevCfg) {
+						client.send(elevCfg.validationError);
+						return null;
+					}
+					const { method, customCommand } = elevCfg;
 
-			const agentSpawn: AgentSpawnMessage = {
-				...baseSpawnMsg,
-				elevated: true,
-				elevationMethod: method,
-				...(customCommand !== undefined && { customCommand }),
-			};
+					const agentSpawn: AgentSpawnMessage = {
+						...baseSpawnMsg,
+						elevated: true,
+						elevationMethod: method,
+						...(customCommand !== undefined && { customCommand }),
+					};
 
-			const cacheKey = `${hostId}:${clientId}`;
-			const cached = this.ctx.elevationCache.get(cacheKey);
-			if (cached && cached.expiresAt > Date.now()) {
-				agentSpawn.elevationSecret = cached.secret;
-				return (
-					await this.lifecycle.sendSpawnAndWait({
-						agent,
+					const cacheKey = `${hostId}:${clientId}`;
+					const cached = this.ctx.elevationCache.get(cacheKey);
+					if (cached && cached.expiresAt > Date.now()) {
+						agentSpawn.elevationSecret = cached.secret;
+						return (
+							await this.lifecycle.sendSpawnAndWait({
+								agent: readyAgent,
+								spawnMsg: agentSpawn,
+								clientId,
+								hostId,
+								session,
+								client,
+								resolvedShell,
+								resolvedArgs,
+								resolvedCwd,
+								resolvedDirectProcess,
+								resolvedLaunchProfileId,
+								cols,
+								rows,
+								suppressClientError: false,
+								resolvedElevated: true,
+								resolvedElevationMethod: method,
+							})
+						).channelId;
+					}
+
+					const firstResult = await this.lifecycle.sendSpawnAndWait({
+						agent: readyAgent,
 						spawnMsg: agentSpawn,
 						clientId,
 						hostId,
@@ -629,68 +925,74 @@ export class SessionManager {
 						resolvedLaunchProfileId,
 						cols,
 						rows,
-						suppressClientError: false,
+						suppressClientError: true,
 						resolvedElevated: true,
 						resolvedElevationMethod: method,
-					})
-				).channelId;
-			}
+					});
 
-			// Cache miss — try passwordless first
-			const firstResult = await this.lifecycle.sendSpawnAndWait({
-				agent,
-				spawnMsg: agentSpawn,
-				clientId,
-				hostId,
-				session,
-				client,
-				resolvedShell,
-				resolvedArgs,
-				resolvedCwd,
-				resolvedDirectProcess,
-				resolvedLaunchProfileId,
-				cols,
-				rows,
-				suppressClientError: true,
-				resolvedElevated: true,
-				resolvedElevationMethod: method,
-			});
+					if (
+						firstResult.channelId !== null ||
+						firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED"
+					) {
+						return firstResult.channelId;
+					}
 
-			if (firstResult.channelId !== null || firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED") {
-				return firstResult.channelId;
-			}
+					const promptFn = this.sshMgr.buildPromptAuth(client);
+					const hostname = host.sshHost ?? host.label ?? hostId;
+					const secret = await promptFn(
+						hostId,
+						"elevation",
+						`Enter password for elevated shell on ${hostname}`,
+					);
+					if (secret === null) {
+						client.send({
+							type: "ERROR",
+							code: "ELEVATION_CANCELLED",
+							message: "Elevation cancelled by user",
+						});
+						return null;
+					}
 
-			// Passwordless failed — prompt user
-			const promptFn = this.sshMgr.buildPromptAuth(client);
-			const hostname = host.sshHost ?? host.label ?? hostId;
-			const secret = await promptFn(
-				hostId,
-				"elevation",
-				`Enter password for elevated shell on ${hostname}`,
-			);
-			if (secret === null) {
-				client.send({
-					type: "ERROR",
-					code: "ELEVATION_CANCELLED",
-					message: "Elevation cancelled by user",
+					this.ctx.elevationCache.set(cacheKey, {
+						secret,
+						expiresAt: Date.now() + 300_000,
+					});
+
+					const retrySpawn: AgentSpawnMessage = {
+						...agentSpawn,
+						requestId: generateId(),
+						elevationSecret: secret,
+					};
+					return (
+						await this.lifecycle.sendSpawnAndWait({
+							agent: readyAgent,
+							spawnMsg: retrySpawn,
+							clientId,
+							hostId,
+							session,
+							client,
+							resolvedShell,
+							resolvedArgs,
+							resolvedCwd,
+							resolvedDirectProcess,
+							resolvedLaunchProfileId,
+							cols,
+							rows,
+							suppressClientError: false,
+							resolvedElevated: true,
+							resolvedElevationMethod: method,
+						})
+					).channelId;
+				}
+
+				// ── Non-elevated spawn ─────────────────────────────────────────────────
+				this.ctx.hubLogger?.log("debug", "handleSpawn: sending non-elevated SPAWN", {
+					requestId: baseSpawnMsg.requestId,
+					shell: baseSpawnMsg.shell,
 				});
-				return null;
-			}
-
-			this.ctx.elevationCache.set(cacheKey, {
-				secret,
-				expiresAt: Date.now() + 300_000,
-			});
-
-			const retrySpawn: AgentSpawnMessage = {
-				...agentSpawn,
-				requestId: generateId(),
-				elevationSecret: secret,
-			};
-			return (
-				await this.lifecycle.sendSpawnAndWait({
-					agent,
-					spawnMsg: retrySpawn,
+				const spawnResult = await this.lifecycle.sendSpawnAndWait({
+					agent: readyAgent,
+					spawnMsg: baseSpawnMsg,
 					clientId,
 					hostId,
 					session,
@@ -702,38 +1004,29 @@ export class SessionManager {
 					resolvedLaunchProfileId,
 					cols,
 					rows,
-					suppressClientError: false,
-					resolvedElevated: true,
-					resolvedElevationMethod: method,
-				})
-			).channelId;
+				});
+				this.ctx.hubLogger?.log("debug", "handleSpawn: sendSpawnAndWait returned", {
+					channelId: spawnResult.channelId,
+					errCode: spawnResult.errCode,
+				});
+				return spawnResult.channelId;
+			} // end inner bare block
+		} finally {
+			// ── Single outer finally — release lease exactly once ─────────────────
+			// Invariant 2: covers ALL exit paths (success, failure, early return, throw).
+			// release() is idempotent (invariant 6).
+			// Invariant 3: triggers reap if leases.size===0 && no channels.
+			if (lease !== null && !lease.released) {
+				// `session` is unassigned on follower failure paths (e.g. acq.connectPromise
+				// rejected before a session resolved). Guard the deref so the finally never
+				// throws on `session.id` — that would mask the original error and skip release.
+				Acq.release(this.ctx, lease, () =>
+					[...this.ctx.channels.values()].some(
+						(ch) => session != null && ch.sessionId === session.id,
+					),
+				);
+			}
 		}
-
-		// ── Non-elevated spawn ─────────────────────────────────────────────────
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sending non-elevated SPAWN", {
-			requestId: baseSpawnMsg.requestId,
-			shell: baseSpawnMsg.shell,
-		});
-		const spawnResult = await this.lifecycle.sendSpawnAndWait({
-			agent,
-			spawnMsg: baseSpawnMsg,
-			clientId,
-			hostId,
-			session,
-			client,
-			resolvedShell,
-			resolvedArgs,
-			resolvedCwd,
-			resolvedDirectProcess,
-			resolvedLaunchProfileId,
-			cols,
-			rows,
-		});
-		this.ctx.hubLogger?.log("debug", "handleSpawn: sendSpawnAndWait returned", {
-			channelId: spawnResult.channelId,
-			errCode: spawnResult.errCode,
-		});
-		return spawnResult.channelId;
 	}
 
 	async handleAttach(clientId: string, channelId: string): Promise<boolean> {
@@ -864,7 +1157,7 @@ export class SessionManager {
 		this.broadcaster.detachClient(clientId, channelId);
 	}
 
-	handleInput(_clientId: string, channelId: string, data: Uint8Array): void {
+	handleInput(clientId: string, channelId: string, data: Uint8Array): void {
 		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
@@ -873,7 +1166,7 @@ export class SessionManager {
 		agent.send(inputMsg);
 	}
 
-	handleResize(_clientId: string, channelId: string, cols: number, rows: number): void {
+	handleResize(clientId: string, channelId: string, cols: number, rows: number): void {
 		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
@@ -972,6 +1265,181 @@ export class SessionManager {
 	/** Proxy used by tests that call sm._warmRestartLocal(hostId, sessionId) */
 	_warmRestartLocal(hostId: string, sessionId: string): Promise<void> {
 		return this.agentMgr.warmRestartLocal(hostId, sessionId);
+	}
+
+	get acquisitions(): SharedSessionContext["acquisitions"] {
+		return this.ctx.acquisitions;
+	}
+
+	get pendingPrompts(): SharedSessionContext["pendingPrompts"] {
+		return this.ctx.pendingPrompts;
+	}
+
+	// ─── Internal: SSH connect (used by handleSpawn coalescing) ──────────────
+
+	/**
+	 * Perform the full SSH connect sequence for a host: create SshAgent, call
+	 * sshAgent.start(), handle TOFU / mismatch retries.  On success the agent
+	 * is wired into ctx.agents.  On failure an ERROR is sent to `client` and
+	 * the promise rejects so the caller can clean up.
+	 *
+	 * This method is extracted from handleSpawn so that concurrent SPAWNs for
+	 * the same host can share a single in-flight promise via ctx.connectingAgents.
+	 *
+	 * @param signal - AbortSignal from the coalescing AbortController. When
+	 *   aborted (via closeSession/shutdown), the SSH connect is cancelled and
+	 *   the promise rejects — preventing revival of an explicitly closed session.
+	 */
+	private async _connectSshAgent(
+		hostId: string,
+		host: import("@termora/shared").Host,
+		client: WsClient,
+		sessionId: string,
+		signal?: AbortSignal,
+		ownerAcqId?: string,
+	): Promise<import("./agent-connection.js").AgentConnection> {
+		const promptAuth = this.sshMgr.buildPromptAuth(client, signal);
+
+		const storedFingerprint = this.ctx.metaDal.getHostFingerprint(hostId);
+		const sshHostname = host.sshHost?.includes("@")
+			? (host.sshHost.split("@")[1] ?? host.sshHost)
+			: (host.sshHost ?? host.label);
+		const sshPort = host.sshPort ?? 22;
+		const hostKey = `${sshHostname}:${sshPort}`;
+		const sessionTrustedFp = this.ctx.trustedOnceFingerprints.get(hostKey);
+
+		const deployOpts = this._buildDeployOpts(hostId, host, client, ownerAcqId);
+
+		console.error(`[termora-ssh] creating SshAgent for host ${host.id}`);
+		const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+
+		console.error(`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label}`);
+		try {
+			console.error("[termora-ssh] deploying agent...");
+			await sshAgent.start(storedFingerprint, sessionTrustedFp, signal);
+			console.error("[termora-ssh] agent deployed, exec starting");
+			console.error("[termora-ssh] SSH connection established");
+		} catch (err) {
+			console.error(`[termora-ssh] SSH error: ${err instanceof Error ? err.message : String(err)}`);
+			// Handle deploy errors (user rejection, binary not available)
+			if (err instanceof DeployError) {
+				client.send({
+					type: "ERROR",
+					code: err.code,
+					message: err.message,
+					hostId,
+				} satisfies ErrorMessage);
+				throw err;
+			}
+
+			// If the connect was aborted (session closed/shutdown), propagate without
+			// sending an error to the client — the session is intentionally gone.
+			if (signal?.aborted) {
+				throw err instanceof Error ? err : new Error("SSH connect aborted");
+			}
+
+			const kv = sshAgent.lastKeyVerification;
+			if (kv.tofu || kv.mismatch) {
+				const action = await this.sshMgr.promptHostKeyVerify(
+					client,
+					hostId,
+					host.sshHost ?? host.label,
+					kv.mismatch ? (storedFingerprint ?? "") : "",
+					kv.capturedFingerprint,
+					kv.tofu,
+					ownerAcqId,
+				);
+				if (action === "reject") {
+					client.send({
+						type: "ERROR",
+						code: "SSH_HOST_KEY_REJECTED",
+						message: "SSH host key rejected by user",
+					} satisfies ErrorMessage);
+					throw new Error("SSH host key rejected by user");
+				}
+				const retryFp = kv.capturedFingerprint;
+				// Abort guard: if the session was closed (aborted) or replaced while
+				// the user was responding to the verify prompt, discard the trust decision.
+				// Without this guard, a response arriving after closeSession() would
+				// persist a fingerprint for a session that is no longer current.
+				if (signal?.aborted || this.ctx.sessions.get(hostId)?.id !== sessionId) {
+					throw Object.assign(new Error("SSH connect aborted"), { name: "AbortError" });
+				}
+				if (action === "trust_permanent") {
+					this.ctx.metaDal.updateHostFingerprint(hostId, retryFp);
+				} else {
+					this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
+				}
+				const retryAgent = new SshAgent(host, promptAuth, deployOpts);
+				console.error(`[termora-ssh] creating SshAgent for host ${host.id} (retry)`);
+				console.error(
+					`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label} (retry)`,
+				);
+				try {
+					console.error("[termora-ssh] deploying agent...");
+					await retryAgent.start(
+						action === "trust_permanent" ? retryFp : null,
+						action === "trust_once" ? retryFp : undefined,
+						signal,
+					);
+					console.error("[termora-ssh] agent deployed, exec starting");
+					console.error("[termora-ssh] SSH connection established");
+				} catch (retryErr) {
+					console.error(
+						`[termora-ssh] SSH error: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+					);
+					// Aborted during retry — don't send an error to the client.
+					if (signal?.aborted) {
+						throw retryErr instanceof Error ? retryErr : new Error("SSH connect aborted");
+					}
+					if (retryErr instanceof DeployError) {
+						client.send({
+							type: "ERROR",
+							code: retryErr.code,
+							message: retryErr.message,
+							hostId,
+						} satisfies ErrorMessage);
+					} else {
+						client.send({
+							type: "ERROR",
+							code: "SSH_CONNECT_FAILED",
+							message: retryErr instanceof Error ? retryErr.message : "SSH connection failed",
+						} satisfies ErrorMessage);
+					}
+					throw retryErr instanceof Error ? retryErr : new Error("SSH connection failed");
+				}
+				// Session-currency guard: verify the session is still the one we started.
+				// An abort racing the final wiring could revive a closed session without this.
+				if (signal?.aborted || this.ctx.sessions.get(hostId)?.id !== sessionId) {
+					retryAgent.close();
+					throw Object.assign(new Error("SSH connect aborted"), { name: "AbortError" });
+				}
+				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
+				this.agentMgr.wireAgentEvents(hostId, sessionId, retryAgent);
+				// B4: do NOT set ctx.agents here — caller sets it atomically with commit().
+				return retryAgent;
+			}
+			client.send({
+				type: "ERROR",
+				code: "SSH_CONNECT_FAILED",
+				message: err instanceof Error ? err.message : "SSH connection failed",
+			} satisfies ErrorMessage);
+			throw err instanceof Error ? err : new Error("SSH connection failed");
+		}
+
+		// Session-currency guard: verify the session is still the one we started.
+		// An abort racing the final wiring (between start() returning and this line)
+		// cannot revive a closed session because we check here before wiring.
+		if (signal?.aborted || this.ctx.sessions.get(hostId)?.id !== sessionId) {
+			sshAgent.close();
+			throw Object.assign(new Error("SSH connect aborted"), { name: "AbortError" });
+		}
+
+		// First connection succeeded without TOFU/mismatch prompt
+		this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
+		this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);
+		// B4: do NOT set ctx.agents here — caller sets it atomically with commit().
+		return sshAgent;
 	}
 
 	// ─── Internal: elevation config ───────────────────────────────────────────
