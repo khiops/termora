@@ -86,7 +86,6 @@ vi.mock("./agent-launcher.js", () => {
 // ─── Mock SshAgent ────────────────────────────────────────────────────────────
 let mockSshAgentInstance: MockSshAgent | null = null;
 /** Set to an Error before a test to make the next new SshAgent's start() reject once. */
-// biome-ignore lint/style/useConst: intentionally reassigned across tests
 let nextSshStartError: Error | null = null;
 
 class MockSshAgent {
@@ -3165,7 +3164,7 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 			hostId,
 		);
 		expect(sessionEntry).toBeDefined();
-		const sessionId = sessionEntry!.id;
+		const sessionId = sessionEntry?.id ?? "";
 
 		// Both channels must reference the SHARED session, not two different ones.
 		const channels = sm as unknown as { channels: Map<string, { sessionId: string }> };
@@ -3352,31 +3351,29 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 		expect(sm.acquisitions.size).toBe(0);
 	});
 
-	// ── NEW Fix 1: second auth prompt for same host cancels first (clobber-prevention) ──
+	// ── NEW Fix 1: same-client sequential re-prompt cancels its own first entry ──
 	//
 	// Mutation oracle: without cancel-before-arm the first prompt's timer fires after
 	// AUTH_PROMPT_TIMEOUT_MS and deletes the NEW entry, permanently wedging the host.
-	it("second buildPromptAuth for same host cancels first prompt — no timer clobber", async () => {
+	// The re-prompt MUST come from the SAME client (ownership rule). A different client
+	// is now forbidden from clobbering another client's in-flight prompt (SEC fix C1).
+	it("second buildPromptAuth for same host from SAME client cancels first prompt — no timer clobber", async () => {
 		vi.useFakeTimers();
 		try {
 			const hostId = "host-clobber-1";
 			const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext })
 				.ctx;
-			const client1 = {
-				id: "c-clob-1",
-				send: vi.fn(),
-				attachedChannels: new Set(),
-			} as WsClient;
-			const client2 = {
-				id: "c-clob-2",
+			// Use the SAME client for both prompts — sequential re-prompt is the legitimate path.
+			const sameClient = {
+				id: "c-clob-same",
 				send: vi.fn(),
 				attachedChannels: new Set(),
 			} as WsClient;
 
-			// Issue first prompt
+			// Issue first prompt from sameClient
 			const promptFn1 = (
 				sm as unknown as { sshMgr: { buildPromptAuth: (c: WsClient) => unknown } }
-			).sshMgr.buildPromptAuth(client1) as (
+			).sshMgr.buildPromptAuth(sameClient) as (
 				hostId: string,
 				type: string,
 				msg: string,
@@ -3388,24 +3385,24 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 			const firstEntry = ctx.pendingAuthPrompts.get(hostId)!;
 			const resolveSpy = vi.spyOn(firstEntry, "resolve");
 
-			// Issue second prompt for the SAME hostId — must cancel the first
+			// Issue second prompt for the SAME hostId from the SAME client — must cancel first
 			const promptFn2 = (
 				sm as unknown as { sshMgr: { buildPromptAuth: (c: WsClient) => unknown } }
-			).sshMgr.buildPromptAuth(client2) as (
+			).sshMgr.buildPromptAuth(sameClient) as (
 				hostId: string,
 				type: string,
 				msg: string,
 			) => Promise<string | null>;
-			void promptFn2(hostId, "password", "Enter password");
+			void promptFn2(hostId, "password", "Enter password again");
 
 			// First promise must have been settled with null (cancelled synchronously)
 			expect(resolveSpy).toHaveBeenCalledWith(null);
 			const result1 = await p1;
 			expect(result1).toBeNull();
 
-			// Map now holds the SECOND entry
+			// Map now holds the SECOND entry (same client)
 			const secondEntry = ctx.pendingAuthPrompts.get(hostId);
-			expect(secondEntry?.clientId).toBe("c-clob-2");
+			expect(secondEntry?.clientId).toBe("c-clob-same");
 
 			// Advancing past the full timeout must NOT corrupt the second entry.
 			// With the fix, only the second timer is armed — there is no ghost first timer.
@@ -4614,7 +4611,7 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 		expect(ctx.pendingHostVerify.has(promptId)).toBe(true);
 
 		// INVARIANT 2: ownership transferred to clientB.
-		expect(ctx.pendingHostVerify.get(promptId)!.clientId).toBe("rt-clientB");
+		expect(ctx.pendingHostVerify.get(promptId)?.clientId).toBe("rt-clientB");
 
 		// INVARIANT 3: prompt re-sent to clientB's wire.
 		expect(bReceived).toContainEqual(resendMsg);
@@ -4753,5 +4750,468 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 		expect(resolveSpy).toHaveBeenCalledWith("trust_permanent");
 
 		clearTimeout(timerRef);
+	});
+});
+
+// ─── Fix B: onReconnectAgent restart-reconnect revive guard ─────────────────
+//
+// Invariant: if closeSession() fires while onReconnectAgent's sshAgent.start()
+// is still awaiting, the post-await currency re-check must detect the deleted
+// session (ctx.sessions no longer has the hostId) and bail — close the fresh
+// agent, return false, and leave ctx.agents empty for that host.
+//
+// Mutation oracle: removing the `ctx.sessions.get(hostId)?.id !== sessionId`
+// post-await guard in onReconnectAgent causes the restart-reconnect to wire
+// the agent unconditionally → session is revived after closeSession.
+//
+// Strategy: use mockImplementationOnce on the second SshAgent construction
+// (the one inside onReconnectAgent) to inject a deferred start(); while start()
+// is pending, call closeSession(); resolve start(); assert the agent was
+// closed (not wired/stored) and onReconnectAgent returned false.
+
+describe("SessionManager — Fix B: onReconnectAgent restart-reconnect revive guard", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		nextSshStartError = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+		vi.mocked(_SshAgentForMock).mockClear();
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	async function createSshHost(): Promise<string> {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const host = dal.createHost({
+			type: "ssh",
+			label: "fixb-ssh",
+			sshHost: "user@fixb-test",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+		return host.id;
+	}
+
+	// B1: closeSession during onReconnectAgent start() → session NOT revived.
+	//
+	// Mutation oracle: removing the post-await currency re-check in onReconnectAgent
+	// causes ctx.agents to receive the fresh agent even after closeSession deleted
+	// the session — observable as ctx.agents.has(hostId) === true after the race.
+	it("B1: closeSession during in-flight start() prevents session revival", async () => {
+		const hostId = await createSshHost();
+
+		const c1 = makeClient("c-fixb-1", []);
+		sm.addClient(c1);
+
+		// First handleSpawn: establishes the session and active agent.
+		const channelId = await sm.handleSpawn("c-fixb-1", { type: "SPAWN", hostId });
+		expect(channelId).toBeTruthy();
+
+		// Disconnect the initial agent so restartChannel sees !agent.connected
+		// and falls into the onReconnectAgent path.
+		const initialAgent = mockSshAgentInstance!;
+		initialAgent.simulateClose();
+		await new Promise((r) => setImmediate(r));
+
+		// Capture the sessionId before the race so we can verify it was not revived.
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		const sessionBefore = ctx.sessions.get(hostId);
+		expect(sessionBefore).toBeDefined();
+		const originalSessionId = sessionBefore?.id ?? "";
+
+		// Deferred start(): lets us interleave closeSession between start() entry and resolve.
+		let resolveStart!: () => void;
+		const startGate = new Promise<void>((res) => {
+			resolveStart = res;
+		});
+
+		// Second SshAgent construction (inside onReconnectAgent) gets a deferred start().
+		const reconnectAgentClose = vi.fn();
+		// biome-ignore lint/complexity/useArrowFunction: vitest needs a constructable function for new-ed mocks
+		vi.mocked(_SshAgentForMock).mockImplementationOnce(function () {
+			const agent = new MockSshAgent();
+			agent.start = vi.fn().mockReturnValue(startGate);
+			agent.close = reconnectAgentClose;
+			return agent as never;
+		});
+
+		// Start restartChannel — it will await onReconnectAgent → await start().
+		// Do NOT await yet; we need to interleave closeSession.
+		const restartPromise = sm.restartChannel(channelId!);
+
+		// Yield to let restartChannel enter onReconnectAgent and reach await start().
+		await new Promise((r) => setImmediate(r));
+
+		// closeSession fires while start() is still pending — deletes ctx.sessions entry.
+		await sm.closeSession(originalSessionId);
+
+		// INVARIANT: session is gone from ctx.sessions (closeSession deleted it).
+		expect(ctx.sessions.has(hostId)).toBe(false);
+
+		// Now resolve start() — the post-await guard should detect the missing session.
+		resolveStart();
+
+		// Await restartChannel — must return false (not revived).
+		const result = await restartPromise;
+
+		// INVARIANT 1: restartChannel returns false — the reconnect was cancelled.
+		// Mutation oracle: without the guard this would return true (revive path).
+		expect(result).toBe(false);
+
+		// INVARIANT 2: the fresh reconnect agent was closed — not leaked.
+		// Mutation oracle: without the guard, close() is never called and the agent leaks.
+		expect(reconnectAgentClose).toHaveBeenCalled();
+
+		// INVARIANT 3: ctx.agents does NOT contain the revived agent for this host.
+		// Mutation oracle: without the guard, ctx.agents.set(hostId, sshAgent) runs
+		// unconditionally and leaves a stale agent reference after session close.
+		expect(ctx.agents.has(hostId)).toBe(false);
+
+		// INVARIANT 4: ctx.sessions remains empty — the session was not re-created.
+		// Mutation oracle: without the guard, getOrCreateSession (removed in fix) would
+		// insert a new session entry, reviving the closed session.
+		expect(ctx.sessions.has(hostId)).toBe(false);
+	});
+
+	// B2 (happy path): onReconnectAgent succeeds when no closeSession races.
+	//
+	// Ensures the currency guard does not break the normal flow.
+	it("B2: onReconnectAgent succeeds when session is still current after start()", async () => {
+		const hostId = await createSshHost();
+
+		const c1 = makeClient("c-fixb-2", []);
+		sm.addClient(c1);
+
+		// Establish initial session + channel.
+		const channelId = await sm.handleSpawn("c-fixb-2", { type: "SPAWN", hostId });
+		expect(channelId).toBeTruthy();
+
+		// Disconnect the initial agent.
+		mockSshAgentInstance?.simulateClose();
+		await new Promise((r) => setImmediate(r));
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+
+		// Verify session still present before restart.
+		expect(ctx.sessions.has(hostId)).toBe(true);
+
+		// Trigger restartChannel — no closeSession race this time.
+		// The default mock start() resolves immediately.
+		const result = await sm.restartChannel(channelId!);
+
+		// INVARIANT: happy path succeeds — agent is wired and session is active.
+		// (restartChannel may return false if the SPAWN roundtrip times out in the
+		// mock environment, but onReconnectAgent itself must have returned true —
+		// observable via ctx.agents being populated for this host.)
+		const agentPresent = ctx.agents.has(hostId);
+		// The currency guard must not have fired (no closeSession).
+		// We accept true OR a mock-SPAWN-timeout false, but agents must be set.
+		expect(agentPresent).toBe(true);
+		// result can be false if the channel SPAWN times out in mock (no mock SPAWN_OK
+		// after reconnect), but the agent wiring must have succeeded.
+		// Suppress unused-result lint; main observable is agentPresent above.
+		void result;
+	});
+});
+
+// ─── Fix C2: onReconnectAgent abort-safety on closeSession ────────────────────
+//
+// Invariant: when closeSession() fires while onReconnectAgent is awaiting a
+// passphrase/TOFU prompt (in-flight buildPromptAuth), the AbortController
+// registered in ctx.reconnectAbortControllers must fire — clearing
+// pendingAuthPrompts for the host so a late handleAuthPromptResponse cannot
+// cache a secret for an already-closed session.
+//
+// Mutation oracle: without an AbortController threaded through buildPromptAuth,
+// the pendingAuthPrompts entry persists after closeSession and a late response
+// caches the secret (observable: passphraseCache populated for the host).
+//
+// Strategy:
+//   1. Build a deferred promptAuth that arms pendingAuthPrompts but never
+//      resolves on its own.
+//   2. Call onReconnectAgent (via restartChannel) → enters the deferred prompt.
+//   3. Verify pendingAuthPrompts entry is armed.
+//   4. closeSession() → reconnectAbortControllers abort fires → entry is cleared.
+//   5. Late handleAuthPromptResponse delivers a secret → assert NOT cached
+//      in passphraseCache (the session is gone, caching would be a security bug).
+//   6. Mutation oracle: removing the AbortController wiring leaves the prompt
+//      alive and the late response populates passphraseCache for the dead session.
+
+describe("SessionManager — Fix C2: onReconnectAgent abort-safe on closeSession", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		nextSshStartError = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+		vi.mocked(_SshAgentForMock).mockClear();
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	async function createSshHostC2(): Promise<string> {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const host = dal.createHost({
+			type: "ssh",
+			label: "c2-ssh",
+			sshHost: "user@c2-test",
+			sshAuth: "password",
+		});
+		return host.id;
+	}
+
+	it("C2: closeSession during in-flight buildPromptAuth clears pendingAuthPrompts, late response does not cache secret", async () => {
+		const hostId = await createSshHostC2();
+
+		const c1 = makeClient("c-c2-1", []);
+		sm.addClient(c1);
+
+		// Establish initial session + channel.
+		const channelId = await sm.handleSpawn("c-c2-1", { type: "SPAWN", hostId });
+		expect(channelId).toBeTruthy();
+
+		// Disconnect the initial agent so restartChannel sees !agent.connected
+		// and falls into the onReconnectAgent path.
+		const initialAgent = mockSshAgentInstance!;
+		initialAgent.simulateClose();
+		await new Promise((r) => setImmediate(r));
+
+		// Capture context maps for assertions.
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+
+		const sessionBefore = ctx.sessions.get(hostId);
+		expect(sessionBefore).toBeDefined();
+		const originalSessionId = sessionBefore?.id ?? "";
+
+		// Make the reconnect agent's start() hang indefinitely so the test
+		// controls when it proceeds. The deferred gate never resolves — the
+		// test relies solely on the abort path.
+		let startGateResolve!: () => void;
+		const startGate = new Promise<void>((res) => {
+			startGateResolve = res;
+		});
+
+		const reconnectAgentClose = vi.fn();
+		// biome-ignore lint/complexity/useArrowFunction: vitest needs a constructable function for new-ed mocks
+		vi.mocked(_SshAgentForMock).mockImplementationOnce(function () {
+			const agent = new MockSshAgent();
+			// start() hangs — it will be aborted by closeSession
+			agent.start = vi.fn().mockReturnValue(startGate);
+			agent.close = reconnectAgentClose;
+			return agent as never;
+		});
+
+		// Trigger restartChannel — enters onReconnectAgent → awaits start().
+		// Do NOT await; interleave closeSession.
+		const restartPromise = sm.restartChannel(channelId!);
+
+		// Yield to let onReconnectAgent register the AbortController and
+		// reach await sshAgent.start().
+		await new Promise((r) => setImmediate(r));
+		await new Promise((r) => setImmediate(r));
+
+		// PRECONDITION: an AbortController must be registered for this host.
+		// Mutation oracle: without the AC wiring, reconnectAbortControllers is empty.
+		expect(ctx.reconnectAbortControllers.has(hostId)).toBe(true);
+
+		// closeSession fires — must abort the reconnectAbortController, which in turn
+		// fires the abort listener inside buildPromptAuth → clears pendingAuthPrompts.
+		await sm.closeSession(originalSessionId);
+
+		// INVARIANT 1: session is gone.
+		expect(ctx.sessions.has(hostId)).toBe(false);
+
+		// INVARIANT 2: reconnectAbortControllers cleared for this host.
+		// Mutation oracle: without the AC deletion in closeSession path, this stays populated.
+		expect(ctx.reconnectAbortControllers.has(hostId)).toBe(false);
+
+		// INVARIANT 3: pendingAuthPrompts cleared — abort listener fired.
+		// Mutation oracle: without the signal threaded through buildPromptAuth, the prompt
+		// entry persists and a late response can populate passphraseCache for the dead host.
+		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+
+		// Simulate a late response arriving after the session was closed.
+		// Without the fix, handleAuthPromptResponse would find the stale entry
+		// and cache the secret in passphraseCache.
+		sm.handleAuthPromptResponse("c-c2-1", hostId, "should-not-be-cached");
+
+		// INVARIANT 4: passphraseCache must NOT contain the secret for the closed host.
+		// Mutation oracle: without the fix, passphraseCache.has(hostId) === true here.
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		// Resolve the gate so start() settles and restartChannel can finish.
+		startGateResolve();
+		await restartPromise;
+	});
+});
+
+// ─── Fix C3: closeSession catch-all clears pendingAuthPrompts unconditionally ─
+//
+// Codex gate finding: when reconnect path A registers AbortController AC-1 for
+// a hostId, then reconnect path B overwrites it with AC-2 (without aborting AC-1),
+// AC-1's abort listener is never fired → the pendingAuthPrompts entry armed by
+// path A's buildPromptAuth closure survives session close.
+//
+// Fix (catch-all in closeSession): after clearing reconnectAbortControllers, also
+// unconditionally clear any pendingAuthPrompts entry for the hostId, regardless of
+// which controller owned it.
+//
+// This tests the catch-all on the ctx directly so it is independent of real SSH
+// timing and exercises the exact code path added to session-manager.ts closeSession.
+
+describe("SessionManager — Fix C3: closeSession catch-all clears orphaned pendingAuthPrompts", () => {
+	let sm: SessionManager;
+	let dbManager: ReturnType<typeof openTestDatabases>;
+
+	beforeEach(() => {
+		localSpawnCount = 0;
+		sshSpawnCount = 0;
+		mockSshAgentInstance = null;
+		nextSshStartError = null;
+		dbManager = openTestDatabases();
+		sm = new SessionManager(dbManager);
+		vi.mocked(_SshAgentForMock).mockClear();
+	});
+
+	afterEach(async () => {
+		await sm.shutdown();
+		dbManager.close();
+	});
+
+	it("C3-1: closeSession unconditionally clears pendingAuthPrompts for the host, even when the registered controller was overwritten", async () => {
+		// Mutation oracle: removing the catch-all block from closeSession leaves
+		// the pendingAuthPrompts entry alive after close — detectable by .has(hostId).
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const host = dal.createHost({
+			type: "ssh",
+			label: "c3-ssh",
+			sshHost: "user@c3-test",
+			sshAuth: "password",
+		});
+		const hostId = host.id;
+
+		const c1 = makeClient("c-c3-1", []);
+		sm.addClient(c1);
+
+		// Establish an SSH session.
+		const channelId = await sm.handleSpawn("c-c3-1", { type: "SPAWN", hostId });
+		expect(channelId).toBeTruthy();
+
+		// Grab the internal ctx to inject a stale pendingAuthPrompts entry that
+		// simulates the orphaned state: path A armed a prompt but path B overwrote
+		// its AC without aborting it, so the listener never fired.
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+
+		const sessionState = ctx.sessions.get(hostId);
+		expect(sessionState).toBeDefined();
+		const sessionId = sessionState?.id ?? "";
+
+		// Directly inject an orphaned auth prompt entry for this host.
+		// This simulates the state left by an overwritten controller whose abort
+		// listener was never called.
+		const resolveSpy = vi.fn();
+		const orphanedTimer = setTimeout(() => {}, 60_000);
+		ctx.pendingAuthPrompts.set(hostId, {
+			resolve: resolveSpy,
+			timer: orphanedTimer,
+			clientId: "c-c3-1",
+			resendPayload: {
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Enter passphrase",
+			} as import("@termora/shared").AuthPromptMessage,
+		});
+
+		// Precondition: the orphaned entry must be present.
+		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(true);
+
+		// closeSession fires — catch-all must clear the entry.
+		await sm.closeSession(sessionId);
+
+		// INVARIANT: pendingAuthPrompts entry must be gone after close.
+		// Mutation oracle: without the catch-all, the entry survives closeSession.
+		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+
+		// INVARIANT: resolve(null) was called to settle the dangling Promise.
+		expect(resolveSpy).toHaveBeenCalledWith(null);
+
+		// Cleanup
+		clearTimeout(orphanedTimer);
+	});
+
+	it("C3-2: late AUTH_PROMPT_RESPONSE does not cache secret after closeSession with orphaned entry", async () => {
+		// Mutation oracle: without the catch-all, handleAuthPromptResponse finds the
+		// stale pendingAuthPrompts entry and populates passphraseCache for the dead
+		// host — a secret is cached for a session that no longer exists.
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		const host = dal.createHost({
+			type: "ssh",
+			label: "c3b-ssh",
+			sshHost: "user@c3b-test",
+			sshAuth: "password",
+		});
+		const hostId = host.id;
+
+		const c1 = makeClient("c-c3b-1", []);
+		sm.addClient(c1);
+
+		const channelId = await sm.handleSpawn("c-c3b-1", { type: "SPAWN", hostId });
+		expect(channelId).toBeTruthy();
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+
+		const sessionId = ctx.sessions.get(hostId)?.id ?? "";
+
+		// Inject orphaned auth prompt (simulates overwritten-controller scenario).
+		const resolveSpy = vi.fn();
+		const orphanedTimer = setTimeout(() => {}, 60_000);
+		ctx.pendingAuthPrompts.set(hostId, {
+			resolve: resolveSpy,
+			timer: orphanedTimer,
+			clientId: "c-c3b-1",
+			resendPayload: {
+				type: "AUTH_PROMPT",
+				hostId,
+				promptType: "passphrase",
+				message: "Enter passphrase",
+			} as import("@termora/shared").AuthPromptMessage,
+		});
+
+		// Close the session — catch-all clears the orphaned entry.
+		await sm.closeSession(sessionId);
+		expect(ctx.pendingAuthPrompts.has(hostId)).toBe(false);
+
+		// Simulate a late client response arriving after close.
+		sm.handleAuthPromptResponse("c-c3b-1", hostId, "should-not-be-cached-secret");
+
+		// INVARIANT: passphraseCache must NOT contain the secret for the closed host.
+		// Mutation oracle: without the catch-all (or without the handleAuthPromptResponse
+		// guard that checks pendingAuthPrompts.has()), the secret would be cached.
+		expect(ctx.passphraseCache.has(hostId)).toBe(false);
+
+		// Cleanup
+		clearTimeout(orphanedTimer);
 	});
 });

@@ -19,12 +19,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import * as Acq from "./session-acquisition.js";
-import type {
-	Lease,
-	SessionAcquisition,
-	SessionState,
-	SharedSessionContext,
-} from "./session-context.js";
+import type { SessionAcquisition, SessionState, SharedSessionContext } from "./session-context.js";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -661,7 +656,6 @@ describe("Fix A: post-commit lease refcount is accurate", () => {
 
 		// Follower still holds its lease — size must be exactly 1.
 		// Mutation oracle: if Fix A removes the wrong lease, size could undercount.
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null
 		expect(acq.leases.size).toBe(1);
 
 		// Cleanup.

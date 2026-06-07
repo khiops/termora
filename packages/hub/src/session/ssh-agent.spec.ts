@@ -741,3 +741,105 @@ describe("deploy failure rejects start() — no unverified-binary fallback", () 
 		TEST_TIMEOUT,
 	);
 });
+
+// ─── Fix C: deploy failure must not leak the authenticated SSH connection ──
+//
+// Both DeployError (user rejection) and infra failures must call cleanup()
+// before rejectOnce() so the authenticated ssh2 Client is destroyed/ended.
+// Without cleanup(), repeated failed deploys exhaust the remote's connection
+// and file-descriptor limits (socket/session exhaustion).
+//
+// Strategy: spy on the SshAgent `cleanup` method; arrange deploy to reject
+// with each error kind; assert cleanup was called before the rejection settles.
+// Mutation oracle: removing the cleanup() call(s) from the .catch() block
+// leaves the spy un-called while start() still rejects — verifying the spy
+// catches the omission.
+
+describe("deploy failure → cleanup() called before rejection (Fix C)", () => {
+	let agentsC: SshAgent[] = [];
+	let serversC: SshServer[] = [];
+
+	afterEach(async () => {
+		for (const agent of agentsC) {
+			try {
+				agent.close();
+			} catch {
+				// ignore
+			}
+		}
+		agentsC = [];
+		await Promise.all(
+			serversC.map(
+				(srv) =>
+					new Promise<void>((resolve) => {
+						srv.close(() => resolve());
+					}),
+			),
+		);
+		serversC = [];
+		vi.resetAllMocks();
+	});
+
+	it(
+		"C1: infra failure (non-DeployError) → cleanup() called before rejection",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new Error("SFTP upload failed: connection reset"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				// Would answer HELLO if runAgent fallback ran — verifies cleanup path
+				stream.write(makeHelloFrame());
+			});
+			serversC.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = { binaryCache: "/tmp/fake-cache", hostname: "127.0.0.1" };
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsC.push(agent);
+
+			// Spy on cleanup — it should be called before start() rejects.
+			const cleanupSpy = vi.spyOn(agent as unknown as { cleanup(): void }, "cleanup");
+
+			// Mutation oracle: without the cleanup() call, cleanupSpy is never called
+			// and the SSH connection stays open after the rejection.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(/deployment failed/i);
+
+			expect(cleanupSpy).toHaveBeenCalled();
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"C2: DeployError (user rejection) → cleanup() called before rejection",
+		async () => {
+			const { deployAgentIfNeeded, DeployError } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockRejectedValueOnce(
+				new DeployError("AGENT_BINARY_REJECTED", "user denied unknown agent binary"),
+			);
+
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			serversC.push(server);
+
+			const storedFp = await getServerFingerprint(port);
+			const deployOpts = { binaryCache: "/tmp/fake-cache", hostname: "127.0.0.1" };
+
+			const agent = new SshAgent(makeHost(port), undefined, deployOpts);
+			agentsC.push(agent);
+
+			// Spy on cleanup — it should be called before start() rejects.
+			const cleanupSpy = vi.spyOn(agent as unknown as { cleanup(): void }, "cleanup");
+
+			// Mutation oracle: without the cleanup() call, cleanupSpy is never called
+			// and the authenticated SSH connection is leaked after user rejection.
+			await expect(agent.start(storedFp, null)).rejects.toThrow(DeployError);
+
+			expect(cleanupSpy).toHaveBeenCalled();
+		},
+		TEST_TIMEOUT,
+	);
+});

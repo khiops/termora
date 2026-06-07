@@ -9,12 +9,10 @@
 
 import type {
 	AgentBellMessage,
-	AgentChannelStateMessage,
 	AgentLogMessage,
 	AgentNotificationMessage,
 	AgentProcessTitleMessage,
 	AgentSnapshotResMessage,
-	AgentSpawnMessage,
 	AgentTitleChangeMessage,
 	ChannelExitMessage,
 	HelloMessage,
@@ -130,7 +128,7 @@ export class AgentConnectionManager {
 		return requestedId;
 	}
 
-	async getOrCreateSession(hostId: string, isSsh: boolean): Promise<SessionState> {
+	async getOrCreateSession(hostId: string, _isSsh: boolean): Promise<SessionState> {
 		const existing = this.ctx.sessions.get(hostId);
 		if (existing && (existing.status === "active" || existing.status === "disconnected")) {
 			return existing;
@@ -222,7 +220,7 @@ export class AgentConnectionManager {
 
 	// ─── Event wiring ─────────────────────────────────────────────────────────
 
-	wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
+	wireAgentEvents(hostId: string, _sessionId: string, agent: AgentConnection): void {
 		agent.on("message", (msg: ProtocolMessage) => {
 			// Dispatch pending request responses
 			const rid = (msg as { requestId?: string }).requestId;
@@ -311,7 +309,7 @@ export class AgentConnectionManager {
 				if (exitLogger) {
 					exitLogger.log("hub", "info", "channel exit", { exitCode: exitMsg.exitCode ?? null });
 					exitLogger.close();
-					this.ctx.loggerRegistry!.delete(exitMsg.channelId);
+					this.ctx.loggerRegistry?.delete(exitMsg.channelId);
 				}
 			} else if (msg.type === "TITLE_CHANGE") {
 				this.broadcaster.handleTitleChange(msg as AgentTitleChangeMessage);

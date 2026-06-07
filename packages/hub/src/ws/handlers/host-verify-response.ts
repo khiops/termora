@@ -24,5 +24,5 @@ export function handleHostVerifyResponse(
 		return;
 	}
 
-	sessionManager.handleHostVerifyResponse(msg.promptId, msg.action);
+	sessionManager.handleHostVerifyResponse(msg.promptId, msg.action, client.id);
 }

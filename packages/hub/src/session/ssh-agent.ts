@@ -473,6 +473,7 @@ export class SshAgent extends AgentConnection {
 									console.error(
 										`[termora-ssh] deploy result: rejected by user (${deployErr.code})`,
 									);
+									this.cleanup();
 									rejectOnce(deployErr);
 									return;
 								}
@@ -489,6 +490,7 @@ export class SshAgent extends AgentConnection {
 								console.warn(
 									`[ssh-agent] auto-deploy failed for host ${this.host.id}: ${deployErrMsg}`,
 								);
+								this.cleanup();
 								rejectOnce(new Error(`Agent deployment failed: ${deployErrMsg}`));
 							});
 					} else {

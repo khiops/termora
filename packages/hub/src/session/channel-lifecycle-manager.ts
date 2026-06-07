@@ -952,10 +952,18 @@ export class ChannelLifecycleManager {
 			};
 			client.send(promptMsg);
 			return new Promise<string | null>((resolve) => {
-				// Race condition guard: cancel any existing pending prompt for this hostId
-				// before setting a new one (e.g. concurrent SPAWNs for the same host).
+				// Ownership-aware prompt replacement (SEC: cross-client clobber prevention).
+				// Only cancel an existing pending prompt for this hostId when it is owned by
+				// the same client (sequential re-prompt from the same SPAWN path — safe to
+				// replace).  If a different client owns the existing entry, fail this new
+				// attempt gracefully with null WITHOUT touching the legitimate in-flight prompt.
 				const existing = this.ctx.pendingAuthPrompts.get(hostId);
 				if (existing) {
+					if (existing.clientId !== client.id) {
+						// Different client holds an in-flight prompt — do not clobber it.
+						resolve(null);
+						return;
+					}
 					if (existing.timer !== null) clearTimeout(existing.timer);
 					existing.resolve(null);
 				}

@@ -24,5 +24,5 @@ export function handleAgentBinaryVerifyResponse(
 		return;
 	}
 
-	sessionManager.handleAgentVerifyResponse(msg.promptId, msg.action);
+	sessionManager.handleAgentVerifyResponse(msg.promptId, msg.action, client.id);
 }

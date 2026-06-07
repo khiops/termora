@@ -9,11 +9,9 @@
 import type {
 	AgentBinaryVerifyMessage,
 	AuthPromptMessage,
-	ErrorMessage,
 	HostArch,
 	HostOs,
 	HostVerifyMessage,
-	ProtocolMessage,
 	TestConnectMessage,
 } from "@termora/shared";
 import { generateId } from "@termora/shared";
@@ -68,11 +66,25 @@ export class SshConnectionManager {
 			}
 			// If the connect was already aborted before we even arm a prompt, bail immediately.
 			if (signal?.aborted) return null;
-			// Fix 1: if a prompt is already pending for this hostId, cancel it before
-			// arming a new one.  Without this, the old timer fires later and deletes
-			// the NEW entry, permanently wedging the host for the rest of its TTL.
+			// Ownership-aware prompt replacement (SEC: cross-client clobber prevention).
+			//
+			// If a prompt is already pending for this hostId, only cancel it when the
+			// new prompt is from the SAME client (sequential re-prompt — fine to replace).
+			// If it is owned by a DIFFERENT client, do NOT cancel or overwrite it: resolve
+			// the NEW prompt attempt to null immediately and bail, so the legitimate
+			// in-flight prompt of the original client survives untouched.
+			//
+			// The abort-listener below uses resolve-identity to guard against clearing a
+			// retargeted entry from a newer acquisition.
 			const existingPrompt = this.ctx.pendingAuthPrompts.get(hostId);
 			if (existingPrompt) {
+				if (existingPrompt.clientId !== client.id) {
+					// Different client is trying to arm a prompt for a host that already has
+					// an active in-flight prompt owned by another client.  Fail this new
+					// attempt gracefully without touching the existing prompt.
+					return null;
+				}
+				// Same client: cancel the old entry and replace it (sequential re-prompt).
 				if (existingPrompt.timer !== null) clearTimeout(existingPrompt.timer);
 				this.ctx.pendingAuthPrompts.delete(hostId);
 				existingPrompt.resolve(null);
@@ -96,8 +108,12 @@ export class SshConnectionManager {
 					signal.addEventListener(
 						"abort",
 						() => {
+							// Only clear the pending entry if it is still the one this
+							// closure armed (guarded by resolve identity).  After retargeting,
+							// the entry may belong to a different acquisition; clearing it
+							// by hostId alone would abort an unrelated prompt.
 							const pending = this.ctx.pendingAuthPrompts.get(hostId);
-							if (pending && pending.clientId === client.id) {
+							if (pending && pending.resolve === resolve) {
 								if (pending.timer !== null) clearTimeout(pending.timer);
 								this.ctx.pendingAuthPrompts.delete(hostId);
 								resolve(null);
@@ -191,13 +207,12 @@ export class SshConnectionManager {
 	handleHostVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
-		clientId?: string,
+		clientId: string,
 	): void {
 		const pending = this.ctx.pendingHostVerify.get(promptId);
 		if (!pending) return;
-		// Response auth: only the current owner clientId may answer (mirrors SEC-003).
-		// clientId is optional for backward compat with callers not yet updated.
-		if (clientId !== undefined && pending.clientId !== clientId) return;
+		// SEC-003 mirror: only the current prompt owner may answer.
+		if (pending.clientId !== clientId) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingHostVerify.delete(promptId);
 		pending.resolve(action);
@@ -259,13 +274,12 @@ export class SshConnectionManager {
 	handleAgentVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
-		clientId?: string,
+		clientId: string,
 	): void {
 		const pending = this.ctx.pendingAgentVerify.get(promptId);
 		if (!pending) return;
-		// Response auth: only the current owner clientId may answer (mirrors SEC-003).
-		// clientId is optional for backward compat with callers not yet updated.
-		if (clientId !== undefined && pending.clientId !== clientId) return;
+		// SEC-003 mirror: only the current prompt owner may answer.
+		if (pending.clientId !== clientId) return;
 		clearTimeout(pending.timer);
 		this.ctx.pendingAgentVerify.delete(promptId);
 		pending.resolve(action);
@@ -316,13 +330,16 @@ export class SshConnectionManager {
 			this.ctx.reconnectTimers.delete(hostId);
 
 			// Currency check before any async work: bail if session was closed
-			// while the timer was pending.
+			// or superseded by a newer session while the timer was pending.
 			const session = this.ctx.sessions.get(hostId);
-			if (!session || session.status === "closed") return;
+			if (!session || session.status === "closed" || session.id !== sessionId) return;
 
 			const host = this.ctx.metaDal.getHost(hostId);
 			if (!host) {
-				this.lifecycle.closeSession(hostId, sessionId);
+				// Only close if this is still the session we were reconnecting.
+				if (this.ctx.sessions.get(hostId)?.id === sessionId) {
+					this.lifecycle.closeSession(hostId, sessionId);
+				}
 				return;
 			}
 
@@ -330,6 +347,13 @@ export class SshConnectionManager {
 			// closeSession() can abort a start() that is still awaiting the SSH handshake.
 			// Invariant 10: the controller is identity-checked so a stale abort cannot
 			// clobber a newer reconnect attempt that replaced this one.
+			//
+			// Abort-before-overwrite: if a prior reconnect attempt registered a controller
+			// for this host but never cleared it (e.g. overwritten by a second reconnect
+			// path racing in), abort it now so its pending auth prompt is cleared at
+			// handoff time — preventing an orphaned pendingAuthPrompts entry.
+			const existingAc = this.ctx.reconnectAbortControllers.get(hostId);
+			if (existingAc) existingAc.abort();
 			const ac = new AbortController();
 			this.ctx.reconnectAbortControllers.set(hostId, ac);
 
@@ -401,7 +425,10 @@ export class SshConnectionManager {
 
 				const nextElapsed = Date.now() - startTime;
 				if (nextElapsed >= RECONNECT_TIMEOUT_MS) {
-					this.lifecycle.closeSession(hostId, sessionId);
+					// Only close if this is still the session we were reconnecting.
+					if (this.ctx.sessions.get(hostId)?.id === sessionId) {
+						this.lifecycle.closeSession(hostId, sessionId);
+					}
 				} else {
 					this.scheduleReconnect(hostId, sessionId, attemptIndex + 1, startTime);
 				}

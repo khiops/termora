@@ -17,7 +17,6 @@ import type {
 	AgentAttachMessage,
 	AgentAttachOkMessage,
 	AgentConfig,
-	AgentLogMessage,
 	AgentSpawnMessage,
 	ElevationMethod,
 	ErrorMessage,
@@ -72,13 +71,13 @@ export class SessionManager {
 	private readonly gc: SpoolGarbageCollector;
 
 	constructor(
-		private dbManager: DatabaseManager,
+		dbManager: DatabaseManager,
 		gcConfig?: GcConfig,
 		agentConfig?: AgentConfig,
 		configResolver?: ConfigResolver,
 		hubLogger?: HubLogger,
 		loggerRegistry?: LoggerRegistry,
-		logsDir?: string,
+		_logsDir?: string,
 	) {
 		const metaDal = new MetaDAL(dbManager.meta);
 		const spoolDal = new SpoolDAL(dbManager.spool);
@@ -138,14 +137,34 @@ export class SessionManager {
 		// Wire reconnect callback for restartChannel on SSH hosts
 		this.lifecycle.onReconnectAgent = async (hostId: string): Promise<boolean> => {
 			const host = ctx.metaDal.getHost(hostId);
-			if (!host || host.type !== "ssh") return false;
+			if (host?.type !== "ssh") return false;
+
+			// Snapshot the session entry BEFORE any await so we can currency-check it
+			// after start() returns (mirrors the invariant-10 guard in scheduleReconnect).
+			const sessionBefore = ctx.sessions.get(hostId);
+			if (!sessionBefore) return false;
+			const sessionId = sessionBefore.id;
 
 			// Need a WS client to prompt for passphrase/TOFU — use the first connected client
 			const firstClient = ctx.clients.values().next().value;
 			if (!firstClient) return false;
 
+			// Mirror scheduleReconnect's abort model: create an AbortController and
+			// register it so closeSession() (which aborts reconnectAbortControllers) can
+			// cancel an in-flight passphrase/TOFU prompt or SSH handshake, preventing a
+			// stale prompt from caching a secret for an already-closed session.
+			// Identity-guarded on settle so a concurrent newer attempt is not clobbered.
+			//
+			// Abort-before-overwrite: if scheduleReconnect already registered a controller
+			// for this host, abort it before overwriting — so its pending auth prompt is
+			// cleared at handoff time rather than left orphaned in pendingAuthPrompts.
+			const existingAcOnReconnect = ctx.reconnectAbortControllers.get(hostId);
+			if (existingAcOnReconnect) existingAcOnReconnect.abort();
+			const ac = new AbortController();
+			ctx.reconnectAbortControllers.set(hostId, ac);
+
 			try {
-				const promptAuth = this.sshMgr.buildPromptAuth(firstClient);
+				const promptAuth = this.sshMgr.buildPromptAuth(firstClient, ac.signal);
 				const deployOpts = this._buildDeployOpts(hostId, host, firstClient);
 				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
 
@@ -157,15 +176,34 @@ export class SessionManager {
 				const hostKey = `${sshHostname}:${sshPort}`;
 				const sessionTrustedFp = ctx.trustedOnceFingerprints.get(hostKey);
 
-				await sshAgent.start(storedFp, sessionTrustedFp);
+				await sshAgent.start(storedFp, sessionTrustedFp, ac.signal);
 
-				// Ensure session exists
-				const session = await this.agentMgr.getOrCreateSession(hostId, true);
-				this.broadcaster.updateSessionStatus(hostId, session.id, "active");
-				this.agentMgr.wireAgentEvents(hostId, session.id, sshAgent);
+				// Post-await currency re-check (mirrors scheduleReconnect invariant 10):
+				// closeSession() may have deleted the session entry while start() was
+				// awaiting the SSH handshake. If the session is gone or was replaced
+				// (different id), close the fresh agent and bail — do NOT wire/store/revive.
+				if (
+					ac.signal.aborted ||
+					ctx.reconnectAbortControllers.get(hostId) !== ac ||
+					ctx.sessions.get(hostId)?.id !== sessionId
+				) {
+					sshAgent.close();
+					return false;
+				}
+
+				// Clear the controller — attempt settled successfully.
+				ctx.reconnectAbortControllers.delete(hostId);
+
+				this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
+				this.agentMgr.wireAgentEvents(hostId, sessionId, sshAgent);
 				ctx.agents.set(hostId, sshAgent);
 				return true;
 			} catch {
+				// Clear the controller on failure (identity-guarded so a newer concurrent
+				// attempt is not clobbered).
+				if (ctx.reconnectAbortControllers.get(hostId) === ac) {
+					ctx.reconnectAbortControllers.delete(hostId);
+				}
 				return false;
 			}
 		};
@@ -255,8 +293,6 @@ export class SessionManager {
 	}
 
 	removeClient(clientId: string): void {
-		this.broadcaster.removeClient(clientId);
-
 		// Prompt re-target: when the prompt owner disconnects, find another live
 		// lease-holder in the same acquisition that is still connected, and re-send
 		// the prompt to them.  If no live candidate exists, reject (fail-closed).
@@ -351,6 +387,12 @@ export class SessionManager {
 			this.ctx.pendingAgentVerify.delete(promptId);
 			pending.resolve("reject");
 		}
+
+		// broadcaster.removeClient runs LAST — after all retargeting — so that
+		// ctx.clients still contains the departing client during the loops above
+		// (needed for candidate lookup) and prompts have already been retargeted
+		// or resolved before the broadcaster clears channel attachments.
+		this.broadcaster.removeClient(clientId);
 	}
 
 	getClientsForChannel(channelId: string): WsClient[] {
@@ -442,6 +484,20 @@ export class SessionManager {
 				this.ctx.pendingAgentVerify.delete(promptId);
 				pending.resolve("reject");
 			}
+		}
+
+		// Catch-all: clear any pending auth prompt for this host, regardless of
+		// which reconnect controller owned it.  This closes the controller-ownership
+		// edge-case (codex gate finding) where an overwritten controller's abort
+		// listener never fires, leaving a pendingAuthPrompts entry alive after close.
+		// Safe to call unconditionally: if no entry exists, the Map.get returns
+		// undefined and we skip.  resolve(null) is idempotent on an already-settled
+		// Promise (JS Promises ignore extra resolutions).
+		const orphanedAuthPrompt = this.ctx.pendingAuthPrompts.get(hostId);
+		if (orphanedAuthPrompt) {
+			if (orphanedAuthPrompt.timer !== null) clearTimeout(orphanedAuthPrompt.timer);
+			this.ctx.pendingAuthPrompts.delete(hostId);
+			orphanedAuthPrompt.resolve(null);
 		}
 
 		this.lifecycle.closeSession(hostId, sessionId);
@@ -1157,7 +1213,7 @@ export class SessionManager {
 		this.broadcaster.detachClient(clientId, channelId);
 	}
 
-	handleInput(clientId: string, channelId: string, data: Uint8Array): void {
+	handleInput(_clientId: string, channelId: string, data: Uint8Array): void {
 		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
@@ -1166,7 +1222,7 @@ export class SessionManager {
 		agent.send(inputMsg);
 	}
 
-	handleResize(clientId: string, channelId: string, cols: number, rows: number): void {
+	handleResize(_clientId: string, channelId: string, cols: number, rows: number): void {
 		const channel = this.ctx.channels.get(channelId);
 		if (!channel) return;
 		const agent = this.ctx.agents.get(channel.hostId);
@@ -1190,15 +1246,17 @@ export class SessionManager {
 	handleHostVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId: string,
 	): void {
-		this.sshMgr.handleHostVerifyResponse(promptId, action);
+		this.sshMgr.handleHostVerifyResponse(promptId, action, clientId);
 	}
 
 	handleAgentVerifyResponse(
 		promptId: string,
 		action: "trust_permanent" | "trust_once" | "reject",
+		clientId: string,
 	): void {
-		this.sshMgr.handleAgentVerifyResponse(promptId, action);
+		this.sshMgr.handleAgentVerifyResponse(promptId, action, clientId);
 	}
 
 	async handleTestConnect(clientId: string, msg: TestConnectMessage): Promise<void> {
