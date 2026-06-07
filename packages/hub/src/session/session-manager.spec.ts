@@ -3440,6 +3440,91 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 		).toBe(true);
 	});
 
+	it("pre-commit guard failure fails acquisition with joined follower and clears PromptContext", async () => {
+		const hostId = await createSshHost();
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		let releaseConnect!: () => void;
+		const connectBarrier = new Promise<void>((resolve) => {
+			releaseConnect = resolve;
+		});
+		const connectedAgent = new MockSshAgent();
+		(
+			sm as unknown as {
+				_connectSshAgent: () => Promise<import("./agent-connection.js").AgentConnection>;
+			}
+		)._connectSshAgent = vi.fn(async () => {
+			await connectBarrier;
+			ctx.sessions.delete(hostId);
+			return connectedAgent as unknown as import("./agent-connection.js").AgentConnection;
+		});
+
+		const c1Received: ProtocolMessage[] = [];
+		const c2Received: ProtocolMessage[] = [];
+		const c1 = makeClient("c-precommit-guard-1", c1Received);
+		const c2 = makeClient("c-precommit-guard-2", c2Received);
+		sm.addClient(c1);
+		sm.addClient(c2);
+
+		const spawn1 = sm.handleSpawn("c-precommit-guard-1", { type: "SPAWN", hostId });
+
+		for (let i = 0; i < 5 && !sm.acquisitions.has(hostId); i++) {
+			await Promise.resolve();
+		}
+		const acq = sm.acquisitions.get(hostId);
+		expect(acq).toBeDefined();
+		if (!acq) throw new Error("expected acquisition");
+
+		openContext(ctx, "session", hostId, "c-precommit-guard-1", acq.id);
+		const promptPromise = promptCtx(
+			ctx,
+			acq.id,
+			"passphrase",
+			{ type: "AUTH_PROMPT", hostId, promptType: "passphrase", message: "test", promptId: "" },
+			(routeClientId, msg) => {
+				ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+			},
+		);
+		expect(promptPromise).not.toBeNull();
+		if (promptPromise === null) throw new Error("expected prompt promise");
+		const promptId = [...ctx.pendingPrompts.keys()][0];
+		expect(promptId).toBeDefined();
+		if (promptId === undefined) throw new Error("expected prompt id");
+
+		const followerConnectRejected = acq.connectPromise.catch((err: Error) => err);
+		const spawn2 = sm.handleSpawn("c-precommit-guard-2", { type: "SPAWN", hostId });
+
+		for (let i = 0; i < 5 && acq.leases.size < 2; i++) {
+			await Promise.resolve();
+		}
+		expect(acq.leases.size).toBe(2);
+
+		releaseConnect();
+
+		const [ch1, ch2, followerError, promptResult] = await Promise.all([
+			spawn1,
+			spawn2,
+			followerConnectRejected,
+			promptPromise as Promise<unknown>,
+		]);
+
+		expect(ch1).toBeNull();
+		expect(ch2).toBeNull();
+		expect(followerError).toEqual(expect.objectContaining({ message: "SSH connect aborted" }));
+		expect(sm.acquisitions.has(hostId)).toBe(false);
+		expect(ctx.promptContexts.has(acq.id)).toBe(false);
+		expect(ctx.pendingPrompts.has(promptId)).toBe(false);
+		expect(ctx.promptIndex.has(promptId)).toBe(false);
+		expect(promptResult).toBeNull();
+		expect(connectedAgent.close).toHaveBeenCalled();
+		expect(
+			c2Received.some(
+				(m) =>
+					m.type === "ERROR" &&
+					(m as ProtocolMessage & { code?: string }).code === "SSH_CONNECT_FAILED",
+			),
+		).toBe(true);
+	});
+
 	// ── Fix 3: shutdown clears acquiringSessions ──
 	//
 	// Mutation oracle: removing the acquiringSessions.clear() from shutdown() leaves

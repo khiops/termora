@@ -422,6 +422,23 @@ export class SessionManager {
 		};
 	}
 
+	private failConnectingAcq(
+		acq: SessionAcquisition,
+		err: unknown,
+		lease?: Lease | null,
+		hasChannels: () => boolean = () => false,
+	): void {
+		const error = err instanceof Error ? err : new Error(String(err));
+		Acq.fail(this.ctx, acq, error);
+		const clearSend = (routeClientId: string, msg: Record<string, unknown>) => {
+			this.ctx.clients.get(routeClientId)?.send(msg as unknown as ProtocolMessage);
+		};
+		clearContext(this.ctx, acq.id, clearSend);
+		if (lease !== null && lease !== undefined && !lease.released) {
+			Acq.release(this.ctx, lease, hasChannels);
+		}
+	}
+
 	async handleSpawn(clientId: string, msg: UiSpawnMessage): Promise<string | null> {
 		this.ctx.hubLogger?.log("debug", "handleSpawn: start", { clientId, hostId: msg.hostId });
 		const client = this.ctx.clients.get(clientId);
@@ -470,8 +487,8 @@ export class SessionManager {
 		// ── Single outer try/finally — release the lease on EVERY exit path ─────────
 		// Invariant 2: the try wraps the entire acquisition + spawn body so all early
 		// returns (follower error, leader error, session-currency checks, guard fails)
-		// pass through the finally.  release() is idempotent (invariant 6) so the
-		// existing inner releases on connect-failure paths are harmless belt-and-suspenders.
+		// pass through the finally.  release() is idempotent (invariant 6), so
+		// pre-commit failure paths can release early and the outer finally will no-op.
 		// Invariant 3: release checks leases.size===0 && no channels → reap if needed.
 		try {
 			// B1: outer try wraps all paths that hold a lease (B1 fix — every early return hits this finally)
@@ -539,7 +556,10 @@ export class SessionManager {
 					});
 
 					const connectingAcq = acq; // capture for identity checks below
-					let connectFailed = false;
+					const releaseConnectingLease = () =>
+						[...this.ctx.channels.values()].some(
+							(ch) => session != null && ch.sessionId === session.id,
+						);
 					try {
 						// getOrCreateSession is async; the session object is created here.
 						const sessionState = await this.agentMgr.getOrCreateSession(hostId, true);
@@ -562,20 +582,12 @@ export class SessionManager {
 								this.broadcaster.updateSessionStatus(hostId, sessionState.id, "closed");
 								this.ctx.sessions.delete(hostId);
 							}
-							// P1: fail() is synchronous — sets FAILED, removes from map, rejects waiters.
-							if (this.ctx.acquisitions.get(hostId) === connectingAcq) {
-								Acq.fail(
-									this.ctx,
-									connectingAcq,
-									err instanceof Error ? err : new Error("SSH connection failed"),
-								);
-							} else {
-								connectingAcq._reject(
-									err instanceof Error ? err : new Error("SSH connection failed"),
-								);
-							}
-							clearContext(this.ctx, connectingAcq.id);
-							connectFailed = true;
+							this.failConnectingAcq(
+								connectingAcq,
+								err instanceof Error ? err : new Error("SSH connection failed"),
+								lease,
+								releaseConnectingLease,
+							);
 							return null;
 						}
 
@@ -604,9 +616,12 @@ export class SessionManager {
 							if (curSession?.id === sessionState.id) {
 								this.ctx.sessions.delete(hostId);
 							}
-							connectingAcq._reject(new Error("SSH connect aborted"));
-							clearContext(this.ctx, connectingAcq.id);
-							connectFailed = true;
+							this.failConnectingAcq(
+								connectingAcq,
+								new Error("SSH connect aborted"),
+								lease,
+								releaseConnectingLease,
+							);
 							client.send({
 								type: "ERROR",
 								code: "SSH_CONNECT_FAILED",
@@ -615,18 +630,8 @@ export class SessionManager {
 							return null;
 						}
 					} catch (err) {
-						Acq.fail(this.ctx, connectingAcq, err instanceof Error ? err : new Error(String(err)));
-						clearContext(this.ctx, connectingAcq.id);
-						connectFailed = true;
+						this.failConnectingAcq(connectingAcq, err, lease, releaseConnectingLease);
 						return null;
-					} finally {
-						// If connect failed, release the leader lease immediately so the acq can
-						// be reaped. The outer finally will see lease.released===true and no-op.
-						if (connectFailed && lease !== null && !lease.released) {
-							Acq.release(this.ctx, lease, () =>
-								[...this.ctx.channels.values()].some((ch) => ch.sessionId === session?.id),
-							);
-						}
 					}
 
 					// Re-validate after leader's own await (invariant 7 belt-and-suspenders).
