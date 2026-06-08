@@ -1,11 +1,11 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: agent
   type: specification
   target_project: /mnt/wsl/shared/dev/termora
   created: 2026-03-21
-  updated: 2026-03-21
+  updated: 2026-06-09
   complexity: COMPLEX
   time-budget: 50-60h
   adversarial_applied: true

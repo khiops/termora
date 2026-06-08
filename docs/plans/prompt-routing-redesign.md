@@ -1,3 +1,12 @@
+---
+doc-meta:
+  status: canonical
+  story_id: "43"
+  scope: hub
+  type: specification
+  updated: 2026-06-09
+  shipped_in: PR #49 (squash bd2cc04)
+---
 # Interactive prompt ownership & routing model (#43, prompt sub-system)
 
 ## Problem
