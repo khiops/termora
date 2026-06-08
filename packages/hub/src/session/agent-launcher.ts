@@ -115,6 +115,10 @@ function launchDaemon(agentPath: string, socketPath: string, config: AgentConfig
 		String(config.bufferPerChannel),
 		"--buffer-global",
 		String(config.bufferGlobal),
+		"--log-level",
+		config.logLevel,
+		"--format",
+		config.logFormat,
 	];
 
 	const isBin = isAgentBinary(agentPath);

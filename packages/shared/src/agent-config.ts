@@ -1,4 +1,6 @@
-/** Parsed agent configuration from [agent] section of config.toml */
+import type { LogConfig } from "./entities.js";
+
+/** Resolved agent configuration used when launching termora-agent */
 export interface AgentConfig {
 	/** Socket path override (empty = auto-detect per platform) */
 	socketPath?: string;
@@ -6,8 +8,10 @@ export interface AgentConfig {
 	bufferPerChannel: number;
 	/** Global output buffer cap across all channels in bytes (default 20 MB) */
 	bufferGlobal: number;
-	/** Log level for agent daemon */
-	logLevel: string;
+	/** Log level resolved from the shared [logging] section */
+	logLevel: LogConfig["level"];
+	/** Log format resolved from the shared [logging] section */
+	logFormat: LogConfig["format"];
 	/** Timeout in ms to wait for the Unix socket bind to succeed (default 5000) */
 	bindTimeout: number;
 }
@@ -24,6 +28,7 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
 	bufferPerChannel: DEFAULT_BUFFER_PER_CHANNEL,
 	bufferGlobal: DEFAULT_BUFFER_GLOBAL,
 	logLevel: "info",
+	logFormat: "jsonl",
 	bindTimeout: DEFAULT_BIND_TIMEOUT,
 };
 
@@ -32,11 +37,13 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
  * Supports: B, KB, MB, GB (case-insensitive).
  * Falls back to parseInt for plain numbers.
  */
-export function parseSize(value: string | number): number {
+export function parseSize(value: unknown): number {
 	if (typeof value === "number") return value;
+	if (typeof value !== "string") return Number.NaN;
 
-	const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/i);
-	if (!match || match[1] === undefined) return Number.parseInt(value, 10);
+	const trimmed = value.trim();
+	const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/i);
+	if (!match || match[1] === undefined) return Number.parseInt(trimmed, 10);
 
 	const num = Number.parseFloat(match[1]);
 	const unit = (match[2] ?? "B").toUpperCase();
@@ -51,9 +58,16 @@ export function parseSize(value: string | number): number {
 	return Math.floor(num * (multipliers[unit] ?? 1));
 }
 
+function parseSizeOrDefault(value: unknown, defaultValue: number): number {
+	if (typeof value !== "number" && typeof value !== "string") return defaultValue;
+
+	const parsed = parseSize(value);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
+}
+
 /**
- * Parse the [agent] section from a TOML config object.
- * Missing fields get defaults.
+ * Parse daemon-specific fields from the [agent] section of a TOML config object.
+ * Logging fields are resolved from the shared [logging] section by the hub.
  */
 export function parseAgentConfig(tomlAgent?: Record<string, unknown>): AgentConfig {
 	if (!tomlAgent) return { ...DEFAULT_AGENT_CONFIG };
@@ -64,13 +78,10 @@ export function parseAgentConfig(tomlAgent?: Record<string, unknown>): AgentConf
 		tomlAgent.socket_path !== ""
 			? { socketPath: tomlAgent.socket_path }
 			: {}),
-		bufferPerChannel: tomlAgent.buffer_per_channel
-			? parseSize(tomlAgent.buffer_per_channel as string | number)
-			: DEFAULT_BUFFER_PER_CHANNEL,
-		bufferGlobal: tomlAgent.buffer_global
-			? parseSize(tomlAgent.buffer_global as string | number)
-			: DEFAULT_BUFFER_GLOBAL,
-		logLevel: typeof tomlAgent.log_level === "string" ? tomlAgent.log_level : "info",
+		bufferPerChannel: parseSizeOrDefault(tomlAgent.buffer_per_channel, DEFAULT_BUFFER_PER_CHANNEL),
+		bufferGlobal: parseSizeOrDefault(tomlAgent.buffer_global, DEFAULT_BUFFER_GLOBAL),
+		logLevel: DEFAULT_AGENT_CONFIG.logLevel,
+		logFormat: DEFAULT_AGENT_CONFIG.logFormat,
 		bindTimeout:
 			typeof tomlAgent.bind_timeout === "number" && tomlAgent.bind_timeout > 0
 				? tomlAgent.bind_timeout

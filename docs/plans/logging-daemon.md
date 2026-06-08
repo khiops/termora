@@ -40,10 +40,10 @@ ACCEPTANCE: Each channel (terminal tab) has a JSONL log file with hub + agent ev
 
 ### US-2: Configurable logging
 AS A termora administrator
-I WANT to configure log level, output target, and retention
+I WANT to configure log level, line format, output target, and retention
 SO THAT I can balance diagnostic detail vs disk usage
 
-ACCEPTANCE: `[logging]` section in config.toml controls level, output, and max_age_days.
+ACCEPTANCE: `[logging]` section in config.toml controls level, format, output, and max_age_days for both hub and agent logging.
 
 ### US-3: Windows daemon mode
 AS A Windows user
@@ -61,7 +61,7 @@ ACCEPTANCE: `termora-agent --daemon` works on Windows with named pipes, same con
 - INV-04: Agent stderr is process-global — lines that cannot be attributed to a specific channel go to hub.jsonl with session/host context (`"src":"agent"`)
 - INV-05: Hub events are attributed with `"src":"hub"` in the channel log
 - INV-05b: Only channel-specific hub events (SPAWN, OUTPUT stats, EXIT) go to channel log. Agent stderr goes to hub.jsonl unless the agent is single-channel (stdio mode → attribute to the sole channel)
-- INV-06: hub.jsonl uses ISO 8601 timestamps (no channel context for relative offset)
+- INV-06: hub.jsonl uses ISO 8601 timestamps (no channel context for relative offset) and is always JSONL. `[logging].format` only controls the hub stderr/console rendering: `jsonl` emits JSON objects, `text` emits single-line human-readable records.
 - INV-07: Named pipe path on Windows includes the current username for isolation
 - INV-08: First entry in a channel log contains the absolute creation timestamp (ISO 8601) so offset `t` can be resolved to wall-clock time. On reattach (daemon mode), read the first line to recover `created_at` for offset computation.
 - INV-09: Log files are created with mode 0o600 (owner read/write only); on Windows, inherit parent directory ACL
@@ -95,7 +95,8 @@ ACCEPTANCE: `termora-agent --daemon` works on Windows with named pipes, same con
 
 ```
 Hub Process
-├── HubLogger → logs/hub.jsonl (ISO 8601, global events)
+├── HubLogger → logs/hub.jsonl (always JSONL, ISO 8601, global events)
+├── optional hub stderr stream using [logging].level + [logging].format
 ├── ChannelLogger registry (Map<channelId, ChannelLogger>)
 │   ├── ChannelLogger A → logs/channels/01KM8BH4.jsonl
 │   │   ├── hub events (src: "hub")
@@ -104,8 +105,8 @@ Hub Process
 └── LogGC → delete files > max_age_days at startup
 
 Agent (Rust)
-├── stdio mode → tracing to stderr (hub captures)
-└── daemon mode → tracing to logs/agent-daemon.jsonl (self-managed)
+├── stdio mode → tracing to stderr using [logging].level + [logging].format
+└── daemon mode → tracing to logs/agent-daemon.jsonl using [logging].level + [logging].format
     ├── Unix: UDS (unchanged)
     └── Windows: Named Pipe (NEW)
 ```
@@ -123,10 +124,16 @@ Agent (Rust)
 
 Fields: `t` (u64, ms offset), `src` ("hub"|"agent"), `lvl` (trace/debug/info/warn/error), `msg` (string), plus optional context fields.
 
-**Hub global log (JSONL, ISO 8601):**
+**Hub global file log (always JSONL, ISO 8601):**
 ```jsonl
 {"ts":"2026-03-21T14:07:04.876Z","lvl":"info","msg":"hub started","port":4100}
 {"ts":"2026-03-21T14:07:05.012Z","lvl":"info","msg":"client paired","client_id":"abc"}
+```
+
+**Hub stderr or agent text stream (`format="text"`, ISO 8601):**
+```text
+2026-03-21T14:07:04.876Z INFO hub started port=4100
+2026-03-21T14:07:05.012Z WARN agent reconnect failed host=prod-web
 ```
 
 ### 4.3 Config Schema
@@ -134,12 +141,14 @@ Fields: `t` (u64, ms offset), `src` ("hub"|"agent"), `lvl` (trace/debug/info/war
 ```toml
 [logging]
 level = "info"           # trace | debug | info | warn | error
+format = "jsonl"         # jsonl | text
 output = "file"          # stderr | file | both
 max_age_days = 30        # 0 = keep forever
 max_size_mb = 50         # per-channel log file size limit (0 = unlimited)
 ```
 
-Default: `level=info`, `output=file`, `max_age_days=30`, `max_size_mb=50`.
+Default: `level=info`, `format=jsonl`, `output=file`, `max_age_days=30`, `max_size_mb=50`.
+The hub and agent both resolve `level` and `format` from this single `[logging]` contract. For the hub, `output=file` and `output=both` always write JSONL to `logs/hub.jsonl`; that file backs `/api/logs/hub` and file-tailing aggregators. `format` only changes the hub stderr/console rendering when `output=stderr` or `output=both`. The hub delivers the effective agent values when spawning local daemon agents and remote stdio agents; the agent applies `format` to its own output stream. `jsonl` is the behavior-preserving default for machine-readable logs; `text` is for human-readable single-line diagnostics.
 When a channel log exceeds `max_size_mb`, the hub stops writing to it (logs a warning to hub.jsonl).
 
 ### 4.4 Data Model Changes
@@ -242,15 +251,16 @@ Scenario: SC-07 Auth events logged
 ```gherkin
 @priority:high @type:nominal
 Scenario: SC-08 Config [logging] section parsed
-  Given config.toml contains [logging] with level="debug"
+  Given config.toml contains [logging] with level="debug" and format="text"
   When the hub loads config
   Then the logging level is set to debug
+  And the logging format is set to text
 
 @priority:medium @type:edge
 Scenario: SC-09 Missing [logging] section uses defaults
   Given config.toml has no [logging] section
   When the hub loads config
-  Then logging defaults to level=info, output=file, max_age_days=30
+  Then logging defaults to level=info, format=jsonl, output=file, max_age_days=30
 
 @priority:medium @type:nominal
 Scenario: SC-10 GC deletes old log files
@@ -383,7 +393,7 @@ Scenario: SC-21 Log search API returns filtered entries
 **Files:**
 - `packages/shared/src/entities.ts` — `LogConfig`, `LogEntry`, `HubLogEntry` interfaces
 - `packages/shared/src/protocol.ts` — `AgentLogMessage` type (LOG protocol message)
-- `packages/hub/src/config.ts` — parse `[logging]` section (level, output, max_age_days, max_size_mb)
+- `packages/hub/src/config.ts` — parse `[logging]` section (level, format, output, max_age_days, max_size_mb)
 
 **Exit criteria:**
 - [ ] Types exported from shared

@@ -31,6 +31,11 @@ describe("parseSize", () => {
 		expect(parseSize("1Mb")).toBe(1024 * 1024);
 		expect(parseSize("512kb")).toBe(512 * 1024);
 	});
+
+	it("returns NaN for non-string/non-number values without throwing", () => {
+		expect(() => parseSize(true)).not.toThrow();
+		expect(Number.isNaN(parseSize(true))).toBe(true);
+	});
 });
 
 describe("parseAgentConfig", () => {
@@ -40,6 +45,7 @@ describe("parseAgentConfig", () => {
 		expect(config.bufferPerChannel).toBe(DEFAULT_BUFFER_PER_CHANNEL);
 		expect(config.bufferGlobal).toBe(DEFAULT_BUFFER_GLOBAL);
 		expect(config.logLevel).toBe("info");
+		expect(config.logFormat).toBe("jsonl");
 		expect(config.socketPath).toBeUndefined();
 		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
@@ -50,6 +56,7 @@ describe("parseAgentConfig", () => {
 		expect(config.bufferPerChannel).toBe(DEFAULT_BUFFER_PER_CHANNEL);
 		expect(config.bufferGlobal).toBe(DEFAULT_BUFFER_GLOBAL);
 		expect(config.logLevel).toBe("info");
+		expect(config.logFormat).toBe("jsonl");
 		expect(config.socketPath).toBeUndefined();
 		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
@@ -80,10 +87,10 @@ describe("parseAgentConfig", () => {
 		expect(config.socketPath).toBeUndefined();
 	});
 
-	it("reads log_level", () => {
+	it("leaves log_level to the shared [logging] contract", () => {
 		const config = parseAgentConfig({ log_level: "debug" });
 
-		expect(config.logLevel).toBe("debug");
+		expect(config.logLevel).toBe("info");
 	});
 
 	it("reads bind_timeout as a positive integer", () => {
@@ -107,6 +114,35 @@ describe("parseAgentConfig", () => {
 	it("falls back to default bindTimeout when bind_timeout is not a number", () => {
 		const config = parseAgentConfig({ bind_timeout: "fast" });
 
+		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
+	});
+
+	it("falls back to defaults for wrong-typed values without throwing", () => {
+		expect(() =>
+			parseAgentConfig({
+				buffer_per_channel: true,
+				buffer_global: [],
+				socket_path: false,
+				bind_timeout: "fast",
+				log_level: 5,
+				format: [],
+			}),
+		).not.toThrow();
+
+		const config = parseAgentConfig({
+			buffer_per_channel: true,
+			buffer_global: [],
+			socket_path: false,
+			bind_timeout: "fast",
+			log_level: 5,
+			format: [],
+		});
+
+		expect(config.bufferPerChannel).toBe(DEFAULT_BUFFER_PER_CHANNEL);
+		expect(config.bufferGlobal).toBe(DEFAULT_BUFFER_GLOBAL);
+		expect(config.logLevel).toBe("info");
+		expect(config.logFormat).toBe("jsonl");
+		expect(config.socketPath).toBeUndefined();
 		expect(config.bindTimeout).toBe(DEFAULT_BIND_TIMEOUT);
 	});
 });

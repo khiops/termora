@@ -249,7 +249,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const sessionManager = new SessionManager(
 			options.dbManager,
 			gcConfig,
-			undefined,
+			configResolver.agentConfig,
 			configResolver,
 			options.hubLogger,
 			loggerRegistry,

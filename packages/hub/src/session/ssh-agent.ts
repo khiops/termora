@@ -1,19 +1,21 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import type { HelloMessage, Host, HostArch, HostOs } from "@termora/shared";
-import { encodeFrame, type ProtocolMessage } from "@termora/shared";
+import type { AgentConfig, HelloMessage, Host, HostArch, HostOs } from "@termora/shared";
+import { DEFAULT_AGENT_CONFIG, encodeFrame, type ProtocolMessage } from "@termora/shared";
 import ssh2, { Client, type ClientChannel, type SyncHostVerifier } from "ssh2";
 import { AgentConnection } from "./agent-connection.js";
 import {
 	type BinaryVerifyPromptFn,
 	DeployError,
 	type DeployOptions,
+	type DeployResult,
 	deployAgentIfNeeded,
 } from "./agent-deployer.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
+type AgentLoggingConfig = Pick<AgentConfig, "logLevel" | "logFormat">;
 
 /**
  * Result of SSH host key verification, populated by the hostVerifier closure
@@ -51,6 +53,45 @@ function parseSshHost(sshHost: string): { username: string; hostname: string } {
 		username: process.env.USER ?? process.env.USERNAME ?? "root",
 		hostname: sshHost,
 	};
+}
+
+function quotePosixShellArg(value: string): string {
+	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function quoteWindowsCmdArg(value: string): string {
+	return `"${value.replace(/"/g, '^"')}"`;
+}
+
+function quoteRemoteShellArg(value: string, os: HostOs | null): string {
+	if (os === "windows") return quoteWindowsCmdArg(value);
+	return quotePosixShellArg(value);
+}
+
+function buildAgentCommand(
+	agentPath: string,
+	os: HostOs | null,
+	loggingConfig: AgentLoggingConfig,
+	includeLoggingArgs: boolean,
+): string {
+	const args = [quoteRemoteShellArg(agentPath, os), "--stdio"];
+	if (includeLoggingArgs) {
+		args.push(
+			"--log-level",
+			quoteRemoteShellArg(loggingConfig.logLevel, os),
+			"--format",
+			quoteRemoteShellArg(loggingConfig.logFormat, os),
+		);
+	}
+	return args.join(" ");
+}
+
+function buildAgentCommandForDeployResult(
+	result: DeployResult,
+	loggingConfig: AgentLoggingConfig,
+): string {
+	return buildAgentCommand(result.remotePath, result.os, loggingConfig, result.deployed);
 }
 
 /**
@@ -120,7 +161,7 @@ export async function buildSshConnectConfig(
 			}
 			const secret = await promptAuth(hostId, "passphrase", `Enter passphrase for ${auth.keyPath}`);
 			console.error(
-				`[termora-ssh] passphrase obtained: ${secret ? "yes (length " + secret.length + ")" : "null (cancelled)"}`,
+				`[termora-ssh] passphrase obtained: ${secret ? `yes (length ${secret.length})` : "null (cancelled)"}`,
 			);
 			if (secret === null) {
 				throw new Error("Authentication cancelled by user");
@@ -218,6 +259,7 @@ export class SshAgent extends AgentConnection {
 		private readonly host: Host,
 		private readonly promptAuth?: AuthPromptFn,
 		private readonly deployOptions?: SshAgentDeployOptions,
+		private readonly loggingConfig: AgentLoggingConfig = DEFAULT_AGENT_CONFIG,
 	) {
 		super();
 	}
@@ -465,7 +507,7 @@ export class SshAgent extends AgentConnection {
 									`[termora-ssh] deploy result: remotePath=${result.remotePath} os=${result.os ?? "unknown"} arch=${result.arch ?? "unknown"}`,
 								);
 								console.error("[termora-ssh] exec termora-agent...");
-								runAgent(result.remotePath);
+								runAgent(buildAgentCommandForDeployResult(result, this.loggingConfig));
 							})
 							.catch((deployErr: unknown) => {
 								// User-initiated rejections must propagate — no fallback.
@@ -495,7 +537,7 @@ export class SshAgent extends AgentConnection {
 							});
 					} else {
 						console.error("[termora-ssh] exec termora-agent...");
-						runAgent("termora-agent --stdio");
+						runAgent(buildAgentCommand("termora-agent", this.host.os, this.loggingConfig, false));
 					}
 				});
 

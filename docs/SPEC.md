@@ -660,7 +660,18 @@ The `[agent]` section configures the local daemon agent. These settings are defi
 | `socket_path` | string | Platform-dependent (see SECURITY.md) | UDS/named pipe path for daemon communication |
 | `buffer_per_channel` | number | 1048576 (1 MB) | Max output buffer per channel (bytes) |
 | `buffer_global` | number | 20971520 (20 MB) | Max total output buffer across all channels (bytes) |
-| `log_level` | string | `"info"` | Agent log level: trace, debug, info, warn, error |
+
+### 6.2 Logging Config (`[logging]` section in config.toml)
+
+The `[logging]` section is the single logging contract for both the hub and agent. The hub parses the section before initializing `HubLogger`, and passes the effective agent `level` and `format` through the same launch channel used for local daemon and remote stdio agents. For the hub, `format` governs only console/stderr rendering; the API-backing `logs/hub.jsonl` file is always JSONL when file output is enabled.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `level` | string | `"info"` | Hub and agent log level: trace, debug, info, warn, error |
+| `format` | string | `"jsonl"` | Console/stderr line rendering: `jsonl` for machine-readable JSON lines, `text` for human-readable single-line records. The hub file sink remains JSONL; the agent applies this to its own output stream. |
+| `output` | string | `"file"` | Hub output target: stderr, file, both. `file` and `both` write JSONL to `logs/hub.jsonl`. |
+| `max_age_days` | number | 30 | Log retention in days; 0 keeps forever |
+| `max_size_mb` | number | 50 | Per-channel log size limit in MB; 0 is unlimited |
 
 ## 7. File System Layout
 

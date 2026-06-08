@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { LogConfig } from "@termora/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubLogger } from "./hub-logger.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -14,6 +14,7 @@ function makeTmpDir(): string {
 function makeConfig(overrides: Partial<LogConfig> = {}): LogConfig {
 	return {
 		level: "info",
+		format: "jsonl",
 		output: "file",
 		maxAgeDays: 30,
 		maxSizeMb: 50,
@@ -39,11 +40,12 @@ describe("HubLogger", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
 	it("writes JSONL with ISO 8601 ts field", () => {
-		const logger = new HubLogger(tmpDir, makeConfig());
+		const logger = new HubLogger(tmpDir, makeConfig({ format: "jsonl" }));
 		logger.log("info", "hub started");
 
 		const filePath = path.join(tmpDir, "hub.jsonl");
@@ -60,6 +62,53 @@ describe("HubLogger", () => {
 		expect(typeof entry.ts).toBe("string");
 		expect(() => new Date(entry.ts as string)).not.toThrow();
 		expect(new Date(entry.ts as string).toISOString()).toBe(entry.ts);
+	});
+
+	it("keeps file output as JSONL when text format is configured", () => {
+		const logger = new HubLogger(tmpDir, makeConfig({ format: "text", output: "file" }));
+		logger.log("warn", "hub started", { port: 4100, component: "server core" });
+
+		const filePath = path.join(tmpDir, "hub.jsonl");
+		const lines = readLines(filePath);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]?.lvl).toBe("warn");
+		expect(lines[0]?.msg).toBe("hub started");
+		expect(lines[0]?.port).toBe(4100);
+		expect(lines[0]?.component).toBe("server core");
+	});
+
+	it("writes human-readable text to stderr when text format is configured", () => {
+		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		const logger = new HubLogger(tmpDir, makeConfig({ format: "text", output: "both" }));
+
+		logger.log("warn", "hub\nstarted", { port: 4100, component: "server core" });
+
+		expect(stderrSpy).toHaveBeenCalledTimes(1);
+		expect(stderrSpy).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z WARN hub started port=4100 component="server core"\n$/,
+			),
+		);
+		const lines = readLines(path.join(tmpDir, "hub.jsonl"));
+		expect(lines[0]?.msg).toBe("hub\nstarted");
+	});
+
+	it("writes structured JSONL to stderr by default", () => {
+		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		const logger = new HubLogger(tmpDir, makeConfig({ output: "stderr" }));
+
+		logger.log("info", "hub started", { port: 4100 });
+
+		expect(stderrSpy).toHaveBeenCalledTimes(1);
+		const line = stderrSpy.mock.calls[0]?.[0];
+		expect(typeof line).toBe("string");
+		if (typeof line !== "string") return;
+		expect(line.endsWith("\n")).toBe(true);
+		const entry = JSON.parse(line) as Record<string, unknown>;
+		expect(entry.lvl).toBe("info");
+		expect(entry.msg).toBe("hub started");
+		expect(entry.port).toBe(4100);
+		expect(fs.existsSync(path.join(tmpDir, "hub.jsonl"))).toBe(false);
 	});
 
 	it("filters out entries below configured level", () => {
