@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,15 +84,15 @@ describe("SSH key endpoints", () => {
 	let sshDir: string;
 
 	beforeEach(async () => {
-		sshDir = join(
-			tmpdir(),
-			`termora-ssh-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
-		mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+		// mkdtempSync is the OS-atomic unique-temp-dir primitive (mode 0700) — guarantees
+		// per-test isolation with no possible name collision under parallel test load,
+		// unlike a hand-rolled Date.now()+Math.random() name.
+		sshDir = mkdtempSync(join(tmpdir(), "termora-ssh-test-"));
 	});
 
 	afterEach(async () => {
 		if (server) await server.close();
+		rmSync(sshDir, { recursive: true, force: true });
 	});
 
 	// Helper: spin up an isolated Fastify server with only the SSH key routes
