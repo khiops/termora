@@ -6,28 +6,34 @@
  * In web mode (dev or hub-served), relative URLs work via proxy or same-origin.
  */
 
+import { readonly, ref } from "vue";
+
 let _cachedPort: number | null = null;
+const _hubPortReady = ref(false);
+
+export const hubPortReady = readonly(_hubPortReady);
+
+function isTauriRuntime(): boolean {
+	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
 
 async function getHubPort(): Promise<number> {
 	if (_cachedPort !== null) return _cachedPort;
-	try {
-		const { invoke } = await import("@tauri-apps/api/core");
-		_cachedPort = await invoke<number>("get_hub_port");
-		return _cachedPort;
-	} catch {
-		return 4100; // fallback for non-Tauri context
-	}
+	if (!isTauriRuntime()) return 4100;
+	const { invoke } = await import("@tauri-apps/api/core");
+	_cachedPort = await invoke<number>("get_hub_port");
+	return _cachedPort;
 }
 
 export function hubBaseUrl(): string {
-	if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+	if (isTauriRuntime()) {
 		return `http://localhost:${_cachedPort ?? 4100}`;
 	}
 	return "";
 }
 
 export function hubWsUrl(): string {
-	if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+	if (isTauriRuntime()) {
 		return `ws://localhost:${_cachedPort ?? 4100}`;
 	}
 	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -37,4 +43,5 @@ export function hubWsUrl(): string {
 /** Call once at app startup to cache the hub port from the Tauri invoke. */
 export async function initHubPort(): Promise<void> {
 	await getHubPort();
+	_hubPortReady.value = true;
 }

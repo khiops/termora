@@ -19,10 +19,6 @@
 			:text-color="visualProfile.banner.textColor"
 		/>
 
-			<!-- Wallpaper layers (UX-10) — behind terminal content -->
-		<div v-if="wallpaperStyle" class="wallpaper-bg" :style="wallpaperStyle" />
-		<div v-if="dimStyle" class="wallpaper-dim" :style="dimStyle" />
-
 		<div v-if="error" class="terminal-error">
 			<span>{{ error }}</span>
 		</div>
@@ -113,7 +109,6 @@ import { useSearchShortcuts } from '../composables/useSearchShortcuts.js';
 import { useTabTitle } from '../composables/useTabTitle.js';
 import { useTerminal } from '../composables/useTerminal.js';
 import { useVisualProfile } from '../composables/useVisualProfile.js';
-import { useWallpaper } from '../composables/useWallpaper.js';
 import { useChannelsStore } from '../stores/channels.js';
 import { useConfigStore } from '../stores/config.js';
 import { useHostsStore } from '../stores/hosts.js';
@@ -272,7 +267,6 @@ const paneHost = computed(() => {
 });
 
 const { profile: visualProfile, bannerText, borderStyle, tintStyle } = useVisualProfile(paneHost);
-const { wallpaperStyle, dimStyle } = useWallpaper(toRef(configStore, 'profile'));
 
 // ---------------------------------------------------------------------------
 // Write-lock awareness
@@ -864,25 +858,11 @@ function onDragEnd(): void {
 	z-index: 2;
 }
 
-.wallpaper-bg {
-	position: absolute;
-	inset: 0;
-	z-index: 0;
-	pointer-events: none;
-}
-
-.wallpaper-dim {
-	position: absolute;
-	inset: 0;
-	z-index: 1;
-	pointer-events: none;
-}
-
 .tint-overlay {
 	position: absolute;
 	inset: 0;
 	pointer-events: none;
-	z-index: 3; /* was 1 — moved above terminal for wallpaper layering */
+	z-index: 3;
 	will-change: opacity;
 }
 
