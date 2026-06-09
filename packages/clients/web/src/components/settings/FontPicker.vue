@@ -65,9 +65,11 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
+import { storeToRefs } from "pinia";
 import FontCard from "./FontCard.vue";
 import { useFileDrop } from "../../composables/useFileDrop.js";
 import { useConfigStore } from "../../stores/config.js";
+import { useAuthStore } from "../../stores/auth.js";
 import { hubBaseUrl } from "../../utils/hub-url.js";
 
 const props = defineProps<{
@@ -81,15 +83,17 @@ const emit = defineEmits<{
 }>();
 
 const configStore = useConfigStore();
-const { fonts } = configStore;
+const authStore = useAuthStore();
+// storeToRefs keeps `fonts` reactive — plain destructuring would snapshot the
+// value and the list would never update after an upload/delete refresh.
+const { fonts } = storeToRefs(configStore);
 
 const uploading = ref(false);
 const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 function authHeader(): Record<string, string> {
-	const token = localStorage.getItem("termora-token");
-	return token ? { Authorization: `Bearer ${token}` } : {};
+	return authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {};
 }
 
 async function uploadFiles(files: File[]): Promise<void> {

@@ -80,9 +80,12 @@
 	/* Text levels */
 	/* alias → tracks --nt-fg (set by applyTheme at runtime) */
 	--nt-text: var(--nt-fg);
-	--nt-text-secondary: #585b70;
-	--nt-text-muted: #a6adc8;
-	/* alias → tracks --nt-text-muted (set by applyTheme at runtime) */
+	/* Muted text levels derive from the active theme's fg/bg (both theme-driven)
+	   so they stay legible in BOTH light and dark mode — blending fg toward bg
+	   keeps contrast against the current background regardless of theme. */
+	--nt-text-secondary: color-mix(in srgb, var(--nt-fg) 80%, var(--nt-bg));
+	--nt-text-muted: color-mix(in srgb, var(--nt-fg) 64%, var(--nt-bg));
+	/* alias → tracks --nt-text-muted */
 	--nt-fg-muted: var(--nt-text-muted);
 
 	/* RGB components for transparent variants via rgba(var(--nt-*-rgb), alpha) */

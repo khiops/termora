@@ -134,8 +134,10 @@ export const useThemeStore = defineStore("theme", () => {
 		root.setProperty("--nt-danger", badgeDanger);
 
 		// Tier 3: computed
-		root.setProperty("--nt-text-secondary", theme.colors.brightBlack);
-		root.setProperty("--nt-text-muted", theme.colors.brightWhite);
+		// NOTE: --nt-text-secondary / --nt-text-muted are intentionally NOT set here.
+		// They derive from --nt-fg/--nt-bg via color-mix in base.css so they stay legible
+		// in BOTH light and dark themes. Setting them to brightBlack/brightWhite assumed a
+		// dark background (brightWhite muted text is invisible on a light theme's light bg).
 		root.setProperty("--nt-accent-fg", readableForeground(theme.ui.accent));
 		root.setProperty("--nt-danger-fg", readableForeground(badgeDanger));
 
