@@ -102,6 +102,31 @@ pnpm -F @termora/hub test
 pnpm -F @termora/web dev
 ```
 
+### Production build (single executable)
+
+Build a self-contained release locally (Linux/macOS native):
+
+```sh
+./scripts/build-agent.sh   # Rust agent → dist/sea/termora-agent  (cargo --release)
+./scripts/build-hub.sh     # Hub SEA    → dist/sea/termora-hub
+                           #   builds the web UI, embeds it, bundles better-sqlite3,
+                           #   and produces a Node Single Executable Application
+```
+
+Both binaries land co-located in `dist/sea/`; the hub resolves the agent next to its own executable. Run it:
+
+```sh
+cd dist/sea
+./termora-hub start --port 4100   # serves the PWA at http://127.0.0.1:4100  (add --daemon / --open)
+./termora-hub pair                # prints an 8-digit code to authorise a new browser client
+./termora-hub status              # or: ./termora-hub stop
+```
+
+Config lives in `~/.config/termora`, runtime state in `~/.local/state/termora`.
+
+> A native SEA embeds the host Node runtime, so build on the OS you target — a cross-platform binary
+> (e.g. the Windows hub) must be produced on that platform.
+
 ---
 
 ## Configuration

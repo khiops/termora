@@ -74,6 +74,19 @@ pnpm -F @termora/hub test # Test single package
 pnpm -F @termora/web dev  # Dev single package
 ```
 
+### Production build & run (local, Linux/macOS native)
+
+```bash
+./scripts/build-agent.sh   # Rust agent → dist/sea/termora-agent (cargo --release)
+./scripts/build-hub.sh     # Hub SEA (builds+embeds web, bundles better-sqlite3) → dist/sea/termora-hub
+cd dist/sea && ./termora-hub start --port 4100   # serve PWA at http://127.0.0.1:4100 (--daemon/--open)
+./termora-hub pair         # 8-digit code to authorise a browser client; also: status | stop
+```
+
+- Hub SEA resolves the agent **co-located** in the same dir (`dist/sea/`) via `sea-agent-resolver.ts`; the agent spawns lazily on first local session.
+- Native SEA embeds the host Node — build cross-platform binaries on their target OS (Windows hub on Windows). Rust agent verify must include `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` (cfg(windows) lints invisible to Linux clippy).
+- Config: `~/.config/termora` · State: `~/.local/state/termora`.
+
 ## Conventions
 
 ### Code
