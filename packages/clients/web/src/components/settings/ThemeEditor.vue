@@ -470,7 +470,7 @@ async function handleSave() {
 
 .theme-editor-close:hover {
 	color: var(--nt-fg);
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .theme-editor-body {
@@ -513,7 +513,7 @@ async function handleSave() {
 
 .theme-editor-input {
 	padding: 6px 10px;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
 	color: var(--nt-fg);
@@ -528,17 +528,17 @@ async function handleSave() {
 }
 
 .theme-editor-input--error {
-	border-color: var(--nt-red, #e06c75);
+	border-color: var(--nt-danger);
 }
 
 .theme-editor-error {
 	font-size: 11px;
-	color: var(--nt-red, #e06c75);
+	color: var(--nt-danger);
 }
 
 .theme-editor-select {
 	padding: 6px 10px;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
 	color: var(--nt-fg);
@@ -573,7 +573,7 @@ async function handleSave() {
 
 .theme-editor-toggle-btn--active {
 	background: var(--nt-accent);
-	color: var(--nt-bg);
+	color: var(--nt-accent-fg);
 }
 
 .theme-editor-section {
@@ -639,7 +639,7 @@ async function handleSave() {
 .theme-editor-color-hex {
 	width: 76px;
 	padding: 3px 6px;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 3px;
 	color: var(--nt-fg);
@@ -683,12 +683,12 @@ async function handleSave() {
 }
 
 .theme-editor-btn--secondary:hover:not(:disabled) {
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-hover);
 }
 
 .theme-editor-btn--primary {
 	background: var(--nt-accent);
-	color: var(--nt-bg);
+	color: var(--nt-accent-fg);
 	border-color: var(--nt-accent);
 }
 
@@ -699,10 +699,10 @@ async function handleSave() {
 .theme-editor-save-error {
 	margin-top: 8px;
 	padding: 6px 10px;
-	background: rgba(var(--nt-fg-rgb), 0.04);
-	border: 1px solid var(--nt-red, #e06c75);
+	background: rgba(var(--nt-danger-rgb, 224, 108, 117), 0.08);
+	border: 1px solid var(--nt-danger);
 	border-radius: 4px;
-	color: var(--nt-red, #e06c75);
+	color: var(--nt-danger);
 	font-size: 12px;
 	text-align: center;
 }

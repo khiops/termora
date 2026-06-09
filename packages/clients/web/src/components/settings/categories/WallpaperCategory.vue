@@ -294,6 +294,7 @@ onMounted(loadWallpapers);
 }
 
 .scope-override-reset:hover {
+	background: var(--nt-hover);
 	border-color: var(--nt-accent);
 	color: var(--nt-accent);
 }
@@ -372,8 +373,8 @@ onMounted(loadWallpapers);
 	width: 20px;
 	height: 20px;
 	padding: 0;
-	background: rgba(0, 0, 0, 0.6);
-	color: white;
+	background: var(--nt-overlay-heavy);
+	color: var(--nt-bright-white);
 	border: none;
 	border-radius: 50%;
 	cursor: pointer;
@@ -401,6 +402,7 @@ onMounted(loadWallpapers);
 }
 
 .wallpaper-upload-btn:hover {
+	background: var(--nt-hover);
 	border-color: var(--nt-accent);
 	color: var(--nt-accent);
 }
@@ -411,11 +413,11 @@ onMounted(loadWallpapers);
 	gap: 8px;
 	margin-top: 8px;
 	padding: 6px 10px;
-	background: rgba(255, 80, 80, 0.1);
-	border: 1px solid rgba(255, 80, 80, 0.3);
+	background: rgba(var(--nt-danger-rgb, 255, 80, 80), 0.1);
+	border: 1px solid rgba(var(--nt-danger-rgb, 255, 80, 80), 0.3);
 	border-radius: 4px;
 	font-size: 12px;
-	color: #ff5050;
+	color: var(--nt-danger);
 }
 
 .wallpaper-upload-error button {

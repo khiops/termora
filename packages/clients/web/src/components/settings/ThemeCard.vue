@@ -88,7 +88,7 @@ const swatchColors = computed(() => [
 }
 
 .theme-card:hover {
-	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+	box-shadow: var(--nt-shadow);
 }
 
 .theme-card--active {
@@ -146,6 +146,6 @@ const swatchColors = computed(() => [
 
 .theme-card-edit:hover {
 	opacity: 1 !important;
-	background: rgba(var(--nt-fg-rgb), 0.1);
+	background: var(--nt-hover);
 }
 </style>

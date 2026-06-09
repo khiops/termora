@@ -426,7 +426,8 @@ function onScrollbarChange(value: unknown) {
 }
 
 .scope-override-reset:hover {
-	background: rgba(var(--nt-fg-rgb), 0.08);
+	background: var(--nt-hover);
 	border-color: var(--nt-accent);
+	color: var(--nt-accent);
 }
 </style>

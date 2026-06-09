@@ -2,7 +2,7 @@ import type { TermoraTheme } from "@termora/shared";
 import { BUNDLED_THEMES } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hexToRgb, useThemeStore } from "./theme.js";
+import { hexToRgb, readableForeground, useThemeStore } from "./theme.js";
 
 const catppuccinMocha = BUNDLED_THEMES["catppuccin-mocha"] as TermoraTheme;
 const nordTheme = BUNDLED_THEMES.nord as TermoraTheme;
@@ -64,14 +64,13 @@ describe("useThemeStore", () => {
 			expect(setPropertyMock).toHaveBeenCalledWith("--nt-badge", catppuccinMocha.ui.badge);
 
 			// Tier 3: computed
-			expect(setPropertyMock).toHaveBeenCalledWith(
-				"--nt-text-secondary",
-				catppuccinMocha.colors.brightBlack,
-			);
-			expect(setPropertyMock).toHaveBeenCalledWith(
-				"--nt-text-muted",
-				catppuccinMocha.colors.brightWhite,
-			);
+			// --nt-text-secondary / --nt-text-muted are NOT set by applyTheme — they derive
+			// from --nt-fg/--nt-bg via color-mix in base.css so they stay legible in light AND
+			// dark themes (setting muted = brightWhite made muted text invisible on a light bg).
+			expect(setPropertyMock).not.toHaveBeenCalledWith("--nt-text-muted", expect.anything());
+			expect(setPropertyMock).not.toHaveBeenCalledWith("--nt-text-secondary", expect.anything());
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-accent-fg", "#000000");
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-danger-fg", "#000000");
 
 			// RGB components
 			expect(setPropertyMock).toHaveBeenCalledWith("--nt-accent-rgb", "137, 180, 250");
@@ -461,5 +460,15 @@ describe("useThemeStore", () => {
 			// Value must be the RGB triple of that theme's effective badgeDanger
 			expect(afterNord[0]?.[1]).toBe(hexToRgb(nordTheme.ui.badgeDanger ?? "#f38ba8"));
 		});
+	});
+});
+
+describe("readableForeground", () => {
+	it("uses black text on light colors", () => {
+		expect(readableForeground("#89b4fa")).toBe("#000000");
+	});
+
+	it("uses white text on dark colors", () => {
+		expect(readableForeground("#0366d6")).toBe("#ffffff");
 	});
 });

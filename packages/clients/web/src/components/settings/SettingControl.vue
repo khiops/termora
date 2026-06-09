@@ -145,7 +145,7 @@ function onFontSelect(value: string | undefined): void {
 .control-number {
 	padding: 4px 8px;
 	font-size: 12px;
-	background: var(--nt-border);
+	background: var(--nt-input-bg);
 	color: var(--nt-fg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
@@ -164,7 +164,7 @@ function onFontSelect(value: string | undefined): void {
 .control-select {
 	padding: 4px 8px;
 	font-size: 12px;
-	background: var(--nt-border);
+	background: var(--nt-input-bg);
 	color: var(--nt-fg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
@@ -197,6 +197,7 @@ function onFontSelect(value: string | undefined): void {
 	width: 36px;
 	height: 20px;
 	background: var(--nt-border);
+	border: 1px solid var(--nt-border);
 	border-radius: 10px;
 	transition: background 0.2s ease;
 }
@@ -211,13 +212,14 @@ function onFontSelect(value: string | undefined): void {
 	left: 2px;
 	width: 16px;
 	height: 16px;
-	background: #fff;
+	background: var(--nt-fg);
 	border-radius: 50%;
 	transition: transform 0.2s ease;
 }
 
 .control-toggle input:checked + .toggle-track .toggle-thumb {
 	transform: translateX(16px);
+	background: var(--nt-accent-fg);
 }
 
 /* ── Range ─────────────────────────────────────────────────────────── */
@@ -265,7 +267,7 @@ function onFontSelect(value: string | undefined): void {
 	padding: 4px 10px;
 	font-size: 12px;
 	font-family: inherit;
-	background: var(--nt-border);
+	background: var(--nt-input-bg);
 	color: var(--nt-fg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;

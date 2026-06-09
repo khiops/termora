@@ -58,16 +58,17 @@ export function useTabManager(
 		const newTabId = generateId();
 		const newTab: Tab = { id: newTabId };
 		const newNode: PaneNode = { type: "terminal", channelId, paneId: newPaneId };
+		let activeIdx: number;
 
 		if (newTabPosition === "afterActive") {
-			const insertIdx = activeTabIndex.value + 1;
 			const newTabs = [...tabs.value];
+			const insertIdx = Math.max(0, Math.min(activeTabIndex.value + 1, newTabs.length));
 			newTabs.splice(insertIdx, 0, newTab);
 			tabs.value = newTabs;
-			activeTabIndex.value = insertIdx;
+			activeIdx = insertIdx;
 		} else {
+			activeIdx = tabs.value.length;
 			tabs.value = [...tabs.value, newTab];
-			activeTabIndex.value = tabs.value.length - 1;
 		}
 
 		// Initialize layout and active pane for the new tab
@@ -79,6 +80,7 @@ export function useTabManager(
 			...activePaneIds.value,
 			[newTabId]: newPaneId,
 		};
+		activeTabIndex.value = activeIdx;
 
 		// Force Vue to re-evaluate v-show on the newly created v-for element.
 		// When adding the first tab, activeTabIndex is already 0 so the 0→0

@@ -126,14 +126,20 @@ export const useThemeStore = defineStore("theme", () => {
 		root.setProperty("--nt-scrollbar-track", theme.ui.scrollbarTrack);
 		root.setProperty("--nt-search-highlight", theme.ui.searchHighlight);
 		root.setProperty("--nt-search-highlight-active", theme.ui.searchHighlightActive);
+		const badgeDanger = theme.ui.badgeDanger ?? "#f38ba8";
 		root.setProperty("--nt-badge-info", theme.ui.badgeInfo ?? "#89b4fa");
 		root.setProperty("--nt-badge-warning", theme.ui.badgeWarning ?? "#f9e2af");
 		root.setProperty("--nt-badge-success", theme.ui.badgeSuccess ?? "#a6e3a1");
-		root.setProperty("--nt-badge-danger", theme.ui.badgeDanger ?? "#f38ba8");
+		root.setProperty("--nt-badge-danger", badgeDanger);
+		root.setProperty("--nt-danger", badgeDanger);
 
 		// Tier 3: computed
-		root.setProperty("--nt-text-secondary", theme.colors.brightBlack);
-		root.setProperty("--nt-text-muted", theme.colors.brightWhite);
+		// NOTE: --nt-text-secondary / --nt-text-muted are intentionally NOT set here.
+		// They derive from --nt-fg/--nt-bg via color-mix in base.css so they stay legible
+		// in BOTH light and dark themes. Setting them to brightBlack/brightWhite assumed a
+		// dark background (brightWhite muted text is invisible on a light theme's light bg).
+		root.setProperty("--nt-accent-fg", readableForeground(theme.ui.accent));
+		root.setProperty("--nt-danger-fg", readableForeground(badgeDanger));
 
 		// RGB components for rgba() usage
 		root.setProperty("--nt-accent-rgb", hexToRgb(theme.ui.accent));
@@ -347,6 +353,22 @@ export function hexToRgb(hex: string): string {
 	const g = Number.parseInt(hex.slice(3, 5), 16);
 	const b = Number.parseInt(hex.slice(5, 7), 16);
 	return `${r}, ${g}, ${b}`;
+}
+
+// ── Helper: choose readable text for a solid theme color ──────────────
+
+export function readableForeground(hex: string): "#000000" | "#ffffff" {
+	const normalized = hex.trim();
+	if (!/^#[0-9a-fA-F]{6}/.test(normalized)) return "#ffffff";
+
+	const r = Number.parseInt(normalized.slice(1, 3), 16) / 255;
+	const g = Number.parseInt(normalized.slice(3, 5), 16) / 255;
+	const b = Number.parseInt(normalized.slice(5, 7), 16) / 255;
+	const linear = (value: number) =>
+		value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+	const luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+
+	return luminance > 0.179 ? "#000000" : "#ffffff";
 }
 
 // ── Helper: "#89b4fa" + alpha -> "rgba(137, 180, 250, 0.85)" ──────────────

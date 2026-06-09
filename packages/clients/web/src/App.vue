@@ -768,8 +768,8 @@ watch(
  * same channel (the watcher above only fires on value *changes*).
  */
 function onSelectChannel(channelId: string): void {
-	channelsStore.selectChannel(channelId);
 	layout.openTab(channelId);
+	channelsStore.selectChannel(channelId);
 }
 
 /**
@@ -1257,6 +1257,7 @@ function onMoveToNewTab(sourceChannelId: string, insertAtIndex: number): void {
  */
 function onSidebarOpenNewTab(channelId: string): void {
 	layout.openTab(channelId);
+	channelsStore.selectChannel(channelId);
 }
 
 /**
@@ -1268,14 +1269,17 @@ function onSidebarOpenCurrentTab(channelId: string): void {
 	if (activeTab === null) {
 		// No active tab — just open a new one
 		layout.openTab(channelId);
+		channelsStore.selectChannel(channelId);
 		return;
 	}
 	// Replace the active pane's channel in the active tab
 	const activeChId = layout.getActiveChannelId(activeTab.id);
 	if (activeChId !== null) {
 		layout.replaceChannelId(activeChId, channelId);
+		channelsStore.selectChannel(channelId);
 	} else {
 		layout.openTab(channelId);
+		channelsStore.selectChannel(channelId);
 	}
 }
 

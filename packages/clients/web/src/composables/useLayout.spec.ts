@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, nextTick } from "vue";
+import { useConfigStore } from "../stores/config.js";
 import type { PaneNode } from "./useLayout.js";
 import {
 	collectTerminalChannelIds,
@@ -96,6 +97,24 @@ describe("Tab identity", () => {
 		const countBefore = layout.tabs.value.length;
 		layout.openTab("ch-A");
 		expect(layout.tabs.value.length).toBe(countBefore);
+	});
+
+	it("openTab activates the first tab when new tabs open after active", () => {
+		const configStore = useConfigStore();
+		configStore.uiConfig = {
+			...configStore.uiConfig,
+			tabs: { ...configStore.uiConfig.tabs, newTabPosition: "afterActive" },
+		};
+
+		layout.openTab("ch-A");
+
+		expect(layout.tabs.value).toHaveLength(1);
+		expect(layout.activeTabIndex.value).toBe(0);
+		const tab = layout.tabs.value[0];
+		expect(tab).toBeDefined();
+		if (!tab) return;
+		expect(layout.activeTab.value).toBe(tab);
+		expect(layout.getActiveChannelId(tab.id)).toBe("ch-A");
 	});
 });
 
