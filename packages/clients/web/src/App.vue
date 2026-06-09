@@ -190,8 +190,30 @@
 			<div class="app-loading-spinner" />
 		</div>
 
-		<!-- Main layout — only shown when authenticated and WS ready -->
-		<div v-else class="app-layout" :style="layoutStyle">
+		<template v-else>
+			<!-- Window-wide wallpaper — one layer behind every app region -->
+			<TransitionGroup
+				name="window-wallpaper-fade"
+				tag="div"
+				class="window-wallpaper"
+				aria-hidden="true"
+			>
+				<div
+					v-if="windowWallpaperStyle"
+					:key="`bg:${windowWallpaperLayerKey}`"
+					class="window-wallpaper__bg"
+					:style="windowWallpaperStyle"
+				/>
+				<div
+					v-if="windowWallpaperDimStyle"
+					:key="`dim:${windowWallpaperLayerKey}`"
+					class="window-wallpaper__dim"
+					:style="windowWallpaperDimStyle"
+				/>
+			</TransitionGroup>
+
+			<!-- Main layout — only shown when authenticated and WS ready -->
+			<div class="app-layout" :style="layoutStyle">
 			<HostRail
 				class="host-rail"
 				@toggle-settings="showSettings = !showSettings"
@@ -284,7 +306,8 @@
 					</div>
 				</div>
 			</div>
-		</div>
+			</div>
+		</template>
 	</div>
 </template>
 
@@ -317,6 +340,7 @@ import TabBar from './components/TabBar.vue';
 import TitleBar from './components/TitleBar.vue';
 import ToastContainer from './components/ToastContainer.vue';
 import WriteRequestDialog from './components/WriteRequestDialog.vue';
+import { useActiveWallpaper } from './composables/useActiveWallpaper.js';
 import { useAutoSwitch } from './composables/useAutoSwitch.js';
 import { useCommandPalette } from './composables/useCommandPalette.js';
 import type { DropZone } from './composables/useLayout.js';
@@ -404,6 +428,22 @@ const themeStore = useThemeStore();
 const writeLockStore = useWriteLockStore();
 const autoSwitch = useAutoSwitch();
 const layout = useLayout();
+const { wallpaperStyle: windowWallpaperStyle, dimStyle: windowWallpaperDimStyle } = useActiveWallpaper({
+	activeTab: layout.activeTab,
+	getActiveChannelId: layout.getActiveChannelId,
+	channelHostMap: toRef(channelsStore, 'channelHostMap'),
+});
+const windowWallpaperLayerKey = computed(() => {
+	const style = windowWallpaperStyle.value;
+	if (!style) return 'none';
+	return [
+		style.backgroundImage ?? '',
+		style.filter ?? '',
+		windowWallpaperDimStyle.value?.background ?? '',
+	]
+		.map(String)
+		.join('|');
+});
 const multiPaneSearch = useMultiPaneSearch();
 provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
@@ -1355,6 +1395,43 @@ body,
 	height: 100%;
 	display: flex;
 	flex-direction: column;
+	position: relative;
+	overflow: hidden;
+	background: var(--nt-bg);
+	isolation: isolate;
+}
+
+.window-wallpaper {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	overflow: hidden;
+	pointer-events: none;
+}
+
+.window-wallpaper__bg,
+.window-wallpaper__dim {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.window-wallpaper__bg {
+	z-index: 0;
+}
+
+.window-wallpaper__dim {
+	z-index: 1;
+}
+
+.window-wallpaper-fade-enter-active,
+.window-wallpaper-fade-leave-active {
+	transition: opacity 160ms ease;
+}
+
+.window-wallpaper-fade-enter-from,
+.window-wallpaper-fade-leave-to {
+	opacity: 0;
 }
 
 .app-layout {
@@ -1362,9 +1439,10 @@ body,
 	grid-template-columns: var(--rail-w, 48px) var(--sidebar-w, 200px) 1fr;
 	flex: 1;
 	min-height: 0;
-	background: var(--nt-bg);
+	background: transparent;
 	color: var(--nt-fg);
 	position: relative;
+	z-index: 1;
 }
 
 .resize-handle {
