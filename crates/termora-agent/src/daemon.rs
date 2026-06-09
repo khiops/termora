@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -19,13 +22,20 @@ const BIND_RETRY_MAX: u32 = 3;
 #[cfg(unix)]
 const BIND_RETRY_DELAY_MS: u64 = 300;
 const MAX_FRAME_QUEUE: usize = 1000;
+static CONNECTION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Tracks the active hub connection so it can be displaced by a new one.
 struct ActiveConnection {
+    /// Daemon-local sequence id for diagnostics.
+    connection_id: u64,
     /// Notified when this connection should be terminated (displaced).
     cancel: Arc<Notify>,
     /// Channel to send encoded frames to the active connection's writer task.
     frame_tx: FrameSender,
+}
+
+fn next_connection_id() -> u64 {
+    CONNECTION_SEQ.fetch_add(1, Ordering::Relaxed) + 1
 }
 
 /// Returns the XDG config directory for termora (`~/.config/termora` on Linux/macOS).
@@ -72,13 +82,17 @@ fn get_config_dir() -> String {
 /// PTY channels persist across hub reconnections.
 #[cfg(unix)]
 pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
-    run_daemon_impl(socket_path, get_config_dir()).await
+    run_daemon_impl(socket_path, get_config_dir(), get_state_dir()).await
 }
 
 /// Internal implementation — takes an explicit config_dir so tests can inject a temp dir
 /// without mutating process-global environment variables.
 #[cfg(unix)]
-async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Result<()> {
+async fn run_daemon_impl(
+    socket_path: String,
+    config_dir: String,
+    state_dir: PathBuf,
+) -> std::io::Result<()> {
     let path = PathBuf::from(&socket_path);
 
     // Validate path length (Unix socket limit: 104-108 bytes depending on platform)
@@ -109,7 +123,7 @@ async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Re
     tracing::info!("daemon listening on {:?}", path);
 
     // Load auth token once at startup (None → first-run, skip auth)
-    let expected_token = read_auth_token(&config_dir).await;
+    let expected_token = read_auth_token_with_state_dir(&config_dir, &state_dir).await;
     if expected_token.is_some() {
         tracing::info!("auth token loaded — connections will be authenticated");
     } else {
@@ -140,7 +154,8 @@ async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Re
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
-                tracing::info!("new hub connection");
+                let connection_id = next_connection_id();
+                tracing::debug!(connection_id, "hub connection accepted");
 
                 // Create cancellation notifier for this connection
                 let cancel = Arc::new(Notify::new());
@@ -152,11 +167,16 @@ async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Re
                 {
                     let mut conn = active_conn.lock().await;
                     if let Some(old) = conn.take() {
-                        tracing::info!("displacing previous connection");
+                        tracing::debug!(
+                            connection_id,
+                            displaced_connection_id = old.connection_id,
+                            "displacing previous hub connection"
+                        );
                         // notify_waiters wakes ALL listeners (writer task + read loop)
                         old.cancel.notify_waiters();
                     }
                     *conn = Some(ActiveConnection {
+                        connection_id,
                         cancel: Arc::clone(&cancel),
                         frame_tx: frame_tx.clone(),
                     });
@@ -173,6 +193,7 @@ async fn run_daemon_impl(socket_path: String, config_dir: String) -> std::io::Re
                     Arc::clone(&active_conn),
                     cancel,
                     expected_token.clone(),
+                    connection_id,
                 ));
             }
             Err(e) => {
@@ -255,7 +276,8 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             continue;
         }
-        tracing::info!("new hub connection (named pipe)");
+        let connection_id = next_connection_id();
+        tracing::debug!(connection_id, "hub connection accepted (named pipe)");
 
         // Swap in the next server instance so the pipe name stays open for future clients
         let connected = {
@@ -273,11 +295,16 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
         {
             let mut conn = active_conn.lock().await;
             if let Some(old) = conn.take() {
-                tracing::info!("displacing previous connection");
+                tracing::debug!(
+                    connection_id,
+                    displaced_connection_id = old.connection_id,
+                    "displacing previous hub connection"
+                );
                 // notify_waiters wakes ALL listeners (writer task + read loop)
                 old.cancel.notify_waiters();
             }
             *conn = Some(ActiveConnection {
+                connection_id,
                 cancel: Arc::clone(&cancel),
                 frame_tx: frame_tx.clone(),
             });
@@ -294,6 +321,7 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
             Arc::clone(&active_conn),
             cancel,
             expected_token.clone(),
+            connection_id,
         ));
     }
 }
@@ -312,12 +340,20 @@ pub async fn run_daemon(socket_path: String) -> std::io::Result<()> {
 /// Returns `Some(String::new())` if auth.json is absent but meta.db exists (fail-closed: auth bypass refused).
 /// Returns `Some(String::new())` if the file exists but is unreadable or malformed (fail-closed).
 /// Returns `Some(token)` on success.
+#[cfg(windows)]
 async fn read_auth_token(config_dir: &str) -> Option<String> {
+    read_auth_token_with_state_dir(config_dir, &get_state_dir()).await
+}
+
+async fn read_auth_token_with_state_dir(
+    config_dir: &str,
+    state_dir: &std::path::Path,
+) -> Option<String> {
     let path = format!("{}/auth.json", config_dir);
 
     // File doesn't exist — check whether this is truly a first run
     if !std::path::Path::new(&path).exists() {
-        let meta_db = get_state_dir().join("meta.db");
+        let meta_db = state_dir.join("meta.db");
         if meta_db.exists() {
             // State data exists but auth.json is gone — this is NOT a first run.
             // Refusing to start without authentication to prevent silent auth bypass.
@@ -536,6 +572,7 @@ async fn handle_connection_inner<S>(
     active_conn: Arc<Mutex<Option<ActiveConnection>>>,
     cancel: Arc<Notify>,
     expected_token: Option<String>,
+    connection_id: u64,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -573,28 +610,35 @@ async fn handle_connection_inner<S>(
         clear_active_if_ours(&active_conn, &cancel).await;
         return;
     }
+    tracing::debug!(connection_id, "HELLO sent");
 
     // --- Step 2: Validate AUTH if a token is configured ---
     // If no token is configured (first-run), skip auth entirely.
     if let Some(ref token) = expected_token {
         match validate_auth(&mut read_half, token).await {
             Ok(true) => {
-                tracing::info!("auth handshake succeeded");
+                tracing::debug!(connection_id, "auth handshake succeeded");
             }
             Ok(false) => {
-                tracing::warn!("auth handshake failed: token mismatch — dropping connection");
+                tracing::warn!(
+                    connection_id,
+                    "auth handshake failed: token mismatch — dropping connection"
+                );
                 clear_active_if_ours(&active_conn, &cancel).await;
                 return;
             }
             Err(e) => {
-                tracing::warn!("auth handshake error: {} — dropping connection", e);
+                tracing::warn!(connection_id, error = %e, "auth handshake error — dropping connection");
                 clear_active_if_ours(&active_conn, &cancel).await;
                 return;
             }
         }
+    } else {
+        tracing::debug!(connection_id, "auth skipped because no token is configured");
     }
 
     // Send AGENT_CHANNEL_STATE for each existing channel
+    let mut channel_state_count = 0usize;
     {
         let mgr = pty_manager.lock().await;
         for (id, ch) in &mgr.channels {
@@ -608,14 +652,22 @@ async fn handle_connection_inner<S>(
                 clear_active_if_ours(&active_conn, &cancel).await;
                 return;
             }
+            channel_state_count += 1;
         }
     }
 
     // Send CHANNEL_STATE_END
+    tracing::debug!(
+        connection_id,
+        channel_state_count,
+        "about to send CHANNEL_STATE_END"
+    );
     if send_encoded(&frame_tx, &AgentToHub::ChannelStateEnd {}).is_err() {
+        tracing::warn!(connection_id, "CHANNEL_STATE_END send failed (writer gone)");
         clear_active_if_ours(&active_conn, &cancel).await;
         return;
     }
+    tracing::debug!(connection_id, "CHANNEL_STATE_END sent");
 
     // Read loop with displacement cancellation
     let mut reader = FrameReader::new();
@@ -624,13 +676,13 @@ async fn handle_connection_inner<S>(
     loop {
         tokio::select! {
             _ = cancel.notified() => {
-                tracing::info!("connection displaced by new hub");
+                tracing::debug!(connection_id, "connection displaced by new hub");
                 break;
             }
             result = read_half.read(&mut buf) => {
                 match result {
                     Ok(0) => {
-                        tracing::info!("hub disconnected (EOF)");
+                        tracing::debug!(connection_id, "hub disconnected (EOF)");
                         break;
                     }
                     Ok(n) => {
@@ -708,6 +760,7 @@ async fn handle_connection(
     active_conn: Arc<Mutex<Option<ActiveConnection>>>,
     cancel: Arc<Notify>,
     expected_token: Option<String>,
+    connection_id: u64,
 ) {
     handle_connection_inner(
         stream,
@@ -719,6 +772,7 @@ async fn handle_connection(
         active_conn,
         cancel,
         expected_token,
+        connection_id,
     )
     .await
 }
@@ -787,6 +841,21 @@ fn spawn_output_router(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn temp_path(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "{}-{}",
+            prefix,
+            ulid::Ulid::new().to_string().to_lowercase()
+        ))
+    }
+
+    async fn temp_dir(prefix: &str) -> PathBuf {
+        let dir = temp_path(prefix);
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        dir
+    }
 
     /// Verify short socket paths pass the length guard (Unix).
     #[cfg(unix)]
@@ -829,6 +898,7 @@ mod tests {
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-noop").await;
 
         let sock_name = format!(
             "termora-test-{}.sock",
@@ -838,7 +908,11 @@ mod tests {
         let path_str = path.to_string_lossy().to_string();
 
         // Start daemon in background
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
 
         // Wait for daemon to bind
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -862,6 +936,7 @@ mod tests {
         daemon_handle.abort();
         let _ = std::fs::remove_file(&path_str);
         let _ = tokio::fs::remove_dir_all(&empty_config).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     #[cfg(unix)]
@@ -873,6 +948,7 @@ mod tests {
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-disp").await;
 
         let sock_name = format!(
             "termora-test-displace-{}.sock",
@@ -881,7 +957,11 @@ mod tests {
         let path = std::env::temp_dir().join(&sock_name);
         let path_str = path.to_string_lossy().to_string();
 
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         // First client connects
@@ -914,6 +994,7 @@ mod tests {
         daemon_handle.abort();
         let _ = std::fs::remove_file(&path_str);
         let _ = tokio::fs::remove_dir_all(&empty_config).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     #[cfg(unix)]
@@ -925,6 +1006,7 @@ mod tests {
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-perms").await;
 
         let sock_name = format!(
             "termora-test-perms-{}.sock",
@@ -933,7 +1015,11 @@ mod tests {
         let path = std::env::temp_dir().join(&sock_name);
         let path_str = path.to_string_lossy().to_string();
 
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         {
@@ -946,6 +1032,7 @@ mod tests {
         daemon_handle.abort();
         let _ = std::fs::remove_file(&path_str);
         let _ = tokio::fs::remove_dir_all(&empty_config).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     #[cfg(unix)]
@@ -957,6 +1044,7 @@ mod tests {
         ));
         tokio::fs::create_dir_all(&empty_config).await.unwrap();
         let config_dir = empty_config.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-stateend").await;
 
         let sock_name = format!(
             "termora-test-state-end-{}.sock",
@@ -965,7 +1053,11 @@ mod tests {
         let path = std::env::temp_dir().join(&sock_name);
         let path_str = path.to_string_lossy().to_string();
 
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         let mut stream = UnixStream::connect(&path_str).await.unwrap();
@@ -1042,6 +1134,7 @@ mod tests {
         daemon_handle.abort();
         let _ = std::fs::remove_file(&path_str);
         let _ = tokio::fs::remove_dir_all(&empty_config).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// Verify a named pipe server instance can be created successfully on Windows.
@@ -1169,8 +1262,11 @@ mod tests {
     /// read_auth_token returns None for a non-existent file.
     #[tokio::test]
     async fn test_read_auth_token_missing_file() {
-        let result = read_auth_token("/tmp/termora-nonexistent-99999/").await;
+        let state_dir = temp_dir("termora-test-state-missing-auth").await;
+        let result =
+            read_auth_token_with_state_dir("/tmp/termora-nonexistent-99999/", &state_dir).await;
         assert!(result.is_none(), "missing file must return None");
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// read_auth_token parses a valid auth.json correctly.
@@ -1185,11 +1281,13 @@ mod tests {
         tokio::fs::write(&auth_path, r#"{"token":"deadbeef1234"}"#)
             .await
             .unwrap();
+        let state_dir = temp_dir("termora-auth-state").await;
 
-        let result = read_auth_token(&dir.to_string_lossy()).await;
+        let result = read_auth_token_with_state_dir(&dir.to_string_lossy(), &state_dir).await;
         assert_eq!(result, Some("deadbeef1234".to_string()));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// read_auth_token returns Some("") (fail-closed) for malformed JSON.
@@ -1204,8 +1302,9 @@ mod tests {
         tokio::fs::write(&auth_path, b"not json at all")
             .await
             .unwrap();
+        let state_dir = temp_dir("termora-auth-bad-state").await;
 
-        let result = read_auth_token(&dir.to_string_lossy()).await;
+        let result = read_auth_token_with_state_dir(&dir.to_string_lossy(), &state_dir).await;
         // Fail-closed: file exists but is malformed → Some("") so auth always fails
         assert_eq!(
             result,
@@ -1214,6 +1313,7 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// read_auth_token returns Some("") (fail-closed) for JSON missing the 'token' field.
@@ -1228,8 +1328,9 @@ mod tests {
         tokio::fs::write(&auth_path, br#"{"other":"value"}"#)
             .await
             .unwrap();
+        let state_dir = temp_dir("termora-auth-nofield-state").await;
 
-        let result = read_auth_token(&dir.to_string_lossy()).await;
+        let result = read_auth_token_with_state_dir(&dir.to_string_lossy(), &state_dir).await;
         // Fail-closed: file exists with valid JSON but no 'token' field
         assert_eq!(
             result,
@@ -1238,6 +1339,7 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// Daemon rejects a connection when a wrong token is sent.
@@ -1260,6 +1362,7 @@ mod tests {
             .await
             .unwrap();
         let config_dir = config_dir_path.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-auth").await;
 
         let sock_dir = std::env::temp_dir().join(format!(
             "termora-daemon-auth-{}",
@@ -1269,7 +1372,11 @@ mod tests {
         let sock_path = sock_dir.join("agent.sock");
         let path_str = sock_path.to_string_lossy().to_string();
 
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         let mut stream = UnixStream::connect(&path_str).await.unwrap();
@@ -1307,6 +1414,7 @@ mod tests {
         daemon_handle.abort();
         let _ = tokio::fs::remove_dir_all(&config_dir_path).await;
         let _ = tokio::fs::remove_dir_all(&sock_dir).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// Daemon accepts a connection when the correct token is sent.
@@ -1328,6 +1436,7 @@ mod tests {
             .await
             .unwrap();
         let config_dir = config_dir_path.to_string_lossy().to_string();
+        let state_dir = temp_dir("termora-test-state-authok").await;
 
         let sock_dir = std::env::temp_dir().join(format!(
             "termora-daemon-authok-{}",
@@ -1337,7 +1446,11 @@ mod tests {
         let sock_path = sock_dir.join("agent.sock");
         let path_str = sock_path.to_string_lossy().to_string();
 
-        let daemon_handle = tokio::spawn(run_daemon_impl(path_str.clone(), config_dir.clone()));
+        let daemon_handle = tokio::spawn(run_daemon_impl(
+            path_str.clone(),
+            config_dir.clone(),
+            state_dir.clone(),
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         let mut stream = UnixStream::connect(&path_str).await.unwrap();
@@ -1376,6 +1489,7 @@ mod tests {
         daemon_handle.abort();
         let _ = tokio::fs::remove_dir_all(&config_dir_path).await;
         let _ = tokio::fs::remove_dir_all(&sock_dir).await;
+        let _ = tokio::fs::remove_dir_all(&state_dir).await;
     }
 
     /// Windows: create_secure_pipe creates a pipe that can accept connections.

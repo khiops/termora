@@ -147,8 +147,8 @@ describe("connectOrLaunch", () => {
 				});
 				await closeServer(staleServer);
 
-				// probeSocket returns false (ECONNREFUSED) for the stale socket.
-				// connectOrLaunch will unlink it, call spawn, then poll for socket.
+				// connectOrLaunch will unlink it, call spawn, then poll with the
+				// authoritative TermoraAgent connection.
 				// Our mock spawn starts the mock daemon instead of a real process.
 				mockSpawnImpl = () => {
 					setImmediate(async () => {
@@ -164,6 +164,7 @@ describe("connectOrLaunch", () => {
 
 				expect(agent).toBeDefined();
 				expect(agent.connected).toBe(true);
+				expect(daemon?.connections).toHaveLength(1);
 			},
 			TEST_TIMEOUT,
 		);
@@ -191,6 +192,7 @@ describe("connectOrLaunch", () => {
 
 				expect(agent).toBeDefined();
 				expect(agent.connected).toBe(true);
+				expect(daemon?.connections).toHaveLength(1);
 
 				// Verify spawn was called with correct arguments
 				expect(capturedArgs[0]).toBe(process.execPath);

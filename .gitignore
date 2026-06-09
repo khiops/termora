@@ -12,6 +12,7 @@ coverage/
 
 # Logs
 *.log
+.tt/
 
 # Environment
 .env

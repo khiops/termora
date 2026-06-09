@@ -238,22 +238,42 @@ async fn create_askpass_script(
 ) -> io::Result<(PathBuf, HashMap<String, String>)> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    // Prefer XDG_RUNTIME_DIR (user-private, mode 0700) over /tmp
-    let tmp_dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
+    // Prefer XDG_RUNTIME_DIR (user-private, mode 0700), but fall back to /tmp
+    // if the runtime dir is present but not writable in a constrained sandbox.
+    let mut dirs = vec![std::env::temp_dir()];
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        dirs.push(PathBuf::from(runtime_dir));
+    }
+
     let filename = format!(
         "termora-askpass-{}",
         ulid::Ulid::new().to_string().to_lowercase()
     );
-    let path = tmp_dir.join(&filename);
+    let mut last_err = None;
+    let (path, mut file) = loop {
+        let Some(tmp_dir) = dirs.pop() else {
+            return Err(last_err.unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no ASKPASS temp directory available",
+                )
+            }));
+        };
+        let path = tmp_dir.join(&filename);
 
-    // Create with O_EXCL + 0700
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true) // O_EXCL
-        .mode(0o700)
-        .open(&path)?;
+        // Create with O_EXCL + 0700
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_EXCL
+            .mode(0o700)
+            .open(&path)
+        {
+            Ok(file) => break (path, file),
+            Err(err) => {
+                last_err = Some(err);
+            }
+        }
+    };
 
     use std::io::Write;
     // Script echoes the env var, not the secret directly

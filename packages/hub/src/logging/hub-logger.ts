@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LogConfig } from "@termora/shared";
-import { LOG_SEVERITY } from "./index.js";
+import { severityForLevel } from "./levels.js";
 
 const ROTATION_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -20,13 +20,13 @@ export class HubLogger {
 		this.logsDir = logsDir;
 		this.filePath = path.join(logsDir, "hub.jsonl");
 		this.oldFilePath = path.join(logsDir, "hub.jsonl.old");
-		this.minSeverity = LOG_SEVERITY[config.level] ?? 2;
+		this.minSeverity = severityForLevel(config.level) ?? severityForLevel("info") ?? 2;
 		this.format = config.format;
 		this.output = config.output;
 	}
 
 	log(level: LogConfig["level"], msg: string, extra?: Record<string, unknown>): void {
-		if ((LOG_SEVERITY[level] ?? 2) < this.minSeverity) return;
+		if ((severityForLevel(level) ?? severityForLevel("info") ?? 2) < this.minSeverity) return;
 
 		const entry: Record<string, unknown> = {
 			ts: new Date().toISOString(),

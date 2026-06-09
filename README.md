@@ -102,6 +102,25 @@ pnpm -F @termora/hub test
 pnpm -F @termora/web dev
 ```
 
+### Headless local-spawn testing
+
+Use the headless harness to exercise the hub WebSocket `AUTH` + `SPAWN` path without opening
+the browser or touching your real Termora state:
+
+```sh
+scripts/dev/headless-hub-test.sh start   # isolated hub on :4199 with debug logging enabled
+scripts/dev/headless-hub-test.sh spawn   # run AUTH + SPAWN probe
+scripts/dev/headless-hub-test.sh logs    # hub connection-lifecycle log tail
+scripts/dev/headless-hub-test.sh alog    # local agent daemon log tail
+scripts/dev/headless-hub-test.sh stop
+scripts/dev/headless-hub-test.sh reset
+```
+
+The harness writes all config, runtime, and state under `.tt/headless-hub/`. Override the
+location or port with `TT_DIR=/tmp/termora-headless` or `TT_PORT=4201`. The hub's dev
+agent resolver uses `target/release/termora-agent`, so rebuild that binary after Rust changes
+before relying on the agent daemon log tail.
+
 ### Production build (single executable)
 
 Build a self-contained release locally (Linux/macOS native):

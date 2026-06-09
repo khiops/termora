@@ -9,6 +9,7 @@ import type {
 	AgentSpawnMessage,
 	AgentSpawnOkMessage,
 	AuthPromptMessage,
+	Channel,
 	ChannelCreatedMessage,
 	ChannelStateMessage,
 	DestroyMessage,
@@ -37,6 +38,12 @@ import type { WsClient } from "./session-manager.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 
 const SPAWN_TIMEOUT_MS = 10_000;
+
+interface RestartSpawnResult {
+	ok: boolean;
+	channelId: string | null;
+	errCode: string | null;
+}
 
 /** Options for _sendSpawnAndWait */
 export interface SendSpawnOpts {
@@ -263,6 +270,20 @@ export class ChannelLifecycleManager {
 		return true;
 	}
 
+	retireChannel(channelId: string, sessionId: string): void {
+		const ch = this.ctx.channels.get(channelId);
+		this.clearElevationForChannel(channelId);
+		this.broadcaster.updateChannelStatus(channelId, sessionId, "dead");
+		if (ch) {
+			for (const clientId of ch.clients) {
+				this.ctx.clients.get(clientId)?.attachedChannels.delete(channelId);
+			}
+		}
+		this.ctx.scheduler.untrackChannel(channelId);
+		this.ctx.chunker.untrackChannel(channelId);
+		this.ctx.channels.delete(channelId);
+	}
+
 	// ─── Restart ─────────────────────────────────────────────────────────────
 
 	/**
@@ -365,6 +386,7 @@ export class ChannelLifecycleManager {
 						agent,
 						spawnWithSecret,
 						channelId,
+						channel,
 						hostId,
 						sessionEntry,
 						ch,
@@ -380,6 +402,7 @@ export class ChannelLifecycleManager {
 					agent,
 					baseElevatedSpawn,
 					channelId,
+					channel,
 					hostId,
 					sessionEntry,
 					ch,
@@ -405,6 +428,7 @@ export class ChannelLifecycleManager {
 					agent,
 					spawnWithSecret,
 					channelId,
+					channel,
 					hostId,
 					sessionEntry,
 					ch,
@@ -418,30 +442,12 @@ export class ChannelLifecycleManager {
 			}
 
 			// Cache miss — try passwordless first
-			let firstErrCode: string | null = null;
-			agent.send(baseElevatedSpawn);
-			const firstOk = await new Promise<boolean>((resolve) => {
-				const timer = setTimeout(() => {
-					this.ctx.pendingRequests.delete(baseElevatedSpawn.requestId);
-					resolve(false);
-				}, SPAWN_TIMEOUT_MS);
-				this.ctx.pendingRequests.set(baseElevatedSpawn.requestId, (incoming: ProtocolMessage) => {
-					clearTimeout(timer);
-					this.ctx.pendingRequests.delete(baseElevatedSpawn.requestId);
-					if (incoming.type === "SPAWN_OK") {
-						resolve(true);
-					} else if (incoming.type === "SPAWN_ERR") {
-						firstErrCode = (incoming as AgentSpawnErrMessage).code;
-						resolve(false);
-					} else {
-						resolve(false);
-					}
-				});
-			});
-
-			if (firstOk) {
+			const firstResult = await this.sendRestartSpawn(agent, baseElevatedSpawn);
+			if (firstResult.ok && firstResult.channelId !== null) {
 				this.applyRestartState(
+					firstResult.channelId,
 					channelId,
+					channel,
 					hostId,
 					sessionEntry,
 					ch,
@@ -455,7 +461,7 @@ export class ChannelLifecycleManager {
 				return true;
 			}
 
-			if (firstErrCode !== "ELEVATION_PASSWORD_REQUIRED") {
+			if (firstResult.errCode !== "ELEVATION_PASSWORD_REQUIRED") {
 				return false;
 			}
 
@@ -497,6 +503,7 @@ export class ChannelLifecycleManager {
 				agent,
 				retrySpawn,
 				channelId,
+				channel,
 				hostId,
 				sessionEntry,
 				ch,
@@ -511,7 +518,7 @@ export class ChannelLifecycleManager {
 
 		// ── Non-elevated restart ─────────────────────────────────────────────
 		const requestId = generateId();
-		agent.send({
+		const restartSpawn: AgentSpawnMessage = {
 			type: "SPAWN",
 			requestId,
 			channelId,
@@ -521,25 +528,15 @@ export class ChannelLifecycleManager {
 			env: {},
 			cols,
 			rows,
-		});
+		};
 
-		const ok = await new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.ctx.pendingRequests.delete(requestId);
-				resolve(false);
-			}, SPAWN_TIMEOUT_MS);
-
-			this.ctx.pendingRequests.set(requestId, (incoming: ProtocolMessage) => {
-				clearTimeout(timer);
-				this.ctx.pendingRequests.delete(requestId);
-				resolve(incoming.type === "SPAWN_OK");
-			});
-		});
-
-		if (!ok) return false;
+		const restartResult = await this.sendRestartSpawn(agent, restartSpawn);
+		if (!restartResult.ok || restartResult.channelId === null) return false;
 
 		this.applyRestartState(
+			restartResult.channelId,
 			channelId,
+			channel,
 			hostId,
 			sessionEntry,
 			ch,
@@ -560,6 +557,7 @@ export class ChannelLifecycleManager {
 		agent: AgentConnection,
 		spawnMsg: AgentSpawnMessage,
 		channelId: string,
+		sourceChannel: Channel,
 		hostId: string,
 		sessionEntry: { id: string; status: string },
 		ch: ChannelState | undefined,
@@ -570,21 +568,12 @@ export class ChannelLifecycleManager {
 		rows: number,
 		directProcess?: boolean,
 	): Promise<boolean> {
-		agent.send(spawnMsg);
-		const ok = await new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.ctx.pendingRequests.delete(spawnMsg.requestId);
-				resolve(false);
-			}, SPAWN_TIMEOUT_MS);
-			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
-				clearTimeout(timer);
-				this.ctx.pendingRequests.delete(spawnMsg.requestId);
-				resolve(incoming.type === "SPAWN_OK");
-			});
-		});
-		if (!ok) return false;
+		const result = await this.sendRestartSpawn(agent, spawnMsg);
+		if (!result.ok || result.channelId === null) return false;
 		this.applyRestartState(
+			result.channelId,
 			channelId,
+			sourceChannel,
 			hostId,
 			sessionEntry,
 			ch,
@@ -598,11 +587,46 @@ export class ChannelLifecycleManager {
 		return true;
 	}
 
+	private async sendRestartSpawn(
+		agent: AgentConnection,
+		spawnMsg: AgentSpawnMessage,
+	): Promise<RestartSpawnResult> {
+		agent.send(spawnMsg);
+		return new Promise<RestartSpawnResult>((resolve) => {
+			const timer = setTimeout(() => {
+				this.ctx.pendingRequests.delete(spawnMsg.requestId);
+				resolve({ ok: false, channelId: null, errCode: null });
+			}, SPAWN_TIMEOUT_MS);
+
+			this.ctx.pendingRequests.set(spawnMsg.requestId, (incoming: ProtocolMessage) => {
+				clearTimeout(timer);
+				this.ctx.pendingRequests.delete(spawnMsg.requestId);
+				if (incoming.type === "SPAWN_OK") {
+					resolve({
+						ok: true,
+						channelId: (incoming as AgentSpawnOkMessage).channelId,
+						errCode: null,
+					});
+				} else if (incoming.type === "SPAWN_ERR") {
+					resolve({
+						ok: false,
+						channelId: null,
+						errCode: (incoming as AgentSpawnErrMessage).code,
+					});
+				} else {
+					resolve({ ok: false, channelId: null, errCode: null });
+				}
+			});
+		});
+	}
+
 	/**
 	 * Update in-memory + DB state after a successful restart SPAWN_OK.
 	 */
 	applyRestartState(
 		channelId: string,
+		previousChannelId: string,
+		sourceChannel: Channel,
 		hostId: string,
 		sessionEntry: { id: string; status: string },
 		ch: ChannelState | undefined,
@@ -613,12 +637,46 @@ export class ChannelLifecycleManager {
 		rows: number,
 		directProcess?: boolean,
 	): void {
+		const clients = ch?.clients ?? new Set<string>();
+		const channelIdChanged = channelId !== previousChannelId;
+
+		if (channelIdChanged) {
+			this.retireChannel(previousChannelId, sessionEntry.id);
+			for (const clientId of clients) {
+				const client = this.ctx.clients.get(clientId);
+				client?.attachedChannels.delete(previousChannelId);
+				client?.attachedChannels.add(channelId);
+			}
+
+			if (this.ctx.metaDal.getChannel(channelId) === undefined) {
+				this.ctx.metaDal.createChannel({
+					id: channelId,
+					sessionId: sessionEntry.id,
+					status: "born",
+					shell,
+					...(args.length > 0 && { args }),
+					cwd,
+					cols,
+					rows,
+					...(sourceChannel.title !== undefined && { title: sourceChannel.title }),
+					...(directProcess && { directProcess: true }),
+					...(sourceChannel.launchProfileId !== undefined && {
+						launchProfileId: sourceChannel.launchProfileId,
+					}),
+					...(sourceChannel.elevated && { elevated: true }),
+					...(sourceChannel.elevationMethod !== undefined && {
+						elevationMethod: sourceChannel.elevationMethod,
+					}),
+				});
+			}
+		}
+
 		this.ctx.metaDal.updateChannelStatus(channelId, "live");
 		this.ctx.channels.set(channelId, {
 			sessionId: sessionEntry.id,
 			hostId,
 			status: "live",
-			clients: ch?.clients ?? new Set(),
+			clients,
 			shell,
 			...(args.length > 0 && { args }),
 			cwd,
@@ -631,6 +689,26 @@ export class ChannelLifecycleManager {
 		});
 		this.ctx.scheduler.trackChannel(channelId);
 		this.ctx.chunker.trackChannel(channelId);
+
+		if (channelIdChanged) {
+			const dbChannel = this.ctx.metaDal.getChannel(channelId);
+			const now = dbChannel?.createdAt ?? new Date().toISOString();
+			this.broadcaster.broadcastChannelCreated({
+				type: "CHANNEL_CREATED",
+				hostId,
+				channelId,
+				sessionId: sessionEntry.id,
+				shell,
+				...(args.length > 0 && { args }),
+				cwd,
+				cols,
+				rows,
+				status: "live",
+				displayTitle: this.broadcaster.resolveDisplayTitle(channelId),
+				createdAt: now,
+				updatedAt: dbChannel?.updatedAt ?? now,
+			});
+		}
 
 		const channelStateMsg: ChannelStateMessage = {
 			type: "CHANNEL_STATE",
@@ -735,7 +813,7 @@ export class ChannelLifecycleManager {
 		const { channel: deadChannel, hostId } = info;
 
 		const sessionEntry = this.ctx.sessions.get(hostId);
-		if (!sessionEntry || sessionEntry.status !== "active") return false;
+		if (sessionEntry?.status !== "active") return false;
 		const agent = this.ctx.agents.get(hostId);
 		if (!agent?.connected) return false;
 

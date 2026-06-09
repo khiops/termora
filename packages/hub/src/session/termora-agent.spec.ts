@@ -382,6 +382,34 @@ describe("TermoraAgent", () => {
 
 		describe("Given CHANNEL_STATE_END never arrives", () => {
 			it(
+				"rejects when the connection closes before CHANNEL_STATE_END",
+				async () => {
+					await new Promise<void>((resolve) => {
+						const server = net.createServer((socket) => {
+							const hello = encodeFrame({
+								type: "HELLO",
+								version: PROTOCOL_VERSION,
+								agentVersion: "0.1.0",
+								capabilities: ["multiplex", "resize", "snapshot"],
+							});
+							socket.write(Buffer.from(hello), () => {
+								socket.destroy();
+							});
+						});
+						daemon = { server, connections: [] };
+						server.listen(socketPath, () => resolve());
+					});
+
+					agent = await TermoraAgent.connectLocal(socketPath);
+
+					await expect(agent.waitForChannelState(1_000)).rejects.toThrow(
+						"CHANNEL_STATE connection closed before CHANNEL_STATE_END",
+					);
+				},
+				TEST_TIMEOUT,
+			);
+
+			it(
 				"rejects with timeout error",
 				async () => {
 					// Daemon that sends HELLO but no CHANNEL_STATE_END
