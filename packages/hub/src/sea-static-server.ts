@@ -171,12 +171,18 @@ export async function registerSeaStaticServing(app: FastifyInstance): Promise<bo
 		const fileKey = pathname === "/" ? "/index.html" : pathname;
 		const file = fileMap.get(fileKey);
 		if (file) {
-			// Apply long-lived immutable cache only for Vite-hashed assets (e.g.
-			// /assets/index-abc123.js). Non-hashed files (favicon.ico, manifest.json)
-			// get a short cache so they reflect updates without a hard refresh.
+			// Cache policy:
+			// - Vite-hashed assets (/assets/index-abc123.js): immutable, 1 year — the
+			//   hash changes on every build, so the URL is the cache key.
+			// - HTML entry (index.html): no-cache (must revalidate every load) so a new
+			//   build's fresh asset hashes are picked up immediately. Caching index.html
+			//   pins the browser to stale asset references until the cache expires.
+			// - Other non-hashed files (favicon, manifest): short cache.
 			const cacheControl = pathname.startsWith("/assets/")
 				? "public, max-age=31536000, immutable"
-				: "public, max-age=3600";
+				: fileKey.endsWith(".html")
+					? "no-cache"
+					: "public, max-age=3600";
 			return reply
 				.header("Content-Type", file.contentType)
 				.header("Cache-Control", cacheControl)
