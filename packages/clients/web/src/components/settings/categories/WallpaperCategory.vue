@@ -12,7 +12,18 @@
 		<section class="settings-section">
 			<h3 class="section-title">Wallpaper</h3>
 
-			<div class="wallpaper-grid">
+			<div
+				class="wallpaper-grid"
+				@dragenter="onDragEnter"
+				@dragover="onDragOver"
+				@dragleave="onDragLeave"
+				@drop="onDrop"
+			>
+				<!-- Drag overlay -->
+				<div v-if="isDragging" class="wallpaper-drop-overlay">
+					<div class="wallpaper-drop-hint">Drop image to add</div>
+				</div>
+
 				<!-- "None" option -->
 				<button
 					class="wallpaper-thumb"
@@ -113,14 +124,18 @@
 </template>
 
 <script setup lang="ts">
-import { MAX_WALLPAPER_SIZE, WALLPAPER_EXTENSIONS } from "@termora/shared";
 import { computed, onMounted, ref } from "vue";
+import { useFileDrop } from "../../../composables/useFileDrop.js";
 import { hubBaseUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";
 import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
 import SettingRow from "../SettingRow.vue";
 import SettingControl from "../SettingControl.vue";
+import {
+	uploadWallpaperFiles,
+	WALLPAPER_ACCEPTED_EXTENSIONS,
+} from "./wallpaperUpload.js";
 
 const props = defineProps<{
 	scope: Scope;
@@ -185,51 +200,26 @@ function triggerUpload(): void {
 
 async function handleUpload(event: Event): Promise<void> {
 	const input = event.target as HTMLInputElement;
-	const file = input.files?.[0];
-	if (!file) return;
-
-	// Client-side size check
-	if (file.size > MAX_WALLPAPER_SIZE) {
-		uploadError.value = "File too large (max 10 MB)";
-		input.value = "";
-		return;
-	}
-
-	// Extension check
-	const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-	if (!WALLPAPER_EXTENSIONS.includes(ext)) {
-		uploadError.value = `Unsupported format. Use: ${WALLPAPER_EXTENSIONS.join(", ")}`;
-		input.value = "";
-		return;
-	}
-
-	const formData = new FormData();
-	formData.append("image", file);
-
-	try {
-		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${authStore.token ?? ""}` },
-			body: formData,
-		});
-
-		if (!resp.ok) {
-			const data = await resp.json().catch(() => ({}));
-			uploadError.value = (data as { message?: string }).message ?? `Upload failed (${resp.status})`;
-			input.value = "";
-			return;
-		}
-
-		const { filename } = await resp.json() as { filename: string };
-		await loadWallpapers();
-		await selectWallpaper(filename);
-		uploadError.value = "";
-	} catch {
-		uploadError.value = "Upload failed";
-	}
-
+	const files = Array.from(input.files ?? []);
 	input.value = "";
+	await uploadFiles(files);
 }
+
+async function uploadFiles(files: File[]): Promise<void> {
+	await uploadWallpaperFiles(files, {
+		token: authStore.token,
+		loadWallpapers,
+		selectWallpaper,
+		setUploadError(message) {
+			uploadError.value = message;
+		},
+	});
+}
+
+const { isDragging, onDragEnter, onDragOver, onDragLeave, onDrop } = useFileDrop(
+	uploadFiles,
+	WALLPAPER_ACCEPTED_EXTENSIONS,
+);
 
 async function deleteWallpaper(filename: string): Promise<void> {
 	try {
@@ -321,10 +311,30 @@ onMounted(loadWallpapers);
 }
 
 .wallpaper-grid {
+	position: relative;
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
 	gap: 8px;
 	margin-bottom: 12px;
+}
+
+.wallpaper-drop-overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(var(--nt-accent-rgb, 99, 102, 241), 0.12);
+	border: 2px dashed var(--nt-accent);
+	border-radius: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 10;
+	pointer-events: none;
+}
+
+.wallpaper-drop-hint {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--nt-accent);
 }
 
 .wallpaper-thumb-wrapper {
