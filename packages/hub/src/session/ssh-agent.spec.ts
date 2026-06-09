@@ -16,7 +16,8 @@ vi.mock("./agent-deployer.js", async (importOriginal) => {
 	return {
 		...actual,
 		deployAgentIfNeeded: vi.fn().mockResolvedValue({
-			remotePath: "termora-agent --stdio",
+			deployed: false,
+			remotePath: "termora-agent",
 			os: null,
 			arch: null,
 		}),
@@ -78,7 +79,7 @@ function makeHelloFrame(): Buffer {
  * Returns the server and the port it is listening on.
  */
 function createMockSshServer(
-	onExec: (stream: NodeJS.ReadWriteStream) => void,
+	onExec: (stream: NodeJS.ReadWriteStream, command: string) => void,
 	opts: { rejectAuth?: boolean } = {},
 ): Promise<{ server: SshServer; port: number }> {
 	return new Promise((resolve) => {
@@ -98,9 +99,9 @@ function createMockSshServer(
 			client.on("ready", () => {
 				client.on("session", (accept) => {
 					const session = accept();
-					session.on("exec", (accept) => {
+					session.on("exec", (accept, _reject, info) => {
 						const stream = accept();
-						onExec(stream);
+						onExec(stream, info.command);
 					});
 				});
 			});
@@ -208,6 +209,145 @@ describe("SshAgent", () => {
 			expect(hello.version).toBe(1);
 			expect(hello.capabilities).toContain("multiplex");
 			expect(agent.connected).toBe(true);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"execs remote stdio agent without logging args when support is unknown",
+		async () => {
+			let command = "";
+			const { server, port } = await createMockSshServer((stream, execCommand) => {
+				command = execCommand;
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(makeHost(port), undefined, undefined, {
+				logLevel: "debug",
+				logFormat: "text",
+			});
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(command).toBe("termora-agent --stdio");
+			expect(command).not.toContain("--log-level");
+			expect(command).not.toContain("--format");
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"quotes deployed Unix remote agent path and logging values for POSIX ssh exec",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
+				deployed: true,
+				remotePath: "/opt/Termora Agent/bin/agent's test$HOME",
+				os: "linux",
+				arch: "x64",
+			});
+
+			let command = "";
+			const { server, port } = await createMockSshServer((stream, execCommand) => {
+				command = execCommand;
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(makeHost(port), undefined, { binaryCache: "/tmp/fake-cache" }, {
+				logLevel: "debug trace",
+				logFormat: "jsonl;rm",
+			} as unknown as ConstructorParameters<typeof SshAgent>[3]);
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(command).toBe(
+				"'/opt/Termora Agent/bin/agent'\\''s test$HOME' --stdio --log-level 'debug trace' --format 'jsonl;rm'",
+			);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"quotes deployed Windows remote agent command with cmd.exe conventions",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
+				deployed: true,
+				remotePath: "%LOCALAPPDATA%\\termora\\termora-agent.exe",
+				os: "windows",
+				arch: "x64",
+			});
+
+			let command = "";
+			const { server, port } = await createMockSshServer((stream, execCommand) => {
+				command = execCommand;
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(
+				makeHost(port),
+				undefined,
+				{ binaryCache: "/tmp/fake-cache" },
+				{
+					logLevel: "debug",
+					logFormat: "text",
+				},
+			);
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(command).toBe(
+				'"%LOCALAPPDATA%\\termora\\termora-agent.exe" --stdio --log-level "debug" --format "text"',
+			);
+			expect(command).not.toContain("'");
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"omits logging args for found remote agents",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
+				deployed: false,
+				remotePath: "/usr/local/bin/termora-agent",
+				os: "linux",
+				arch: "x64",
+			});
+
+			let command = "";
+			const { server, port } = await createMockSshServer((stream, execCommand) => {
+				command = execCommand;
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(
+				makeHost(port),
+				undefined,
+				{ binaryCache: "/tmp/fake-cache" },
+				{
+					logLevel: "debug",
+					logFormat: "text",
+				},
+			);
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(command).toBe("/usr/local/bin/termora-agent --stdio");
+			expect(command).not.toContain("--log-level");
+			expect(command).not.toContain("--format");
 		},
 		TEST_TIMEOUT,
 	);

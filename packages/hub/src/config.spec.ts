@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { JsonMap } from "@iarna/toml";
 import type { CascadeResponse, ElevationMethod } from "@termora/shared";
 import {
+	DEFAULT_AGENT_CONFIG,
 	DEFAULT_APPEARANCE,
 	DEFAULT_ELEVATION_CONFIG,
 	DEFAULT_PROFILE,
@@ -23,6 +24,7 @@ import {
 	DEFAULT_TABS_CONFIG,
 	DEFAULT_TITLE_CONFIG,
 	DEFAULT_UI_CONFIG,
+	extractAgentConfig,
 	extractAppearanceConfig,
 	extractElevationConfig,
 	extractLogConfig,
@@ -2053,6 +2055,7 @@ describe("extractLogConfig", () => {
 		const result = extractLogConfig({});
 		expect(result).toEqual(DEFAULT_LOG_CONFIG);
 		expect(result.level).toBe("info");
+		expect(result.format).toBe("jsonl");
 		expect(result.output).toBe("file");
 		expect(result.maxAgeDays).toBe(30);
 		expect(result.maxSizeMb).toBe(50);
@@ -2062,12 +2065,14 @@ describe("extractLogConfig", () => {
 		const result = extractLogConfig({
 			logging: {
 				level: "debug",
+				format: "text",
 				output: "both",
 				max_age_days: 7,
 				max_size_mb: 100,
 			},
 		});
 		expect(result.level).toBe("debug");
+		expect(result.format).toBe("text");
 		expect(result.output).toBe("both");
 		expect(result.maxAgeDays).toBe(7);
 		expect(result.maxSizeMb).toBe(100);
@@ -2087,6 +2092,13 @@ describe("extractLogConfig", () => {
 		}
 	});
 
+	it("accepts all valid format values", () => {
+		for (const format of ["text", "jsonl"] as const) {
+			const result = extractLogConfig({ logging: { format } });
+			expect(result.format).toBe(format);
+		}
+	});
+
 	it("ignores invalid level — falls back to default", () => {
 		const result = extractLogConfig({ logging: { level: "verbose" } });
 		expect(result.level).toBe("info");
@@ -2095,6 +2107,11 @@ describe("extractLogConfig", () => {
 	it("ignores invalid output — falls back to default", () => {
 		const result = extractLogConfig({ logging: { output: "console" } });
 		expect(result.output).toBe("file");
+	});
+
+	it("ignores invalid format — falls back to default", () => {
+		const result = extractLogConfig({ logging: { format: "xml" } });
+		expect(result.format).toBe("jsonl");
 	});
 
 	it("clamps max_age_days to 0 minimum", () => {
@@ -2120,6 +2137,7 @@ describe("extractLogConfig", () => {
 	it("partial override — only overrides specified keys", () => {
 		const result = extractLogConfig({ logging: { level: "warn" } });
 		expect(result.level).toBe("warn");
+		expect(result.format).toBe(DEFAULT_LOG_CONFIG.format);
 		expect(result.output).toBe(DEFAULT_LOG_CONFIG.output);
 		expect(result.maxAgeDays).toBe(DEFAULT_LOG_CONFIG.maxAgeDays);
 		expect(result.maxSizeMb).toBe(DEFAULT_LOG_CONFIG.maxSizeMb);
@@ -2133,5 +2151,46 @@ describe("extractLogConfig", () => {
 	it("ignores non-number max_size_mb", () => {
 		const result = extractLogConfig({ logging: { max_size_mb: "50mb" } });
 		expect(result.maxSizeMb).toBe(DEFAULT_LOG_CONFIG.maxSizeMb);
+	});
+});
+
+describe("extractAgentConfig", () => {
+	it("resolves agent log level and format from [logging]", () => {
+		const result = extractAgentConfig({
+			agent: {
+				buffer_per_channel: "2MB",
+				log_level: "error",
+			},
+			logging: {
+				level: "debug",
+				format: "text",
+			},
+		});
+
+		expect(result.bufferPerChannel).toBe(2 * 1024 * 1024);
+		expect(result.logLevel).toBe("debug");
+		expect(result.logFormat).toBe("text");
+	});
+
+	it("falls back to defaults for malformed [agent] and [logging] values", () => {
+		const parsed = {
+			agent: {
+				buffer_per_channel: true,
+				buffer_global: [],
+				socket_path: false,
+				bind_timeout: "fast",
+				log_level: 5,
+				format: [],
+			},
+			logging: {
+				level: 5,
+				format: [],
+			},
+		} as unknown as JsonMap;
+
+		expect(() => extractAgentConfig(parsed)).not.toThrow();
+
+		const result = extractAgentConfig(parsed);
+		expect(result).toEqual(DEFAULT_AGENT_CONFIG);
 	});
 });

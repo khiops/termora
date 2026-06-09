@@ -233,6 +233,7 @@ export interface FontFamily {
 
 export interface LogConfig {
 	level: "trace" | "debug" | "info" | "warn" | "error";
+	format: "text" | "jsonl";
 	output: "stderr" | "file" | "both";
 	maxAgeDays: number;
 	maxSizeMb: number;

@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { LogConfig } from "@termora/shared";
 import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HubLogger } from "../logging/hub-logger.js";
 import { registerLogRoutes } from "./logs.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -23,6 +25,17 @@ function writeHubLog(logsDir: string, lines: object[]): void {
 	fs.mkdirSync(logsDir, { recursive: true });
 	const content = `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`;
 	fs.writeFileSync(path.join(logsDir, "hub.jsonl"), content);
+}
+
+function makeLogConfig(overrides: Partial<LogConfig> = {}): LogConfig {
+	return {
+		level: "info",
+		format: "jsonl",
+		output: "file",
+		maxAgeDays: 30,
+		maxSizeMb: 50,
+		...overrides,
+	};
 }
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -222,6 +235,28 @@ describe("GET /api/logs/hub", () => {
 		const body = res.json<{ entries: unknown[]; total: number }>();
 		expect(body.total).toBe(4);
 		expect(body.entries).toHaveLength(4);
+	});
+
+	it("returns hub entries written with text format because the file remains JSONL", async () => {
+		const logger = new HubLogger(logsDir, makeLogConfig({ format: "text", output: "file" }));
+		logger.log("info", "hub started", { port: 4100 });
+		logger.log("warn", "agent reconnect failed", { host: "prod-web" });
+
+		const rawLines = fs.readFileSync(path.join(logsDir, "hub.jsonl"), "utf8").trim().split("\n");
+		expect(rawLines).toHaveLength(2);
+		expect(rawLines.map((line) => JSON.parse(line) as Record<string, unknown>)).toMatchObject([
+			{ lvl: "info", msg: "hub started", port: 4100 },
+			{ lvl: "warn", msg: "agent reconnect failed", host: "prod-web" },
+		]);
+
+		const res = await app.inject({ method: "GET", url: "/api/logs/hub" });
+		expect(res.statusCode).toBe(200);
+		const body = res.json<{ entries: Array<{ lvl: string; msg: string }>; total: number }>();
+		expect(body.total).toBe(2);
+		expect(body.entries.map((entry) => entry.msg)).toEqual([
+			"hub started",
+			"agent reconnect failed",
+		]);
 	});
 
 	it("skips malformed JSONL lines", async () => {

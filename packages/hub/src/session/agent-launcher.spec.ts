@@ -202,6 +202,10 @@ describe("connectOrLaunch", () => {
 				expect(cliArgs).toContain(String(config.bufferPerChannel));
 				expect(cliArgs).toContain("--buffer-global");
 				expect(cliArgs).toContain(String(config.bufferGlobal));
+				expect(cliArgs).toContain("--log-level");
+				expect(cliArgs).toContain(config.logLevel);
+				expect(cliArgs).toContain("--format");
+				expect(cliArgs).toContain(config.logFormat);
 
 				// Verify detached + stdio: stdin=ignore, stdout+stderr=log fd
 				const opts = capturedArgs[2] as Record<string, unknown>;
@@ -279,6 +283,10 @@ describe("connectOrLaunch", () => {
 				expect(cliArgs).toContain("--daemon");
 				expect(cliArgs).toContain("--socket");
 				expect(cliArgs).toContain(socketPath);
+				expect(cliArgs).toContain("--log-level");
+				expect(cliArgs).toContain(config.logLevel);
+				expect(cliArgs).toContain("--format");
+				expect(cliArgs).toContain(config.logFormat);
 			},
 			TEST_TIMEOUT,
 		);

@@ -12,6 +12,7 @@ mod pty;
 mod shell;
 
 use clap::Parser;
+use clap::ValueEnum;
 
 #[derive(Parser)]
 #[command(name = "termora-agent", version)]
@@ -35,41 +36,70 @@ struct Cli {
     /// Global output buffer size (daemon mode)
     #[arg(long)]
     buffer_global: Option<usize>,
+
+    /// Agent tracing level from the shared [logging] contract
+    #[arg(long = "log-level", value_enum, default_value = "info")]
+    log_level: LogLevel,
+
+    /// Agent tracing line format from the shared [logging] contract
+    #[arg(long = "format", value_enum, default_value = "jsonl")]
+    format: LogFormat,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum LogFormat {
+    Text,
+    Jsonl,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct LoggingConfig {
+    level: LogLevel,
+    format: LogFormat,
+}
+
+impl From<&Cli> for LoggingConfig {
+    fn from(cli: &Cli) -> Self {
+        Self {
+            level: cli.log_level,
+            format: cli.format,
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     // Parse CLI args
     let cli = Cli::parse();
+    let logging_config = LoggingConfig::from(&cli);
 
-    // Init logging: daemon mode writes JSONL to file; stdio mode writes to stderr.
+    init_tracing(logging_config, cli.daemon)?;
+
     if cli.daemon {
+        // Daemon mode writes to its own log file; stdio mode writes to stderr.
         let log_path = logging::daemon_log_path();
-        let log_file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "termora_agent=info".into()),
-            )
-            .json()
-            .with_writer(log_file)
-            .init();
         tracing::info!(log_path = %log_path.display(), "daemon log file opened");
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "termora_agent=info".into()),
-            )
-            .with_target(false)
-            .with_writer(std::io::stderr)
-            .init();
-    }
-
-    if cli.daemon {
         // Resolve socket path — platform-specific default when not provided via --socket
         let socket = cli.socket.unwrap_or_else(|| {
             #[cfg(unix)]
@@ -158,6 +188,47 @@ async fn main() -> std::io::Result<()> {
     Ok(())
 }
 
+fn init_tracing(config: LoggingConfig, daemon: bool) -> std::io::Result<()> {
+    if daemon {
+        let log_path = logging::daemon_log_path();
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        match config.format {
+            LogFormat::Jsonl => tracing_subscriber::fmt()
+                .with_env_filter(env_filter(config.level))
+                .json()
+                .with_writer(log_file)
+                .init(),
+            LogFormat::Text => tracing_subscriber::fmt()
+                .with_env_filter(env_filter(config.level))
+                .with_target(false)
+                .with_writer(log_file)
+                .init(),
+        }
+    } else {
+        match config.format {
+            LogFormat::Jsonl => tracing_subscriber::fmt()
+                .with_env_filter(env_filter(config.level))
+                .json()
+                .with_writer(std::io::stderr)
+                .init(),
+            LogFormat::Text => tracing_subscriber::fmt()
+                .with_env_filter(env_filter(config.level))
+                .with_target(false)
+                .with_writer(std::io::stderr)
+                .init(),
+        }
+    }
+    Ok(())
+}
+
+fn env_filter(level: LogLevel) -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| format!("termora_agent={}", level.as_str()).into())
+}
+
 /// Replace stdout/stderr with non-inheritable duplicates.
 ///
 /// When the hub spawns us with stdio pipes, Node.js creates inheritable handles.
@@ -202,5 +273,36 @@ fn protect_stdio_handles() {
                 SetStdHandle(std_id, new_handle);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logging_config_defaults_to_jsonl_info() {
+        let cli = Cli::try_parse_from(["termora-agent"]).unwrap();
+        let config = LoggingConfig::from(&cli);
+
+        assert_eq!(config.level, LogLevel::Info);
+        assert_eq!(config.format, LogFormat::Jsonl);
+    }
+
+    #[test]
+    fn logging_config_reads_cli_level_and_format() {
+        let cli = Cli::try_parse_from([
+            "termora-agent",
+            "--daemon",
+            "--log-level",
+            "debug",
+            "--format",
+            "text",
+        ])
+        .unwrap();
+        let config = LoggingConfig::from(&cli);
+
+        assert_eq!(config.level, LogLevel::Debug);
+        assert_eq!(config.format, LogFormat::Text);
     }
 }

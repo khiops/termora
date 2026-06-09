@@ -14,6 +14,7 @@ function makeTmpDir(): string {
 function makeConfig(overrides: Partial<LogConfig> = {}): LogConfig {
 	return {
 		level: "info",
+		format: "jsonl",
 		output: "file",
 		maxAgeDays: 30,
 		maxSizeMb: 50,

@@ -12,6 +12,8 @@ export class HubLogger {
 	private readonly oldFilePath: string;
 	private readonly logsDir: string;
 	private readonly minSeverity: number;
+	private readonly format: LogConfig["format"];
+	private readonly output: LogConfig["output"];
 	private dirEnsured = false;
 
 	constructor(logsDir: string, config: LogConfig) {
@@ -19,13 +21,12 @@ export class HubLogger {
 		this.filePath = path.join(logsDir, "hub.jsonl");
 		this.oldFilePath = path.join(logsDir, "hub.jsonl.old");
 		this.minSeverity = LOG_SEVERITY[config.level] ?? 2;
+		this.format = config.format;
+		this.output = config.output;
 	}
 
 	log(level: LogConfig["level"], msg: string, extra?: Record<string, unknown>): void {
 		if ((LOG_SEVERITY[level] ?? 2) < this.minSeverity) return;
-
-		this.ensureDir();
-		this.maybeRotate();
 
 		const entry: Record<string, unknown> = {
 			ts: new Date().toISOString(),
@@ -34,12 +35,41 @@ export class HubLogger {
 			...extra,
 		};
 
-		const line = `${JSON.stringify(entry)}\n`;
+		if (this.output === "file" || this.output === "both") {
+			this.writeFileLine(entry);
+		}
+		if (this.output === "stderr" || this.output === "both") {
+			this.writeStderrLine(entry);
+		}
+	}
+
+	private writeFileLine(entry: Record<string, unknown>): void {
+		this.ensureDir();
+		this.maybeRotate();
+
 		try {
-			fs.appendFileSync(this.filePath, line, { mode: 0o600 });
+			fs.appendFileSync(this.filePath, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
 		} catch {
 			// Silently fail if write fails (e.g. disk full)
 		}
+	}
+
+	private writeStderrLine(entry: Record<string, unknown>): void {
+		const line = this.format === "text" ? this.renderTextLine(entry) : `${JSON.stringify(entry)}\n`;
+		try {
+			process.stderr.write(line);
+		} catch {
+			// Silently fail if stderr write fails
+		}
+	}
+
+	private renderTextLine(entry: Record<string, unknown>): string {
+		const { ts, lvl, msg, ...extra } = entry;
+		const fields = Object.entries(extra)
+			.filter(([, value]) => value !== undefined)
+			.map(([key, value]) => `${key}=${formatTextValue(value)}`);
+		const suffix = fields.length > 0 ? ` ${fields.join(" ")}` : "";
+		return `${String(ts)} ${String(lvl).toUpperCase()} ${String(msg).replace(/\s+/g, " ")}${suffix}\n`;
 	}
 
 	private maybeRotate(): void {
@@ -58,5 +88,17 @@ export class HubLogger {
 		if (this.dirEnsured) return;
 		fs.mkdirSync(this.logsDir, { recursive: true });
 		this.dirEnsured = true;
+	}
+}
+
+function formatTextValue(value: unknown): string {
+	if (typeof value === "string") {
+		return /^[^\s=]+$/.test(value) ? value : JSON.stringify(value);
+	}
+	try {
+		const encoded = JSON.stringify(value);
+		return encoded ?? String(value);
+	} catch {
+		return String(value);
 	}
 }

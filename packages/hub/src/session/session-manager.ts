@@ -182,7 +182,7 @@ export class SessionManager {
 			try {
 				const promptAuth = this.sshMgr.buildPromptAuth(firstClient, ac.signal, reconnectCtxId);
 				const deployOpts = this._buildDeployOpts(hostId, host, firstClient, reconnectCtxId);
-				const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+				const sshAgent = new SshAgent(host, promptAuth, deployOpts, ctx.agentConfig);
 
 				const storedFp = ctx.metaDal.getHostFingerprint(hostId);
 				const sshHostname = host.sshHost?.includes("@")
@@ -1296,7 +1296,7 @@ export class SessionManager {
 		const deployOpts = this._buildDeployOpts(hostId, host, client, ownerAcqId);
 
 		console.error(`[termora-ssh] creating SshAgent for host ${host.id}`);
-		const sshAgent = new SshAgent(host, promptAuth, deployOpts);
+		const sshAgent = new SshAgent(host, promptAuth, deployOpts, this.ctx.agentConfig);
 
 		console.error(`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label}`);
 		try {
@@ -1355,7 +1355,7 @@ export class SessionManager {
 				} else {
 					this.ctx.trustedOnceFingerprints.set(hostKey, retryFp);
 				}
-				const retryAgent = new SshAgent(host, promptAuth, deployOpts);
+				const retryAgent = new SshAgent(host, promptAuth, deployOpts, this.ctx.agentConfig);
 				console.error(`[termora-ssh] creating SshAgent for host ${host.id} (retry)`);
 				console.error(
 					`[termora-ssh] starting SSH connection to ${host.sshHost ?? host.label} (retry)`,

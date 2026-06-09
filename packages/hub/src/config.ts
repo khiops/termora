@@ -15,6 +15,7 @@ import { join } from "node:path";
 import TOML from "@iarna/toml";
 import { edit, initSync } from "@rainbowatcher/toml-edit-js";
 import type {
+	AgentConfig,
 	AppearanceConfig,
 	CascadeResponse,
 	ChannelsConfig,
@@ -31,6 +32,7 @@ import type {
 	UiConfig,
 } from "@termora/shared";
 import {
+	DEFAULT_AGENT_CONFIG,
 	DEFAULT_APPEARANCE,
 	DEFAULT_ELEVATION_CONFIG,
 	DEFAULT_LAYOUT_CONFIG,
@@ -39,6 +41,7 @@ import {
 	ELEVATION_METHODS_DARWIN,
 	ELEVATION_METHODS_LINUX,
 	ELEVATION_METHODS_WINDOWS,
+	parseAgentConfig,
 	TERMINAL_PROFILE_KEYS,
 	UI_CONFIG_SECTIONS,
 	validateCustomCommand,
@@ -615,6 +618,7 @@ export function extractAuthConfig(parsed: TOML.JsonMap): AuthConfig {
 
 export const DEFAULT_LOG_CONFIG: LogConfig = {
 	level: "info",
+	format: "jsonl",
 	output: "file",
 	maxAgeDays: 30,
 	maxSizeMb: 50,
@@ -638,6 +642,9 @@ export function extractLogConfig(parsed: TOML.JsonMap): LogConfig {
 		) {
 			config.level = raw.level;
 		}
+		if (raw.format === "text" || raw.format === "jsonl") {
+			config.format = raw.format;
+		}
 		if (raw.output === "stderr" || raw.output === "file" || raw.output === "both") {
 			config.output = raw.output;
 		}
@@ -649,6 +656,25 @@ export function extractLogConfig(parsed: TOML.JsonMap): LogConfig {
 		}
 	}
 	return config;
+}
+
+/**
+ * Extract AgentConfig from parsed TOML. Daemon-specific knobs still live under
+ * [agent], but log level/format come from the shared [logging] contract.
+ */
+export function extractAgentConfig(parsed: TOML.JsonMap): AgentConfig {
+	const section = parsed.agent;
+	const agentSection =
+		section != null && typeof section === "object"
+			? (section as Record<string, unknown>)
+			: undefined;
+	const logging = extractLogConfig(parsed);
+
+	return {
+		...parseAgentConfig(agentSection),
+		logLevel: logging.level,
+		logFormat: logging.format,
+	};
 }
 
 /**
@@ -678,6 +704,7 @@ export class ConfigResolver {
 	private _elevation: ElevationConfig = { ...DEFAULT_ELEVATION_CONFIG };
 	private _corsOrigins: string[] = [...DEFAULT_CORS_ORIGINS];
 	private _logConfig: LogConfig = { ...DEFAULT_LOG_CONFIG };
+	private _agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
 	private _configDir: string | null = null;
 
 	constructor(private metaDal: MetaDAL) {}
@@ -710,6 +737,11 @@ export class ConfigResolver {
 	/** Returns the resolved logging configuration (defaults merged with [logging] from config.toml). */
 	get logConfig(): LogConfig {
 		return this._logConfig;
+	}
+
+	/** Returns the resolved local agent daemon configuration. */
+	get agentConfig(): AgentConfig {
+		return this._agentConfig;
 	}
 
 	/**
@@ -770,6 +802,9 @@ export class ConfigResolver {
 
 		// ── [logging] section ───────────────────────────────────────────────
 		this._logConfig = extractLogConfig(parsed);
+
+		// ── [agent] section + shared [logging] section ─────────────────────
+		this._agentConfig = extractAgentConfig(parsed);
 	}
 
 	/** Returns the Layer 2 terminal overrides from config.toml. */

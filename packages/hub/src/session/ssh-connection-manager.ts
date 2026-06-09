@@ -506,7 +506,12 @@ export class SshConnectionManager {
 					},
 				};
 
-				const sshAgent = new SshAgent(host, this.buildCacheOnlyPromptAuth(hostId), deployOpts);
+				const sshAgent = new SshAgent(
+					host,
+					this.buildCacheOnlyPromptAuth(hostId),
+					deployOpts,
+					this.ctx.agentConfig,
+				);
 				const storedFp = this.ctx.metaDal.getHostFingerprint(hostId);
 				const hostKey = `${sshHostname}:${host.sshPort ?? 22}`;
 				const sessionFp = this.ctx.trustedOnceFingerprints.get(hostKey);
