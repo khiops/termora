@@ -106,6 +106,8 @@ export class AgentConnectionManager {
 	/** Lazy ref to SshConnectionManager — set after construction to break circular dep */
 	sshMgr!: SshConnectionManager;
 
+	private readonly daemonAttachPromises = new Map<string, Promise<TermoraAgent>>();
+
 	constructor(
 		private readonly ctx: SharedSessionContext,
 		private readonly broadcaster: StateBroadcaster,
@@ -128,9 +130,14 @@ export class AgentConnectionManager {
 		return requestedId;
 	}
 
-	async getOrCreateSession(hostId: string, _isSsh: boolean): Promise<SessionState> {
+	async getOrCreateSession(hostId: string, isSsh: boolean): Promise<SessionState> {
 		const existing = this.ctx.sessions.get(hostId);
-		if (existing && (existing.status === "active" || existing.status === "disconnected")) {
+		if (
+			existing &&
+			(existing.status === "active" ||
+				existing.status === "disconnected" ||
+				(!isSsh && existing.status === "starting"))
+		) {
 			return existing;
 		}
 
@@ -380,6 +387,16 @@ export class AgentConnectionManager {
 			}
 		}
 
+		agent.on("error", (err: Error) => {
+			this.ctx.hubLogger?.log("warn", "agent-connection-manager: agent error", {
+				hostId,
+				message: err.message,
+			});
+			if (this.ctx.agents.get(hostId) === agent) {
+				agent.close();
+			}
+		});
+
 		agent.on("close", () => {
 			this.ctx.hubLogger?.log("info", "agent-connection-manager: agent closed", { hostId });
 			const session = this.ctx.sessions.get(hostId);
@@ -421,40 +438,104 @@ export class AgentConnectionManager {
 	// ─── Daemon agent ─────────────────────────────────────────────────────────
 
 	private async attachDaemon(hostId: string, sessionId: string): Promise<TermoraAgent> {
+		const existing = this.ctx.agents.get(hostId);
+		if (existing?.connected) {
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: reusing live daemon agent", {
+				hostId,
+				sessionId,
+			});
+			return existing as TermoraAgent;
+		}
+		if (existing !== undefined) {
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: evicting stale daemon agent", {
+				hostId,
+				sessionId,
+			});
+			this.ctx.agents.delete(hostId);
+			this.ctx.agentCapabilities.delete(hostId);
+			existing.close();
+		}
+
+		const inFlight = this.daemonAttachPromises.get(hostId);
+		if (inFlight !== undefined) {
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: joining daemon attach", {
+				hostId,
+				sessionId,
+			});
+			return inFlight;
+		}
+
+		const attachPromise = this.attachDaemonFresh(hostId, sessionId);
+		this.daemonAttachPromises.set(hostId, attachPromise);
+		void attachPromise
+			.finally(() => {
+				if (this.daemonAttachPromises.get(hostId) === attachPromise) {
+					this.daemonAttachPromises.delete(hostId);
+				}
+			})
+			.catch(() => {});
+		return attachPromise;
+	}
+
+	private async attachDaemonFresh(hostId: string, sessionId: string): Promise<TermoraAgent> {
 		const socketPath = getSocketPath(this.ctx.agentConfig.socketPath);
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: attachDaemon", {
 			hostId,
 			sessionId,
 			socketPath,
 		});
-		const agent = await connectOrLaunch(socketPath, this.ctx.agentConfig);
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", {
-			hostId,
-			connected: agent.connected,
-		});
+		let agent: TermoraAgent | null = null;
+		try {
+			agent = await connectOrLaunch(
+				socketPath,
+				this.ctx.agentConfig,
+				undefined,
+				this.ctx.hubLogger ?? undefined,
+			);
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: connectOrLaunch succeeded", {
+				hostId,
+				connected: agent.connected,
+				hasPrimaryToken: this.ctx.primaryToken !== null,
+			});
 
-		// Send AUTH to daemon agent (required before CHANNEL_STATE handshake)
-		if (this.ctx.primaryToken) {
-			agent.send({ type: "AUTH", token: this.ctx.primaryToken });
+			this.wireAgentEvents(hostId, sessionId, agent);
+
+			// Send AUTH to daemon agent (required before CHANNEL_STATE handshake).
+			// The TermoraAgent channel-state collector is installed in the constructor,
+			// so the CHANNEL_STATE listener is already armed before AUTH can trigger it.
+			if (this.ctx.primaryToken) {
+				agent.send({ type: "AUTH", token: this.ctx.primaryToken });
+			}
+
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", {
+				hostId,
+			});
+			const states = await agent.waitForChannelState();
+			this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", {
+				hostId,
+				count: states.length,
+			});
+			this.lifecycle.reconcileChannelState(hostId, states);
+
+			this.ctx.agents.set(hostId, agent);
+			this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
+			this.ctx.hubLogger?.log("info", "agent-connection-manager: agent active", { hostId });
+
+			return agent;
+		} catch (err) {
+			if (agent !== null) {
+				if (this.ctx.agents.get(hostId) === agent) {
+					this.ctx.agents.delete(hostId);
+					this.ctx.agentCapabilities.delete(hostId);
+				}
+				agent.close();
+			}
+			this.ctx.hubLogger?.log("warn", "agent-connection-manager: daemon attach failed", {
+				hostId,
+				message: err instanceof Error ? err.message : String(err),
+			});
+			throw err;
 		}
-
-		this.wireAgentEvents(hostId, sessionId, agent);
-
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: waiting for channel state", {
-			hostId,
-		});
-		const states = await agent.waitForChannelState();
-		this.ctx.hubLogger?.log("debug", "agent-connection-manager: got channel states", {
-			hostId,
-			count: states.length,
-		});
-		this.lifecycle.reconcileChannelState(hostId, states);
-
-		this.ctx.agents.set(hostId, agent);
-		this.broadcaster.updateSessionStatus(hostId, sessionId, "active");
-		this.ctx.hubLogger?.log("info", "agent-connection-manager: agent active", { hostId });
-
-		return agent;
 	}
 
 	async connectDaemonAgent(hostId: string, sessionId: string): Promise<TermoraAgent> {

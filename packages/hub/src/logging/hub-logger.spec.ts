@@ -125,6 +125,42 @@ describe("HubLogger", () => {
 		expect(lines[1]?.lvl).toBe("error");
 	});
 
+	it("emits debug records when configured at debug level", () => {
+		const logger = new HubLogger(tmpDir, makeConfig({ level: "debug" }));
+		logger.log("debug", "local agent trace", { component: "termora-agent" });
+
+		const lines = readLines(path.join(tmpDir, "hub.jsonl"));
+		expect(lines).toHaveLength(1);
+		expect(lines[0]?.lvl).toBe("debug");
+		expect(lines[0]?.msg).toBe("local agent trace");
+		expect(lines[0]?.component).toBe("termora-agent");
+	});
+
+	it("suppresses debug records when configured at info level", () => {
+		const logger = new HubLogger(tmpDir, makeConfig({ level: "info" }));
+		logger.log("debug", "hidden trace");
+		logger.log("info", "visible info");
+
+		const lines = readLines(path.join(tmpDir, "hub.jsonl"));
+		expect(lines).toHaveLength(1);
+		expect(lines[0]?.lvl).toBe("info");
+		expect(lines[0]?.msg).toBe("visible info");
+	});
+
+	it("routes debug records to stderr when stderr output is configured", () => {
+		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		const logger = new HubLogger(
+			tmpDir,
+			makeConfig({ level: "debug", format: "text", output: "stderr" }),
+		);
+
+		logger.log("debug", "local agent trace", { connId: 1 });
+
+		expect(stderrSpy).toHaveBeenCalledTimes(1);
+		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("DEBUG local agent trace"));
+		expect(fs.existsSync(path.join(tmpDir, "hub.jsonl"))).toBe(false);
+	});
+
 	it("rotates to hub.jsonl.old when size exceeds 10 MB", () => {
 		const logger = new HubLogger(tmpDir, makeConfig());
 		const filePath = path.join(tmpDir, "hub.jsonl");

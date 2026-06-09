@@ -1,14 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LogConfig } from "@termora/shared";
-import { LOG_SEVERITY } from "./index.js";
+import { severityForLevel } from "./levels.js";
 
 // ─── ChannelLogger ─────────────────────────────────────────────────────────────
 
 export class ChannelLogger {
 	private readonly filePath: string;
 	private readonly createdAt: Date;
-	private readonly config: LogConfig;
 	private readonly minSeverity: number;
 	private readonly maxBytes: number;
 	private readonly channelsDir: string;
@@ -20,8 +19,7 @@ export class ChannelLogger {
 		this.channelsDir = path.join(logsDir, "channels");
 		this.filePath = path.join(this.channelsDir, `${channelId}.jsonl`);
 		this.createdAt = createdAt;
-		this.config = config;
-		this.minSeverity = LOG_SEVERITY[config.level] ?? 2;
+		this.minSeverity = severityForLevel(config.level) ?? severityForLevel("info") ?? 2;
 		this.maxBytes = config.maxSizeMb * 1024 * 1024;
 	}
 
@@ -32,7 +30,7 @@ export class ChannelLogger {
 		extra?: Record<string, unknown>,
 	): void {
 		if (this.saturated) return;
-		if ((LOG_SEVERITY[level] ?? 2) < this.minSeverity) return;
+		if ((severityForLevel(level) ?? severityForLevel("info") ?? 2) < this.minSeverity) return;
 
 		this.ensureDir();
 

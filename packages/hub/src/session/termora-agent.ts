@@ -1,5 +1,6 @@
 import net from "node:net";
 import { type AgentChannelStateMessage, encodeFrame, type ProtocolMessage } from "@termora/shared";
+import type { HubLogger } from "../logging/hub-logger.js";
 import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
@@ -16,6 +17,9 @@ const HELLO_TIMEOUT_MS = 5_000;
 export class TermoraAgent extends AgentConnection {
 	private socket: net.Socket;
 	private sendQueue: SendQueue;
+	private connId: number;
+	private readonly hubLogger: HubLogger | undefined;
+	private static _connSeq = 0;
 
 	/**
 	 * Promise that resolves with collected AGENT_CHANNEL_STATE messages
@@ -24,42 +28,85 @@ export class TermoraAgent extends AgentConnection {
 	 */
 	private channelStatePromise: Promise<AgentChannelStateMessage[]>;
 
-	constructor(socket: net.Socket) {
+	constructor(socket: net.Socket, hubLogger?: HubLogger) {
 		super();
 		this.socket = socket;
+		this.hubLogger = hubLogger;
+		this.connId = ++TermoraAgent._connSeq;
+		this.logDebug("termora-agent: connection created");
 		this.sendQueue = new SendQueue("termora-agent");
 		this.sendQueue.attach(socket);
+
+		this.on("message", (m: ProtocolMessage) => {
+			this.logDebug("termora-agent: received message", { messageType: m.type });
+		});
+		this.on("ready", () => {
+			this.logDebug("termora-agent: ready", {
+				agentVersion: this.helloMessage?.agentVersion,
+				capabilities: this.helloMessage?.capabilities,
+			});
+		});
 
 		socket.on("data", (data: Buffer) => {
 			this.handleData(data);
 		});
 
 		socket.on("close", () => {
+			this.logDebug("termora-agent: socket closed");
 			this.sendQueue.clear();
 			this.emit("close");
 		});
 
 		socket.on("error", (err) => {
+			this.logDebug("termora-agent: socket error", { message: err.message });
 			this.emit("error", err);
 		});
 
 		// Eagerly collect channel-state messages into a promise so that
 		// callers of waitForChannelState() never miss messages that arrived
 		// between HELLO and the await.
-		this.channelStatePromise = new Promise<AgentChannelStateMessage[]>((resolve) => {
+		this.channelStatePromise = new Promise<AgentChannelStateMessage[]>((resolve, reject) => {
 			const states: AgentChannelStateMessage[] = [];
+			let settled = false;
+
+			const cleanup = (): void => {
+				this.off("message", onMessage);
+				this.off("close", onClose);
+				this.off("error", onError);
+			};
+
+			const settle = (fn: () => void): void => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				fn();
+			};
 
 			const onMessage = (msg: ProtocolMessage): void => {
 				if (msg.type === "AGENT_CHANNEL_STATE") {
 					states.push(msg);
 				} else if (msg.type === "CHANNEL_STATE_END") {
-					this.off("message", onMessage);
-					resolve(states);
+					settle(() => resolve(states));
 				}
 			};
 
+			const onClose = (): void => {
+				settle(() => reject(new Error("CHANNEL_STATE connection closed before CHANNEL_STATE_END")));
+			};
+
+			const onError = (err: Error): void => {
+				settle(() => reject(err));
+			};
+
 			this.on("message", onMessage);
+			this.once("close", onClose);
+			this.once("error", onError);
 		});
+		this.channelStatePromise.catch(() => {});
+	}
+
+	private logDebug(msg: string, extra?: Record<string, unknown>): void {
+		this.hubLogger?.log("debug", msg, { connId: this.connId, ...extra });
 	}
 
 	/** Send a framed protocol message to the agent. */
@@ -111,13 +158,13 @@ export class TermoraAgent extends AgentConnection {
 	 * Resolves after HELLO is received (agent is ready).
 	 * Rejects on connection error or HELLO timeout (5s).
 	 */
-	static connectLocal(socketPath: string): Promise<TermoraAgent> {
+	static connectLocal(socketPath: string, hubLogger?: HubLogger): Promise<TermoraAgent> {
 		return new Promise((resolve, reject) => {
 			const socket = net.connect(socketPath);
 			let settled = false;
 
 			socket.once("connect", () => {
-				const agent = new TermoraAgent(socket);
+				const agent = new TermoraAgent(socket, hubLogger);
 
 				const timer = setTimeout(() => {
 					if (!settled) {

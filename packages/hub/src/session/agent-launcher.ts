@@ -4,13 +4,9 @@ import { access, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	AGENT_SOCKET_POLL_MS,
-	AGENT_SOCKET_TIMEOUT,
-	type AgentConfig,
-	probeSocket,
-} from "@termora/shared";
+import { AGENT_SOCKET_POLL_MS, AGENT_SOCKET_TIMEOUT, type AgentConfig } from "@termora/shared";
 import { detectSea } from "@termora/shared/dist/sea-addon-loader.js";
+import type { HubLogger } from "../logging/hub-logger.js";
 import { resolveAgentBinaryPath } from "../sea-agent-resolver.js";
 import { TermoraAgent } from "./termora-agent.js";
 
@@ -49,16 +45,16 @@ export function isAgentBinary(agentPath: string): boolean {
  *
  * Flow:
  * 1. Verify agent binary exists
- * 2. Probe socket: alive → connect, ECONNREFUSED/ENOENT → spawn
+ * 2. Try the authoritative local connection directly
  * 3. If EACCES → throw (different user's socket — do NOT unlink)
  * 4. Spawn: child_process.spawn with detached + unref
- * 5. Poll for socket availability (100ms interval, 5s timeout)
- * 6. Connect via TermoraAgent.connectLocal
+ * 5. Poll with TermoraAgent.connectLocal until the daemon accepts
  */
 export async function connectOrLaunch(
 	socketPath: string,
 	config: AgentConfig,
 	agentBinaryPath?: string,
+	hubLogger?: HubLogger,
 ): Promise<TermoraAgent> {
 	const agentPath = agentBinaryPath ?? resolveAgentPath();
 
@@ -74,8 +70,11 @@ export async function connectOrLaunch(
 	// Try direct connect first — avoids a throwaway probe connection that
 	// confuses the agent's AUTH handshake on Windows named pipes.
 	try {
-		return await TermoraAgent.connectLocal(socketPath);
-	} catch {
+		return await TermoraAgent.connectLocal(socketPath, hubLogger);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "EACCES") {
+			throw new Error(`Permission denied connecting to socket: ${socketPath}`);
+		}
 		// Connection failed — agent not running or stale socket
 	}
 
@@ -89,11 +88,10 @@ export async function connectOrLaunch(
 	// Spawn daemon
 	const daemonLogPath = launchDaemon(agentPath, socketPath, config);
 
-	// Wait for socket to become available
-	await waitForSocket(socketPath, daemonLogPath);
-
-	// Connect
-	return TermoraAgent.connectLocal(socketPath);
+	// Connect by polling the real agent handshake. Do not use a throwaway
+	// socket probe here: the daemon treats every accepted connection as the
+	// active hub and will displace the previous one before AUTH completes.
+	return connectWhenReady(socketPath, daemonLogPath, hubLogger);
 }
 
 /**
@@ -217,21 +215,33 @@ export function readBoundedLogTail(
 }
 
 /**
- * Poll for the socket to become available (agent has started listening).
+ * Poll until the daemon accepts the authoritative hub connection.
+ *
+ * This intentionally uses TermoraAgent.connectLocal instead of probeSocket.
+ * A probe opens a real socket, and the daemon's single-active-connection
+ * policy treats that as a hub connection that displaces the previous one.
+ *
  * Retries every AGENT_SOCKET_POLL_MS (100ms), gives up after AGENT_SOCKET_TIMEOUT (5s).
  *
  * On timeout, appends the last ~20 lines of the daemon log (if non-empty) to
  * the error message so startup crashes are not silent.
  */
-async function waitForSocket(socketPath: string, daemonLogPath?: string): Promise<void> {
+async function connectWhenReady(
+	socketPath: string,
+	daemonLogPath?: string,
+	hubLogger?: HubLogger,
+): Promise<TermoraAgent> {
 	const deadline = Date.now() + AGENT_SOCKET_TIMEOUT;
+	let lastErr: unknown;
 
 	while (Date.now() < deadline) {
 		try {
-			const isAlive = await probeSocket(socketPath);
-			if (isAlive) return;
-		} catch {
-			// EACCES or transient error — wait and retry
+			return await TermoraAgent.connectLocal(socketPath, hubLogger);
+		} catch (err) {
+			lastErr = err;
+			if ((err as NodeJS.ErrnoException).code === "EACCES") {
+				throw new Error(`Permission denied connecting to socket: ${socketPath}`);
+			}
 		}
 
 		await sleep(AGENT_SOCKET_POLL_MS);
@@ -246,8 +256,12 @@ async function waitForSocket(socketPath: string, daemonLogPath?: string): Promis
 		}
 	}
 
+	const lastErrText =
+		lastErr instanceof Error && lastErr.message.length > 0
+			? `; last error: ${lastErr.message}`
+			: "";
 	throw new Error(
-		`Agent socket did not become available within ${AGENT_SOCKET_TIMEOUT}ms: ${socketPath}${logTail}`,
+		`Agent socket did not become available within ${AGENT_SOCKET_TIMEOUT}ms: ${socketPath}${lastErrText}${logTail}`,
 	);
 }
 

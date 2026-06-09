@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigResolver } from "../config.js";
 import { openTestDatabases } from "../storage/db.js";
 import { SpoolDAL } from "../storage/spool.js";
+import { connectOrLaunch as _connectOrLaunchForMock } from "./agent-launcher.js";
 import {
 	clearContext,
 	openContext,
@@ -15,6 +16,17 @@ import { SessionManager, type WsClient } from "./session-manager.js";
 // Per-test counters reset in beforeEach; each SPAWN emits a unique channelId.
 let localSpawnCount = 0;
 let sshSpawnCount = 0;
+let nextLocalSpawnChannelIdOverride: string | null = null;
+let nextLocalAttachNotFoundChannelId: string | null = null;
+let localChannelStateWaitCount = 0;
+let nextLocalChannelStateFailure: Error | null = null;
+const mockLocalAgents: Array<{
+	send: ReturnType<typeof vi.fn>;
+	close: ReturnType<typeof vi.fn>;
+	waitForChannelState: ReturnType<typeof vi.fn>;
+	simulateDisconnect: () => void;
+	connected: boolean;
+}> = [];
 
 function nextLocalChannelId(): string {
 	return `local-ch-${++localSpawnCount}`;
@@ -31,12 +43,28 @@ vi.mock("./agent-launcher.js", () => {
 
 	class MockLocalAgent extends EventEmitter {
 		private _connected = true;
+		constructor() {
+			super();
+			mockLocalAgents.push(this);
+		}
 		start = vi.fn().mockResolvedValue(undefined);
-		waitForChannelState = vi.fn().mockResolvedValue([]);
+		waitForChannelState = vi.fn(() => {
+			localChannelStateWaitCount++;
+			if (nextLocalChannelStateFailure !== null) {
+				const err = nextLocalChannelStateFailure;
+				nextLocalChannelStateFailure = null;
+				return Promise.reject(err);
+			}
+			return Promise.resolve([]);
+		});
 		send = vi.fn((msg: ProtocolMessage) => {
 			if (msg.type === "SPAWN") {
 				const spawnMsg = msg as unknown as Record<string, unknown>;
-				const channelId = (spawnMsg.channelId as string | undefined) ?? nextLocalChannelId();
+				const channelId =
+					nextLocalSpawnChannelIdOverride ??
+					(spawnMsg.channelId as string | undefined) ??
+					nextLocalChannelId();
+				nextLocalSpawnChannelIdOverride = null;
 				// Two-step elevation: if elevated=true but no elevationSecret, return SPAWN_ERR
 				if (spawnMsg.elevated === true && !spawnMsg.elevationSecret) {
 					setImmediate(() => {
@@ -58,6 +86,18 @@ vi.mock("./agent-launcher.js", () => {
 				});
 			} else if (msg.type === "ATTACH") {
 				const attachMsg = msg as unknown as { channelId: string };
+				if (nextLocalAttachNotFoundChannelId === attachMsg.channelId) {
+					nextLocalAttachNotFoundChannelId = null;
+					setImmediate(() => {
+						this.emit("message", {
+							type: "ERROR",
+							code: "CHANNEL_NOT_FOUND",
+							message: `channel ${attachMsg.channelId} not found`,
+							channelId: attachMsg.channelId,
+						});
+					});
+					return;
+				}
 				setImmediate(() => {
 					this.emit("message", {
 						type: "ATTACH_OK",
@@ -77,6 +117,11 @@ vi.mock("./agent-launcher.js", () => {
 		close = vi.fn(() => {
 			this._connected = false;
 		});
+		simulateDisconnect = vi.fn(() => {
+			if (!this._connected) return;
+			this._connected = false;
+			this.emit("close");
+		});
 		get connected() {
 			return this._connected;
 		}
@@ -87,6 +132,12 @@ vi.mock("./agent-launcher.js", () => {
 		resolveAgentPath: () => "/mock/agent/path",
 		isAgentBinary: () => true,
 	};
+});
+
+afterEach(() => {
+	nextLocalSpawnChannelIdOverride = null;
+	nextLocalAttachNotFoundChannelId = null;
+	nextLocalChannelStateFailure = null;
 });
 
 // ─── Mock SshAgent ────────────────────────────────────────────────────────────
@@ -200,6 +251,10 @@ function makeClient(id: string, received: ProtocolMessage[]): WsClient {
 	};
 }
 
+async function flushImmediate(): Promise<void> {
+	await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("SessionManager", () => {
@@ -210,9 +265,12 @@ describe("SessionManager", () => {
 		// Reset per-test state
 		localSpawnCount = 0;
 		sshSpawnCount = 0;
+		localChannelStateWaitCount = 0;
+		mockLocalAgents.length = 0;
 		mockSshAgentInstance = null;
 		dbManager = openTestDatabases();
 		sm = new SessionManager(dbManager);
+		vi.mocked(_connectOrLaunchForMock).mockClear();
 	});
 
 	afterEach(async () => {
@@ -289,6 +347,149 @@ describe("SessionManager", () => {
 		await sm.handleSpawn("c1", { type: "SPAWN", hostId: "local" });
 
 		expect(client.attachedChannels.has("local-ch-1")).toBe(true);
+	});
+
+	it("N concurrent LOCAL SPAWNs share one daemon connection and one channel-state handshake", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		vi.mocked(_connectOrLaunchForMock).mockClear();
+
+		const clients = Array.from({ length: 12 }, (_, i) => {
+			const received: ProtocolMessage[] = [];
+			const client = makeClient(`c-local-sf-${i}`, received);
+			sm.addClient(client);
+			return { client, received };
+		});
+
+		const channelIds = await Promise.all(
+			clients.map(({ client }) =>
+				sm.handleSpawn(client.id, { type: "SPAWN", hostId: localHostId }),
+			),
+		);
+
+		expect(channelIds.every((id) => id !== null)).toBe(true);
+		expect(new Set(channelIds).size).toBe(clients.length);
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(1);
+		expect(localChannelStateWaitCount).toBe(1);
+		expect(mockLocalAgents).toHaveLength(1);
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		const session = ctx.sessions.get(localHostId);
+		expect(session?.status).toBe("active");
+		for (const channelId of channelIds) {
+			if (channelId !== null) expect(ctx.channels.get(channelId)?.sessionId).toBe(session?.id);
+		}
+
+		const sharedAgent = ctx.agents.get(localHostId) as
+			| { send: ReturnType<typeof vi.fn> }
+			| undefined;
+		expect(sharedAgent).toBe(mockLocalAgents[0]);
+		const spawnSends =
+			sharedAgent?.send.mock.calls.filter(
+				(call) => (call[0] as ProtocolMessage).type === "SPAWN",
+			) ?? [];
+		expect(spawnSends).toHaveLength(clients.length);
+		for (const { received } of clients) {
+			expect(received.some((m) => m.type === "SPAWN_OK")).toBe(true);
+		}
+	});
+
+	it("N concurrent LOCAL daemon attaches share one connectOrLaunch and one channel-state handshake", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const sessionId = "LOCALATTACH0000000000000000001";
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		ctx.metaDal.createSession({ id: sessionId, hostId: localHostId, status: "starting" });
+		ctx.sessions.set(localHostId, { id: sessionId, hostId: localHostId, status: "starting" });
+		vi.mocked(_connectOrLaunchForMock).mockClear();
+
+		const agentMgr = (
+			sm as unknown as {
+				agentMgr: { connectDaemonAgent: (hostId: string, sessionId: string) => Promise<unknown> };
+			}
+		).agentMgr;
+		const agents = await Promise.all(
+			Array.from({ length: 12 }, () => agentMgr.connectDaemonAgent(localHostId, sessionId)),
+		);
+
+		expect(new Set(agents).size).toBe(1);
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(1);
+		expect(localChannelStateWaitCount).toBe(1);
+		expect(ctx.agents.get(localHostId)).toBe(agents[0]);
+		expect(ctx.agents.get(localHostId)).toBe(mockLocalAgents[0]);
+	});
+
+	it("LOCAL daemon disconnect evicts current agent and reconnects without opening a third connection", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const received1: ProtocolMessage[] = [];
+		const client1 = makeClient("c-local-disconnect-1", received1);
+		sm.addClient(client1);
+
+		const channelId = await sm.handleSpawn("c-local-disconnect-1", {
+			type: "SPAWN",
+			hostId: localHostId,
+		});
+		expect(channelId).not.toBeNull();
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		const firstAgent = ctx.agents.get(localHostId);
+		expect(firstAgent).toBe(mockLocalAgents[0]);
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(1);
+		expect(localChannelStateWaitCount).toBe(1);
+
+		mockLocalAgents[0]?.simulateDisconnect();
+		expect(ctx.agents.has(localHostId)).toBe(false);
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(2);
+
+		await flushImmediate();
+		await flushImmediate();
+
+		const secondAgent = ctx.agents.get(localHostId);
+		expect(secondAgent).toBe(mockLocalAgents[1]);
+		expect(secondAgent).not.toBe(firstAgent);
+		expect(localChannelStateWaitCount).toBe(2);
+
+		const received2: ProtocolMessage[] = [];
+		const client2 = makeClient("c-local-disconnect-2", received2);
+		sm.addClient(client2);
+		const secondChannelId = await sm.handleSpawn("c-local-disconnect-2", {
+			type: "SPAWN",
+			hostId: localHostId,
+		});
+
+		expect(secondChannelId).not.toBeNull();
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(2);
+		expect(localChannelStateWaitCount).toBe(2);
+	});
+
+	it("failed LOCAL channel-state handshake closes half-open agent and retries cleanly", async () => {
+		const localHostId = await sm.ensureLocalHost();
+		const received1: ProtocolMessage[] = [];
+		const client1 = makeClient("c-local-handshake-1", received1);
+		sm.addClient(client1);
+		nextLocalChannelStateFailure = new Error("CHANNEL_STATE timeout");
+
+		await expect(
+			sm.handleSpawn("c-local-handshake-1", { type: "SPAWN", hostId: localHostId }),
+		).rejects.toThrow("CHANNEL_STATE timeout");
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(1);
+		expect(localChannelStateWaitCount).toBe(1);
+		expect(mockLocalAgents[0]?.close).toHaveBeenCalledTimes(1);
+		expect(ctx.agents.has(localHostId)).toBe(false);
+
+		const received2: ProtocolMessage[] = [];
+		const client2 = makeClient("c-local-handshake-2", received2);
+		sm.addClient(client2);
+		const channelId = await sm.handleSpawn("c-local-handshake-2", {
+			type: "SPAWN",
+			hostId: localHostId,
+		});
+
+		expect(channelId).not.toBeNull();
+		expect(vi.mocked(_connectOrLaunchForMock).mock.calls).toHaveLength(2);
+		expect(localChannelStateWaitCount).toBe(2);
+		expect(ctx.agents.get(localHostId)).toBe(mockLocalAgents[1]);
+		expect(received2.some((m) => m.type === "SPAWN_OK")).toBe(true);
 	});
 
 	it("handleAttach adds a second client to an existing channel", async () => {
@@ -906,6 +1107,41 @@ describe("SessionManager", () => {
 		expect(attachOk.cached).toBe(false);
 	});
 
+	it("handleAttach retires stale live channel when agent reports CHANNEL_NOT_FOUND", async () => {
+		const received1: ProtocolMessage[] = [];
+		const c1 = makeClient("c-attach-stale-1", received1);
+		sm.addClient(c1);
+		const channelId = await sm.handleSpawn("c-attach-stale-1", { type: "SPAWN", hostId: "local" });
+		expect(channelId).toBe("local-ch-1");
+		if (channelId === null) throw new Error("expected local channel");
+
+		nextLocalAttachNotFoundChannelId = channelId;
+		const received2: ProtocolMessage[] = [];
+		const c2 = makeClient("c-attach-stale-2", received2);
+		sm.addClient(c2);
+
+		const attached = await sm.handleAttach("c-attach-stale-2", channelId);
+		expect(attached).toBe(false);
+		expect(received2.some((m) => m.type === "ATTACH_OK")).toBe(false);
+		expect(
+			received2.some(
+				(m) =>
+					m.type === "ERROR" &&
+					(m as ProtocolMessage & { code?: string; channelId?: string }).code === "CHANNEL_DEAD" &&
+					(m as ProtocolMessage & { code?: string; channelId?: string }).channelId === channelId,
+			),
+		).toBe(true);
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		expect(ctx.channels.has(channelId)).toBe(false);
+		expect(c1.attachedChannels.has(channelId)).toBe(false);
+		expect(c2.attachedChannels.has(channelId)).toBe(false);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		expect(dal.getChannel(channelId)?.status).toBe("dead");
+	});
+
 	it("handleAttach on orphan channel with reachable SSH agent: sends ATTACH to agent, stores snapshot, ATTACH_OK with snapshot+tail", async () => {
 		const { MetaDAL } = await import("../storage/meta.js");
 		const dal = new MetaDAL(dbManager.meta);
@@ -1207,6 +1443,49 @@ describe("SessionManager", () => {
 		const ch = dal.getChannel(deadId);
 		expect(ch).toBeDefined();
 		expect(ch?.status).toBe("live");
+	});
+
+	it("restartChannel uses the channel id returned by SPAWN_OK for attach and snapshots", async () => {
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-restart-live-id", received);
+		sm.addClient(client);
+
+		const oldChannelId = await sm.handleSpawn("c-restart-live-id", {
+			type: "SPAWN",
+			hostId: "local",
+		});
+		expect(oldChannelId).toBe("local-ch-1");
+		if (oldChannelId === null) throw new Error("expected local channel");
+
+		const liveChannelId = "local-restart-live-id";
+		nextLocalSpawnChannelIdOverride = liveChannelId;
+		const restarted = await sm.restartChannel(oldChannelId);
+		expect(restarted).toBe(true);
+
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		expect(ctx.channels.has(oldChannelId)).toBe(false);
+		expect(ctx.channels.get(liveChannelId)?.status).toBe("live");
+		expect(client.attachedChannels.has(oldChannelId)).toBe(false);
+		expect(client.attachedChannels.has(liveChannelId)).toBe(true);
+
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+		expect(dal.getChannel(oldChannelId)?.status).toBe("dead");
+		expect(dal.getChannel(liveChannelId)?.status).toBe("live");
+
+		sm.handleDetach("c-restart-live-id", liveChannelId);
+		const agent = ctx.agents.get(ctx.channels.get(liveChannelId)?.hostId ?? "") as
+			| { send: ReturnType<typeof vi.fn> }
+			| undefined;
+		const snapshotReqs =
+			agent?.send.mock.calls
+				.map((call) => call[0] as ProtocolMessage)
+				.filter((msg) => msg.type === "SNAPSHOT_REQ") ?? [];
+		expect(snapshotReqs).toHaveLength(1);
+		expect(snapshotReqs[0]).toMatchObject({ type: "SNAPSHOT_REQ", channelId: liveChannelId });
+		expect(snapshotReqs).not.toContainEqual(
+			expect.objectContaining({ type: "SNAPSHOT_REQ", channelId: oldChannelId }),
+		);
 	});
 
 	it("respawn broadcasts CHANNEL_STATE for the new channel", async () => {

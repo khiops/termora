@@ -66,6 +66,15 @@ export interface WsClient {
 
 const ATTACH_TIMEOUT_MS = 5_000;
 
+function isAgentChannelNotFoundError(err: unknown, channelId: string): err is ErrorMessage {
+	if (typeof err !== "object" || err === null) return false;
+	const maybeErr = err as Partial<ErrorMessage>;
+	if (maybeErr.type !== "ERROR") return false;
+	if (maybeErr.channelId !== undefined && maybeErr.channelId !== channelId) return false;
+	if (maybeErr.code === "CHANNEL_NOT_FOUND") return true;
+	return typeof maybeErr.message === "string" && /channel .*not found/i.test(maybeErr.message);
+}
+
 export class SessionManager {
 	// ─── Shared runtime state ─────────────────────────────────────────────────
 	private readonly ctx: SharedSessionContext;
@@ -1088,7 +1097,7 @@ export class SessionManager {
 					} else if (incoming.type === "ERROR") {
 						clearTimeout(timer);
 						this.ctx.pendingRequests.delete(pendingKey);
-						reject(new Error("Agent ATTACH error"));
+						reject(incoming);
 					}
 				});
 			});
@@ -1113,7 +1122,20 @@ export class SessionManager {
 				displayTitle,
 			};
 			client.send(attachOk);
-		} catch {
+		} catch (err) {
+			if (isAgentChannelNotFoundError(err, channelId)) {
+				this.lifecycle.retireChannel(channelId, channel.sessionId);
+				channel.clients.delete(clientId);
+				client.attachedChannels.delete(channelId);
+				client.send({
+					type: "ERROR",
+					code: "CHANNEL_DEAD",
+					message: `Channel ${channelId} is no longer live on the agent`,
+					channelId,
+				} satisfies ErrorMessage);
+				return false;
+			}
+
 			const { snapshot, tail } = this.lifecycle.buildAttachPayload(channelId);
 			const attachOk: UiAttachOkMessage = {
 				type: "ATTACH_OK",

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import type { FastifyInstance } from "fastify";
-import { LOG_SEVERITY } from "../logging/index.js";
+import { severityForLevel } from "../logging/levels.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,12 +85,12 @@ function filterByLevel(
 	level: string | undefined,
 ): Record<string, unknown>[] {
 	if (!level) return entries;
-	const minSev = LOG_SEVERITY[level];
+	const minSev = severityForLevel(level);
 	if (minSev === undefined) return entries;
 	return entries.filter((e) => {
 		const lvl = e.lvl;
 		if (typeof lvl !== "string") return false;
-		const sev = LOG_SEVERITY[lvl];
+		const sev = severityForLevel(lvl);
 		return sev !== undefined && sev >= minSev;
 	});
 }
