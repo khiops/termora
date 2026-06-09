@@ -53,6 +53,7 @@
 	--nt-host-rail: #11111b;
 	--nt-border: #313244;
 	--nt-accent: #89b4fa;
+	--nt-accent-fg: #11111b;
 	--nt-badge: #f38ba8;
 	--nt-scrollbar-thumb: #585b70;
 	--nt-scrollbar-track: #00000000;
@@ -62,6 +63,7 @@
 	--nt-badge-warning: #f9e2af;
 	--nt-badge-success: #a6e3a1;
 	--nt-badge-danger: #f38ba8;
+	--nt-danger-fg: #11111b;
 	/* alias → tracks --nt-badge-danger (set by applyTheme at runtime) */
 	--nt-danger: var(--nt-badge-danger);
 	/* alias → tracks --nt-tab-hover (set by applyTheme at runtime) */

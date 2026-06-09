@@ -208,7 +208,7 @@ onMounted(() => {
 .theme-picker-input {
 	width: 100%;
 	padding: 8px 12px;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 6px;
 	color: var(--nt-fg);
@@ -234,7 +234,7 @@ onMounted(() => {
 
 .theme-picker-btn {
 	padding: 6px 12px;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-bg-surface);
 	border: 1px solid var(--nt-border);
 	border-radius: 6px;
 	color: var(--nt-fg);
@@ -246,7 +246,7 @@ onMounted(() => {
 }
 
 .theme-picker-btn:hover {
-	background: rgba(var(--nt-fg-rgb), 0.1);
+	background: var(--nt-hover);
 	border-color: var(--nt-accent);
 }
 
@@ -255,10 +255,10 @@ onMounted(() => {
 	align-items: center;
 	gap: 8px;
 	padding: 8px 12px;
-	background: rgba(var(--nt-fg-rgb), 0.04);
-	border: 1px solid var(--nt-red, #e06c75);
+	background: rgba(var(--nt-danger-rgb, 224, 108, 117), 0.08);
+	border: 1px solid var(--nt-danger);
 	border-radius: 6px;
-	color: var(--nt-red, #e06c75);
+	color: var(--nt-danger);
 	font-size: 12px;
 }
 

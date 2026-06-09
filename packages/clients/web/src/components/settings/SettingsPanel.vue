@@ -255,7 +255,7 @@ watch(
 
 .settings-close:hover {
 	color: var(--nt-fg);
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .settings-body {
@@ -302,7 +302,7 @@ watch(
 
 .settings-about-btn:hover {
 	color: var(--nt-fg);
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 /* ── Transitions ──────────────────────────────────────────────────────── */

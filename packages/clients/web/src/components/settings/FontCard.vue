@@ -57,7 +57,7 @@ const confirmDelete = ref(false);
 	flex-direction: column;
 	gap: 8px;
 	padding: 10px 12px;
-	background: var(--nt-bg-surface);
+	background: var(--nt-bg-raised);
 	border: 1px solid var(--nt-border);
 	border-radius: 6px;
 	cursor: pointer;
@@ -114,7 +114,7 @@ const confirmDelete = ref(false);
 .font-card-delete:hover {
 	color: var(--nt-danger);
 	border-color: var(--nt-danger);
-	background: rgba(var(--nt-danger-rgb, 220 50 50), 0.08);
+	background: rgba(var(--nt-danger-rgb, 220, 50, 50), 0.08);
 }
 
 .font-card-confirm {
@@ -133,7 +133,7 @@ const confirmDelete = ref(false);
 	padding: 2px 8px;
 	font-size: 11px;
 	font-family: inherit;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-bg-surface);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
 	color: var(--nt-fg);
@@ -141,17 +141,18 @@ const confirmDelete = ref(false);
 }
 
 .font-card-confirm-btn:hover {
-	background: rgba(var(--nt-fg-rgb), 0.12);
+	background: var(--nt-hover);
 }
 
 .font-card-confirm-btn--danger {
-	background: rgba(var(--nt-danger-rgb, 220 50 50), 0.12);
+	background: rgba(var(--nt-danger-rgb, 220, 50, 50), 0.12);
 	border-color: var(--nt-danger);
 	color: var(--nt-danger);
 }
 
 .font-card-confirm-btn--danger:hover {
-	background: rgba(var(--nt-danger-rgb, 220 50 50), 0.22);
+	background: var(--nt-danger);
+	color: var(--nt-danger-fg);
 }
 
 .font-card-preview {

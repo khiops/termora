@@ -249,18 +249,18 @@ onMounted(async () => {
 }
 
 .badge-pin {
-	background: rgba(59, 130, 246, 0.15);
-	color: #3b82f6;
+	background: rgba(var(--nt-accent-rgb), 0.15);
+	color: var(--nt-accent);
 }
 
 .badge-hide {
-	background: rgba(239, 68, 68, 0.15);
-	color: #ef4444;
+	background: rgba(var(--nt-danger-rgb, 239, 68, 68), 0.15);
+	color: var(--nt-danger);
 }
 
 .badge-default {
-	background: rgba(34, 197, 94, 0.15);
-	color: #22c55e;
+	background: rgba(var(--nt-green-rgb), 0.15);
+	color: var(--nt-green);
 }
 
 .no-override {
@@ -270,7 +270,7 @@ onMounted(async () => {
 .override-select {
 	width: 100%;
 	padding: 4px 8px;
-	background: var(--nt-bg);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 4px;
 	color: var(--nt-fg);

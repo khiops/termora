@@ -177,6 +177,7 @@ async function onFileInputChange(event: Event): Promise<void> {
 .font-picker-dialog {
 	position: relative;
 	background: var(--nt-bg);
+	color: var(--nt-fg);
 	border: 1px solid var(--nt-border);
 	border-radius: 8px;
 	padding: 0;
@@ -190,7 +191,7 @@ async function onFileInputChange(event: Event): Promise<void> {
 .font-picker-drop-overlay {
 	position: absolute;
 	inset: 0;
-	background: rgba(var(--nt-accent-rgb, 99 102 241), 0.12);
+	background: rgba(var(--nt-accent-rgb, 99, 102, 241), 0.12);
 	border: 2px dashed var(--nt-accent);
 	border-radius: 8px;
 	display: flex;
@@ -239,13 +240,14 @@ async function onFileInputChange(event: Event): Promise<void> {
 .dialog-close:hover {
 	color: var(--nt-fg);
 	border-color: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .font-picker-error {
 	padding: 8px 16px;
 	font-size: 12px;
 	color: var(--nt-danger);
-	background: rgba(var(--nt-danger-rgb, 220 50 50), 0.08);
+	background: rgba(var(--nt-danger-rgb, 220, 50, 50), 0.08);
 	border-bottom: 1px solid var(--nt-border);
 }
 
@@ -280,7 +282,7 @@ async function onFileInputChange(event: Event): Promise<void> {
 	font-size: 12px;
 	font-family: inherit;
 	font-weight: 600;
-	background: rgba(var(--nt-fg-rgb), 0.06);
+	background: var(--nt-bg-surface);
 	border: 1px solid var(--nt-border);
 	border-radius: 6px;
 	color: var(--nt-fg);
@@ -289,7 +291,8 @@ async function onFileInputChange(event: Event): Promise<void> {
 }
 
 .font-picker-add-btn:hover:not(:disabled) {
-	background: rgba(var(--nt-fg-rgb), 0.12);
+	background: var(--nt-hover);
+	border-color: var(--nt-accent);
 }
 
 .font-picker-add-btn:disabled {

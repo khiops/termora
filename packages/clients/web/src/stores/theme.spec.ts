@@ -2,7 +2,7 @@ import type { TermoraTheme } from "@termora/shared";
 import { BUNDLED_THEMES } from "@termora/shared";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hexToRgb, useThemeStore } from "./theme.js";
+import { hexToRgb, readableForeground, useThemeStore } from "./theme.js";
 
 const catppuccinMocha = BUNDLED_THEMES["catppuccin-mocha"] as TermoraTheme;
 const nordTheme = BUNDLED_THEMES.nord as TermoraTheme;
@@ -72,6 +72,8 @@ describe("useThemeStore", () => {
 				"--nt-text-muted",
 				catppuccinMocha.colors.brightWhite,
 			);
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-accent-fg", "#000000");
+			expect(setPropertyMock).toHaveBeenCalledWith("--nt-danger-fg", "#000000");
 
 			// RGB components
 			expect(setPropertyMock).toHaveBeenCalledWith("--nt-accent-rgb", "137, 180, 250");
@@ -461,5 +463,15 @@ describe("useThemeStore", () => {
 			// Value must be the RGB triple of that theme's effective badgeDanger
 			expect(afterNord[0]?.[1]).toBe(hexToRgb(nordTheme.ui.badgeDanger ?? "#f38ba8"));
 		});
+	});
+});
+
+describe("readableForeground", () => {
+	it("uses black text on light colors", () => {
+		expect(readableForeground("#89b4fa")).toBe("#000000");
+	});
+
+	it("uses white text on dark colors", () => {
+		expect(readableForeground("#0366d6")).toBe("#ffffff");
 	});
 });

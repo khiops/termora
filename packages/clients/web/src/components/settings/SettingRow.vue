@@ -84,7 +84,7 @@ function formatInheritedValue(value: unknown): string {
 	top: 4px;
 	bottom: 4px;
 	width: 4px;
-	background: #3b82f6;
+	background: var(--nt-accent);
 	border-radius: 2px;
 }
 
@@ -129,9 +129,9 @@ function formatInheritedValue(value: unknown): string {
 .reset-button {
 	padding: 2px 8px;
 	font-size: 11px;
-	color: #3b82f6;
+	color: var(--nt-accent);
 	background: transparent;
-	border: 1px solid #3b82f6;
+	border: 1px solid var(--nt-accent);
 	border-radius: 3px;
 	cursor: pointer;
 	white-space: nowrap;
@@ -141,7 +141,7 @@ function formatInheritedValue(value: unknown): string {
 }
 
 .reset-button:hover {
-	background: #3b82f6;
-	color: #fff;
+	background: var(--nt-accent);
+	color: var(--nt-accent-fg);
 }
 </style>

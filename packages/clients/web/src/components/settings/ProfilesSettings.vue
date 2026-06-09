@@ -304,7 +304,7 @@ onMounted(async () => {
 	align-items: center;
 	gap: 10px;
 	padding: 10px 12px;
-	background: var(--nt-bg);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 8px;
 	transition: border-color 0.15s ease;
@@ -352,7 +352,7 @@ onMounted(async () => {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: var(--nt-border);
+	background: var(--nt-bg-surface);
 	border-radius: 8px;
 	font-size: 18px;
 	font-family: var(--nt-font-mono, monospace);
@@ -408,27 +408,27 @@ onMounted(async () => {
 }
 
 .badge-os-linux {
-	background: rgba(250, 173, 20, 0.15);
-	color: #faad14;
+	background: color-mix(in srgb, var(--nt-yellow) 16%, transparent);
+	color: var(--nt-yellow);
 }
 
 .badge-os-darwin {
-	background: rgba(100, 210, 255, 0.15);
-	color: #64d2ff;
+	background: color-mix(in srgb, var(--nt-cyan) 16%, transparent);
+	color: var(--nt-cyan);
 }
 
 .badge-os-windows {
-	background: rgba(0, 120, 215, 0.15);
-	color: #0078d7;
+	background: rgba(var(--nt-accent-rgb), 0.16);
+	color: var(--nt-accent);
 }
 
 .badge-os-any {
-	background: rgba(161, 161, 170, 0.15);
+	background: color-mix(in srgb, var(--nt-text-secondary) 16%, transparent);
 	color: var(--nt-text-secondary);
 }
 
 .badge-mode {
-	background: var(--nt-border);
+	background: var(--nt-bg-surface);
 	color: var(--nt-text-secondary);
 }
 
@@ -455,13 +455,13 @@ onMounted(async () => {
 }
 
 .action-btn:hover {
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .action-btn-danger:hover {
-	border-color: #ef4444;
-	color: #ef4444;
-	background: rgba(239, 68, 68, 0.08);
+	border-color: var(--nt-danger);
+	color: var(--nt-danger);
+	background: rgba(var(--nt-danger-rgb, 239, 68, 68), 0.08);
 }
 
 /* ── Delete confirm ──────────────────────────────────────────────────────── */
@@ -469,7 +469,7 @@ onMounted(async () => {
 .delete-confirm-overlay {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--nt-overlay);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -529,7 +529,7 @@ onMounted(async () => {
 
 .btn-primary {
 	background: var(--nt-accent);
-	color: #fff;
+	color: var(--nt-accent-fg);
 	border-color: var(--nt-accent);
 }
 
@@ -544,13 +544,13 @@ onMounted(async () => {
 }
 
 .btn-ghost:hover:not(:disabled) {
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .btn-danger {
-	background: #ef4444;
-	color: #fff;
-	border-color: #ef4444;
+	background: var(--nt-danger);
+	color: var(--nt-danger-fg);
+	border-color: var(--nt-danger);
 }
 
 .btn-danger:hover:not(:disabled) {

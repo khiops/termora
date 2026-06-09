@@ -87,12 +87,12 @@ watch(visibleCategories, (cats) => {
 
 .category-item:hover {
 	color: var(--nt-fg);
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .category-item.active {
 	color: var(--nt-fg);
 	font-weight: 600;
-	background: var(--nt-border);
+	background: var(--nt-bg-surface);
 }
 </style>

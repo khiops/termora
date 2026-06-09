@@ -542,11 +542,11 @@ async function handleSave(): Promise<void> {
 .form-error {
 	padding: 10px 14px;
 	margin-bottom: 16px;
-	background: rgba(239, 68, 68, 0.1);
-	border: 1px solid rgba(239, 68, 68, 0.3);
+	background: rgba(var(--nt-danger-rgb, 239, 68, 68), 0.1);
+	border: 1px solid rgba(var(--nt-danger-rgb, 239, 68, 68), 0.3);
 	border-radius: 6px;
 	font-size: 13px;
-	color: #ef4444;
+	color: var(--nt-danger);
 }
 
 .form-section {
@@ -592,13 +592,13 @@ async function handleSave(): Promise<void> {
 }
 
 .required {
-	color: #ef4444;
+	color: var(--nt-danger);
 }
 
 .form-input {
 	flex: 1;
 	padding: 6px 10px;
-	background: var(--nt-bg);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 5px;
 	color: var(--nt-fg);
@@ -615,7 +615,7 @@ async function handleSave(): Promise<void> {
 .form-select {
 	flex: 1;
 	padding: 6px 10px;
-	background: var(--nt-bg);
+	background: var(--nt-input-bg);
 	border: 1px solid var(--nt-border);
 	border-radius: 5px;
 	color: var(--nt-fg);
@@ -656,7 +656,7 @@ async function handleSave(): Promise<void> {
 	align-items: center;
 	gap: 4px;
 	padding: 3px 8px;
-	background: var(--nt-border);
+	background: var(--nt-bg-surface);
 	border-radius: 12px;
 	font-size: 12px;
 	font-family: var(--nt-font-mono, monospace);
@@ -674,7 +674,7 @@ async function handleSave(): Promise<void> {
 }
 
 .arg-remove:hover {
-	color: #ef4444;
+	color: var(--nt-danger);
 }
 
 .arg-add-row {
@@ -780,7 +780,7 @@ async function handleSave(): Promise<void> {
 }
 
 .env-remove:hover {
-	color: #ef4444;
+	color: var(--nt-danger);
 }
 
 /* ── Collapsible overrides ────────────────────────────────────────────────── */
@@ -833,7 +833,7 @@ async function handleSave(): Promise<void> {
 
 .btn-primary {
 	background: var(--nt-accent);
-	color: #fff;
+	color: var(--nt-accent-fg);
 	border-color: var(--nt-accent);
 }
 
@@ -848,7 +848,7 @@ async function handleSave(): Promise<void> {
 }
 
 .btn-ghost:hover:not(:disabled) {
-	background: var(--nt-border);
+	background: var(--nt-hover);
 }
 
 .btn-sm {
