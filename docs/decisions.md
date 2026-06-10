@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## HUB-DAEMON-SEA — SEA-aware daemon re-exec + readiness gate (#60, 2026-06-10)
+
+- SEA daemon spawn re-execs the binary with CLI argv (`start --port N`) — the SEA bundle's entry IS cli.ts (footer auto-invokes `main(argv)`), so the existing foreground path provides everything (auth init, DBs, `persistRuntime`, shutdown handlers). No second entry point, no extracted script. `--daemon` is never re-passed (fork-bomb guard, locked by test). Dev mode keeps the compiled `main.js` sibling.
+- Readiness is proven, never assumed: the parent polls `runtime.json` until `pid === child.pid` (immune to stale files/pid reuse), then probes `/api/health` on the port from runtime.json (zero_conf may shift it from the requested one). Success message only after a 200.
+- Failure is loud and terminal: child stdout/stderr go to `hub-daemon.log` in the state dir (truncated per start so it can't grow unbounded; 0600 — daemon output may leak sensitive details); on child death or 5s timeout the CLI prints the cause plus a bounded log tail (64 KiB read cap) and exits 1. A timeout also SIGTERMs the child via the ChildProcess handle (never a raw pid kill — pid-reuse hazard): exit 1 must mean "no daemon is running".
+- Health probes are individually bounded (single `healthTimeoutMs` constant feeding both the fetch AbortSignal and a race timeout) so a socket that accepts but never responds cannot hang the CLI past its deadline.
+- Polling/probing logic lives in `daemon-launch.ts` as pure functions + injected-deps loop (no module mocks needed); the cmdStart wiring stays thin glue, untested by design (integration spawn test deferred — heavy and platform-fragile).
+
+---
+
 ## DESKTOP-TRANSLUCENCY — Background modes + native window effects (#58, 2026-06-10)
 
 - Three explicit background modes (image / solid / transparent) as per-scope `TerminalProfile` fields resolved through the 4-layer cascade — replaces the implicit "wallpaper set or not" model. Default `image`: with an empty wallpaper it renders solid, reproducing the pre-#58 states with zero profile migration.
