@@ -3,6 +3,8 @@
 	"packages": {
 		".": {
 			"release-type": "node",
+			"draft": true,
+			"force-tag-creation": true,
 			"component": "termora",
 			"changelog-path": "CHANGELOG.md",
 			"bump-minor-pre-major": true,
