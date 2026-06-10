@@ -1,6 +1,7 @@
 import type { TerminalProfile } from "@termora/shared";
-import { describe, expect, it } from "vitest";
-import { ref } from "vue";
+import { afterEach, describe, expect, it } from "vitest";
+import { nextTick, ref } from "vue";
+import { setAssetTokenForTests } from "../utils/hub-url.js";
 import { useWallpaper } from "./useWallpaper.js";
 
 function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile {
@@ -20,6 +21,11 @@ function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile 
 }
 
 describe("useWallpaper", () => {
+	afterEach(() => {
+		Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+		setAssetTokenForTests(null);
+	});
+
 	describe("wallpaperStyle", () => {
 		it("should return null when wallpaper is empty", () => {
 			// Arrange
@@ -91,7 +97,52 @@ describe("useWallpaper", () => {
 			const { wallpaperStyle } = useWallpaper(profile);
 
 			// Assert
-			expect(wallpaperStyle.value?.backgroundImage).toMatch(/\?t=\d+/);
+			expect(wallpaperStyle.value?.backgroundImage).toMatch(/[?&]t=\d+/);
+		});
+
+		it("should include the asset token query parameter when initialized", () => {
+			// Arrange
+			setAssetTokenForTests("asset-test-token");
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toContain("asset_token=asset-test-token");
+		});
+
+		it("should re-run and include asset_token when token arrives after first render (pairing path)", async () => {
+			// Arrange — token NOT yet set (simulates pairing path: token arrives after boot)
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert — first render: no token in URL
+			expect(wallpaperStyle.value?.backgroundImage).not.toContain("asset_token=");
+
+			// Act — token arrives (e.g. after pairing flow completes)
+			setAssetTokenForTests("late-token");
+			await nextTick();
+
+			// Assert — computed must have re-run and now includes the token
+			expect(wallpaperStyle.value?.backgroundImage).toContain("asset_token=late-token");
+		});
+
+		it("should prefix wallpaper URL with the hub base URL in Tauri runtime", () => {
+			// Arrange
+			Object.defineProperty(window, "__TAURI_INTERNALS__", {
+				value: {},
+				configurable: true,
+			});
+			const profile = ref(makeProfile({ wallpaper: "desktop image.jpg" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toContain(
+				`url(http://localhost:4100/public/wallpapers/${encodeURIComponent("desktop image.jpg")}`,
+			);
 		});
 	});
 

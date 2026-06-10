@@ -166,6 +166,23 @@ The port defaults to `4100` and can be overridden via:
 2. Environment variable `TERMORA_PORT`
 3. `port` key in `config.toml`
 
+Terminal background settings live in `[terminal]` and cascade to host/channel profiles:
+
+```toml
+[terminal]
+wallpaper = "forest.webp"
+wallpaper_blur = 4
+wallpaper_dim = 25
+
+# image = wallpaper when set, otherwise solid; solid = opaque theme background;
+# transparent = desktop transparency in Tauri, solid fallback in browsers.
+background_mode = "transparent"
+
+# Desktop-only native effect. auto maps to blur on Windows 10, mica on Windows 11,
+# vibrancy-under-window on macOS, and none on Linux.
+window_effect = "auto"
+```
+
 In `zero_conf` mode the hub auto-increments from 4100 to 4199 if the default port is taken, and writes the actual port to `runtime.json` in the state directory.
 
 ---

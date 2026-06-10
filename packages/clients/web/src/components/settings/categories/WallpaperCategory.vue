@@ -2,7 +2,7 @@
 	<div class="settings-category">
 		<!-- Scope override banner (host/channel only) -->
 		<div v-if="hasWallpaperOverride && scope !== 'global'" class="scope-override-banner">
-			<span>This scope has wallpaper overrides.</span>
+			<span>This scope has background overrides.</span>
 			<button class="scope-override-reset" type="button" @click="resetWallpaperOverride">
 				Reset to inherited
 			</button>
@@ -11,6 +11,22 @@
 		<!-- Wallpaper picker section -->
 		<section class="settings-section">
 			<h3 class="section-title">Wallpaper</h3>
+
+			<SettingRow
+				label="Mode"
+				description="Choose whether this scope uses an image, a solid background, or desktop transparency."
+				:scope="scope"
+				:is-overridden="settingsStore.isOverridden(scope, 'terminal', 'backgroundMode')"
+				:inherited-from="settingsStore.inheritedFrom(scope, 'terminal', 'backgroundMode')"
+				@reset="settingsStore.resetSetting(scope, 'terminal', 'backgroundMode')"
+			>
+				<SettingControl
+					type="select"
+					:model-value="currentBackgroundMode"
+					:options="backgroundModeOptions"
+					@update:model-value="updateBackgroundMode"
+				/>
+			</SettingRow>
 
 			<div
 				class="wallpaper-grid"
@@ -24,16 +40,6 @@
 					<div class="wallpaper-drop-hint">Drop image to add</div>
 				</div>
 
-				<!-- "None" option -->
-				<button
-					class="wallpaper-thumb"
-					:class="{ active: !currentWallpaper }"
-					type="button"
-					@click="clearWallpaper"
-				>
-					<span class="wallpaper-none">None</span>
-				</button>
-
 				<!-- Wallpaper thumbnails -->
 				<div
 					v-for="wp in wallpapers"
@@ -45,9 +51,9 @@
 						:class="{ active: currentWallpaper === wp }"
 						type="button"
 						@click="selectWallpaper(wp)"
-					>
+						>
 						<img
-							:src="`/public/wallpapers/${encodeURIComponent(wp)}`"
+							:src="wallpaperThumbnailSrc(wp)"
 							:alt="wp"
 							loading="lazy"
 						/>
@@ -83,6 +89,23 @@
 		<!-- Blur / Dim sliders -->
 		<section class="settings-section">
 			<h3 class="section-title">Effects</h3>
+
+			<SettingRow
+				v-if="showWindowEffectPicker"
+				label="Window effect"
+				:description="windowEffectDescription"
+				:scope="scope"
+				:is-overridden="settingsStore.isOverridden(scope, 'terminal', 'windowEffect')"
+				:inherited-from="settingsStore.inheritedFrom(scope, 'terminal', 'windowEffect')"
+				@reset="settingsStore.resetSetting(scope, 'terminal', 'windowEffect')"
+			>
+				<SettingControl
+					type="select"
+					:model-value="currentWindowEffect"
+					:options="windowEffectOptions"
+					@update:model-value="updateWindowEffect"
+				/>
+			</SettingRow>
 
 			<SettingRow
 				label="Blur"
@@ -124,9 +147,14 @@
 </template>
 
 <script setup lang="ts">
+import type { BackgroundMode, WindowEffect } from "@termora/shared";
 import { computed, onMounted, ref } from "vue";
 import { useFileDrop } from "../../../composables/useFileDrop.js";
-import { hubBaseUrl } from "../../../utils/hub-url.js";
+import {
+	isTauriRuntime,
+	usePlatformInfo,
+} from "../../../composables/useWindowEffects.js";
+import { assetTokenReady, hubBaseUrl, namedPublicAssetUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";
 import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
@@ -136,6 +164,15 @@ import {
 	uploadWallpaperFiles,
 	WALLPAPER_ACCEPTED_EXTENSIONS,
 } from "./wallpaperUpload.js";
+import {
+	backgroundModeOptions as getBackgroundModeOptions,
+	normalizeSettingsBackgroundMode,
+	normalizeSettingsWindowEffect,
+	shouldShowWindowEffectPicker,
+	WALLPAPER_OVERRIDE_KEYS,
+	windowEffectDescription as getWindowEffectDescription,
+	windowEffectSettingsOptions,
+} from "./wallpaperSettings.js";
 
 const props = defineProps<{
 	scope: Scope;
@@ -147,8 +184,26 @@ const authStore = useAuthStore();
 const wallpapers = ref<string[]>([]);
 const uploadError = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
+const platformInfo = usePlatformInfo();
+const runsInTauri = computed(() => isTauriRuntime());
+
+/**
+ * Builds a signed thumbnail src for a wallpaper filename.
+ * Reads `assetTokenReady` so Vue re-renders thumbnails when the asset token
+ * arrives (pairing path: token is null at first render, set after pairing).
+ */
+function wallpaperThumbnailSrc(filename: string): string {
+	// Establish reactive dependency on the token — forces re-render when it flips.
+	void assetTokenReady.value;
+	return namedPublicAssetUrl("wallpapers", filename);
+}
 
 // ─── Computed ──────────────────────────────────────────────────────────
+
+const currentBackgroundMode = computed<BackgroundMode>(() => {
+	const value = settingsStore.getValue(props.scope, "terminal", "backgroundMode");
+	return normalizeSettingsBackgroundMode(value);
+});
 
 const currentWallpaper = computed(() => {
 	return (settingsStore.getValue(props.scope, "terminal", "wallpaper") as string) ?? "";
@@ -162,12 +217,25 @@ const currentDim = computed(() => {
 	return (settingsStore.getValue(props.scope, "terminal", "wallpaperDim") as number) ?? 0;
 });
 
+const currentWindowEffect = computed<WindowEffect>(() => {
+	const value = settingsStore.getValue(props.scope, "terminal", "windowEffect");
+	return normalizeSettingsWindowEffect(value);
+});
+
+const backgroundModeOptions = computed(() => getBackgroundModeOptions(runsInTauri.value));
+
+const windowEffectOptions = computed(() => windowEffectSettingsOptions(platformInfo.value));
+
+const showWindowEffectPicker = computed(
+	() => shouldShowWindowEffectPicker(runsInTauri.value, platformInfo.value),
+);
+
+const windowEffectDescription = computed(() => getWindowEffectDescription(platformInfo.value));
+
 const hasWallpaperOverride = computed(() => {
 	if (props.scope === "global") return false;
-	return (
-		settingsStore.isOverridden(props.scope, "terminal", "wallpaper") ||
-		settingsStore.isOverridden(props.scope, "terminal", "wallpaperBlur") ||
-		settingsStore.isOverridden(props.scope, "terminal", "wallpaperDim")
+	return WALLPAPER_OVERRIDE_KEYS.some((key) =>
+		settingsStore.isOverridden(props.scope, "terminal", key),
 	);
 });
 
@@ -175,7 +243,9 @@ const hasWallpaperOverride = computed(() => {
 
 async function loadWallpapers(): Promise<void> {
 	try {
-		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`);
+		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`, {
+			headers: { Authorization: `Bearer ${authStore.token ?? ""}` },
+		});
 		if (resp.ok) {
 			const data = await resp.json();
 			wallpapers.value = data.wallpapers;
@@ -191,6 +261,14 @@ async function selectWallpaper(filename: string): Promise<void> {
 
 async function clearWallpaper(): Promise<void> {
 	await settingsStore.updateSetting(props.scope, "terminal", "wallpaper", "");
+}
+
+async function updateBackgroundMode(value: unknown): Promise<void> {
+	await settingsStore.updateSetting(props.scope, "terminal", "backgroundMode", value as BackgroundMode);
+}
+
+async function updateWindowEffect(value: unknown): Promise<void> {
+	await settingsStore.updateSetting(props.scope, "terminal", "windowEffect", value as WindowEffect);
 }
 
 function triggerUpload(): void {
@@ -246,9 +324,9 @@ async function updateDim(value: unknown): Promise<void> {
 }
 
 async function resetWallpaperOverride(): Promise<void> {
-	await settingsStore.resetSetting(props.scope, "terminal", "wallpaper");
-	await settingsStore.resetSetting(props.scope, "terminal", "wallpaperBlur");
-	await settingsStore.resetSetting(props.scope, "terminal", "wallpaperDim");
+	for (const key of WALLPAPER_OVERRIDE_KEYS) {
+		await settingsStore.resetSetting(props.scope, "terminal", key);
+	}
 }
 
 onMounted(loadWallpapers);
@@ -369,11 +447,6 @@ onMounted(loadWallpapers);
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-}
-
-.wallpaper-none {
-	font-size: 12px;
-	color: var(--nt-text-muted);
 }
 
 .wallpaper-delete {

@@ -785,7 +785,7 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 
 | Method | Path | Auth | Body / Notes |
 |--------|------|------|--------------|
-| GET | `/api/fonts` | ○ | `FontFamily[]` — scans system + user font dirs |
+| GET | `/api/fonts` | ● | `FontFamily[]` — scans system + user font dirs; returned public font URLs carry the per-boot asset token |
 
 #### Themes
 
@@ -801,9 +801,15 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 
 | Method | Path | Auth | Body / Notes |
 |--------|------|------|--------------|
-| GET | `/api/wallpapers` | ○ | `WallpaperFile[]` — user wallpapers |
+| GET | `/api/wallpapers` | ● | `WallpaperFile[]` — user wallpaper filenames; clients build signed public URLs |
 | POST | `/api/wallpapers` | ● | multipart upload → `{ filename }` (201) |
 | DELETE | `/api/wallpapers/:filename` | ● | 204 |
+
+#### Asset Token
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/assets/token` | ● | `{ assetToken, token }` — per-boot token appended to `/public/*` URLs as `asset_token` |
 
 #### Pairing
 
@@ -816,9 +822,9 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 
 | Prefix | Source | Notes |
 |--------|--------|-------|
-| `/public/fonts/` | `~/.config/termora/fonts/` | User custom fonts (unauthenticated) |
-| `/public/sounds/` | `~/.config/termora/sounds/` | User custom bell sounds (unauthenticated) |
-| `/public/wallpapers/` | `~/.config/termora/wallpapers/` | User wallpapers (unauthenticated) |
+| `/public/fonts/` | `~/.config/termora/fonts/` | User custom fonts; `Cross-Origin-Resource-Policy: cross-origin` only when `asset_token` is valid |
+| `/public/sounds/` | `~/.config/termora/sounds/` | User custom bell sounds; `Cross-Origin-Resource-Policy: cross-origin` only when `asset_token` is valid |
+| `/public/wallpapers/` | `~/.config/termora/wallpapers/` | User wallpapers; `Cross-Origin-Resource-Policy: cross-origin` only when `asset_token` is valid |
 | `/` (fallback) | `static/` dir or SEA blob | Web UI bundle (unauthenticated) |
 
 ### Request/Response Body Schemas

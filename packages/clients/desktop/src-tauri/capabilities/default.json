@@ -13,7 +13,10 @@
 		"core:window:allow-is-maximized",
 		"core:window:allow-show",
 		"core:window:allow-set-focus",
+		"core:window:allow-set-effects",
 		"core:window:allow-start-resize-dragging",
+		"os:allow-platform",
+		"os:allow-version",
 		{
 			"identifier": "shell:allow-execute",
 			"allow": [

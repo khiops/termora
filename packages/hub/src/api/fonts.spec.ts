@@ -95,7 +95,7 @@ describe("Font endpoints", () => {
 
 	describe("GET /api/fonts", () => {
 		it("should return empty array when no fonts exist", async () => {
-			const res = await server.inject({ method: "GET", url: "/api/fonts" });
+			const res = await server.inject({ method: "GET", url: "/api/fonts", headers: authHeader() });
 			expect(res.statusCode).toBe(200);
 			expect(res.json()).toEqual([]);
 		});
@@ -104,11 +104,14 @@ describe("Font endpoints", () => {
 			// Write a minimal TTF — family name will be derived from filename heuristic
 			writeFileSync(join(configDir, "fonts", "Hack-Regular.ttf"), TTF_MAGIC);
 
-			const res = await server.inject({ method: "GET", url: "/api/fonts" });
+			const res = await server.inject({ method: "GET", url: "/api/fonts", headers: authHeader() });
 			expect(res.statusCode).toBe(200);
-			const families = res.json<{ family: string; files: unknown[] }[]>();
+			const families = res.json<{ family: string; files: Array<{ url: string }> }[]>();
 			expect(Array.isArray(families)).toBe(true);
 			expect(families.length).toBeGreaterThan(0);
+			expect(families[0]?.files[0]?.url).toMatch(
+				/^\/public\/fonts\/Hack-Regular\.ttf\?asset_token=/,
+			);
 		});
 	});
 
@@ -250,7 +253,11 @@ describe("Font endpoints", () => {
 			expect(res.statusCode).toBe(204);
 
 			// Verify files are gone
-			const listRes = await server.inject({ method: "GET", url: "/api/fonts" });
+			const listRes = await server.inject({
+				method: "GET",
+				url: "/api/fonts",
+				headers: authHeader(),
+			});
 			expect(
 				listRes.json<{ family: string }[]>().find((f) => f.family === "My Font"),
 			).toBeUndefined();

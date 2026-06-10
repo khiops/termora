@@ -264,6 +264,59 @@ describe("ConfigResolver.resolve", () => {
 		expect(resolved.fontSize).toBe(DEFAULT_PROFILE.fontSize);
 		expect(resolved.cursorStyle).toBe(DEFAULT_PROFILE.cursorStyle);
 	});
+
+	it("background mode and window effect cascade through resolve()", () => {
+		const dir = join(tmpdir(), `termora-bg-mode-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[terminal]\nbackground_mode = "solid"\nwindow_effect = "blur"\n',
+		);
+
+		const host = metaDal.createHost({ type: "local", label: "cascade-bg-test" });
+		metaDal.updateHostProfile(
+			host.id,
+			JSON.stringify({ backgroundMode: "transparent", windowEffect: "auto" }),
+		);
+
+		metaDal.createSession({ id: "ses-bg", hostId: host.id, status: "starting" });
+		metaDal.createChannel({ id: "ch-bg", sessionId: "ses-bg", status: "born" });
+		metaDal.updateChannelProfile(
+			"ch-bg",
+			JSON.stringify({ backgroundMode: "image", windowEffect: "none" }),
+		);
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		const resolved = resolver.resolve(host.id, "ch-bg");
+
+		expect(resolved.backgroundMode).toBe("image");
+		expect(resolved.windowEffect).toBe("none");
+		expect(resolved.fontSize).toBe(DEFAULT_PROFILE.fontSize);
+	});
+
+	it("malformed host/channel profileJson does not block lower-layer background fields", () => {
+		const dir = join(tmpdir(), `termora-bg-malformed-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[terminal]\nbackground_mode = "transparent"\nwindow_effect = "auto"\n',
+		);
+
+		const host = metaDal.createHost({ type: "local", label: "malformed-bg-test" });
+		metaDal.updateHostProfile(host.id, "{not-json");
+
+		metaDal.createSession({ id: "ses-bg-bad", hostId: host.id, status: "starting" });
+		metaDal.createChannel({ id: "ch-bg-bad", sessionId: "ses-bg-bad", status: "born" });
+		metaDal.updateChannelProfile("ch-bg-bad", "{also-not-json");
+
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+		const resolved = resolver.resolve(host.id, "ch-bg-bad");
+
+		expect(resolved.backgroundMode).toBe("transparent");
+		expect(resolved.windowEffect).toBe("auto");
+	});
 });
 
 // ─── loadGcConfig + ConfigResolver.gcConfig ──────────────────────────────────
@@ -1215,6 +1268,54 @@ describe("ConfigResolver.getCascade", () => {
 		expect(cascade.terminal.global).toEqual({ fontSize: 18 });
 		expect(cascade.terminal.resolved.fontSize).toBe(18);
 	});
+
+	it("includes background fields at every terminal cascade layer", () => {
+		const dir = join(tmpdir(), `termora-cascade-bg-${Date.now()}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'[terminal]\nbackground_mode = "solid"\nwindow_effect = "blur"\n',
+		);
+		const resolver = new ConfigResolver(metaDal);
+		resolver.loadFromFile(dir);
+
+		const host = metaDal.createHost({ type: "local", label: "cascade-bg-host" });
+		metaDal.updateHostProfile(
+			host.id,
+			JSON.stringify({ backgroundMode: "transparent", windowEffect: "auto" }),
+		);
+
+		const sessionId = generateId();
+		metaDal.createSession({ id: sessionId, hostId: host.id, status: "active" });
+		const channelId = generateId();
+		metaDal.createChannel({ id: channelId, sessionId, status: "live" });
+		metaDal.updateChannelProfile(
+			channelId,
+			JSON.stringify({ backgroundMode: "image", windowEffect: "none" }),
+		);
+
+		const cascade = resolver.getCascade(host.id, channelId);
+		expect(cascade.terminal.defaults).toMatchObject({
+			backgroundMode: "image",
+			windowEffect: "none",
+		});
+		expect(cascade.terminal.global).toEqual({
+			backgroundMode: "solid",
+			windowEffect: "blur",
+		});
+		expect(cascade.terminal.host).toEqual({
+			backgroundMode: "transparent",
+			windowEffect: "auto",
+		});
+		expect(cascade.terminal.channel).toEqual({
+			backgroundMode: "image",
+			windowEffect: "none",
+		});
+		expect(cascade.terminal.resolved).toMatchObject({
+			backgroundMode: "image",
+			windowEffect: "none",
+		});
+	});
 });
 
 // ─── ConfigResolver.getGlobalTerminalOverrides ──────────────────────────────
@@ -1482,6 +1583,27 @@ describe("PUT /api/config/global", () => {
 		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
 		const body = cascade.json<CascadeResponse>();
 		expect(body.terminal.global).toMatchObject({ fontSize: 20 });
+	});
+
+	it("writes background mode and window effect terminal keys to config.toml", async () => {
+		const res = await server.inject({
+			method: "PUT",
+			url: "/api/config/global",
+			payload: { terminal: { backgroundMode: "solid", windowEffect: "auto" } },
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ ok: true });
+
+		const content = readFileSync(join(tempDir, "config.toml"), "utf8");
+		expect(content).toContain("background_mode");
+		expect(content).toContain("window_effect");
+
+		const cascade = await server.inject({ method: "GET", url: "/api/config/cascade" });
+		const body = cascade.json<CascadeResponse>();
+		expect(body.terminal.global).toMatchObject({
+			backgroundMode: "solid",
+			windowEffect: "auto",
+		});
 	});
 
 	it("rejects unknown keys (400)", async () => {

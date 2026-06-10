@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, nextTick, ref } from "vue";
 import type { ProfileChangeEvent } from "../stores/config.js";
+import { setAssetTokenForTests } from "../utils/hub-url.js";
 import type { PaneNode } from "./usePaneTree.js";
 
 function withSetup<T>(setup: () => T): { result: T; unmount: () => void } {
@@ -49,15 +50,40 @@ vi.mock("../stores/auth.js", () => ({
 }));
 
 vi.mock("../utils/hub-url.js", async () => {
+	const actual = await vi.importActual<typeof import("../utils/hub-url.js")>("../utils/hub-url.js");
 	const vue = await vi.importActual<typeof import("vue")>("vue");
 	return {
 		hubBaseUrl: () => "http://hub",
 		hubPortReady: vue.ref(true),
+		// Expose the real assetTokenReady and setAssetTokenForTests so reactivity
+		// tests can control the token while Vue tracks the dependency correctly.
+		assetTokenReady: actual.assetTokenReady,
+		setAssetTokenForTests: actual.setAssetTokenForTests,
+		namedPublicAssetUrl: (
+			kind: string,
+			filename: string,
+			params?: Record<string, string | number>,
+		) => {
+			// Reading assetTokenReady establishes a Vue reactive dependency so
+			// any computed that calls this function re-runs when the token arrives.
+			const hasToken = actual.assetTokenReady.value;
+			const url = new URL(`http://hub/public/${kind}/${encodeURIComponent(filename)}`);
+			if (hasToken) {
+				url.searchParams.set("asset_token", "mock-token");
+			}
+			if (params) {
+				for (const [key, value] of Object.entries(params)) {
+					url.searchParams.set(key, String(value));
+				}
+			}
+			return url.toString();
+		},
 	};
 });
 
 describe("useActiveWallpaper", () => {
 	let useActiveWallpaper: typeof import("./useActiveWallpaper.js").useActiveWallpaper;
+	let shouldUseTransparentBackground: typeof import("./useActiveWallpaper.js").shouldUseTransparentBackground;
 	let unresolvedWallpaperFallbackMs: number;
 	let usePaneTree: typeof import("./usePaneTree.js").usePaneTree;
 	let useConfigStore: () => ReturnType<typeof import("../stores/config.js").useConfigStore> & {
@@ -71,6 +97,7 @@ describe("useActiveWallpaper", () => {
 		const paneTreeMod = await import("./usePaneTree.js");
 		const configMod = await import("../stores/config.js");
 		useActiveWallpaper = activeWallpaperMod.useActiveWallpaper;
+		shouldUseTransparentBackground = activeWallpaperMod.shouldUseTransparentBackground;
 		unresolvedWallpaperFallbackMs = activeWallpaperMod.UNRESOLVED_WALLPAPER_FALLBACK_MS;
 		usePaneTree = paneTreeMod.usePaneTree;
 		// biome-ignore lint/suspicious/noExplicitAny: test helper cast
@@ -81,6 +108,8 @@ describe("useActiveWallpaper", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+		// Reset the real asset token so tests don't bleed into each other.
+		setAssetTokenForTests(null);
 	});
 
 	it("resolves the window wallpaper from the active pane and updates when focus changes", async () => {
@@ -182,6 +211,97 @@ describe("useActiveWallpaper", () => {
 
 		expect(result.activeChannelId.value).toBeNull();
 		expect(result.wallpaperStyle.value).toBeNull();
+
+		unmount();
+	});
+
+	it("applies background mode rendering decisions and treats unknown modes as image", async () => {
+		const profilesByChannel = new Map<string, Record<string, unknown>>([
+			["ch-image", { backgroundMode: "image", wallpaper: "image.jpg" }],
+			["ch-solid", { backgroundMode: "solid", wallpaper: "hidden-solid.jpg" }],
+			["ch-transparent", { backgroundMode: "transparent", wallpaper: "hidden-glass.jpg" }],
+			["ch-empty-image", { backgroundMode: "image", wallpaper: "" }],
+			["ch-unknown", { backgroundMode: "garbage", wallpaper: "safe.jpg" }],
+		]);
+		const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input));
+			const channelId = url.searchParams.get("channel_id") ?? "";
+			return {
+				ok: true,
+				json: async () => ({
+					terminal: {
+						resolved: {
+							...DEFAULT_PROFILE,
+							...profilesByChannel.get(channelId),
+						},
+					},
+				}),
+			};
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { result, unmount } = withSetup(() => {
+			const activeTab = ref({ id: "image" });
+			const channelsByTab: Record<string, string> = {
+				image: "ch-image",
+				solid: "ch-solid",
+				transparent: "ch-transparent",
+				empty: "ch-empty-image",
+				unknown: "ch-unknown",
+			};
+			const channelHostMap = ref<ReadonlyMap<string, string>>(
+				new Map([
+					["ch-image", "host-1"],
+					["ch-solid", "host-1"],
+					["ch-transparent", "host-1"],
+					["ch-empty-image", "host-1"],
+					["ch-unknown", "host-1"],
+				]),
+			);
+			const wallpaper = useActiveWallpaper({
+				activeTab,
+				getActiveChannelId: (tabId) => channelsByTab[tabId] ?? null,
+				channelHostMap,
+			});
+
+			return {
+				...wallpaper,
+				activeTab,
+			};
+		});
+
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("image.jpg");
+
+		result.activeTab.value = { id: "solid" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("solid");
+		expect(result.wallpaperStyle.value).toBeNull();
+		expect(result.dimStyle.value).toBeNull();
+
+		result.activeTab.value = { id: "transparent" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("transparent");
+		expect(result.wallpaperStyle.value).toBeNull();
+		expect(result.dimStyle.value).toBeNull();
+		expect(shouldUseTransparentBackground(result.backgroundMode.value, true)).toBe(true);
+		expect(shouldUseTransparentBackground(result.backgroundMode.value, false)).toBe(false);
+
+		result.activeTab.value = { id: "empty" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value).toBeNull();
+
+		result.activeTab.value = { id: "unknown" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("safe.jpg");
 
 		unmount();
 	});
@@ -376,6 +496,50 @@ describe("useActiveWallpaper", () => {
 		expect(mappedUrl.searchParams.get("host_id")).toBe("host-correct");
 		expect(mappedUrl.searchParams.get("channel_id")).toBe("ch-late");
 		expect(result.wallpaperStyle.value?.backgroundImage).toContain("correct.jpg");
+
+		unmount();
+	});
+
+	it("updates window wallpaper URL when asset token arrives after first render (pairing path)", async () => {
+		// Arrange — no token at boot (pairing path)
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				terminal: {
+					resolved: {
+						...DEFAULT_PROFILE,
+						wallpaper: "scenic.jpg",
+						wallpaperBlur: 0,
+						wallpaperDim: 0,
+					},
+				},
+			}),
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { result, unmount } = withSetup(() => {
+			const activeTab = ref({ id: "tab-1" });
+			const channelHostMap = ref<ReadonlyMap<string, string>>(new Map([["ch-1", "host-1"]]));
+			const wallpaper = useActiveWallpaper({
+				activeTab,
+				getActiveChannelId: () => "ch-1",
+				channelHostMap,
+			});
+			return wallpaper;
+		});
+
+		await flushAsync();
+
+		// First render: profile resolved but token not yet set — URL has no asset_token
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("scenic.jpg");
+		expect(result.wallpaperStyle.value?.backgroundImage).not.toContain("asset_token=");
+
+		// Act — token arrives (e.g. pairing completes)
+		setAssetTokenForTests("arrived-token");
+		await nextTick();
+
+		// Assert — wallpaper URL must now include the token
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("asset_token=");
 
 		unmount();
 	});

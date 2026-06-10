@@ -1,4 +1,5 @@
 import type { BellSound } from "@termora/shared";
+import { namedPublicAssetUrl } from "../utils/hub-url.js";
 
 let audioContext: AudioContext | null = null;
 let userInteracted = false;
@@ -33,7 +34,7 @@ if (typeof window !== "undefined") {
  * Play bell sound based on configuration.
  *
  * - "system": sine wave 800Hz, 100ms via Web Audio API
- * - "custom": play an audio file from /public/sounds/
+ * - "custom": play an audio file from the hub's signed public sound URL
  * - "mute": no-op
  */
 export function playBellSound(config: { sound: BellSound; customSoundFile?: string }): void {
@@ -93,7 +94,7 @@ function _playCustomSound(filename: string): void {
 	}
 
 	try {
-		const audio = new Audio(`/public/sounds/${filename}`);
+		const audio = new Audio(namedPublicAssetUrl("sounds", filename));
 		audio.volume = 0.5;
 		void audio.play().catch(() => {
 			// Autoplay may be blocked

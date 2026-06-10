@@ -236,6 +236,8 @@ export const DEFAULT_PROFILE: TerminalProfile = {
 	wallpaper: "",
 	wallpaperBlur: 0,
 	wallpaperDim: 0,
+	backgroundMode: "image",
+	windowEffect: "none",
 	envMode: "inherit",
 };
 
@@ -309,6 +311,8 @@ export const TERMINAL_PROFILE_KEYS = [
 	"wallpaper",
 	"wallpaperBlur",
 	"wallpaperDim",
+	"backgroundMode",
+	"windowEffect",
 ] as const;
 
 export const MAX_WALLPAPER_BLUR = 20;

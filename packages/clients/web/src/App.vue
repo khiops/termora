@@ -1,5 +1,5 @@
 <template>
-	<div class="app-root">
+	<div class="app-root" :class="{ 'app-root--transparent': windowUsesTransparentBackground }">
 		<TitleBar />
 		<!-- Write-request dialog — rendered globally, outside layout, via Teleport -->
 		<WriteRequestDialog />
@@ -340,7 +340,10 @@ import TabBar from './components/TabBar.vue';
 import TitleBar from './components/TitleBar.vue';
 import ToastContainer from './components/ToastContainer.vue';
 import WriteRequestDialog from './components/WriteRequestDialog.vue';
-import { useActiveWallpaper } from './composables/useActiveWallpaper.js';
+import {
+	shouldUseTransparentBackground,
+	useActiveWallpaper,
+} from './composables/useActiveWallpaper.js';
 import { useAutoSwitch } from './composables/useAutoSwitch.js';
 import { useCommandPalette } from './composables/useCommandPalette.js';
 import type { DropZone } from './composables/useLayout.js';
@@ -354,6 +357,11 @@ import {
 import { MULTI_PANE_SEARCH_KEY, useMultiPaneSearch } from './composables/useMultiPaneSearch.js';
 import { useResizable } from './composables/useResizable.js';
 import { useTabTitle } from './composables/useTabTitle.js';
+import {
+	isTauriRuntime,
+	usePlatformInfo,
+	useWindowEffects,
+} from './composables/useWindowEffects.js';
 import { useWindowTitle } from './composables/useWindowTitle.js';
 import { useAuthStore } from './stores/auth.js';
 import { useChannelsStore } from './stores/channels.js';
@@ -363,7 +371,7 @@ import { useProfilesStore } from './stores/profiles.js';
 import { useSessionStore } from './stores/session.js';
 import { useThemeStore } from './stores/theme.js';
 import { useWriteLockStore } from './stores/writelock.js';
-import { hubBaseUrl, initHubPort } from './utils/hub-url.js';
+import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -428,11 +436,24 @@ const themeStore = useThemeStore();
 const writeLockStore = useWriteLockStore();
 const autoSwitch = useAutoSwitch();
 const layout = useLayout();
-const { wallpaperStyle: windowWallpaperStyle, dimStyle: windowWallpaperDimStyle } = useActiveWallpaper({
+const {
+	wallpaperStyle: windowWallpaperStyle,
+	dimStyle: windowWallpaperDimStyle,
+	backgroundMode: windowBackgroundMode,
+	displayedEffectState: windowDisplayedEffectState,
+} = useActiveWallpaper({
 	activeTab: layout.activeTab,
 	getActiveChannelId: layout.getActiveChannelId,
 	channelHostMap: toRef(channelsStore, 'channelHostMap'),
 });
+const windowPlatformInfo = usePlatformInfo();
+useWindowEffects({
+	displayedEffectState: windowDisplayedEffectState,
+	platformInfo: windowPlatformInfo,
+});
+const windowUsesTransparentBackground = computed(() =>
+	shouldUseTransparentBackground(windowBackgroundMode.value, isTauriRuntime()),
+);
 const windowWallpaperLayerKey = computed(() => {
 	const style = windowWallpaperStyle.value;
 	if (!style) return 'none';
@@ -688,9 +709,6 @@ onMounted(async () => {
 	// Ctrl+K / Cmd+K must be captured before Chrome's omnibox intercepts it (SC-14)
 	window.addEventListener('keydown', onGlobalKeydown, { capture: true });
 
-	// Load fonts before terminals are created (no auth needed)
-	await configStore.loadFonts();
-
 	// In Tauri desktop, resolve the hub port BEFORE any API calls so that
 	// hubBaseUrl() / hubWsUrl() use the correct port (zero_conf may pick != 4100).
 	try {
@@ -715,6 +733,8 @@ onMounted(async () => {
 	if (authStore.token !== null) {
 		try {
 			await sessionStore.connect();
+			await initAssetToken(authStore.token);
+			await configStore.loadFonts();
 			// Load resolved profile + UI behaviour config now that auth is established
 			await configStore.loadProfile();
 			await configStore.loadUiConfig();
@@ -1090,6 +1110,8 @@ async function onCreateChannelGroupConfirmed(name?: string): Promise<void> {
 async function onAuthenticated(): Promise<void> {
 	postAuthLoading.value = true;
 	try {
+		await initAssetToken(authStore.token);
+		await configStore.loadFonts();
 		await configStore.loadProfile();
 		await configStore.loadUiConfig();
 		await themeStore.loadThemes();
@@ -1389,6 +1411,7 @@ body,
 	overflow: hidden;
 	font-family: system-ui, -apple-system, sans-serif;
 	font-size: 13px;
+	background: transparent;
 }
 
 .app-root {
@@ -1399,6 +1422,10 @@ body,
 	overflow: hidden;
 	background: var(--nt-bg);
 	isolation: isolate;
+}
+
+.app-root--transparent {
+	background: transparent;
 }
 
 .window-wallpaper {

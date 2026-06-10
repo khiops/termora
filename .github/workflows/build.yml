@@ -43,15 +43,16 @@ jobs:
       - run: ./scripts/build-web.sh
         env:
           TERMORA_BUILD_HASH: ${{ github.sha }}
-      # Artifacts only on main/tags — PRs just verify build + tests
+      # Artifacts on tags (release) or manual dispatch (downstream hub/desktop jobs
+      # need them) — plain PR pushes just verify build + tests
       - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           name: web-dist-raw
           path: packages/clients/web/dist/
           retention-days: 1
       - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           name: web-dist-embedded
           path: packages/hub/static/
@@ -112,7 +113,7 @@ jobs:
         env:
           TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
       - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           name: agent-${{ matrix.triple }}
           path: dist/sea/termora-agent*
@@ -120,8 +121,8 @@ jobs:
 
   build-hub:
     name: Build Hub (${{ matrix.triple }})
-    # Only on main/tags — needs web-dist artifact
-    if: startsWith(github.ref, 'refs/tags/')
+    # Tags (release) or manual dispatch (pre-merge cross-platform validation)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [matrix, build-web]
     strategy:
       fail-fast: false
@@ -165,8 +166,8 @@ jobs:
 
   build-desktop:
     name: Build Desktop (${{ matrix.triple }})
-    # Only on main/tags — needs agent + hub + web artifacts
-    if: startsWith(github.ref, 'refs/tags/')
+    # Tags (release) or manual dispatch (pre-merge cross-platform validation)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [matrix, build-agent, build-hub, build-web]
     strategy:
       fail-fast: false

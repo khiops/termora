@@ -3,6 +3,17 @@
 
 import type { BellSound } from "./config.js";
 
+export type BackgroundMode = "image" | "solid" | "transparent";
+export type WindowEffect =
+	| "none"
+	| "auto"
+	| "mica"
+	| "blur"
+	| "acrylic"
+	| "vibrancy-under-window"
+	| "vibrancy-sidebar"
+	| "vibrancy-hud";
+
 export interface TerminalProfile {
 	fontFamily?: string;
 	fontSize?: number;
@@ -18,6 +29,8 @@ export interface TerminalProfile {
 	wallpaper?: string;
 	wallpaperBlur?: number;
 	wallpaperDim?: number;
+	backgroundMode?: BackgroundMode;
+	windowEffect?: WindowEffect;
 	/** Controls how process.env is merged into PTY environment. Default: 'inherit'. */
 	envMode?: "minimal" | "inherit";
 	[key: string]: unknown;

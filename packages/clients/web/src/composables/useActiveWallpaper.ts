@@ -1,4 +1,9 @@
-import { DEFAULT_PROFILE, type TerminalProfile } from "@termora/shared";
+import {
+	type BackgroundMode,
+	DEFAULT_PROFILE,
+	type TerminalProfile,
+	type WindowEffect,
+} from "@termora/shared";
 import { computed, onUnmounted, type Ref, ref, watch } from "vue";
 import { useResolvedProfile } from "./useResolvedProfile.js";
 import type { Tab } from "./useTabManager.js";
@@ -15,6 +20,32 @@ interface UseActiveWallpaperOptions {
 type WallpaperProfile = Required<
 	Pick<TerminalProfile, "wallpaper" | "wallpaperBlur" | "wallpaperDim">
 >;
+type WindowBackgroundProfile = WallpaperProfile & {
+	backgroundMode: BackgroundMode;
+	windowEffect: WindowEffect;
+};
+
+/** What `useWindowEffects` reads to derive the desired native effect. */
+export type DisplayedEffectState = {
+	mode: BackgroundMode;
+	windowEffect: WindowEffect;
+};
+
+export function normalizeBackgroundMode(value: unknown): BackgroundMode {
+	if (value === "image" || value === "solid" || value === "transparent") return value;
+	return "image";
+}
+
+export function shouldRenderWallpaper(profile: WindowBackgroundProfile): boolean {
+	return profile.backgroundMode === "image" && profile.wallpaper.length > 0;
+}
+
+export function shouldUseTransparentBackground(
+	backgroundMode: BackgroundMode,
+	isTauriRuntime: boolean,
+): boolean {
+	return backgroundMode === "transparent" && isTauriRuntime;
+}
 
 function wallpaperScopeKey(hostId: string | null, channelId: string | null): string | null {
 	if (channelId === null) return null;
@@ -29,11 +60,18 @@ function wallpaperFields(profile: TerminalProfile): WallpaperProfile {
 	};
 }
 
-function terminalProfileFromWallpaper(profile: WallpaperProfile): TerminalProfile {
+function backgroundFields(profile: TerminalProfile): WindowBackgroundProfile {
 	return {
-		...DEFAULT_PROFILE,
-		...profile,
+		...wallpaperFields(profile),
+		backgroundMode: normalizeBackgroundMode(
+			profile.backgroundMode ?? DEFAULT_PROFILE.backgroundMode,
+		),
+		windowEffect: profile.windowEffect ?? DEFAULT_PROFILE.windowEffect ?? "none",
 	};
+}
+
+function terminalProfileFromBackground(profile: WindowBackgroundProfile): TerminalProfile {
+	return { ...DEFAULT_PROFILE, ...profile };
 }
 
 /**
@@ -69,8 +107,10 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		return context?.channelId === channelId && context.hostId === activeHostId.value;
 	});
 
-	const wallpaperCache = new Map<string, WallpaperProfile>();
-	const displayedWallpaper = ref<WallpaperProfile>(wallpaperFields(DEFAULT_PROFILE));
+	const wallpaperCache = new Map<string, WindowBackgroundProfile>();
+	const displayedBackground = ref<WindowBackgroundProfile>(backgroundFields(DEFAULT_PROFILE));
+	/** True once the unresolved-fallback timer fires for the current scope key. Resets on scope change or successful resolution. */
+	const fallbackActive = ref(false);
 	let unresolvedFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function clearUnresolvedFallbackTimer(): void {
@@ -81,12 +121,14 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	function showDefaultWallpaper(): void {
 		clearUnresolvedFallbackTimer();
-		displayedWallpaper.value = wallpaperFields(DEFAULT_PROFILE);
+		fallbackActive.value = false;
+		displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 	}
 
-	function showWallpaper(profile: WallpaperProfile): void {
+	function showWallpaper(profile: WindowBackgroundProfile): void {
 		clearUnresolvedFallbackTimer();
-		displayedWallpaper.value = { ...profile };
+		fallbackActive.value = false;
+		displayedBackground.value = { ...profile };
 	}
 
 	function showCachedWallpaper(key: string): boolean {
@@ -98,11 +140,13 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	function startUnresolvedFallbackTimer(key: string): void {
 		clearUnresolvedFallbackTimer();
+		fallbackActive.value = false;
 		unresolvedFallbackTimer = setTimeout(() => {
 			unresolvedFallbackTimer = null;
 			if (activeScopeKey.value !== key || resolvedForActivePane.value) return;
+			fallbackActive.value = true;
 			if (showCachedWallpaper(key)) return;
-			displayedWallpaper.value = wallpaperFields(DEFAULT_PROFILE);
+			displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 		}, UNRESOLVED_WALLPAPER_FALLBACK_MS);
 	}
 
@@ -129,7 +173,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 			}
 			if (!resolvedForActivePane.value) return;
 
-			const profile = wallpaperFields(resolvedProfile.value);
+			const profile = backgroundFields(resolvedProfile.value);
 			wallpaperCache.set(key, { ...profile });
 			showWallpaper(profile);
 		},
@@ -140,16 +184,38 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		clearUnresolvedFallbackTimer();
 	});
 
-	const wallpaperProfile = computed<TerminalProfile>(() => {
-		return terminalProfileFromWallpaper(displayedWallpaper.value);
+	const backgroundProfile = computed<TerminalProfile>(() => {
+		return terminalProfileFromBackground(displayedBackground.value);
 	});
+	const wallpaperProfile = computed<TerminalProfile>(() => ({
+		...backgroundProfile.value,
+		wallpaper: shouldRenderWallpaper(displayedBackground.value)
+			? displayedBackground.value.wallpaper
+			: "",
+	}));
+	const backgroundMode = computed<BackgroundMode>(() => displayedBackground.value.backgroundMode);
+
+	/**
+	 * The displayed effect state — derived from `displayedBackground`, the same internal state
+	 * that drives the painted background (resolved, cached, or default-fallback).
+	 * `useWindowEffects` watches this ref instead of the raw resolved profile + boolean gates.
+	 */
+	const displayedEffectState = computed<DisplayedEffectState>(() => ({
+		mode: displayedBackground.value.backgroundMode,
+		windowEffect: displayedBackground.value.windowEffect,
+	}));
 
 	const { wallpaperStyle, dimStyle, refreshCache } = useWallpaper(wallpaperProfile);
 
 	return {
 		activeChannelId,
 		activeHostId,
-		profile: wallpaperProfile,
+		profile: backgroundProfile,
+		resolvedProfile,
+		resolvedForActivePane,
+		fallbackActive,
+		backgroundMode,
+		displayedEffectState,
 		wallpaperStyle,
 		dimStyle,
 		reload,

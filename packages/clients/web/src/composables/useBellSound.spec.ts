@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { setAssetTokenForTests } from "../utils/hub-url.js";
 import { playBellSound } from "./useBellSound.js";
 
 describe("playBellSound", () => {
@@ -15,6 +16,7 @@ describe("playBellSound", () => {
 		let warnSpy: MockInstance;
 
 		beforeEach(() => {
+			setAssetTokenForTests("sound-token");
 			mockAudio = { play: vi.fn().mockResolvedValue(undefined), volume: 0 };
 			AudioSpy = vi
 				// biome-ignore lint/suspicious/noExplicitAny: spying on the global Audio constructor with a partial test double; the real HTMLAudioElement ctor type does not match the mock and MockInstance<any> is needed to assign the spy
@@ -24,13 +26,14 @@ describe("playBellSound", () => {
 		});
 
 		afterEach(() => {
+			setAssetTokenForTests(null);
 			AudioSpy.mockRestore();
 			warnSpy.mockRestore();
 		});
 
 		it.each([".wav", ".mp3", ".ogg", ".m4a"])("accepts valid extension %s", (ext) => {
 			playBellSound({ sound: "custom", customSoundFile: `bell${ext}` });
-			expect(AudioSpy).toHaveBeenCalledWith(`/public/sounds/bell${ext}`);
+			expect(AudioSpy).toHaveBeenCalledWith(`/public/sounds/bell${ext}?asset_token=sound-token`);
 			expect(warnSpy).not.toHaveBeenCalled();
 		});
 
@@ -54,7 +57,7 @@ describe("playBellSound", () => {
 
 		it("is case-insensitive for extension check", () => {
 			playBellSound({ sound: "custom", customSoundFile: "BELL.MP3" });
-			expect(AudioSpy).toHaveBeenCalledWith("/public/sounds/BELL.MP3");
+			expect(AudioSpy).toHaveBeenCalledWith("/public/sounds/BELL.MP3?asset_token=sound-token");
 			expect(warnSpy).not.toHaveBeenCalled();
 		});
 	});

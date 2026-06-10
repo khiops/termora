@@ -4,6 +4,21 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DESKTOP-TRANSLUCENCY — Background modes + native window effects (#58, 2026-06-10)
+
+- Three explicit background modes (image / solid / transparent) as per-scope `TerminalProfile` fields resolved through the 4-layer cascade — replaces the implicit "wallpaper set or not" model. Default `image`: with an empty wallpaper it renders solid, reproducing the pre-#58 states with zero profile migration.
+- Desktop window is created `transparent: true` permanently on ALL OS (Tauri: transparency is creation-time-only); CSS paints opacity in non-transparent modes, so mode switches are instant and there is a single code path. Trade-off accepted: ~8× GPU power on macOS even for opaque content (tauri-apps/tauri#15471, open upstream) — macOS is not a tested distribution target; the mitigation (macOS-only restart-gated opt-out) is designed in `docs/briefs/desktop-translucency.md` and built only if real users report battery issues or upstream fixes the compositing path.
+- `macos-private-api` feature accepted (required for macOS transparency) — App Store distribution is excluded by design (GitHub Releases only).
+- Window effects (mica/blur/acrylic/vibrancy) are runtime-settable and follow the active pane's scope like the window-wide wallpaper; `auto` resolves per OS + Windows build (Win11→mica, Win10→blur — never acrylic by default, documented lag); Linux gets no effects (compositor-dependent alpha only). Unknown mode/effect values degrade at the render boundary (mode→image, effect→none) — there is deliberately no value validation in the hub resolve path.
+- OS detection via `tauri-plugin-os` (canonical upstream surface) rather than a hand-rolled Rust command or registry-reading crate.
+- The native effect follows WHAT IS DISPLAYED: useWindowEffects consumes a single `displayedEffectState` derived from useActiveWallpaper's displayed background (resolved, cached, or fallback) — no resolution/scope boolean gating; an effect can never outlive the painted background. IPC is latest-wins, serialized, with mandatory re-apply after stale completions and clearEffects only when an effect was actually applied.
+- REST bodies for profile writes are camelCase only; snake_case exists solely in config.toml (algorithmic conversion at the file boundary — no lookup table to maintain).
+- Settings UI: the mode selector is visible in ALL runtimes (per-scope server-side setting honored by desktop clients; "(desktop only)" hint in browsers); the effect picker is Tauri-only and hidden on Linux (no native effects there). No "None" wallpaper tile — the grid only picks which image; removing the wallpaper is expressed by switching the mode to Solid.
+- Capability hygiene: `core:window:allow-set-effects` + `os:allow-platform` + `os:allow-version` granted minimally to the main window (narrowest set for the two plugin-os calls used), locked by a config regression test.
+- Public asset embedding is token-gated: `/public/*` serves `Cross-Origin-Resource-Policy: cross-origin` ONLY when the URL carries the per-boot asset token (`?asset_token=`, constant-time compare), distributed via the authenticated `GET /api/assets/token`. The desktop webview (`tauri://localhost`) needs cross-origin embeds; without the token, assets stay same-origin-protected against drive-by localhost embedding. `GET /api/fonts` and `GET /api/wallpapers` now require auth (their responses carry signed URLs).
+
+---
+
 ## MULTICLIENT-SYNC — Multi-client channel sync & SSH reconnect (2026-06-05)
 
 - CHANNEL_CREATED broadcast: new channels are announced to all connected clients via a CHANNEL_CREATED message carrying the full channel payload (status live, resolved display title) so observers add the channel without a manual refresh; the web client filters by active host and dedupes by channel id.
@@ -246,14 +261,14 @@ Decisions archived from workflow — newest first.
 ## WALLPAPER — Configurable terminal wallpaper with cascade (2026-03-08)
 
 - Wallpaper fields in TerminalProfile (cascades via existing 4-layer system)
-- Upload to ~/.config/termora/wallpapers/, served at /public/wallpapers/ (same pattern as fonts)
+- Upload to ~/.config/termora/wallpapers/, served at signed /public/wallpapers/ URLs (same pattern as fonts)
 - Cover only (no contain/tile), blur 0-20px, dim 0-100%
 - Layer stack: wallpaper-bg (z0) → wallpaper-dim (z1) → terminal (z2) → tint (z3)
 - Upload validation: jpg/jpeg/png/webp/gif/avif, max 10MB via @fastify/multipart
-- GET /api/wallpapers no auth (scoped to GET method), POST/DELETE auth required
+- GET /api/wallpapers, POST, and DELETE require auth; thumbnail/runtime URLs append the per-boot asset token
 - Path traversal: basename + directory containment
 - X-Content-Type-Options: nosniff on static wallpapers route
-- Cache-busting ?t=timestamp on wallpaper URLs
+- Cache-busting ?t=timestamp plus asset_token on wallpaper URLs
 - useWallpaper composable: profile ref → wallpaperStyle + dimStyle computeds
 - TerminalPane z-index: wallpaper-bg(0) → dim(1) → terminal(2) → tint(3)
 - WallpaperCategory.vue: picker grid + upload + blur/dim sliders + scope override
@@ -531,9 +546,9 @@ Decisions archived from workflow — newest first.
 
 - Cross-platform font stack: Consolas → Liberation Mono → Courier New → monospace (no embedding, licensing)
 - User fonts: drop .woff2/.woff/.ttf/.otf in ~/.config/termora/fonts/, auto-discovered
-- Font serving: second @fastify/static at /public/fonts/ (decorateReply: false for multi-static)
+- Font serving: second @fastify/static at signed /public/fonts/ URLs (decorateReply: false for multi-static)
 - Font filename heuristic: family slug from first segment, camelCase→spaces, suffixes→weight (Regular=400, Bold=700)
-- GET /api/fonts unauthenticated (font list is non-sensitive metadata)
+- GET /api/fonts requires auth because returned font URLs carry the per-boot asset token
 - Dynamic @font-face injection: <style> element appended to <head> at startup
 - Config load bug: ConfigResolver.loadFromFile() was never called — instantiated but not invoked
 - Config store: Pinia useConfigStore.load() fetches /api/fonts + /api/config/resolved in parallel

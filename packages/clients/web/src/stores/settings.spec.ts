@@ -463,6 +463,49 @@ describe("useSettingsStore", () => {
 			vi.useRealTimers();
 		});
 
+		it("persists background mode and window effect settings with camelCase REST keys", async () => {
+			vi.useFakeTimers();
+			const store = useSettingsStore();
+			store.cascade = makeCascade();
+			store.currentHostId = "host-ctx";
+			store.currentChannelId = "chan-ctx";
+
+			mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+
+			void store.updateSetting("global", "terminal", "backgroundMode", "transparent");
+			void store.updateSetting("host", "terminal", "windowEffect", "auto");
+			void store.updateSetting("channel", "terminal", "backgroundMode", "solid");
+			await vi.advanceTimersByTimeAsync(600);
+
+			const putGlobal = mockFetch.mock.calls.find(
+				(args: unknown[]) =>
+					args[0] === "/api/config/global" &&
+					(args[1] as RequestInit | undefined)?.method === "PUT",
+			);
+			const patchHost = mockFetch.mock.calls.find(
+				(args: unknown[]) =>
+					args[0] === "/api/hosts/host-ctx/profile" &&
+					(args[1] as RequestInit | undefined)?.method === "PATCH",
+			);
+			const patchChannel = mockFetch.mock.calls.find(
+				(args: unknown[]) =>
+					args[0] === "/api/channels/chan-ctx/profile" &&
+					(args[1] as RequestInit | undefined)?.method === "PATCH",
+			);
+
+			expect(JSON.parse((putGlobal?.[1] as RequestInit).body as string)).toEqual({
+				terminal: { backgroundMode: "transparent" },
+			});
+			expect(JSON.parse((patchHost?.[1] as RequestInit).body as string)).toEqual({
+				profile: { windowEffect: "auto" },
+			});
+			expect(JSON.parse((patchChannel?.[1] as RequestInit).body as string)).toEqual({
+				profile: { backgroundMode: "solid" },
+			});
+
+			vi.useRealTimers();
+		});
+
 		it("skips API call when currentHostId is null for host scope", async () => {
 			vi.useFakeTimers();
 			const store = useSettingsStore();

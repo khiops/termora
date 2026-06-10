@@ -1,3 +1,6 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addCorsOrigins, createServer } from "./server.js";
@@ -6,6 +9,12 @@ import { openTestDatabases } from "./storage/db.js";
 
 /** Known token used across auth tests */
 const TEST_TOKEN = "a".repeat(64);
+const TTF_MAGIC = Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+const PUBLIC_ASSET_CASES = [
+	{ kind: "fonts", filename: "Test-Regular.ttf", body: TTF_MAGIC },
+	{ kind: "sounds", filename: "Bell.wav", body: "RIFF....WAVEfmt " },
+	{ kind: "wallpapers", filename: "Wallpaper.png", body: "fake-png" },
+] as const;
 
 describe("Hub Server", () => {
 	let server: FastifyInstance;
@@ -257,5 +266,106 @@ describe("Hub Server — CORS allowlist", () => {
 			headers: { origin: "http://localhost:9999" },
 		});
 		expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:9999");
+	});
+});
+
+describe("Hub Server — security headers", () => {
+	let server: FastifyInstance | undefined;
+	let dbs: DatabaseManager | undefined;
+	let configDir: string | undefined;
+
+	afterEach(async () => {
+		if (server) await server.close();
+		dbs?.close();
+		if (configDir) rmSync(configDir, { recursive: true, force: true });
+		server = undefined;
+		dbs = undefined;
+		configDir = undefined;
+	});
+
+	async function createProtectedAssetServer(
+		kind: (typeof PUBLIC_ASSET_CASES)[number]["kind"],
+		filename: string,
+		body: Buffer | string,
+	): Promise<string> {
+		configDir = join(
+			tmpdir(),
+			`termora-public-corp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		mkdirSync(join(configDir, kind), { recursive: true });
+		writeFileSync(join(configDir, kind, filename), body);
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir,
+		});
+
+		const tokenRes = await server.inject({ method: "GET", url: "/api/assets/token" });
+		const { assetToken } = tokenRes.json<{ assetToken: string }>();
+		return assetToken;
+	}
+
+	it.each(
+		PUBLIC_ASSET_CASES,
+	)("GET /public/$kind/:file serves signed public assets with cross-origin CORP", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		const assetToken = await createProtectedAssetServer(kind, filename, body);
+
+		const response = await server?.inject({
+			method: "GET",
+			url: `/public/${kind}/${filename}?asset_token=${assetToken}`,
+			headers: { origin: "tauri://localhost" },
+		});
+
+		expect(response?.statusCode).toBe(200);
+		expect(response?.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+	});
+
+	it.each(PUBLIC_ASSET_CASES)("GET /public/$kind/:file rejects missing asset token", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		await createProtectedAssetServer(kind, filename, body);
+
+		const response = await server?.inject({
+			method: "GET",
+			url: `/public/${kind}/${filename}`,
+			headers: { origin: "tauri://localhost" },
+		});
+
+		expect(response?.statusCode).toBe(403);
+		expect(response?.json<{ error: { code: string } }>().error.code).toBe("ASSET_TOKEN_REQUIRED");
+	});
+
+	it.each(PUBLIC_ASSET_CASES)("GET /public/$kind/:file rejects invalid asset token", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		await createProtectedAssetServer(kind, filename, body);
+
+		const response = await server?.inject({
+			method: "GET",
+			url: `/public/${kind}/${filename}?asset_token=bad-token`,
+			headers: { origin: "tauri://localhost" },
+		});
+
+		expect(response?.statusCode).toBe(403);
+		expect(response?.json<{ error: { code: string } }>().error.code).toBe("ASSET_TOKEN_REQUIRED");
+	});
+
+	it("GET /api/health keeps Helmet's same-origin CORP", async () => {
+		server = await createServer({ logger: false });
+
+		const response = await server.inject({ method: "GET", url: "/api/health" });
+
+		expect(response.statusCode).toBe(200);
+		expect(response.headers["cross-origin-resource-policy"]).toBe("same-origin");
 	});
 });

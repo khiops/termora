@@ -19,6 +19,7 @@ import { registerSshKeyRoutes } from "./api/ssh-keys.js";
 import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
+import { getBootAssetToken, requestHasValidAssetToken } from "./asset-token.js";
 import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH, HUB_VERSION } from "./build-version.js";
 import { getConfigDir, getStateDir } from "./cli.js";
@@ -49,6 +50,13 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
  * starts and the actual port is known — call addCorsOrigins() from main.ts.
  */
 const _corsAllowedOrigins = new Set<string>();
+const PROTECTED_PUBLIC_ASSET_PREFIXES = ["/public/fonts", "/public/sounds", "/public/wallpapers"];
+
+function isProtectedPublicAssetPath(pathname: string): boolean {
+	return PROTECTED_PUBLIC_ASSET_PREFIXES.some(
+		(prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+	);
+}
 
 /**
  * Add one or more exact origin strings to the CORS allowlist.
@@ -95,6 +103,27 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			},
 		},
 		crossOriginEmbedderPolicy: false,
+	});
+
+	server.addHook("onSend", async (request, reply, payload) => {
+		const pathname = new URL(request.url, "http://localhost").pathname;
+		if (pathname.startsWith("/public/") && requestHasValidAssetToken(request)) {
+			reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+		}
+		return payload;
+	});
+
+	server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
+		const pathname = new URL(request.url, "http://localhost").pathname;
+		if (!isProtectedPublicAssetPath(pathname)) return;
+		if (requestHasValidAssetToken(request)) return;
+
+		return reply.code(403).send({
+			error: {
+				code: "ASSET_TOKEN_REQUIRED",
+				message: "Valid asset token required",
+			},
+		});
 	});
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)
@@ -165,8 +194,6 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
-			if (pathname === "/api/fonts" && request.method === "GET") return;
-			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -226,6 +253,11 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	// Health endpoint — unauthenticated, always available for debugging
 	server.get("/api/health", async () => {
 		return { status: "ok", version: HUB_VERSION, build: BUILD_HASH };
+	});
+
+	server.get("/api/assets/token", async () => {
+		const token = getBootAssetToken();
+		return { assetToken: token, token };
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided
