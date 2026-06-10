@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { namedPublicAssetUrl, publicAssetUrl, setAssetTokenForTests } from "./hub-url.js";
+import {
+	assetTokenReady,
+	namedPublicAssetUrl,
+	publicAssetUrl,
+	setAssetTokenForTests,
+} from "./hub-url.js";
 
 describe("public asset URL helpers", () => {
 	afterEach(() => {
@@ -33,5 +38,19 @@ describe("public asset URL helpers", () => {
 		expect(namedPublicAssetUrl("sounds", "bell.mp3")).toBe(
 			"http://localhost:4100/public/sounds/bell.mp3?asset_token=asset-token",
 		);
+	});
+
+	it("omits asset_token from URL when no token is set", () => {
+		// Token not set (default state after afterEach reset)
+		const url = namedPublicAssetUrl("wallpapers", "bg.png");
+		expect(url).not.toContain("asset_token");
+	});
+
+	it("assetTokenReady is false before setAssetTokenForTests and true after", () => {
+		expect(assetTokenReady.value).toBe(false);
+		setAssetTokenForTests("tok");
+		expect(assetTokenReady.value).toBe(true);
+		setAssetTokenForTests(null);
+		expect(assetTokenReady.value).toBe(false);
 	});
 });

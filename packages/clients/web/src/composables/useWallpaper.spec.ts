@@ -1,6 +1,6 @@
 import type { TerminalProfile } from "@termora/shared";
 import { afterEach, describe, expect, it } from "vitest";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 import { setAssetTokenForTests } from "../utils/hub-url.js";
 import { useWallpaper } from "./useWallpaper.js";
 
@@ -110,6 +110,22 @@ describe("useWallpaper", () => {
 
 			// Assert
 			expect(wallpaperStyle.value?.backgroundImage).toContain("asset_token=asset-test-token");
+		});
+
+		it("should re-run and include asset_token when token arrives after first render (pairing path)", async () => {
+			// Arrange — token NOT yet set (simulates pairing path: token arrives after boot)
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert — first render: no token in URL
+			expect(wallpaperStyle.value?.backgroundImage).not.toContain("asset_token=");
+
+			// Act — token arrives (e.g. after pairing flow completes)
+			setAssetTokenForTests("late-token");
+			await nextTick();
+
+			// Assert — computed must have re-run and now includes the token
+			expect(wallpaperStyle.value?.backgroundImage).toContain("asset_token=late-token");
 		});
 
 		it("should prefix wallpaper URL with the hub base URL in Tauri runtime", () => {

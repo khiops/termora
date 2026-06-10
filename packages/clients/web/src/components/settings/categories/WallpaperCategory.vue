@@ -53,7 +53,7 @@
 						@click="selectWallpaper(wp)"
 						>
 						<img
-							:src="namedPublicAssetUrl('wallpapers', wp)"
+							:src="wallpaperThumbnailSrc(wp)"
 							:alt="wp"
 							loading="lazy"
 						/>
@@ -154,7 +154,7 @@ import {
 	isTauriRuntime,
 	usePlatformInfo,
 } from "../../../composables/useWindowEffects.js";
-import { hubBaseUrl, namedPublicAssetUrl } from "../../../utils/hub-url.js";
+import { assetTokenReady, hubBaseUrl, namedPublicAssetUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";
 import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
@@ -186,6 +186,17 @@ const uploadError = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
 const platformInfo = usePlatformInfo();
 const runsInTauri = computed(() => isTauriRuntime());
+
+/**
+ * Builds a signed thumbnail src for a wallpaper filename.
+ * Reads `assetTokenReady` so Vue re-renders thumbnails when the asset token
+ * arrives (pairing path: token is null at first render, set after pairing).
+ */
+function wallpaperThumbnailSrc(filename: string): string {
+	// Establish reactive dependency on the token — forces re-render when it flips.
+	void assetTokenReady.value;
+	return namedPublicAssetUrl("wallpapers", filename);
+}
 
 // ─── Computed ──────────────────────────────────────────────────────────
 

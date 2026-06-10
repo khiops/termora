@@ -1,7 +1,7 @@
 import type { TerminalProfile } from "@termora/shared";
 import type { CSSProperties } from "vue";
 import { computed, type Ref, ref } from "vue";
-import { namedPublicAssetUrl } from "../utils/hub-url.js";
+import { assetTokenReady, namedPublicAssetUrl } from "../utils/hub-url.js";
 
 /**
  * Composable: reactive wallpaper style computation for a terminal pane.
@@ -13,6 +13,10 @@ export function useWallpaper(profile: Ref<TerminalProfile>) {
 	const cacheBust = ref(Date.now());
 
 	const wallpaperStyle = computed<CSSProperties | null>(() => {
+		// Track assetTokenReady so this computed re-runs when the token arrives
+		// (pairing path: token arrives after first render — without this read the
+		// computed has no reactive dependency on the token and stays stale).
+		void assetTokenReady.value;
 		if (!profile.value.wallpaper) return null;
 		const url = namedPublicAssetUrl("wallpapers", profile.value.wallpaper, {
 			t: cacheBust.value,

@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, nextTick, ref } from "vue";
 import type { ProfileChangeEvent } from "../stores/config.js";
+import { setAssetTokenForTests } from "../utils/hub-url.js";
 import type { PaneNode } from "./usePaneTree.js";
 
 function withSetup<T>(setup: () => T): { result: T; unmount: () => void } {
@@ -49,16 +50,27 @@ vi.mock("../stores/auth.js", () => ({
 }));
 
 vi.mock("../utils/hub-url.js", async () => {
+	const actual = await vi.importActual<typeof import("../utils/hub-url.js")>("../utils/hub-url.js");
 	const vue = await vi.importActual<typeof import("vue")>("vue");
 	return {
 		hubBaseUrl: () => "http://hub",
 		hubPortReady: vue.ref(true),
+		// Expose the real assetTokenReady and setAssetTokenForTests so reactivity
+		// tests can control the token while Vue tracks the dependency correctly.
+		assetTokenReady: actual.assetTokenReady,
+		setAssetTokenForTests: actual.setAssetTokenForTests,
 		namedPublicAssetUrl: (
 			kind: string,
 			filename: string,
 			params?: Record<string, string | number>,
 		) => {
+			// Reading assetTokenReady establishes a Vue reactive dependency so
+			// any computed that calls this function re-runs when the token arrives.
+			const hasToken = actual.assetTokenReady.value;
 			const url = new URL(`http://hub/public/${kind}/${encodeURIComponent(filename)}`);
+			if (hasToken) {
+				url.searchParams.set("asset_token", "mock-token");
+			}
 			if (params) {
 				for (const [key, value] of Object.entries(params)) {
 					url.searchParams.set(key, String(value));
@@ -96,6 +108,8 @@ describe("useActiveWallpaper", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+		// Reset the real asset token so tests don't bleed into each other.
+		setAssetTokenForTests(null);
 	});
 
 	it("resolves the window wallpaper from the active pane and updates when focus changes", async () => {
@@ -482,6 +496,50 @@ describe("useActiveWallpaper", () => {
 		expect(mappedUrl.searchParams.get("host_id")).toBe("host-correct");
 		expect(mappedUrl.searchParams.get("channel_id")).toBe("ch-late");
 		expect(result.wallpaperStyle.value?.backgroundImage).toContain("correct.jpg");
+
+		unmount();
+	});
+
+	it("updates window wallpaper URL when asset token arrives after first render (pairing path)", async () => {
+		// Arrange — no token at boot (pairing path)
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				terminal: {
+					resolved: {
+						...DEFAULT_PROFILE,
+						wallpaper: "scenic.jpg",
+						wallpaperBlur: 0,
+						wallpaperDim: 0,
+					},
+				},
+			}),
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { result, unmount } = withSetup(() => {
+			const activeTab = ref({ id: "tab-1" });
+			const channelHostMap = ref<ReadonlyMap<string, string>>(new Map([["ch-1", "host-1"]]));
+			const wallpaper = useActiveWallpaper({
+				activeTab,
+				getActiveChannelId: () => "ch-1",
+				channelHostMap,
+			});
+			return wallpaper;
+		});
+
+		await flushAsync();
+
+		// First render: profile resolved but token not yet set — URL has no asset_token
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("scenic.jpg");
+		expect(result.wallpaperStyle.value?.backgroundImage).not.toContain("asset_token=");
+
+		// Act — token arrives (e.g. pairing completes)
+		setAssetTokenForTests("arrived-token");
+		await nextTick();
+
+		// Assert — wallpaper URL must now include the token
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("asset_token=");
 
 		unmount();
 	});
