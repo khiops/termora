@@ -8,10 +8,26 @@
 			"bump-minor-pre-major": true,
 			"bump-patch-for-minor-pre-major": true,
 			"extra-files": [
-				"packages/shared/package.json",
-				"packages/hub/package.json",
-				"packages/clients/web/package.json",
-				"packages/clients/desktop/package.json",
+				{
+					"type": "json",
+					"path": "packages/shared/package.json",
+					"jsonpath": "$.version"
+				},
+				{
+					"type": "json",
+					"path": "packages/hub/package.json",
+					"jsonpath": "$.version"
+				},
+				{
+					"type": "json",
+					"path": "packages/clients/web/package.json",
+					"jsonpath": "$.version"
+				},
+				{
+					"type": "json",
+					"path": "packages/clients/desktop/package.json",
+					"jsonpath": "$.version"
+				},
 				{
 					"type": "toml",
 					"path": "crates/termora-agent/Cargo.toml",
@@ -31,11 +47,6 @@
 					"type": "toml",
 					"path": "packages/clients/desktop/src-tauri/Cargo.toml",
 					"jsonpath": "$.package.version"
-				},
-				{
-					"type": "generic",
-					"path": "packages/hub/src/build-version.ts",
-					"glob": false
 				}
 			]
 		}
