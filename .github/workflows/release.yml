@@ -9,6 +9,16 @@ on:
       tag:
         description: "Release tag (e.g. v0.2.0)"
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0)"
+        required: true
+        type: string
+      ref:
+        description: "Exact commit SHA to build (used when the tag does not exist yet, i.e. draft release)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -23,6 +33,8 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - id: filter
         run: |
           jq -c '{include:[.targets[]|select(.enabled and .agent)]}' \
@@ -41,26 +53,50 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
           fetch-depth: 0
       - name: Create or reuse release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
-          # Delete ALL draft releases for this tag (there can be duplicates
-          # from concurrent or retried runs).
-          DRAFT_IDS=$(gh api repos/${{ github.repository }}/releases \
-            --jq "[.[] | select(.tag_name==\"$TAG_NAME\" and .draft) | .id] | .[]")
-          for id in $DRAFT_IDS; do
-            echo "Deleting stale draft release id=$id"
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$id"
-          done
-          # Check if a published release already exists
-          if gh release view "$TAG_NAME" &>/dev/null; then
-            echo "Release $TAG_NAME already exists (published) — reusing"
+          # The build must match the tag: when the tag already exists
+          # (force-tag-creation), refuse to attach assets built from a
+          # different commit — GitHub ignores target_commitish once the
+          # tag exists, so failing loudly is the only safe option.
+          if TAG_SHA="$(git rev-parse -q --verify "refs/tags/$TAG_NAME^{commit}" 2>/dev/null)"; then
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
+              echo "::error::Tag $TAG_NAME points at $TAG_SHA but this build checked out $HEAD_SHA"
+              exit 1
+            fi
+          fi
+          # --paginate: with >100 releases, a single page can miss the
+          # tag's release and create a duplicate draft.
+          RELEASES_JSON="$(gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" | jq -s 'add')"
+          PUBLISHED_ID="$(printf '%s' "$RELEASES_JSON" | jq -r --arg tag "$TAG_NAME" '[.[] | select(.tag_name == $tag and (.draft | not)) | .id][0] // empty')"
+          if [ -n "$PUBLISHED_ID" ]; then
+            echo "Release $TAG_NAME already exists (published); reusing id=$PUBLISHED_ID"
           else
-            gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME"
+            DRAFT_IDS="$(printf '%s' "$RELEASES_JSON" | jq -r --arg tag "$TAG_NAME" '.[] | select(.tag_name == $tag and .draft) | .id')"
+            KEEP_DRAFT_ID=""
+            for id in $DRAFT_IDS; do
+              if [ -z "$KEEP_DRAFT_ID" ]; then
+                KEEP_DRAFT_ID="$id"
+                echo "Keeping draft release id=$id"
+              else
+                echo "Deleting duplicate draft release id=$id"
+                gh api -X DELETE "repos/${{ github.repository }}/releases/$id"
+              fi
+            done
+            if [ -n "$KEEP_DRAFT_ID" ]; then
+              # Reuse release-please's draft as-is: it carries the curated
+              # changelog body, and the tag-vs-HEAD guard above already
+              # rules out building a commit the tag does not point at.
+              echo "Reusing draft release $TAG_NAME id=$KEEP_DRAFT_ID"
+            else
+              gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME" --target "$(git rev-parse HEAD)"
+            fi
           fi
 
   build-web:
@@ -69,6 +105,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: pnpm/action-setup@v5
         with:
           version: 10
@@ -79,9 +117,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -F @termora/shared build
       - name: Build web
-        env:
-          TERMORA_BUILD_HASH: ${{ github.sha }}
-        run: ./scripts/build-web.sh
+        run: |
+          TERMORA_BUILD_HASH="$(git rev-parse HEAD)"
+          export TERMORA_BUILD_HASH
+          ./scripts/build-web.sh
       - name: Upload web assets to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,6 +139,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -151,6 +192,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: pnpm/action-setup@v5
         with:
           version: 10
@@ -175,16 +218,19 @@ jobs:
         env:
           TERMORA_SKIP_WEB: "true"
           TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
-          TERMORA_BUILD_HASH: ${{ github.sha }}
-        run: ./scripts/build-hub.sh
+        run: |
+          TERMORA_BUILD_HASH="$(git rev-parse HEAD)"
+          export TERMORA_BUILD_HASH
+          ./scripts/build-hub.sh
       - name: Build (pwsh)
         if: ${{ !matrix.shell_sh }}
         shell: pwsh
         env:
           TERMORA_SKIP_WEB: "true"
           TERMORA_TARGET_TRIPLE: ${{ matrix.triple }}
-          TERMORA_BUILD_HASH: ${{ github.sha }}
-        run: .\scripts\build-hub.ps1
+        run: |
+          $env:TERMORA_BUILD_HASH = (git rev-parse HEAD)
+          .\scripts\build-hub.ps1
       - name: Upload hub to release
         shell: bash
         env:
@@ -209,6 +255,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: pnpm/action-setup@v5
         with:
           version: 10
@@ -278,6 +326,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - name: Remove intermediate assets and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
