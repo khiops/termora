@@ -1,4 +1,9 @@
-import { type BackgroundMode, DEFAULT_PROFILE, type TerminalProfile } from "@termora/shared";
+import {
+	type BackgroundMode,
+	DEFAULT_PROFILE,
+	type TerminalProfile,
+	type WindowEffect,
+} from "@termora/shared";
 import { computed, onUnmounted, type Ref, ref, watch } from "vue";
 import { useResolvedProfile } from "./useResolvedProfile.js";
 import type { Tab } from "./useTabManager.js";
@@ -17,6 +22,13 @@ type WallpaperProfile = Required<
 >;
 type WindowBackgroundProfile = WallpaperProfile & {
 	backgroundMode: BackgroundMode;
+	windowEffect: WindowEffect;
+};
+
+/** What `useWindowEffects` reads to derive the desired native effect. */
+export type DisplayedEffectState = {
+	mode: BackgroundMode;
+	windowEffect: WindowEffect;
 };
 
 export function normalizeBackgroundMode(value: unknown): BackgroundMode {
@@ -54,6 +66,7 @@ function backgroundFields(profile: TerminalProfile): WindowBackgroundProfile {
 		backgroundMode: normalizeBackgroundMode(
 			profile.backgroundMode ?? DEFAULT_PROFILE.backgroundMode,
 		),
+		windowEffect: profile.windowEffect ?? DEFAULT_PROFILE.windowEffect ?? "none",
 	};
 }
 
@@ -182,6 +195,16 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 	}));
 	const backgroundMode = computed<BackgroundMode>(() => displayedBackground.value.backgroundMode);
 
+	/**
+	 * The displayed effect state — derived from `displayedBackground`, the same internal state
+	 * that drives the painted background (resolved, cached, or default-fallback).
+	 * `useWindowEffects` watches this ref instead of the raw resolved profile + boolean gates.
+	 */
+	const displayedEffectState = computed<DisplayedEffectState>(() => ({
+		mode: displayedBackground.value.backgroundMode,
+		windowEffect: displayedBackground.value.windowEffect,
+	}));
+
 	const { wallpaperStyle, dimStyle, refreshCache } = useWallpaper(wallpaperProfile);
 
 	return {
@@ -192,6 +215,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		resolvedForActivePane,
 		fallbackActive,
 		backgroundMode,
+		displayedEffectState,
 		wallpaperStyle,
 		dimStyle,
 		reload,

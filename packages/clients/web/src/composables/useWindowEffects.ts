@@ -1,6 +1,6 @@
-import type { TerminalProfile, WindowEffect } from "@termora/shared";
+import type { WindowEffect } from "@termora/shared";
 import { onMounted, onUnmounted, type Ref, ref, watch } from "vue";
-import { normalizeBackgroundMode } from "./useActiveWallpaper.js";
+import { type DisplayedEffectState, normalizeBackgroundMode } from "./useActiveWallpaper.js";
 
 export type WindowEffectsPlatform = "linux" | "windows" | "macos";
 
@@ -57,13 +57,13 @@ function isWindows11(platform: WindowEffectsPlatformInfo): boolean {
 }
 
 export function resolveWindowEffect(
-	profile: Pick<TerminalProfile, "backgroundMode" | "windowEffect">,
+	displayed: DisplayedEffectState,
 	currentPlatformInfo: WindowEffectsPlatformInfo | null,
 ): NativeWindowEffect | null {
-	if (normalizeBackgroundMode(profile.backgroundMode) !== "transparent") return null;
+	if (normalizeBackgroundMode(displayed.mode) !== "transparent") return null;
 	if (currentPlatformInfo === null) return null;
 
-	const effect = normalizeWindowEffect(profile.windowEffect);
+	const effect = normalizeWindowEffect(displayed.windowEffect);
 	if (effect === "none") return null;
 
 	if (currentPlatformInfo.os === "linux") return null;
@@ -148,9 +148,7 @@ async function getCurrentTauriWindowForEffects(): Promise<WindowEffectsWindow | 
 }
 
 export function useWindowEffects(options: {
-	profile: Ref<TerminalProfile>;
-	resolvedForActivePane: Ref<boolean>;
-	hasActiveScope: Ref<boolean>;
+	displayedEffectState: Ref<DisplayedEffectState>;
 	platformInfo: Ref<WindowEffectsPlatformInfo | null>;
 	getWindow?: WindowEffectsAdapter;
 }): void {
@@ -163,9 +161,6 @@ export function useWindowEffects(options: {
 
 	function runApply(): void {
 		if (applying || stopped) return;
-		// When unresolved but a scope exists (transient), defer until resolution.
-		// When there is no active scope (or fallback is active), proceed to clear.
-		if (!options.resolvedForActivePane.value && options.hasActiveScope.value) return;
 		if (desiredEffect === appliedEffect) return;
 
 		const runGeneration = generation;
@@ -176,8 +171,6 @@ export function useWindowEffects(options: {
 
 			const win = await getWindow();
 			if (win === null || stopped) return;
-			// Same guard inside the async body: allow clear-path when scope is gone.
-			if (!options.resolvedForActivePane.value && options.hasActiveScope.value) return;
 			if (runGeneration !== generation) return;
 
 			if (effectAtStart === null) {
@@ -193,30 +186,19 @@ export function useWindowEffects(options: {
 			})
 			.finally(() => {
 				applying = false;
-				if (
-					!stopped &&
-					(options.resolvedForActivePane.value || !options.hasActiveScope.value) &&
-					runGeneration !== generation
-				) {
+				if (!stopped && runGeneration !== generation) {
 					runApply();
 				}
 			});
 	}
 
 	const stop = watch(
-		[options.profile, options.resolvedForActivePane, options.hasActiveScope, options.platformInfo],
+		[options.displayedEffectState, options.platformInfo],
 		() => {
-			if (!options.resolvedForActivePane.value) {
-				generation += 1;
-				if (!options.hasActiveScope.value) {
-					// No active scope (pane closed / permanent fallback): desired effect is null.
-					desiredEffect = null;
-					runApply();
-				}
-				return;
-			}
-
-			const nextEffect = resolveWindowEffect(options.profile.value, options.platformInfo.value);
+			const nextEffect = resolveWindowEffect(
+				options.displayedEffectState.value,
+				options.platformInfo.value,
+			);
 			if (nextEffect === desiredEffect && nextEffect === appliedEffect) return;
 			desiredEffect = nextEffect;
 			generation += 1;

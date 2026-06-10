@@ -1,6 +1,7 @@
-import type { TerminalProfile } from "@termora/shared";
+import type { BackgroundMode, WindowEffect } from "@termora/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, nextTick, ref } from "vue";
+import type { DisplayedEffectState } from "./useActiveWallpaper.js";
 import {
 	resetWindowEffectsPlatformInfoForTests,
 	resolveWindowEffect,
@@ -42,6 +43,13 @@ function deferred(): { promise: Promise<void>; reject: () => void; resolve: () =
 	return { promise, reject, resolve };
 }
 
+function displayedState(
+	mode: BackgroundMode,
+	windowEffect: WindowEffect = "auto",
+): DisplayedEffectState {
+	return { mode, windowEffect };
+}
+
 describe("resolveWindowEffect", () => {
 	it("resolves auto and per-OS native effects", () => {
 		const win11: WindowEffectsPlatformInfo = { os: "windows", windowsBuild: 26_100 };
@@ -49,41 +57,25 @@ describe("resolveWindowEffect", () => {
 		const macos: WindowEffectsPlatformInfo = { os: "macos", windowsBuild: null };
 		const linux: WindowEffectsPlatformInfo = { os: "linux", windowsBuild: null };
 
-		expect(
-			resolveWindowEffect({ backgroundMode: "transparent", windowEffect: "auto" }, win11),
-		).toBe("mica");
-		expect(
-			resolveWindowEffect({ backgroundMode: "transparent", windowEffect: "auto" }, win10),
-		).toBe("blur");
-		expect(
-			resolveWindowEffect({ backgroundMode: "transparent", windowEffect: "auto" }, macos),
-		).toBe("underWindowBackground");
-		expect(
-			resolveWindowEffect({ backgroundMode: "transparent", windowEffect: "auto" }, linux),
-		).toBeNull();
+		expect(resolveWindowEffect(displayedState("transparent", "auto"), win11)).toBe("mica");
+		expect(resolveWindowEffect(displayedState("transparent", "auto"), win10)).toBe("blur");
+		expect(resolveWindowEffect(displayedState("transparent", "auto"), macos)).toBe(
+			"underWindowBackground",
+		);
+		expect(resolveWindowEffect(displayedState("transparent", "auto"), linux)).toBeNull();
 	});
 
 	it("degrades invalid combinations and unknown values to none", () => {
 		const win10: WindowEffectsPlatformInfo = { os: "windows", windowsBuild: 19_045 };
 		const win11: WindowEffectsPlatformInfo = { os: "windows", windowsBuild: 26_100 };
 
+		expect(resolveWindowEffect(displayedState("transparent", "mica"), win10)).toBeNull();
+		expect(resolveWindowEffect(displayedState("solid", "auto"), win11)).toBeNull();
 		expect(
-			resolveWindowEffect({ backgroundMode: "transparent", windowEffect: "mica" }, win10),
+			resolveWindowEffect({ mode: "transparent", windowEffect: "shimmer" as WindowEffect }, win11),
 		).toBeNull();
 		expect(
-			resolveWindowEffect({ backgroundMode: "solid", windowEffect: "auto" }, win11),
-		).toBeNull();
-		expect(
-			resolveWindowEffect(
-				{ backgroundMode: "transparent", windowEffect: "shimmer" } as unknown as TerminalProfile,
-				win11,
-			),
-		).toBeNull();
-		expect(
-			resolveWindowEffect(
-				{ backgroundMode: "garbage", windowEffect: "auto" } as unknown as TerminalProfile,
-				win11,
-			),
+			resolveWindowEffect({ mode: "garbage" as BackgroundMode, windowEffect: "auto" }, win11),
 		).toBeNull();
 	});
 });
@@ -94,10 +86,11 @@ describe("useWindowEffects", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("does not apply or clear effects before the active scope resolves", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(false);
-		const hasActiveScope = ref(true);
+	// ── Proof test 1: round-5 repro — cached scope short-circuits fallback timer ──────────────────
+
+	it("clears mica immediately when switching to a cached solid scope (round-5 repro: no fallback timer needed)", async () => {
+		// Scope A: transparent+mica applied.
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "auto"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "windows",
 			windowsBuild: 26_100,
@@ -114,28 +107,148 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow: async () => win,
 			}),
 		);
 		await flushAsync();
+		expect(calls).toEqual(["set:mica"]);
 
-		expect(calls).toEqual([]);
-
-		resolvedForActivePane.value = true;
+		// Switch to scope B: the cache displays its solid background immediately
+		// (cascade fetch for B never completes — simulated by never resolving).
+		// useActiveWallpaper already shows B's solid cached state, so displayedEffectState
+		// reflects that immediately — no fallback timer needed, no IPC race.
+		displayed.value = displayedState("solid", "auto");
 		await flushAsync();
 
+		// The contract: displayed solid → desired null → clearEffects called.
+		expect(calls).toEqual(["set:mica", "clear"]);
+		unmount();
+	});
+
+	// ── Proof test 2: last pane closed ────────────────────────────────────────────────────────────
+
+	it("clears an applied effect when the last pane closes (null/default displayed state)", async () => {
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "auto"));
+		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
+			os: "windows",
+			windowsBuild: 26_100,
+		});
+		const calls: string[] = [];
+		const win: WindowEffectsWindow = {
+			setEffects: vi.fn(async ({ effects }) => {
+				calls.push(`set:${effects[0]}`);
+			}),
+			clearEffects: vi.fn(async () => {
+				calls.push("clear");
+			}),
+		};
+
+		const { unmount } = withSetup(() =>
+			useWindowEffects({
+				displayedEffectState: displayed,
+				platformInfo,
+				getWindow: async () => win,
+			}),
+		);
+		await flushAsync();
+		expect(calls).toEqual(["set:mica"]);
+
+		// Last pane closed: useActiveWallpaper reverts to DEFAULT_PROFILE (backgroundMode "image").
+		displayed.value = displayedState("image", "auto");
+		await flushAsync();
+
+		expect(calls).toEqual(["set:mica", "clear"]);
+		unmount();
+	});
+
+	// ── Proof test 3: permanent-unresolved with fallback display ──────────────────────────────────
+
+	it("clears when the fallback timer fires and useActiveWallpaper shows the default (solid/image) state", async () => {
+		// Start with mica applied for a transparent scope.
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "mica"));
+		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
+			os: "windows",
+			windowsBuild: 26_100,
+		});
+		const calls: string[] = [];
+		const win: WindowEffectsWindow = {
+			setEffects: vi.fn(async ({ effects }) => {
+				calls.push(`set:${effects[0]}`);
+			}),
+			clearEffects: vi.fn(async () => {
+				calls.push("clear");
+			}),
+		};
+
+		const { unmount } = withSetup(() =>
+			useWindowEffects({
+				displayedEffectState: displayed,
+				platformInfo,
+				getWindow: async () => win,
+			}),
+		);
+		await flushAsync();
+		expect(calls).toEqual(["set:mica"]);
+
+		// Fallback timer fires: useActiveWallpaper switches displayedBackground to DEFAULT_PROFILE
+		// which has backgroundMode "image" — the displayed state changes to non-transparent.
+		displayed.value = displayedState("image", "mica");
+		await flushAsync();
+
+		expect(calls).toEqual(["set:mica", "clear"]);
+		unmount();
+	});
+
+	// ── Proof test 4: transient switch — no spurious clear/re-apply (anti-flicker) ────────────────
+
+	it("does not spuriously clear/re-apply during a scope switch that stays transparent+mica", async () => {
+		// Both scope A and B use transparent+mica. During the switch, useActiveWallpaper shows
+		// cached B immediately (also transparent+mica) → displayedEffectState never changes →
+		// no intermediate IPC.
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "mica"));
+		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
+			os: "windows",
+			windowsBuild: 26_100,
+		});
+		const calls: string[] = [];
+		const win: WindowEffectsWindow = {
+			setEffects: vi.fn(async ({ effects }) => {
+				calls.push(`set:${effects[0]}`);
+			}),
+			clearEffects: vi.fn(async () => {
+				calls.push("clear");
+			}),
+		};
+
+		const { unmount } = withSetup(() =>
+			useWindowEffects({
+				displayedEffectState: displayed,
+				platformInfo,
+				getWindow: async () => win,
+			}),
+		);
+		await flushAsync();
+		expect(calls).toEqual(["set:mica"]);
+
+		// Scope switch: displayed state is identical (cached B is also transparent+mica).
+		// Anti-flicker falls out of the contract: desired hasn't changed → no IPC.
+		displayed.value = { ...displayedState("transparent", "mica") };
+		await flushAsync();
+
+		// No intermediate clear or re-set: the desired effect matches the applied effect.
 		expect(calls).toEqual(["set:mica"]);
 		unmount();
 	});
 
-	it("does not apply a pending effect after the active scope becomes unresolved", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
+	// ── Preserved coverage (S7/S8 per-OS matrix — pure function, input adapted) ───────────────────
+
+	it("discards a stale pending set when the displayed state becomes non-transparent mid-flight", async () => {
+		// Generation token ensures the stale async body aborts when desired changes before
+		// the window handle resolves. Because the set never completed, appliedEffect stays
+		// null, so no clearEffects call is needed afterward.
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "auto"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "windows",
 			windowsBuild: 26_100,
@@ -164,34 +277,32 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow,
 			}),
 		);
 		await flushAsync();
+		// Async body is pending (getWindow #1 not yet resolved).
 
-		resolvedForActivePane.value = false;
+		// displayedEffectState changes to solid → desiredEffect = null, generation bumped.
+		displayed.value = displayedState("solid", "auto");
 		await flushAsync();
+		// Resolve the stale window handle — async body sees runGeneration !== generation → aborts.
 		resolveWindow(win);
 		await flushAsync();
-
+		// finally reconciliation: appliedEffect is null, desiredEffect is null → no IPC.
 		expect(calls).toEqual([]);
 
-		resolvedForActivePane.value = true;
+		// Subsequent transparency transition triggers correctly.
+		displayed.value = displayedState("transparent", "mica");
 		await flushAsync();
-
 		expect(calls).toEqual(["set:mica"]);
-		expect(getWindow).toHaveBeenCalledTimes(2);
 		unmount();
 	});
 
 	it("re-applies the latest desired effect after a stale IPC mutates native state", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "mica" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "mica"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "windows",
 			windowsBuild: 26_100,
@@ -216,9 +327,7 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow: async () => win,
 			}),
@@ -229,11 +338,11 @@ describe("useWindowEffects", () => {
 		setDeferreds[0]?.resolve();
 		await flushAsync();
 
-		profile.value = { backgroundMode: "image", windowEffect: "none" };
+		displayed.value = displayedState("image", "none");
 		await flushAsync();
 		expect(calls).toEqual(["set:mica", "clear"]);
 
-		profile.value = { backgroundMode: "transparent", windowEffect: "mica" };
+		displayed.value = displayedState("transparent", "mica");
 		await flushAsync();
 		expect(calls).toEqual(["set:mica", "clear"]);
 
@@ -247,9 +356,7 @@ describe("useWindowEffects", () => {
 	});
 
 	it("retries the same desired effect after the window handle becomes available", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "mica" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "mica"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "windows",
 			windowsBuild: 26_100,
@@ -267,9 +374,7 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow,
 			}),
@@ -277,7 +382,7 @@ describe("useWindowEffects", () => {
 		await flushAsync();
 		expect(calls).toEqual([]);
 
-		profile.value = { backgroundMode: "transparent", windowEffect: "mica" };
+		displayed.value = { ...displayedState("transparent", "mica") };
 		await flushAsync();
 
 		expect(calls).toEqual(["set:mica"]);
@@ -287,9 +392,7 @@ describe("useWindowEffects", () => {
 
 	it("retries clearing the same desired no-effect state after a clear failure", async () => {
 		vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "mica" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "mica"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "windows",
 			windowsBuild: 26_100,
@@ -310,9 +413,7 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow: async () => win,
 			}),
@@ -320,14 +421,14 @@ describe("useWindowEffects", () => {
 		await flushAsync();
 		expect(calls).toEqual(["set:mica"]);
 
-		profile.value = { backgroundMode: "image", windowEffect: "none" };
+		displayed.value = displayedState("image", "none");
 		await flushAsync();
 		expect(calls).toEqual(["set:mica", "clear"]);
 
 		clearDeferreds[0]?.reject();
 		await flushAsync();
 
-		profile.value = { backgroundMode: "image", windowEffect: "none" };
+		displayed.value = { ...displayedState("image", "none") };
 		await flushAsync();
 
 		expect(calls).toEqual(["set:mica", "clear", "clear"]);
@@ -337,9 +438,7 @@ describe("useWindowEffects", () => {
 	});
 
 	it("does not call into Tauri for platform paths that never applied an effect", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
+		const displayed = ref<DisplayedEffectState>(displayedState("transparent", "auto"));
 		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
 			os: "linux",
 			windowsBuild: null,
@@ -348,143 +447,17 @@ describe("useWindowEffects", () => {
 
 		const { unmount } = withSetup(() =>
 			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
+				displayedEffectState: displayed,
 				platformInfo,
 				getWindow,
 			}),
 		);
 		await flushAsync();
 
-		profile.value = { backgroundMode: "image", windowEffect: "none" };
+		displayed.value = displayedState("image", "none");
 		await flushAsync();
 
 		expect(getWindow).not.toHaveBeenCalled();
-		unmount();
-	});
-
-	// --- Proof tests for the no-active-scope clear bug fix ---
-
-	it("clears an applied effect when hasActiveScope drops to false (pane closed)", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
-		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
-			os: "windows",
-			windowsBuild: 26_100,
-		});
-		const calls: string[] = [];
-		const win: WindowEffectsWindow = {
-			setEffects: vi.fn(async ({ effects }) => {
-				calls.push(`set:${effects[0]}`);
-			}),
-			clearEffects: vi.fn(async () => {
-				calls.push("clear");
-			}),
-		};
-
-		const { unmount } = withSetup(() =>
-			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
-				platformInfo,
-				getWindow: async () => win,
-			}),
-		);
-		await flushAsync();
-		expect(calls).toEqual(["set:mica"]);
-
-		// Simulate closing the last pane / no active channel.
-		resolvedForActivePane.value = false;
-		hasActiveScope.value = false;
-		await flushAsync();
-
-		expect(calls).toEqual(["set:mica", "clear"]);
-		unmount();
-	});
-
-	it("clears an applied effect when the unresolved-fallback fires (permanent-unresolved scope)", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
-		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
-			os: "windows",
-			windowsBuild: 26_100,
-		});
-		const calls: string[] = [];
-		const win: WindowEffectsWindow = {
-			setEffects: vi.fn(async ({ effects }) => {
-				calls.push(`set:${effects[0]}`);
-			}),
-			clearEffects: vi.fn(async () => {
-				calls.push("clear");
-			}),
-		};
-
-		const { unmount } = withSetup(() =>
-			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
-				platformInfo,
-				getWindow: async () => win,
-			}),
-		);
-		await flushAsync();
-		expect(calls).toEqual(["set:mica"]);
-
-		// Simulate the unresolved-fallback timer firing: scope exists but profile never resolved.
-		resolvedForActivePane.value = false;
-		hasActiveScope.value = false; // fallbackActive=true → windowHasActiveScope=false
-		await flushAsync();
-
-		expect(calls).toEqual(["set:mica", "clear"]);
-		unmount();
-	});
-
-	it("does not clear an applied effect during transient unresolved (anti-flicker: scope switches then resolves)", async () => {
-		const profile = ref<TerminalProfile>({ backgroundMode: "transparent", windowEffect: "auto" });
-		const resolvedForActivePane = ref(true);
-		const hasActiveScope = ref(true);
-		const platformInfo = ref<WindowEffectsPlatformInfo | null>({
-			os: "windows",
-			windowsBuild: 26_100,
-		});
-		const calls: string[] = [];
-		const win: WindowEffectsWindow = {
-			setEffects: vi.fn(async ({ effects }) => {
-				calls.push(`set:${effects[0]}`);
-			}),
-			clearEffects: vi.fn(async () => {
-				calls.push("clear");
-			}),
-		};
-
-		const { unmount } = withSetup(() =>
-			useWindowEffects({
-				profile,
-				resolvedForActivePane,
-				hasActiveScope,
-				platformInfo,
-				getWindow: async () => win,
-			}),
-		);
-		await flushAsync();
-		expect(calls).toEqual(["set:mica"]);
-
-		// Scope switches: unresolved but hasActiveScope stays true (transient).
-		resolvedForActivePane.value = false;
-		// hasActiveScope remains true — no clear should happen.
-		await flushAsync();
-		expect(calls).toEqual(["set:mica"]); // no clearEffects called
-
-		// Profile resolves shortly after.
-		resolvedForActivePane.value = true;
-		await flushAsync();
-		// Effect same as desired — no extra set/clear.
-		expect(calls).toEqual(["set:mica"]);
 		unmount();
 	});
 });

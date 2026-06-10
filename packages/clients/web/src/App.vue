@@ -440,23 +440,15 @@ const {
 	wallpaperStyle: windowWallpaperStyle,
 	dimStyle: windowWallpaperDimStyle,
 	backgroundMode: windowBackgroundMode,
-	resolvedProfile: windowResolvedProfile,
-	resolvedForActivePane: windowResolvedForActivePane,
-	activeChannelId: windowActiveChannelId,
-	fallbackActive: windowFallbackActive,
+	displayedEffectState: windowDisplayedEffectState,
 } = useActiveWallpaper({
 	activeTab: layout.activeTab,
 	getActiveChannelId: layout.getActiveChannelId,
 	channelHostMap: toRef(channelsStore, 'channelHostMap'),
 });
 const windowPlatformInfo = usePlatformInfo();
-const windowHasActiveScope = computed(
-	() => windowActiveChannelId.value !== null && !windowFallbackActive.value,
-);
 useWindowEffects({
-	profile: windowResolvedProfile,
-	resolvedForActivePane: windowResolvedForActivePane,
-	hasActiveScope: windowHasActiveScope,
+	displayedEffectState: windowDisplayedEffectState,
 	platformInfo: windowPlatformInfo,
 });
 const windowUsesTransparentBackground = computed(() =>

@@ -63,7 +63,7 @@
 						@click="selectWallpaper(wp)"
 					>
 						<img
-							:src="`/public/wallpapers/${encodeURIComponent(wp)}`"
+							:src="`${hubBaseUrl()}/public/wallpapers/${encodeURIComponent(wp)}`"
 							:alt="wp"
 							loading="lazy"
 						/>
