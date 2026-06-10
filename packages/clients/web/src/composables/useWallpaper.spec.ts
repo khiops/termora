@@ -1,5 +1,5 @@
 import type { TerminalProfile } from "@termora/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ref } from "vue";
 import { useWallpaper } from "./useWallpaper.js";
 
@@ -20,6 +20,10 @@ function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile 
 }
 
 describe("useWallpaper", () => {
+	afterEach(() => {
+		Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+	});
+
 	describe("wallpaperStyle", () => {
 		it("should return null when wallpaper is empty", () => {
 			// Arrange
@@ -92,6 +96,23 @@ describe("useWallpaper", () => {
 
 			// Assert
 			expect(wallpaperStyle.value?.backgroundImage).toMatch(/\?t=\d+/);
+		});
+
+		it("should prefix wallpaper URL with the hub base URL in Tauri runtime", () => {
+			// Arrange
+			Object.defineProperty(window, "__TAURI_INTERNALS__", {
+				value: {},
+				configurable: true,
+			});
+			const profile = ref(makeProfile({ wallpaper: "desktop image.jpg" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toContain(
+				`url(http://localhost:4100/public/wallpapers/${encodeURIComponent("desktop image.jpg")}`,
+			);
 		});
 	});
 

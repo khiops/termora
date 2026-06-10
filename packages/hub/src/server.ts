@@ -1,3 +1,4 @@
+import type { ServerResponse } from "node:http";
 import * as path from "node:path";
 import cors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
@@ -49,6 +50,11 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
  * starts and the actual port is known — call addCorsOrigins() from main.ts.
  */
 const _corsAllowedOrigins = new Set<string>();
+const PUBLIC_ASSET_CORP = "cross-origin";
+
+function setPublicAssetHeaders(res: ServerResponse): void {
+	res.setHeader("Cross-Origin-Resource-Policy", PUBLIC_ASSET_CORP);
+}
 
 /**
  * Add one or more exact origin strings to the CORS allowlist.
@@ -395,6 +401,7 @@ async function registerUserFonts(server: FastifyInstance, configDir: string): Pr
 		root: fontsDir,
 		prefix: "/public/fonts/",
 		decorateReply: false, // required for multiple @fastify/static plugins
+		setHeaders: setPublicAssetHeaders,
 	});
 
 	server.log.info({ fontsDir }, "serving user fonts from config dir");
@@ -418,6 +425,7 @@ async function registerUserSounds(server: FastifyInstance, configDir: string): P
 		root: soundsDir,
 		prefix: "/public/sounds/",
 		decorateReply: false, // required for multiple @fastify/static plugins
+		setHeaders: setPublicAssetHeaders,
 	});
 
 	server.log.info({ soundsDir }, "serving user sounds from config dir");
@@ -439,6 +447,7 @@ async function registerUserWallpapers(server: FastifyInstance, configDir: string
 		prefix: "/public/wallpapers/",
 		decorateReply: false,
 		setHeaders: (res) => {
+			setPublicAssetHeaders(res);
 			res.setHeader("X-Content-Type-Options", "nosniff");
 		},
 	});
@@ -448,7 +457,7 @@ async function registerUserWallpapers(server: FastifyInstance, configDir: string
 
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
 	const { existsSync } = await import("node:fs");
-	const { join, dirname } = await import("node:path");
+	const { join, dirname, relative } = await import("node:path");
 	const { fileURLToPath } = await import("node:url");
 
 	// Resolve static/ relative to this source file:
@@ -470,6 +479,12 @@ async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
 	await server.register(fastifyStatic, {
 		root: staticDir,
 		prefix: "/",
+		setHeaders: (res, filePath) => {
+			const staticRelativePath = relative(staticDir, filePath).replaceAll("\\", "/");
+			if (staticRelativePath.startsWith("public/")) {
+				setPublicAssetHeaders(res);
+			}
+		},
 		// SPA fallback: serve index.html for any path not matching a real file
 		// so that Vue Router client-side routes work after a hard refresh.
 		wildcard: false,

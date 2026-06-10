@@ -1,6 +1,7 @@
 import type { TerminalProfile } from "@termora/shared";
 import type { CSSProperties } from "vue";
 import { computed, type Ref, ref } from "vue";
+import { hubBaseUrl } from "../utils/hub-url.js";
 
 /**
  * Composable: reactive wallpaper style computation for a terminal pane.
@@ -13,7 +14,7 @@ export function useWallpaper(profile: Ref<TerminalProfile>) {
 
 	const wallpaperStyle = computed<CSSProperties | null>(() => {
 		if (!profile.value.wallpaper) return null;
-		const url = `/public/wallpapers/${encodeURIComponent(profile.value.wallpaper)}?t=${cacheBust.value}`;
+		const url = `${hubBaseUrl()}/public/wallpapers/${encodeURIComponent(profile.value.wallpaper)}?t=${cacheBust.value}`;
 		const blur = profile.value.wallpaperBlur ?? 0;
 		return {
 			backgroundImage: `url(${url})`,
