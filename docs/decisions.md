@@ -4,6 +4,20 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DESKTOP-TRANSLUCENCY — Background modes + native window effects (#58, 2026-06-10)
+
+- Three explicit background modes (image / solid / transparent) as per-scope `TerminalProfile` fields resolved through the 4-layer cascade — replaces the implicit "wallpaper set or not" model. Default `image`: with an empty wallpaper it renders solid, reproducing the pre-#58 states with zero profile migration.
+- Desktop window is created `transparent: true` permanently on ALL OS (Tauri: transparency is creation-time-only); CSS paints opacity in non-transparent modes, so mode switches are instant and there is a single code path. Trade-off accepted: ~8× GPU power on macOS even for opaque content (tauri-apps/tauri#15471, open upstream) — macOS is not a tested distribution target; the mitigation (macOS-only restart-gated opt-out) is designed in `docs/briefs/desktop-translucency.md` and built only if real users report battery issues or upstream fixes the compositing path.
+- `macos-private-api` feature accepted (required for macOS transparency) — App Store distribution is excluded by design (GitHub Releases only).
+- Window effects (mica/blur/acrylic/vibrancy) are runtime-settable and follow the active pane's scope like the window-wide wallpaper; `auto` resolves per OS + Windows build (Win11→mica, Win10→blur — never acrylic by default, documented lag); Linux gets no effects (compositor-dependent alpha only). Unknown mode/effect values degrade at the render boundary (mode→image, effect→none) — there is deliberately no value validation in the hub resolve path.
+- OS detection via `tauri-plugin-os` (canonical upstream surface) rather than a hand-rolled Rust command or registry-reading crate.
+- Async effect IPC is latest-wins with reconciliation: a generation token + mandatory re-apply of the desired state after any stale completion (ignoring stale promise results is insufficient — the IPC has already mutated native state), clearEffects only when an effect was actually applied, and no apply while the active scope's cascade is unresolved.
+- REST bodies for profile writes are camelCase only; snake_case exists solely in config.toml (algorithmic conversion at the file boundary — no lookup table to maintain).
+- Settings UI: the mode selector is visible in ALL runtimes (per-scope server-side setting honored by desktop clients; "(desktop only)" hint in browsers); the effect picker is Tauri-only. The "None" wallpaper button keeps clearing only the wallpaper field — mode is owned by the selector.
+- Capability hygiene: `core:window:allow-set-effects` + `os:default` granted minimally to the main window, locked by a config regression test.
+
+---
+
 ## MULTICLIENT-SYNC — Multi-client channel sync & SSH reconnect (2026-06-05)
 
 - CHANNEL_CREATED broadcast: new channels are announced to all connected clients via a CHANNEL_CREATED message carrying the full channel payload (status live, resolved display title) so observers add the channel without a manual refresh; the web client filters by active host and dedupes by channel id.
