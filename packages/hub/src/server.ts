@@ -1,4 +1,3 @@
-import type { ServerResponse } from "node:http";
 import * as path from "node:path";
 import cors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
@@ -52,7 +51,9 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
 const _corsAllowedOrigins = new Set<string>();
 const PUBLIC_ASSET_CORP = "cross-origin";
 
-function setPublicAssetHeaders(res: ServerResponse): void {
+function setPublicAssetHeaders(res: {
+	setHeader(name: string, value: number | string | readonly string[]): unknown;
+}): void {
 	res.setHeader("Cross-Origin-Resource-Policy", PUBLIC_ASSET_CORP);
 }
 
