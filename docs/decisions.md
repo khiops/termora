@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## RELEASE-AUTO-CHAIN — merging the release PR is the whole release (2026-06-11)
+
+- The multi-OS build chains directly off the release-please job via `workflow_call` (`release-build` job gated on `release_created`), in the same workflow run. Tag-triggered chaining is impossible by design: release-please pushes its tag with the default `GITHUB_TOKEN`, and GITHUB_TOKEN-created events never trigger workflows. The `push: tags` and `workflow_dispatch` triggers remain as recovery paths for re-building an existing tag.
+- Releases are draft-until-built: release-please creates a DRAFT release (`draft: true`), assets attach to it, and `publish-release` flips it public only when every build succeeded — a mid-build failure can no longer leave a public release with partial assets. `force-tag-creation: true` is required with drafts: GitHub defers tag creation for draft releases, which would otherwise break release-please's next version computation.
+- The chained caller passes the exact commit SHA (`ref` input) alongside the tag; all checkouts pin to `ref || tag`. `create-release` fails loudly if the tag exists but points at a different commit than the checkout — GitHub ignores `target_commitish` once a tag exists, so retargeting a release is impossible and refusing to build is the only safe behavior.
+- Build hashes are stamped from `git rev-parse HEAD` of the checkout, never from the event SHA (wrong under dispatch on an older tag).
+- release-please's draft (with its curated changelog body) is reused, never deleted/recreated; only duplicate drafts are pruned. Release listing uses `gh api --paginate` (a single 100-entry page would eventually miss the tag's release and duplicate the draft).
+
+---
+
 ## RELEASE-VERSION-SYNC — release-please owns every version surface (#64, 2026-06-10)
 
 - The release-please action is invoked in pure manifest mode (`manifest-file` + `config-file` only). `release-type` lives in the config's package block, never as an action input — as an input it selects the simple mode and silently ignores the config's `extra-files` (this is why three releases shipped without propagating versions).
