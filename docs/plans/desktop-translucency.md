@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: desktop
   type: specification
   created: 2026-06-10
