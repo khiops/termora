@@ -6,10 +6,18 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+	buildDaemonSpawnPlan,
+	type ChildExitState,
+	type DaemonReadyResult,
+	openDaemonLog,
+	readDaemonLogTail,
+	waitForDaemonReady,
+} from "./daemon-launch.js";
+import { detectSea } from "./sea-addon-loader.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -246,20 +254,79 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	const port = args.port ?? 4100;
 
 	if (args.daemon) {
-		// Resolve the compiled main.js sibling path
-		const mainPath = fileURLToPath(new URL("./main.js", import.meta.url));
-		const child = spawn(process.execPath, [mainPath], {
+		const stateDir = getStateDir();
+		mkdirSync(stateDir, { recursive: true });
+		const logPath = join(stateDir, "hub-daemon.log");
+		const logFd = openDaemonLog(logPath);
+		const plan = buildDaemonSpawnPlan({
+			sea: detectSea(),
+			port,
+			...(args.open ? { open: true } : {}),
+			moduleUrl: import.meta.url,
+		});
+		let childExit: ChildExitState = { exited: false };
+		const child = spawn(process.execPath, plan.args, {
 			detached: true,
-			stdio: "ignore",
+			stdio: ["ignore", logFd, logFd],
 			env: {
 				...process.env,
-				TERMORA_PORT: String(port),
-				...(args.open ? { TERMORA_OPEN: "1" } : {}),
+				...plan.env,
 			},
 		});
+		child.on("exit", (code, signal) => {
+			childExit = { exited: true, code, signal };
+		});
+		child.on("error", (err) => {
+			childExit = { exited: true, code: null, signal: null, errorMessage: err.message };
+		});
 		child.unref();
-		console.log(`Hub starting as daemon (pid ${child.pid ?? "?"} on port ${port})`);
-		return;
+		if (child.pid === undefined) {
+			console.error("Failed to start daemon process: child pid was not reported");
+			closeSync(logFd);
+			process.exit(1);
+		}
+		const childPid = child.pid;
+
+		let result: DaemonReadyResult;
+		try {
+			result = await waitForDaemonReady({
+				childPid,
+				loadRuntime,
+				fetchHealth: async (runtimePort) => {
+					// Abort a stalled probe so the socket is not left hanging open.
+					const res = await fetch(`http://127.0.0.1:${runtimePort}/api/health`, {
+						signal: AbortSignal.timeout(2000),
+					});
+					if (!res.ok) {
+						throw new Error(`Health check failed with HTTP ${res.status}`);
+					}
+					return res.json();
+				},
+				getChildExit: () => childExit,
+				readLogTail: () => readDaemonLogTail(logPath),
+				killChild: () => {
+					try {
+						process.kill(childPid, "SIGTERM");
+					} catch {
+						// Already gone — nothing left to terminate.
+					}
+				},
+				now: () => Date.now(),
+				sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+			});
+		} catch (err) {
+			closeSync(logFd);
+			throw err;
+		}
+
+		closeSync(logFd);
+		if (result.ok) {
+			console.log(`Hub daemon ready (pid ${result.pid} on port ${result.port})`);
+			process.exit(0);
+		}
+
+		console.error(result.message);
+		process.exit(1);
 	}
 
 	// Foreground — dynamic import keeps heavy deps out of parse-time module graph
