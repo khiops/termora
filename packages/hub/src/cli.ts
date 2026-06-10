@@ -287,6 +287,8 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 		}
 		const childPid = child.pid;
 
+		// Single source of truth for both probe bounds (socket abort + race).
+		const healthTimeoutMs = 2000;
 		let result: DaemonReadyResult;
 		try {
 			result = await waitForDaemonReady({
@@ -295,7 +297,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 				fetchHealth: async (runtimePort) => {
 					// Abort a stalled probe so the socket is not left hanging open.
 					const res = await fetch(`http://127.0.0.1:${runtimePort}/api/health`, {
-						signal: AbortSignal.timeout(2000),
+						signal: AbortSignal.timeout(healthTimeoutMs),
 					});
 					if (!res.ok) {
 						throw new Error(`Health check failed with HTTP ${res.status}`);
@@ -304,15 +306,14 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 				},
 				getChildExit: () => childExit,
 				readLogTail: () => readDaemonLogTail(logPath),
+				// Kill via the ChildProcess handle: a raw process.kill(pid) could
+				// hit an unrelated process if the OS reused the pid.
 				killChild: () => {
-					try {
-						process.kill(childPid, "SIGTERM");
-					} catch {
-						// Already gone — nothing left to terminate.
-					}
+					child.kill("SIGTERM");
 				},
 				now: () => Date.now(),
 				sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+				healthTimeoutMs,
 			});
 		} catch (err) {
 			closeSync(logFd);
