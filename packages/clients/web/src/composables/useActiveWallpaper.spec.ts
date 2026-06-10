@@ -58,6 +58,7 @@ vi.mock("../utils/hub-url.js", async () => {
 
 describe("useActiveWallpaper", () => {
 	let useActiveWallpaper: typeof import("./useActiveWallpaper.js").useActiveWallpaper;
+	let shouldUseTransparentBackground: typeof import("./useActiveWallpaper.js").shouldUseTransparentBackground;
 	let unresolvedWallpaperFallbackMs: number;
 	let usePaneTree: typeof import("./usePaneTree.js").usePaneTree;
 	let useConfigStore: () => ReturnType<typeof import("../stores/config.js").useConfigStore> & {
@@ -71,6 +72,7 @@ describe("useActiveWallpaper", () => {
 		const paneTreeMod = await import("./usePaneTree.js");
 		const configMod = await import("../stores/config.js");
 		useActiveWallpaper = activeWallpaperMod.useActiveWallpaper;
+		shouldUseTransparentBackground = activeWallpaperMod.shouldUseTransparentBackground;
 		unresolvedWallpaperFallbackMs = activeWallpaperMod.UNRESOLVED_WALLPAPER_FALLBACK_MS;
 		usePaneTree = paneTreeMod.usePaneTree;
 		// biome-ignore lint/suspicious/noExplicitAny: test helper cast
@@ -182,6 +184,97 @@ describe("useActiveWallpaper", () => {
 
 		expect(result.activeChannelId.value).toBeNull();
 		expect(result.wallpaperStyle.value).toBeNull();
+
+		unmount();
+	});
+
+	it("applies background mode rendering decisions and treats unknown modes as image", async () => {
+		const profilesByChannel = new Map<string, Record<string, unknown>>([
+			["ch-image", { backgroundMode: "image", wallpaper: "image.jpg" }],
+			["ch-solid", { backgroundMode: "solid", wallpaper: "hidden-solid.jpg" }],
+			["ch-transparent", { backgroundMode: "transparent", wallpaper: "hidden-glass.jpg" }],
+			["ch-empty-image", { backgroundMode: "image", wallpaper: "" }],
+			["ch-unknown", { backgroundMode: "garbage", wallpaper: "safe.jpg" }],
+		]);
+		const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input));
+			const channelId = url.searchParams.get("channel_id") ?? "";
+			return {
+				ok: true,
+				json: async () => ({
+					terminal: {
+						resolved: {
+							...DEFAULT_PROFILE,
+							...profilesByChannel.get(channelId),
+						},
+					},
+				}),
+			};
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { result, unmount } = withSetup(() => {
+			const activeTab = ref({ id: "image" });
+			const channelsByTab: Record<string, string> = {
+				image: "ch-image",
+				solid: "ch-solid",
+				transparent: "ch-transparent",
+				empty: "ch-empty-image",
+				unknown: "ch-unknown",
+			};
+			const channelHostMap = ref<ReadonlyMap<string, string>>(
+				new Map([
+					["ch-image", "host-1"],
+					["ch-solid", "host-1"],
+					["ch-transparent", "host-1"],
+					["ch-empty-image", "host-1"],
+					["ch-unknown", "host-1"],
+				]),
+			);
+			const wallpaper = useActiveWallpaper({
+				activeTab,
+				getActiveChannelId: (tabId) => channelsByTab[tabId] ?? null,
+				channelHostMap,
+			});
+
+			return {
+				...wallpaper,
+				activeTab,
+			};
+		});
+
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("image.jpg");
+
+		result.activeTab.value = { id: "solid" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("solid");
+		expect(result.wallpaperStyle.value).toBeNull();
+		expect(result.dimStyle.value).toBeNull();
+
+		result.activeTab.value = { id: "transparent" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("transparent");
+		expect(result.wallpaperStyle.value).toBeNull();
+		expect(result.dimStyle.value).toBeNull();
+		expect(shouldUseTransparentBackground(result.backgroundMode.value, true)).toBe(true);
+		expect(shouldUseTransparentBackground(result.backgroundMode.value, false)).toBe(false);
+
+		result.activeTab.value = { id: "empty" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value).toBeNull();
+
+		result.activeTab.value = { id: "unknown" };
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("safe.jpg");
 
 		unmount();
 	});

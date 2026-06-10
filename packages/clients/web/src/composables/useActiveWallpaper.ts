@@ -1,4 +1,4 @@
-import { DEFAULT_PROFILE, type TerminalProfile } from "@termora/shared";
+import { type BackgroundMode, DEFAULT_PROFILE, type TerminalProfile } from "@termora/shared";
 import { computed, onUnmounted, type Ref, ref, watch } from "vue";
 import { useResolvedProfile } from "./useResolvedProfile.js";
 import type { Tab } from "./useTabManager.js";
@@ -15,6 +15,25 @@ interface UseActiveWallpaperOptions {
 type WallpaperProfile = Required<
 	Pick<TerminalProfile, "wallpaper" | "wallpaperBlur" | "wallpaperDim">
 >;
+type WindowBackgroundProfile = WallpaperProfile & {
+	backgroundMode: BackgroundMode;
+};
+
+export function normalizeBackgroundMode(value: unknown): BackgroundMode {
+	if (value === "image" || value === "solid" || value === "transparent") return value;
+	return "image";
+}
+
+export function shouldRenderWallpaper(profile: WindowBackgroundProfile): boolean {
+	return profile.backgroundMode === "image" && profile.wallpaper.length > 0;
+}
+
+export function shouldUseTransparentBackground(
+	backgroundMode: BackgroundMode,
+	isTauriRuntime: boolean,
+): boolean {
+	return backgroundMode === "transparent" && isTauriRuntime;
+}
 
 function wallpaperScopeKey(hostId: string | null, channelId: string | null): string | null {
 	if (channelId === null) return null;
@@ -29,11 +48,17 @@ function wallpaperFields(profile: TerminalProfile): WallpaperProfile {
 	};
 }
 
-function terminalProfileFromWallpaper(profile: WallpaperProfile): TerminalProfile {
+function backgroundFields(profile: TerminalProfile): WindowBackgroundProfile {
 	return {
-		...DEFAULT_PROFILE,
-		...profile,
+		...wallpaperFields(profile),
+		backgroundMode: normalizeBackgroundMode(
+			profile.backgroundMode ?? DEFAULT_PROFILE.backgroundMode,
+		),
 	};
+}
+
+function terminalProfileFromBackground(profile: WindowBackgroundProfile): TerminalProfile {
+	return { ...DEFAULT_PROFILE, ...profile };
 }
 
 /**
@@ -69,8 +94,8 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		return context?.channelId === channelId && context.hostId === activeHostId.value;
 	});
 
-	const wallpaperCache = new Map<string, WallpaperProfile>();
-	const displayedWallpaper = ref<WallpaperProfile>(wallpaperFields(DEFAULT_PROFILE));
+	const wallpaperCache = new Map<string, WindowBackgroundProfile>();
+	const displayedBackground = ref<WindowBackgroundProfile>(backgroundFields(DEFAULT_PROFILE));
 	let unresolvedFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function clearUnresolvedFallbackTimer(): void {
@@ -81,12 +106,12 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	function showDefaultWallpaper(): void {
 		clearUnresolvedFallbackTimer();
-		displayedWallpaper.value = wallpaperFields(DEFAULT_PROFILE);
+		displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 	}
 
-	function showWallpaper(profile: WallpaperProfile): void {
+	function showWallpaper(profile: WindowBackgroundProfile): void {
 		clearUnresolvedFallbackTimer();
-		displayedWallpaper.value = { ...profile };
+		displayedBackground.value = { ...profile };
 	}
 
 	function showCachedWallpaper(key: string): boolean {
@@ -102,7 +127,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 			unresolvedFallbackTimer = null;
 			if (activeScopeKey.value !== key || resolvedForActivePane.value) return;
 			if (showCachedWallpaper(key)) return;
-			displayedWallpaper.value = wallpaperFields(DEFAULT_PROFILE);
+			displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 		}, UNRESOLVED_WALLPAPER_FALLBACK_MS);
 	}
 
@@ -129,7 +154,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 			}
 			if (!resolvedForActivePane.value) return;
 
-			const profile = wallpaperFields(resolvedProfile.value);
+			const profile = backgroundFields(resolvedProfile.value);
 			wallpaperCache.set(key, { ...profile });
 			showWallpaper(profile);
 		},
@@ -140,16 +165,24 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		clearUnresolvedFallbackTimer();
 	});
 
-	const wallpaperProfile = computed<TerminalProfile>(() => {
-		return terminalProfileFromWallpaper(displayedWallpaper.value);
+	const backgroundProfile = computed<TerminalProfile>(() => {
+		return terminalProfileFromBackground(displayedBackground.value);
 	});
+	const wallpaperProfile = computed<TerminalProfile>(() => ({
+		...backgroundProfile.value,
+		wallpaper: shouldRenderWallpaper(displayedBackground.value)
+			? displayedBackground.value.wallpaper
+			: "",
+	}));
+	const backgroundMode = computed<BackgroundMode>(() => displayedBackground.value.backgroundMode);
 
 	const { wallpaperStyle, dimStyle, refreshCache } = useWallpaper(wallpaperProfile);
 
 	return {
 		activeChannelId,
 		activeHostId,
-		profile: wallpaperProfile,
+		profile: backgroundProfile,
+		backgroundMode,
 		wallpaperStyle,
 		dimStyle,
 		reload,

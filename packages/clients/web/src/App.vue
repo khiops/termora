@@ -1,5 +1,5 @@
 <template>
-	<div class="app-root">
+	<div class="app-root" :class="{ 'app-root--transparent': windowUsesTransparentBackground }">
 		<TitleBar />
 		<!-- Write-request dialog — rendered globally, outside layout, via Teleport -->
 		<WriteRequestDialog />
@@ -340,7 +340,10 @@ import TabBar from './components/TabBar.vue';
 import TitleBar from './components/TitleBar.vue';
 import ToastContainer from './components/ToastContainer.vue';
 import WriteRequestDialog from './components/WriteRequestDialog.vue';
-import { useActiveWallpaper } from './composables/useActiveWallpaper.js';
+import {
+	shouldUseTransparentBackground,
+	useActiveWallpaper,
+} from './composables/useActiveWallpaper.js';
 import { useAutoSwitch } from './composables/useAutoSwitch.js';
 import { useCommandPalette } from './composables/useCommandPalette.js';
 import type { DropZone } from './composables/useLayout.js';
@@ -428,11 +431,21 @@ const themeStore = useThemeStore();
 const writeLockStore = useWriteLockStore();
 const autoSwitch = useAutoSwitch();
 const layout = useLayout();
-const { wallpaperStyle: windowWallpaperStyle, dimStyle: windowWallpaperDimStyle } = useActiveWallpaper({
+const {
+	wallpaperStyle: windowWallpaperStyle,
+	dimStyle: windowWallpaperDimStyle,
+	backgroundMode: windowBackgroundMode,
+} = useActiveWallpaper({
 	activeTab: layout.activeTab,
 	getActiveChannelId: layout.getActiveChannelId,
 	channelHostMap: toRef(channelsStore, 'channelHostMap'),
 });
+function isTauriRuntime(): boolean {
+	return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+const windowUsesTransparentBackground = computed(() =>
+	shouldUseTransparentBackground(windowBackgroundMode.value, isTauriRuntime()),
+);
 const windowWallpaperLayerKey = computed(() => {
 	const style = windowWallpaperStyle.value;
 	if (!style) return 'none';
@@ -1389,6 +1402,7 @@ body,
 	overflow: hidden;
 	font-family: system-ui, -apple-system, sans-serif;
 	font-size: 13px;
+	background: transparent;
 }
 
 .app-root {
@@ -1399,6 +1413,10 @@ body,
 	overflow: hidden;
 	background: var(--nt-bg);
 	isolation: isolate;
+}
+
+.app-root--transparent {
+	background: transparent;
 }
 
 .window-wallpaper {

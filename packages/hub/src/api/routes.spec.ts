@@ -1474,6 +1474,25 @@ describe("PATCH /api/hosts/:id/profile — key validation", () => {
 		expect(res.statusCode).toBe(200);
 	});
 
+	it("accepts and persists background mode and window effect keys", async () => {
+		const hostId = await createHost("prof-key-bg-valid");
+		const res = await server.inject({
+			method: "PATCH",
+			url: `/api/hosts/${hostId}/profile`,
+			payload: { profile: { backgroundMode: "transparent", windowEffect: "auto" } },
+		});
+		expect(res.statusCode).toBe(200);
+
+		const getRes = await server.inject({
+			method: "GET",
+			url: `/api/hosts/${hostId}/profile`,
+		});
+		expect(getRes.statusCode).toBe(200);
+		const { profile } = getRes.json<{ profile: Record<string, unknown> }>();
+		expect(profile.backgroundMode).toBe("transparent");
+		expect(profile.windowEffect).toBe("auto");
+	});
+
 	it("rejects unknown profile keys with 400", async () => {
 		const hostId = await createHost("prof-key-invalid");
 		const res = await server.inject({
@@ -1538,12 +1557,12 @@ describe("PATCH /api/channels/:id/profile — key validation", () => {
 		const res = await server.inject({
 			method: "PATCH",
 			url: `/api/channels/${channelId}/profile`,
-			payload: { profile: { badKey: 42 } },
+			payload: { profile: { bogusKey: 42 } },
 		});
 		expect(res.statusCode).toBe(400);
 		const body = res.json<{ error: { code: string; message: string } }>();
 		expect(body.error.code).toBe("VALIDATION_ERROR");
-		expect(body.error.message).toContain("badKey");
+		expect(body.error.message).toContain("bogusKey");
 	});
 });
 
