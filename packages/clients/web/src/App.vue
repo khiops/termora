@@ -357,6 +357,11 @@ import {
 import { MULTI_PANE_SEARCH_KEY, useMultiPaneSearch } from './composables/useMultiPaneSearch.js';
 import { useResizable } from './composables/useResizable.js';
 import { useTabTitle } from './composables/useTabTitle.js';
+import {
+	isTauriRuntime,
+	usePlatformInfo,
+	useWindowEffects,
+} from './composables/useWindowEffects.js';
 import { useWindowTitle } from './composables/useWindowTitle.js';
 import { useAuthStore } from './stores/auth.js';
 import { useChannelsStore } from './stores/channels.js';
@@ -435,14 +440,19 @@ const {
 	wallpaperStyle: windowWallpaperStyle,
 	dimStyle: windowWallpaperDimStyle,
 	backgroundMode: windowBackgroundMode,
+	resolvedProfile: windowResolvedProfile,
+	resolvedForActivePane: windowResolvedForActivePane,
 } = useActiveWallpaper({
 	activeTab: layout.activeTab,
 	getActiveChannelId: layout.getActiveChannelId,
 	channelHostMap: toRef(channelsStore, 'channelHostMap'),
 });
-function isTauriRuntime(): boolean {
-	return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
+const windowPlatformInfo = usePlatformInfo();
+useWindowEffects({
+	profile: windowResolvedProfile,
+	resolvedForActivePane: windowResolvedForActivePane,
+	platformInfo: windowPlatformInfo,
+});
 const windowUsesTransparentBackground = computed(() =>
 	shouldUseTransparentBackground(windowBackgroundMode.value, isTauriRuntime()),
 );

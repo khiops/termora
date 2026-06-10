@@ -59,6 +59,13 @@ describe("tauri.conf.json", () => {
 		expect(build.devUrl).toBe("http://localhost:5173");
 	});
 
+	it("creates the main window as transparent and enables macOS private API at app level", () => {
+		const app = conf.app as Record<string, unknown>;
+		const windows = app.windows as Array<Record<string, unknown>>;
+		expect(windows[0]?.transparent).toBe(true);
+		expect(app.macOSPrivateApi).toBe(true);
+	});
+
 	it("updater plugin is configured with endpoint", () => {
 		const plugins = conf.plugins as Record<string, unknown>;
 		expect(plugins).toBeDefined();
@@ -121,8 +128,16 @@ describe("Cargo.toml", () => {
 		expect(cargo).toMatch(/^tauri-plugin-updater\s*=/m);
 	});
 
+	it("contains tauri-plugin-os dependency", () => {
+		expect(cargo).toMatch(/^tauri-plugin-os\s*=/m);
+	});
+
 	it("tray-icon feature is enabled", () => {
 		expect(cargo).toMatch(/tray-icon/);
+	});
+
+	it("macos-private-api feature is enabled", () => {
+		expect(cargo).toMatch(/macos-private-api/);
 	});
 
 	it("has correct package name", () => {
@@ -175,5 +190,13 @@ describe("src/lib.ts", () => {
 
 	it("polls /api/health endpoint for readiness", () => {
 		expect(src).toMatch(/\/api\/health/);
+	});
+});
+
+describe("src-tauri/src/lib.rs", () => {
+	const src = readText("src-tauri/src/lib.rs");
+
+	it("registers the OS plugin", () => {
+		expect(src).toMatch(/\.plugin\(tauri_plugin_os::init\(\)\)/);
 	});
 });

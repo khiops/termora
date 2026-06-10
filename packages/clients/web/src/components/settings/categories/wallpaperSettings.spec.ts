@@ -1,0 +1,56 @@
+import { describe, expect, it } from "vitest";
+import {
+	backgroundModeOptions,
+	normalizeSettingsBackgroundMode,
+	normalizeSettingsWindowEffect,
+	shouldShowWindowEffectPicker,
+	WALLPAPER_OVERRIDE_KEYS,
+	windowEffectDescription,
+	windowEffectSettingsOptions,
+} from "./wallpaperSettings.js";
+
+describe("wallpaper settings helpers", () => {
+	it("shows the transparent mode hint in non-Tauri runtimes", () => {
+		expect(backgroundModeOptions(false)).toContainEqual({
+			label: "Transparent (desktop only — renders as solid in this browser)",
+			value: "transparent",
+		});
+		expect(backgroundModeOptions(true)).toContainEqual({
+			label: "Transparent",
+			value: "transparent",
+		});
+	});
+
+	it("normalizes unknown settings values to safe defaults", () => {
+		expect(normalizeSettingsBackgroundMode("transparent")).toBe("transparent");
+		expect(normalizeSettingsBackgroundMode("garbage")).toBe("image");
+		expect(normalizeSettingsWindowEffect("mica")).toBe("mica");
+		expect(normalizeSettingsWindowEffect("shimmer")).toBe("none");
+	});
+
+	it("shows the effect picker only for Tauri with platform info", () => {
+		const win11 = { os: "windows" as const, windowsBuild: 26_100 };
+		expect(shouldShowWindowEffectPicker(false, win11)).toBe(false);
+		expect(shouldShowWindowEffectPicker(true, null)).toBe(false);
+		expect(shouldShowWindowEffectPicker(true, win11)).toBe(true);
+		expect(windowEffectSettingsOptions(win11)).toContainEqual({ label: "Mica", value: "mica" });
+	});
+
+	it("keeps background override detection and reset scoped to every wallpaper key", () => {
+		expect(WALLPAPER_OVERRIDE_KEYS).toEqual([
+			"backgroundMode",
+			"windowEffect",
+			"wallpaper",
+			"wallpaperBlur",
+			"wallpaperDim",
+		]);
+	});
+
+	it("describes platform-specific effect behavior", () => {
+		expect(windowEffectDescription({ os: "linux", windowsBuild: null })).toContain(
+			"compositor support",
+		);
+		expect(windowEffectDescription({ os: "windows", windowsBuild: 26_100 })).toContain("Windows");
+		expect(windowEffectDescription({ os: "macos", windowsBuild: null })).toContain("macOS");
+	});
+});

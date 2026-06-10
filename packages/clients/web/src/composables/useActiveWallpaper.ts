@@ -182,6 +182,8 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		activeChannelId,
 		activeHostId,
 		profile: backgroundProfile,
+		resolvedProfile,
+		resolvedForActivePane,
 		backgroundMode,
 		wallpaperStyle,
 		dimStyle,

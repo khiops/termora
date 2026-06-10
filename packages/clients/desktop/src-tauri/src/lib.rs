@@ -1,5 +1,6 @@
-use std::io::Write;
 use std::sync::atomic::{AtomicU16, Ordering};
+#[cfg(not(dev))]
+use std::io::Write;
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -41,6 +42,7 @@ fn read_hub_auth_token() -> Option<String> {
 /// Resolves the termora state directory:
 /// - Linux/macOS: $XDG_STATE_HOME/termora or ~/.local/state/termora
 /// - Windows: %LOCALAPPDATA%\termora
+#[cfg(not(dev))]
 fn get_state_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -57,6 +59,7 @@ fn get_state_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Reads the hub port from runtime.json in the state dir.
+#[cfg(not(dev))]
 fn read_runtime_port() -> Option<u16> {
     let state_dir = get_state_dir()?;
     let runtime_path = state_dir.join("runtime.json");
@@ -66,6 +69,7 @@ fn read_runtime_port() -> Option<u16> {
 }
 
 /// Checks whether a hub is alive by probing its /api/health endpoint.
+#[cfg(not(dev))]
 fn is_hub_alive(port: u16) -> bool {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -233,6 +237,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![get_hub_auth_token, get_hub_port])
         .setup(setup_app)

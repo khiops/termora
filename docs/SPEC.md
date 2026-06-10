@@ -649,6 +649,23 @@ Layer 4: Channel profile (meta.db channels.profile_json)
 Resolved config → xterm.js instance
 ```
 
+Terminal background profile keys cascade through the same four layers:
+
+| TOML key | Profile key | Values | Default | Notes |
+|----------|-------------|--------|---------|-------|
+| `background_mode` | `backgroundMode` | `image`, `solid`, `transparent` | `image` | `image` keeps existing wallpaper behavior; `image` with no wallpaper renders solid. In browser clients, `transparent` renders solid. |
+| `window_effect` | `windowEffect` | `none`, `auto`, `mica`, `blur`, `acrylic`, `vibrancy-under-window`, `vibrancy-sidebar`, `vibrancy-hud` | `none` | Desktop-only native effect, used only when `backgroundMode` resolves to `transparent`. |
+
+Native effect resolution:
+
+| Requested effect | Linux | Windows 10 | Windows 11 | macOS |
+|------------------|-------|------------|------------|-------|
+| `auto` | none | `blur` | `mica` | `vibrancy-under-window` |
+| `mica` | none | none | `mica` | none |
+| `acrylic` | none | `acrylic` | `acrylic` | none |
+| `blur` | none | `blur` | `blur` | none |
+| `vibrancy-*` | none | none | none | matching macOS vibrancy material |
+
 **Deep merge:** Object keys merge recursively. Scalars overwrite. `null` removes key. Arrays replace.
 
 ### 6.1 Agent Config (`[agent]` section in config.toml)
