@@ -72,7 +72,7 @@ export const useSettingsStore = defineStore("settings", () => {
 			if (hostId) params.set("host_id", hostId);
 			if (channelId) params.set("channel_id", channelId);
 			const qs = params.toString();
-			const url = `/api/config/cascade${qs ? `?${qs}` : ""}`;
+			const url = `${hubBaseUrl()}/api/config/cascade${qs ? `?${qs}` : ""}`;
 			const res = await fetch(url, {
 				headers: { Authorization: `Bearer ${authStore.token}` },
 			});

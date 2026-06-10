@@ -191,6 +191,7 @@ import type { TermoraTheme, TermoraThemeColors, TermoraThemeUi } from "@termora/
 import { THEME_NAME_REGEX } from "@termora/shared";
 import { useThemeStore } from "../../stores/theme.js";
 import { useAuthStore } from "../../stores/auth.js";
+import { hubBaseUrl } from "../../utils/hub-url.js";
 
 const props = defineProps<{
 	theme?: TermoraTheme;
@@ -402,7 +403,9 @@ async function handleSave() {
 
 	try {
 		const method = isNew.value ? "POST" : "PUT";
-		const url = isNew.value ? "/api/themes" : `/api/themes/${encodeURIComponent(theme.name)}`;
+		const url = isNew.value
+			? `${hubBaseUrl()}/api/themes`
+			: `${hubBaseUrl()}/api/themes/${encodeURIComponent(theme.name)}`;
 
 		const response = await fetch(url, {
 			method,

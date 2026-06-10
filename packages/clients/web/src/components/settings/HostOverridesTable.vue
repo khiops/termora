@@ -115,7 +115,7 @@ async function handleOverrideChange(hostId: string, value: string): Promise<void
 		if (value === "") {
 			// Remove override
 			const res = await fetch(
-				`/api/hosts/${encodeURIComponent(hostId)}/profiles/${encodeURIComponent(props.profileId)}`,
+				`${hubBaseUrl()}/api/hosts/${encodeURIComponent(hostId)}/profiles/${encodeURIComponent(props.profileId)}`,
 				{
 					method: "DELETE",
 					headers: { Authorization: `Bearer ${authStore.token}` },
@@ -130,7 +130,7 @@ async function handleOverrideChange(hostId: string, value: string): Promise<void
 			// Upsert override
 			const overrideType = value as "pin" | "hide" | "default";
 			const res = await fetch(
-				`/api/hosts/${encodeURIComponent(hostId)}/profiles/${encodeURIComponent(props.profileId)}`,
+				`${hubBaseUrl()}/api/hosts/${encodeURIComponent(hostId)}/profiles/${encodeURIComponent(props.profileId)}`,
 				{
 					method: "PUT",
 					headers: {
