@@ -50,6 +50,13 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
  * starts and the actual port is known — call addCorsOrigins() from main.ts.
  */
 const _corsAllowedOrigins = new Set<string>();
+const PROTECTED_PUBLIC_ASSET_PREFIXES = ["/public/fonts", "/public/sounds", "/public/wallpapers"];
+
+function isProtectedPublicAssetPath(pathname: string): boolean {
+	return PROTECTED_PUBLIC_ASSET_PREFIXES.some(
+		(prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+	);
+}
 
 /**
  * Add one or more exact origin strings to the CORS allowlist.
@@ -104,6 +111,19 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			reply.header("Cross-Origin-Resource-Policy", "cross-origin");
 		}
 		return payload;
+	});
+
+	server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
+		const pathname = new URL(request.url, "http://localhost").pathname;
+		if (!isProtectedPublicAssetPath(pathname)) return;
+		if (requestHasValidAssetToken(request)) return;
+
+		return reply.code(403).send({
+			error: {
+				code: "ASSET_TOKEN_REQUIRED",
+				message: "Valid asset token required",
+			},
+		});
 	});
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)

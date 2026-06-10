@@ -10,6 +10,11 @@ import { openTestDatabases } from "./storage/db.js";
 /** Known token used across auth tests */
 const TEST_TOKEN = "a".repeat(64);
 const TTF_MAGIC = Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+const PUBLIC_ASSET_CASES = [
+	{ kind: "fonts", filename: "Test-Regular.ttf", body: TTF_MAGIC },
+	{ kind: "sounds", filename: "Bell.wav", body: "RIFF....WAVEfmt " },
+	{ kind: "wallpapers", filename: "Wallpaper.png", body: "fake-png" },
+] as const;
 
 describe("Hub Server", () => {
 	let server: FastifyInstance;
@@ -278,13 +283,17 @@ describe("Hub Server — security headers", () => {
 		configDir = undefined;
 	});
 
-	it("GET /public/fonts/:file serves signed public assets with cross-origin CORP", async () => {
+	async function createProtectedAssetServer(
+		kind: (typeof PUBLIC_ASSET_CASES)[number]["kind"],
+		filename: string,
+		body: Buffer | string,
+	): Promise<string> {
 		configDir = join(
 			tmpdir(),
 			`termora-public-corp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
-		mkdirSync(join(configDir, "fonts"), { recursive: true });
-		writeFileSync(join(configDir, "fonts", "Test-Regular.ttf"), TTF_MAGIC);
+		mkdirSync(join(configDir, kind), { recursive: true });
+		writeFileSync(join(configDir, kind, filename), body);
 		dbs = openTestDatabases();
 		server = await createServer({
 			logger: false,
@@ -295,40 +304,60 @@ describe("Hub Server — security headers", () => {
 
 		const tokenRes = await server.inject({ method: "GET", url: "/api/assets/token" });
 		const { assetToken } = tokenRes.json<{ assetToken: string }>();
+		return assetToken;
+	}
 
-		const response = await server.inject({
+	it.each(
+		PUBLIC_ASSET_CASES,
+	)("GET /public/$kind/:file serves signed public assets with cross-origin CORP", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		const assetToken = await createProtectedAssetServer(kind, filename, body);
+
+		const response = await server?.inject({
 			method: "GET",
-			url: `/public/fonts/Test-Regular.ttf?asset_token=${assetToken}`,
+			url: `/public/${kind}/${filename}?asset_token=${assetToken}`,
 			headers: { origin: "tauri://localhost" },
 		});
 
-		expect(response.statusCode).toBe(200);
-		expect(response.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+		expect(response?.statusCode).toBe(200);
+		expect(response?.headers["cross-origin-resource-policy"]).toBe("cross-origin");
 	});
 
-	it("GET /public/fonts/:file keeps same-origin CORP without the asset token", async () => {
-		configDir = join(
-			tmpdir(),
-			`termora-public-corp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
-		mkdirSync(join(configDir, "fonts"), { recursive: true });
-		writeFileSync(join(configDir, "fonts", "Test-Regular.ttf"), TTF_MAGIC);
-		dbs = openTestDatabases();
-		server = await createServer({
-			logger: false,
-			dbManager: dbs,
-			skipShellDiscovery: true,
-			configDir,
-		});
+	it.each(PUBLIC_ASSET_CASES)("GET /public/$kind/:file rejects missing asset token", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		await createProtectedAssetServer(kind, filename, body);
 
-		const response = await server.inject({
+		const response = await server?.inject({
 			method: "GET",
-			url: "/public/fonts/Test-Regular.ttf?asset_token=bad-token",
+			url: `/public/${kind}/${filename}`,
 			headers: { origin: "tauri://localhost" },
 		});
 
-		expect(response.statusCode).toBe(200);
-		expect(response.headers["cross-origin-resource-policy"]).toBe("same-origin");
+		expect(response?.statusCode).toBe(403);
+		expect(response?.json<{ error: { code: string } }>().error.code).toBe("ASSET_TOKEN_REQUIRED");
+	});
+
+	it.each(PUBLIC_ASSET_CASES)("GET /public/$kind/:file rejects invalid asset token", async ({
+		kind,
+		filename,
+		body,
+	}) => {
+		await createProtectedAssetServer(kind, filename, body);
+
+		const response = await server?.inject({
+			method: "GET",
+			url: `/public/${kind}/${filename}?asset_token=bad-token`,
+			headers: { origin: "tauri://localhost" },
+		});
+
+		expect(response?.statusCode).toBe(403);
+		expect(response?.json<{ error: { code: string } }>().error.code).toBe("ASSET_TOKEN_REQUIRED");
 	});
 
 	it("GET /api/health keeps Helmet's same-origin CORP", async () => {
