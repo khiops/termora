@@ -6,7 +6,8 @@
 	"scripts": {
 		"tauri": "tauri",
 		"dev": "tauri dev",
-		"build": "tauri build"
+		"build": "tauri build",
+		"test": "pnpm -w exec vitest run --project desktop"
 	},
 	"devDependencies": {
 		"@tauri-apps/cli": ">=2.0.0"
