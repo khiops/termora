@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## RELEASE-VERSION-SYNC — release-please owns every version surface (#64, 2026-06-10)
+
+- The release-please action is invoked in pure manifest mode (`manifest-file` + `config-file` only). `release-type` lives in the config's package block, never as an action input — as an input it selects the simple mode and silently ignores the config's `extra-files` (this is why three releases shipped without propagating versions).
+- Every `extra-files` entry is a TYPED updater (`json`/`toml` with a jsonpath) targeting the version value directly. Bare strings are banned in this config: they select the annotation-based Generic updater, a guaranteed no-op on JSON files. `build-version.ts` is not an extra-file — it resolves its version at runtime (env → hub package.json).
+- All version surfaces (root + 4 sub-packages + tauri.conf + 3 Cargo.toml) follow the single manifest version. The build-time jq/sed patch in `release.yml` remains as belt-and-braces for tag-dispatched builds.
+- Known residual: release-please bumps Cargo.toml but not Cargo.lock; the lock self-heals at the next build (no CI cargo build uses `--locked`).
+- Verification contract for any future config change: the open release PR's refreshed diff must list every declared extra-file (`gh pr diff <N> --name-only`) — a green action run alone proves nothing.
+
+---
+
 ## HUB-DAEMON-SEA — SEA-aware daemon re-exec + readiness gate (#60, 2026-06-10)
 
 - SEA daemon spawn re-execs the binary with CLI argv (`start --port N`) — the SEA bundle's entry IS cli.ts (footer auto-invokes `main(argv)`), so the existing foreground path provides everything (auth init, DBs, `persistRuntime`, shutdown handlers). No second entry point, no extracted script. `--daemon` is never re-passed (fork-bomb guard, locked by test). Dev mode keeps the compiled `main.js` sibling.
