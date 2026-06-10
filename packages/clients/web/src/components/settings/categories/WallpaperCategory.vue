@@ -40,16 +40,6 @@
 					<div class="wallpaper-drop-hint">Drop image to add</div>
 				</div>
 
-				<!-- "None" option -->
-				<button
-					class="wallpaper-thumb"
-					:class="{ active: !currentWallpaper }"
-					type="button"
-					@click="clearWallpaper"
-				>
-					<span class="wallpaper-none">None</span>
-				</button>
-
 				<!-- Wallpaper thumbnails -->
 				<div
 					v-for="wp in wallpapers"
@@ -444,11 +434,6 @@ onMounted(loadWallpapers);
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-}
-
-.wallpaper-none {
-	font-size: 12px;
-	color: var(--nt-text-muted);
 }
 
 .wallpaper-delete {
