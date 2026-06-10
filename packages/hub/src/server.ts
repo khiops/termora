@@ -19,6 +19,7 @@ import { registerSshKeyRoutes } from "./api/ssh-keys.js";
 import { registerThemeRoutes } from "./api/themes.js";
 import { registerTokenRoutes } from "./api/tokens.js";
 import { registerWallpaperRoutes } from "./api/wallpapers.js";
+import { getBootAssetToken, requestHasValidAssetToken } from "./asset-token.js";
 import { touchToken, upsertPrimaryToken, validateTokenRecord } from "./auth.js";
 import { BUILD_HASH, HUB_VERSION } from "./build-version.js";
 import { getConfigDir, getStateDir } from "./cli.js";
@@ -49,13 +50,6 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
  * starts and the actual port is known — call addCorsOrigins() from main.ts.
  */
 const _corsAllowedOrigins = new Set<string>();
-const PUBLIC_ASSET_CORP = "cross-origin";
-
-function setPublicAssetHeaders(res: {
-	setHeader(name: string, value: number | string | readonly string[]): unknown;
-}): void {
-	res.setHeader("Cross-Origin-Resource-Policy", PUBLIC_ASSET_CORP);
-}
 
 /**
  * Add one or more exact origin strings to the CORS allowlist.
@@ -102,6 +96,14 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			},
 		},
 		crossOriginEmbedderPolicy: false,
+	});
+
+	server.addHook("onSend", async (request, reply, payload) => {
+		const pathname = new URL(request.url, "http://localhost").pathname;
+		if (pathname.startsWith("/public/") && requestHasValidAssetToken(request)) {
+			reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+		}
+		return payload;
 	});
 
 	// CORS — required for Tauri desktop (webview origin differs from hub)
@@ -172,8 +174,6 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
-			if (pathname === "/api/fonts" && request.method === "GET") return;
-			if (pathname === "/api/wallpapers" && request.method === "GET") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -233,6 +233,11 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	// Health endpoint — unauthenticated, always available for debugging
 	server.get("/api/health", async () => {
 		return { status: "ok", version: HUB_VERSION, build: BUILD_HASH };
+	});
+
+	server.get("/api/assets/token", async () => {
+		const token = getBootAssetToken();
+		return { assetToken: token, token };
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided
@@ -402,7 +407,6 @@ async function registerUserFonts(server: FastifyInstance, configDir: string): Pr
 		root: fontsDir,
 		prefix: "/public/fonts/",
 		decorateReply: false, // required for multiple @fastify/static plugins
-		setHeaders: setPublicAssetHeaders,
 	});
 
 	server.log.info({ fontsDir }, "serving user fonts from config dir");
@@ -426,7 +430,6 @@ async function registerUserSounds(server: FastifyInstance, configDir: string): P
 		root: soundsDir,
 		prefix: "/public/sounds/",
 		decorateReply: false, // required for multiple @fastify/static plugins
-		setHeaders: setPublicAssetHeaders,
 	});
 
 	server.log.info({ soundsDir }, "serving user sounds from config dir");
@@ -448,7 +451,6 @@ async function registerUserWallpapers(server: FastifyInstance, configDir: string
 		prefix: "/public/wallpapers/",
 		decorateReply: false,
 		setHeaders: (res) => {
-			setPublicAssetHeaders(res);
 			res.setHeader("X-Content-Type-Options", "nosniff");
 		},
 	});
@@ -458,7 +460,7 @@ async function registerUserWallpapers(server: FastifyInstance, configDir: string
 
 async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
 	const { existsSync } = await import("node:fs");
-	const { join, dirname, relative } = await import("node:path");
+	const { join, dirname } = await import("node:path");
 	const { fileURLToPath } = await import("node:url");
 
 	// Resolve static/ relative to this source file:
@@ -480,12 +482,6 @@ async function registerStaticIfExists(server: FastifyInstance): Promise<void> {
 	await server.register(fastifyStatic, {
 		root: staticDir,
 		prefix: "/",
-		setHeaders: (res, filePath) => {
-			const staticRelativePath = relative(staticDir, filePath).replaceAll("\\", "/");
-			if (staticRelativePath.startsWith("public/")) {
-				setPublicAssetHeaders(res);
-			}
-		},
 		// SPA fallback: serve index.html for any path not matching a real file
 		// so that Vue Router client-side routes work after a hard refresh.
 		wildcard: false,

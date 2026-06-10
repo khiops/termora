@@ -22,7 +22,7 @@ function isValidExtension(filename: string): boolean {
 export function registerWallpaperRoutes(server: FastifyInstance, configDir: string): void {
 	const wallpapersDir = join(configDir, "wallpapers");
 
-	// GET /api/wallpapers — no auth (bypassed in server.ts hook)
+	// GET /api/wallpapers — lists filenames; public asset URLs are signed client-side.
 	server.get("/api/wallpapers", async () => {
 		let entries: string[];
 		try {

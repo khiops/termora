@@ -36,7 +36,6 @@ interface StaticFileEntry {
 
 /** The full manifest structure embedded as a SEA asset. */
 type StaticManifest = Record<string, StaticFileEntry>;
-const PUBLIC_ASSET_CORP = "cross-origin";
 
 // ────────────────────────────────────────────────────────────────────────────
 // SEA detection (mirrors sea-addon-loader.ts)
@@ -184,9 +183,6 @@ export async function registerSeaStaticServing(app: FastifyInstance): Promise<bo
 				: fileKey.endsWith(".html")
 					? "no-cache"
 					: "public, max-age=3600";
-			if (fileKey.startsWith("/public/")) {
-				reply.header("Cross-Origin-Resource-Policy", PUBLIC_ASSET_CORP);
-			}
 			return reply
 				.header("Content-Type", file.contentType)
 				.header("Cache-Control", cacheControl)

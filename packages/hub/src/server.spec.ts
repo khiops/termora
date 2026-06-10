@@ -278,7 +278,35 @@ describe("Hub Server — security headers", () => {
 		configDir = undefined;
 	});
 
-	it("GET /public/fonts/:file serves public assets with cross-origin CORP", async () => {
+	it("GET /public/fonts/:file serves signed public assets with cross-origin CORP", async () => {
+		configDir = join(
+			tmpdir(),
+			`termora-public-corp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		mkdirSync(join(configDir, "fonts"), { recursive: true });
+		writeFileSync(join(configDir, "fonts", "Test-Regular.ttf"), TTF_MAGIC);
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir,
+		});
+
+		const tokenRes = await server.inject({ method: "GET", url: "/api/assets/token" });
+		const { assetToken } = tokenRes.json<{ assetToken: string }>();
+
+		const response = await server.inject({
+			method: "GET",
+			url: `/public/fonts/Test-Regular.ttf?asset_token=${assetToken}`,
+			headers: { origin: "tauri://localhost" },
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+	});
+
+	it("GET /public/fonts/:file keeps same-origin CORP without the asset token", async () => {
 		configDir = join(
 			tmpdir(),
 			`termora-public-corp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -295,12 +323,12 @@ describe("Hub Server — security headers", () => {
 
 		const response = await server.inject({
 			method: "GET",
-			url: "/public/fonts/Test-Regular.ttf",
+			url: "/public/fonts/Test-Regular.ttf?asset_token=bad-token",
 			headers: { origin: "tauri://localhost" },
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+		expect(response.headers["cross-origin-resource-policy"]).toBe("same-origin");
 	});
 
 	it("GET /api/health keeps Helmet's same-origin CORP", async () => {

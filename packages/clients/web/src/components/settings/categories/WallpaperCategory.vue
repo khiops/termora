@@ -51,9 +51,9 @@
 						:class="{ active: currentWallpaper === wp }"
 						type="button"
 						@click="selectWallpaper(wp)"
-					>
+						>
 						<img
-							:src="`${hubBaseUrl()}/public/wallpapers/${encodeURIComponent(wp)}`"
+							:src="namedPublicAssetUrl('wallpapers', wp)"
 							:alt="wp"
 							loading="lazy"
 						/>
@@ -154,7 +154,7 @@ import {
 	isTauriRuntime,
 	usePlatformInfo,
 } from "../../../composables/useWindowEffects.js";
-import { hubBaseUrl } from "../../../utils/hub-url.js";
+import { hubBaseUrl, namedPublicAssetUrl } from "../../../utils/hub-url.js";
 import { useAuthStore } from "../../../stores/auth.js";
 import { useSettingsStore } from "../../../stores/settings.js";
 import type { Scope } from "../../../stores/settings.js";
@@ -232,7 +232,9 @@ const hasWallpaperOverride = computed(() => {
 
 async function loadWallpapers(): Promise<void> {
 	try {
-		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`);
+		const resp = await fetch(`${hubBaseUrl()}/api/wallpapers`, {
+			headers: { Authorization: `Bearer ${authStore.token ?? ""}` },
+		});
 		if (resp.ok) {
 			const data = await resp.json();
 			wallpapers.value = data.wallpapers;

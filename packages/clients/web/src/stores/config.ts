@@ -12,7 +12,7 @@ import {
 } from "@termora/shared";
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { hubBaseUrl } from "../utils/hub-url.js";
+import { hubBaseUrl, publicAssetUrl } from "../utils/hub-url.js";
 import { useAuthStore } from "./auth.js";
 
 // ─── Profile change event bus ─────────────────────────────────────────────────
@@ -39,17 +39,23 @@ function injectFontFaces(families: FontFamily[]): void {
 	const rules: string[] = [];
 	for (const family of families) {
 		for (const file of family.files) {
-			const format = file.url.endsWith(".woff2")
+			const pathname = new URL(file.url, "http://localhost").pathname;
+			const format = pathname.endsWith(".woff2")
 				? "woff2"
-				: file.url.endsWith(".woff")
+				: pathname.endsWith(".woff")
 					? "woff"
-					: file.url.endsWith(".ttf")
+					: pathname.endsWith(".ttf")
 						? "truetype"
 						: "opentype";
+			const src = file.url.startsWith("/public/")
+				? publicAssetUrl(file.url)
+				: file.url.startsWith("/")
+					? `${hubBaseUrl()}${file.url}`
+					: file.url;
 			rules.push(
 				`@font-face {
 	font-family: "${family.family}";
-	src: url("${file.url.startsWith("/") ? hubBaseUrl() + file.url : file.url}") format("${format}");
+	src: url("${src}") format("${format}");
 	font-weight: ${file.weight};
 	font-style: ${file.style};
 	font-display: swap;
@@ -112,7 +118,12 @@ export const useConfigStore = defineStore("config", () => {
 	 */
 	async function loadFonts(): Promise<void> {
 		try {
-			const fontList: FontFamily[] = await fetch(`${hubBaseUrl()}/api/fonts`).then((r) => r.json());
+			const authStore = useAuthStore();
+			const response = await fetch(`${hubBaseUrl()}/api/fonts`, {
+				...(authStore.token ? { headers: { Authorization: `Bearer ${authStore.token}` } } : {}),
+			});
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const fontList: FontFamily[] = await response.json();
 			fonts.value = fontList;
 			injectFontFaces(fontList);
 

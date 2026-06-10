@@ -371,7 +371,7 @@ import { useProfilesStore } from './stores/profiles.js';
 import { useSessionStore } from './stores/session.js';
 import { useThemeStore } from './stores/theme.js';
 import { useWriteLockStore } from './stores/writelock.js';
-import { hubBaseUrl, initHubPort } from './utils/hub-url.js';
+import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
@@ -709,9 +709,6 @@ onMounted(async () => {
 	// Ctrl+K / Cmd+K must be captured before Chrome's omnibox intercepts it (SC-14)
 	window.addEventListener('keydown', onGlobalKeydown, { capture: true });
 
-	// Load fonts before terminals are created (no auth needed)
-	await configStore.loadFonts();
-
 	// In Tauri desktop, resolve the hub port BEFORE any API calls so that
 	// hubBaseUrl() / hubWsUrl() use the correct port (zero_conf may pick != 4100).
 	try {
@@ -736,6 +733,8 @@ onMounted(async () => {
 	if (authStore.token !== null) {
 		try {
 			await sessionStore.connect();
+			await initAssetToken(authStore.token);
+			await configStore.loadFonts();
 			// Load resolved profile + UI behaviour config now that auth is established
 			await configStore.loadProfile();
 			await configStore.loadUiConfig();
@@ -1111,6 +1110,8 @@ async function onCreateChannelGroupConfirmed(name?: string): Promise<void> {
 async function onAuthenticated(): Promise<void> {
 	postAuthLoading.value = true;
 	try {
+		await initAssetToken(authStore.token);
+		await configStore.loadFonts();
 		await configStore.loadProfile();
 		await configStore.loadUiConfig();
 		await themeStore.loadThemes();

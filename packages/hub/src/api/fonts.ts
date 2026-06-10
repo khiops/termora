@@ -4,6 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import type { FontFamily, FontFile } from "@termora/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { fileTypeFromBuffer } from "file-type";
+import { buildSignedPublicAssetUrl } from "../asset-token.js";
 import { sanitizeFilename } from "./upload-utils.js";
 
 /** Supported font file extensions */
@@ -191,7 +192,7 @@ export function scanFonts(fontsDir: string): FontFamily[] {
 		files.push({
 			style: parsed.style,
 			weight: parsed.weight,
-			url: `/public/fonts/${entry}`,
+			url: buildSignedPublicAssetUrl("fonts", entry),
 		});
 		familyMap.set(parsed.family, files);
 	}
@@ -207,8 +208,7 @@ export function scanFonts(fontsDir: string): FontFamily[] {
 }
 
 /**
- * Register the GET /api/fonts route.
- * No auth required — font list is not sensitive.
+ * Register the font routes.
  */
 export function registerFontRoutes(server: FastifyInstance, configDir: string): void {
 	const fontsDir = join(configDir, "fonts");
@@ -299,8 +299,8 @@ export function registerFontRoutes(server: FastifyInstance, configDir: string): 
 			}
 
 			for (const fontFile of match.files) {
-				// Strip /public/fonts/ prefix to get bare filename
-				const filename = fontFile.url.replace(/^\/public\/fonts\//, "");
+				const pathname = new URL(fontFile.url, "http://localhost").pathname;
+				const filename = decodeURIComponent(pathname.replace(/^\/public\/fonts\//, ""));
 				const target = join(fontsDir, filename);
 
 				// Containment check — never escape fontsDir

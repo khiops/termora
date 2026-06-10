@@ -1244,10 +1244,25 @@ describe("Auth enforcement", () => {
 		expect(res.statusCode).not.toBe(401);
 	});
 
-	it("bypasses auth for /api/fonts", async () => {
+	it("rejects GET /api/fonts without auth", async () => {
 		const res = await authServer.inject({ method: "GET", url: "/api/fonts" });
-		// May be 200 or 404 depending on fonts dir existence, but never 401
-		expect(res.statusCode).not.toBe(401);
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects GET /api/wallpapers without auth", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/wallpapers" });
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
+	});
+
+	it("rejects GET /api/assets/token without auth", async () => {
+		const res = await authServer.inject({ method: "GET", url: "/api/assets/token" });
+		expect(res.statusCode).toBe(401);
+		const body = res.json<{ error: string }>();
+		expect(body.error).toBe("AUTH_REQUIRED");
 	});
 
 	it("rejects GET /api/groups without auth", async () => {

@@ -125,7 +125,11 @@ describe("Wallpaper endpoints", () => {
 
 	describe("GET /api/wallpapers", () => {
 		it("should return empty list when no wallpapers exist", async () => {
-			const res = await server.inject({ method: "GET", url: "/api/wallpapers" });
+			const res = await server.inject({
+				method: "GET",
+				url: "/api/wallpapers",
+				headers: authHeader(),
+			});
 			expect(res.statusCode).toBe(200);
 			expect(res.json()).toEqual({ wallpapers: [] });
 		});
@@ -134,7 +138,11 @@ describe("Wallpaper endpoints", () => {
 			writeFileSync(join(configDir, "wallpapers", "bg.png"), "fake-png");
 			writeFileSync(join(configDir, "wallpapers", "hero.jpg"), "fake-jpg");
 
-			const res = await server.inject({ method: "GET", url: "/api/wallpapers" });
+			const res = await server.inject({
+				method: "GET",
+				url: "/api/wallpapers",
+				headers: authHeader(),
+			});
 			expect(res.statusCode).toBe(200);
 			const body = res.json<{ wallpapers: string[] }>();
 			expect(body.wallpapers).toContain("bg.png");
@@ -145,17 +153,20 @@ describe("Wallpaper endpoints", () => {
 			writeFileSync(join(configDir, "wallpapers", "script.sh"), "#!/bin/sh");
 			writeFileSync(join(configDir, "wallpapers", "image.webp"), "fake-webp");
 
-			const res = await server.inject({ method: "GET", url: "/api/wallpapers" });
+			const res = await server.inject({
+				method: "GET",
+				url: "/api/wallpapers",
+				headers: authHeader(),
+			});
 			expect(res.statusCode).toBe(200);
 			const body = res.json<{ wallpapers: string[] }>();
 			expect(body.wallpapers).not.toContain("script.sh");
 			expect(body.wallpapers).toContain("image.webp");
 		});
 
-		it("should work without auth (public endpoint)", async () => {
+		it("should reject list without auth", async () => {
 			const res = await server.inject({ method: "GET", url: "/api/wallpapers" });
-			// No Authorization header — should still be 200
-			expect(res.statusCode).toBe(200);
+			expect(res.statusCode).toBe(401);
 		});
 	});
 

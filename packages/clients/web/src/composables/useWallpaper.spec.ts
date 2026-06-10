@@ -1,6 +1,7 @@
 import type { TerminalProfile } from "@termora/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { ref } from "vue";
+import { setAssetTokenForTests } from "../utils/hub-url.js";
 import { useWallpaper } from "./useWallpaper.js";
 
 function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile {
@@ -22,6 +23,7 @@ function makeProfile(overrides: Partial<TerminalProfile> = {}): TerminalProfile 
 describe("useWallpaper", () => {
 	afterEach(() => {
 		Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+		setAssetTokenForTests(null);
 	});
 
 	describe("wallpaperStyle", () => {
@@ -95,7 +97,19 @@ describe("useWallpaper", () => {
 			const { wallpaperStyle } = useWallpaper(profile);
 
 			// Assert
-			expect(wallpaperStyle.value?.backgroundImage).toMatch(/\?t=\d+/);
+			expect(wallpaperStyle.value?.backgroundImage).toMatch(/[?&]t=\d+/);
+		});
+
+		it("should include the asset token query parameter when initialized", () => {
+			// Arrange
+			setAssetTokenForTests("asset-test-token");
+			const profile = ref(makeProfile({ wallpaper: "bg.png" }));
+
+			// Act
+			const { wallpaperStyle } = useWallpaper(profile);
+
+			// Assert
+			expect(wallpaperStyle.value?.backgroundImage).toContain("asset_token=asset-test-token");
 		});
 
 		it("should prefix wallpaper URL with the hub base URL in Tauri runtime", () => {

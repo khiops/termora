@@ -53,6 +53,19 @@ vi.mock("../utils/hub-url.js", async () => {
 	return {
 		hubBaseUrl: () => "http://hub",
 		hubPortReady: vue.ref(true),
+		namedPublicAssetUrl: (
+			kind: string,
+			filename: string,
+			params?: Record<string, string | number>,
+		) => {
+			const url = new URL(`http://hub/public/${kind}/${encodeURIComponent(filename)}`);
+			if (params) {
+				for (const [key, value] of Object.entries(params)) {
+					url.searchParams.set(key, String(value));
+				}
+			}
+			return url.toString();
+		},
 	};
 });
 
