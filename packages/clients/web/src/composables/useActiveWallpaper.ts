@@ -96,6 +96,8 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	const wallpaperCache = new Map<string, WindowBackgroundProfile>();
 	const displayedBackground = ref<WindowBackgroundProfile>(backgroundFields(DEFAULT_PROFILE));
+	/** True once the unresolved-fallback timer fires for the current scope key. Resets on scope change or successful resolution. */
+	const fallbackActive = ref(false);
 	let unresolvedFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function clearUnresolvedFallbackTimer(): void {
@@ -106,11 +108,13 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	function showDefaultWallpaper(): void {
 		clearUnresolvedFallbackTimer();
+		fallbackActive.value = false;
 		displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 	}
 
 	function showWallpaper(profile: WindowBackgroundProfile): void {
 		clearUnresolvedFallbackTimer();
+		fallbackActive.value = false;
 		displayedBackground.value = { ...profile };
 	}
 
@@ -123,9 +127,11 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 
 	function startUnresolvedFallbackTimer(key: string): void {
 		clearUnresolvedFallbackTimer();
+		fallbackActive.value = false;
 		unresolvedFallbackTimer = setTimeout(() => {
 			unresolvedFallbackTimer = null;
 			if (activeScopeKey.value !== key || resolvedForActivePane.value) return;
+			fallbackActive.value = true;
 			if (showCachedWallpaper(key)) return;
 			displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
 		}, UNRESOLVED_WALLPAPER_FALLBACK_MS);
@@ -184,6 +190,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		profile: backgroundProfile,
 		resolvedProfile,
 		resolvedForActivePane,
+		fallbackActive,
 		backgroundMode,
 		wallpaperStyle,
 		dimStyle,

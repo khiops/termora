@@ -150,6 +150,7 @@ async function getCurrentTauriWindowForEffects(): Promise<WindowEffectsWindow | 
 export function useWindowEffects(options: {
 	profile: Ref<TerminalProfile>;
 	resolvedForActivePane: Ref<boolean>;
+	hasActiveScope: Ref<boolean>;
 	platformInfo: Ref<WindowEffectsPlatformInfo | null>;
 	getWindow?: WindowEffectsAdapter;
 }): void {
@@ -157,15 +158,26 @@ export function useWindowEffects(options: {
 	let generation = 0;
 	let desiredEffect: NativeWindowEffect | null = null;
 	let appliedEffect: NativeWindowEffect | null = null;
+	let applying = false;
 	let stopped = false;
 
-	function runApply(runGeneration: number): void {
+	function runApply(): void {
+		if (applying || stopped) return;
+		// When unresolved but a scope exists (transient), defer until resolution.
+		// When there is no active scope (or fallback is active), proceed to clear.
+		if (!options.resolvedForActivePane.value && options.hasActiveScope.value) return;
+		if (desiredEffect === appliedEffect) return;
+
+		const runGeneration = generation;
 		const effectAtStart = desiredEffect;
+		applying = true;
 		void (async () => {
 			if (effectAtStart === null && appliedEffect === null) return;
 
 			const win = await getWindow();
 			if (win === null || stopped) return;
+			// Same guard inside the async body: allow clear-path when scope is gone.
+			if (!options.resolvedForActivePane.value && options.hasActiveScope.value) return;
 			if (runGeneration !== generation) return;
 
 			if (effectAtStart === null) {
@@ -180,20 +192,35 @@ export function useWindowEffects(options: {
 				console.warn("[useWindowEffects] failed to apply native effect:", err);
 			})
 			.finally(() => {
-				if (!stopped && runGeneration !== generation) runApply(generation);
+				applying = false;
+				if (
+					!stopped &&
+					(options.resolvedForActivePane.value || !options.hasActiveScope.value) &&
+					runGeneration !== generation
+				) {
+					runApply();
+				}
 			});
 	}
 
 	const stop = watch(
-		[options.profile, options.resolvedForActivePane, options.platformInfo],
+		[options.profile, options.resolvedForActivePane, options.hasActiveScope, options.platformInfo],
 		() => {
-			if (!options.resolvedForActivePane.value) return;
+			if (!options.resolvedForActivePane.value) {
+				generation += 1;
+				if (!options.hasActiveScope.value) {
+					// No active scope (pane closed / permanent fallback): desired effect is null.
+					desiredEffect = null;
+					runApply();
+				}
+				return;
+			}
 
 			const nextEffect = resolveWindowEffect(options.profile.value, options.platformInfo.value);
-			if (nextEffect === desiredEffect) return;
+			if (nextEffect === desiredEffect && nextEffect === appliedEffect) return;
 			desiredEffect = nextEffect;
 			generation += 1;
-			runApply(generation);
+			runApply();
 		},
 		{ immediate: true, flush: "sync" },
 	);

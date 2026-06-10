@@ -60,7 +60,10 @@ export function shouldShowWindowEffectPicker(
 	runsInTauri: boolean,
 	platformInfo: WindowEffectsPlatformInfo | null,
 ): boolean {
-	return runsInTauri && windowEffectSettingsOptions(platformInfo).length > 0;
+	// Linux resolves every effect to none (spec §3.2: picker hidden entirely) —
+	// offering a picker there would persist a setting that never does anything.
+	if (!runsInTauri || platformInfo === null || platformInfo.os === "linux") return false;
+	return windowEffectSettingsOptions(platformInfo).length > 0;
 }
 
 export function windowEffectDescription(platformInfo: WindowEffectsPlatformInfo | null): string {

@@ -15,7 +15,8 @@
 		"core:window:allow-set-focus",
 		"core:window:allow-set-effects",
 		"core:window:allow-start-resize-dragging",
-		"os:default",
+		"os:allow-platform",
+		"os:allow-version",
 		{
 			"identifier": "shell:allow-execute",
 			"allow": [

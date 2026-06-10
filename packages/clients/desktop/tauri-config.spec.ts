@@ -102,10 +102,12 @@ describe("capabilities/default.json", () => {
 		expect(hubRule?.sidecar).toBe(true);
 	});
 
-	it("grants the set-effects window capability and OS info read", () => {
+	it("grants the set-effects window capability and narrow OS info reads", () => {
 		const permissions = caps.permissions as unknown[];
 		expect(permissions).toContain("core:window:allow-set-effects");
-		expect(permissions).toContain("os:default");
+		expect(permissions).toContain("os:allow-platform");
+		expect(permissions).toContain("os:allow-version");
+		expect(permissions).not.toContain("os:default");
 	});
 
 	it("targets the main window", () => {

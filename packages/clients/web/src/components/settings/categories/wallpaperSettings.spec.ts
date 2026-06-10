@@ -36,6 +36,12 @@ describe("wallpaper settings helpers", () => {
 		expect(windowEffectSettingsOptions(win11)).toContainEqual({ label: "Mica", value: "mica" });
 	});
 
+	it("hides the effect picker entirely on Linux (every effect resolves to none there)", () => {
+		expect(shouldShowWindowEffectPicker(true, { os: "linux" as const, windowsBuild: null })).toBe(
+			false,
+		);
+	});
+
 	it("keeps background override detection and reset scoped to every wallpaper key", () => {
 		expect(WALLPAPER_OVERRIDE_KEYS).toEqual([
 			"backgroundMode",
