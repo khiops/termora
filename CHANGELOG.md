@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/khiops/termora/compare/termora-v0.3.3...termora-v0.3.4) (2026-06-11)
+
+
+### Bug Fixes
+
+* **root:** sync lockfile specifier for @tauri-apps/plugin-shell floor ([ad56bbe](https://github.com/khiops/termora/commit/ad56bbe7331c419e73a2831ceffdca2ad86c231e))
+
 ## [0.3.3](https://github.com/khiops/termora/compare/termora-v0.3.2...termora-v0.3.3) (2026-06-11)
 
 
