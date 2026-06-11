@@ -7,7 +7,7 @@
 			"arch": "x64",
 			"shell_sh": true,
 			"agent": true,
-			"hub": true,
+			"hub": false,
 			"desktop": false,
 			"enabled": true
 		},

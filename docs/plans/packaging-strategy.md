@@ -150,15 +150,17 @@ npx postject dist/termora-agent NODE_SEA_BLOB dist/sea-prep.blob \
 
 ## Phase 2c: CI Build Matrix
 
-GitHub Actions matrix producing binaries for all platforms:
+GitHub Actions matrix (`.github/build-matrix.json`). Agents build for ALL
+architectures — release assets feed the remote-deploy binary cache. The hub
+and desktop app build in CI for Windows only: Linux is the daily local dev
+platform (`./scripts/build-hub.sh`), and macOS has no test hardware.
 
-| Platform | Agent | Hub | Priority |
-|----------|-------|-----|----------|
-| Windows x64 | `termora-agent.exe` | `termora-hub.exe` | P0 (test first) |
-| Linux x64 | `termora-agent` | `termora-hub` | P0 |
-| Linux arm64 | `termora-agent` | `termora-hub` | P0 |
-| macOS arm64 | `termora-agent` | `termora-hub` | P1 |
-| macOS x64 | `termora-agent` | `termora-hub` | P2 |
+| Platform | Agent | Hub | Desktop |
+|----------|-------|-----|---------|
+| Windows x64 | `termora-agent.exe` | `termora-hub.exe` | NSIS/MSI |
+| Linux x64 | `termora-agent` | local build only | — |
+| Linux arm64 | `termora-agent` | — | — |
+| macOS | disabled (no test hardware) | — | — |
 
 Artifacts uploaded to GitHub Releases per version tag.
 
