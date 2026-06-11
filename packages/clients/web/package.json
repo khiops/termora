@@ -7,6 +7,7 @@
 	"scripts": {
 		"build": "vue-tsc -p tsconfig.json --noEmit && vite build",
 		"dev": "vite",
+		"test": "pnpm -w exec vitest run --project web",
 		"typecheck": "vue-tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
