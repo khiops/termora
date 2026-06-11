@@ -4,7 +4,7 @@
 	"private": false,
 	"type": "module",
 	"description": "Local-first session terminal platform — hub daemon + agent + SSH + PWA UI",
-	"license": "MIT",
+	"license": "AGPL-3.0-only",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/khiops/termora.git"

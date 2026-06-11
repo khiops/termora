@@ -10,3 +10,30 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+
+  licenses:
+    name: License compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust dependency licenses (cargo-deny, root workspace)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+      - name: Rust dependency licenses (cargo-deny, desktop Tauri tree)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+          manifest-path: packages/clients/desktop/src-tauri/Cargo.toml
+          arguments: --all-features
+          command-arguments: --config packages/clients/desktop/src-tauri/deny.toml
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: npm dependency licenses (allowlist)
+        run: ./scripts/check-npm-licenses.sh

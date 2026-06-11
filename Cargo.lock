@@ -69,7 +69,7 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "async-xpty"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "libc",
  "nix",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "termora-agent"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "async-xpty",
  "clap",

@@ -5,7 +5,7 @@ Sessions survive client disconnects, SSH drops, and device switches.
 
 ![Status](https://img.shields.io/badge/status-under%20active%20development-yellow)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![License](https://img.shields.io/badge/license-AGPL--3.0--only-blue)
 
 > **Not yet published to npm.** Under active development.
 
@@ -189,4 +189,21 @@ In `zero_conf` mode the hub auto-increments from 4100 to 4199 if the default por
 
 ## License
 
-GPL-3.0 — see [LICENSE](./LICENSE).
+termora is licensed per component:
+
+| Component | License |
+|-----------|---------|
+| `termora` (CLI), `@termora/hub`, `@termora/web`, `@termora/desktop`, `crates/termora-agent` | [AGPL-3.0-only](./LICENSE) |
+| [`crates/async-xpty`](./crates/async-xpty) | [MIT](./crates/async-xpty/LICENSE-MIT) OR [Apache-2.0](./crates/async-xpty/LICENSE-APACHE) |
+| [`@termora/shared`](./packages/shared) | [MIT](./packages/shared/LICENSE-MIT) OR [Apache-2.0](./packages/shared/LICENSE-APACHE) |
+
+The application is AGPL so termora stays fully free software and self-hostable — including
+when run as a network service. The standalone libraries are permissively dual-licensed for
+ecosystem adoption.
+
+**This licensing is permanent.** The launch license is a commitment, not a starting point:
+the application components will remain AGPL-3.0-only and the libraries will remain
+MIT OR Apache-2.0.
+
+Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/)
+(inbound = outbound). There is no CLA.
