@@ -9,11 +9,9 @@ import {
 } from "@termora/shared";
 
 export class ThemeManager {
-	private readonly configDir: string;
 	private readonly themesDir: string;
 
 	constructor(configDir: string) {
-		this.configDir = configDir;
 		this.themesDir = join(configDir, "themes");
 	}
 

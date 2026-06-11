@@ -81,7 +81,6 @@ describe("useHostVerifyStore", () => {
 
 		store.accept();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("trust_permanent");
 	});
@@ -94,7 +93,6 @@ describe("useHostVerifyStore", () => {
 
 		store.trustOnce();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("trust_once");
 	});
@@ -107,7 +105,6 @@ describe("useHostVerifyStore", () => {
 
 		store.reject();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("reject");
 	});
@@ -120,7 +117,6 @@ describe("useHostVerifyStore", () => {
 
 		store.dismiss();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("reject");
 		expect(store.currentPrompt).toBeNull();

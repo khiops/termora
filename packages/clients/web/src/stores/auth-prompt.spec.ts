@@ -149,7 +149,6 @@ describe("useAuthPromptStore", () => {
 
 		store.respond("pass");
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (wsClient.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent).not.toHaveProperty("promptId");
 		expect(sent).not.toHaveProperty("deliveryEpoch");
@@ -228,7 +227,6 @@ describe("useAuthPromptStore", () => {
 
 		store.respond("s");
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (wsClient.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.promptId).toBe("pid-1");
 	});

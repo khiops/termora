@@ -194,7 +194,6 @@ describe("SendQueue backpressure", () => {
 		// ID 1 = initial write(). Queue starts at ID 2 (MSG_0).
 		// After 2 overflows, IDs 2 and 3 (MSG_0, MSG_1) were shifted out.
 		// First in queue should now be ID 4 (MSG_2).
-		// biome-ignore lint/style/noNonNullAssertion: frames[0] guaranteed by pending assertion above
 		const firstInQueue = Buffer.from(agent.sendQueue.frames[0]!);
 		expect(firstInQueue.readUInt32LE(0)).toBe(4);
 	});

@@ -82,7 +82,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.respond("trust_once");
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("trust_once");
 	});
@@ -95,7 +94,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.respond("reject");
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("reject");
 	});
@@ -108,7 +106,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.trustPermanently();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("trust_permanent");
 	});
@@ -121,7 +118,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.trustOnce();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("trust_once");
 	});
@@ -134,7 +130,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.reject();
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.action).toBe("reject");
 	});
@@ -193,7 +188,6 @@ describe("useAgentVerifyStore", () => {
 
 		store.respond("trust_permanent");
 
-		// biome-ignore lint/style/noNonNullAssertion: test assertion — call is guaranteed by preceding expect
 		const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 		expect(sent.promptId).toBe("pid-first");
 	});

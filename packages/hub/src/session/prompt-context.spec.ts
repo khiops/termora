@@ -187,7 +187,6 @@ describe("Invariant 3: respond() accepts only from the CURRENT routeClientId", (
 		expect(capturedPromptId).toBeDefined();
 
 		// Rogue client-b tries to respond.
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-b", 1, "secret");
 		expect(accepted).toBe(false);
 
@@ -207,7 +206,6 @@ describe("Invariant 3: respond() accepts only from the CURRENT routeClientId", (
 
 		const promise = PC.prompt(ctx, context.id, "passphrase", { type: "AUTH_PROMPT" }, spySend);
 		expect(capturedPromptId).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-a", 1, "my-secret");
 		expect(accepted).toBe(true);
 		return expect(promise).resolves.toBe("my-secret");
@@ -233,7 +231,6 @@ describe("Invariant 3: respond() accepts only from the CURRENT routeClientId", (
 		const promise = PC.prompt(ctx, context.id, "host_verify", { type: "HOST_VERIFY" }, spySend);
 		expect(capturedPromptId).toBeDefined();
 		// Pass undefined epoch — back-compat path.
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-a", undefined, "trust_once");
 		expect(accepted).toBe(true);
 		return expect(promise).resolves.toBe("trust_once");
@@ -257,7 +254,6 @@ describe("Invariant 3: respond() accepts only from the CURRENT routeClientId", (
 		PC.prompt(ctx, context.id, "host_verify", { type: "HOST_VERIFY" }, spySend);
 		expect(capturedPromptId).toBeDefined();
 		// Epoch 999 does not match the in-flight epoch (1).
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-a", 999, "trust_permanent");
 		expect(accepted).toBe(false);
 
@@ -496,7 +492,6 @@ describe("Guard B: CLOSED context refuses prompt() and respond()", () => {
 
 		PC.clearContext(ctx, context.id);
 
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-a", 1, "secret");
 		expect(accepted).toBe(false);
 	});
@@ -525,7 +520,6 @@ describe("Guard D: stale deliveryEpoch rejected by respond()", () => {
 		PC.retarget(ctx, context.id, "client-b", retargetSend);
 
 		// Old-route client-a tries to respond with epoch=1 — must be rejected.
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-a", 1, "stale-secret");
 		expect(accepted).toBe(false);
 
@@ -553,7 +547,6 @@ describe("Guard D: stale deliveryEpoch rejected by respond()", () => {
 		expect(capturedPromptId).toBeDefined();
 
 		// client-b responds with the current epoch (2 after one retarget).
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
 		const accepted = PC.respond(ctx, capturedPromptId!, "client-b", currentEpoch, "correct-secret");
 		expect(accepted).toBe(true);
 	});

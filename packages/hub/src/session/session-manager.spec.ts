@@ -1182,7 +1182,6 @@ describe("SessionManager", () => {
 
 		expect(mockSshAgentInstance).not.toBeFalsy();
 		// MockSshAgent should have received an ATTACH message
-		// biome-ignore lint/style/noNonNullAssertion: asserted not null above
 		const sendCalls = mockSshAgentInstance!.send.mock.calls.map(
 			(c) => (c[0] as ProtocolMessage).type,
 		);
