@@ -26,9 +26,18 @@ ALLOWED=(
 	"(BSD-2-Clause OR MIT OR Apache-2.0)"
 )
 
-if ! json=$(pnpm licenses list --prod --json 2>&1); then
-	echo "pnpm licenses list failed:" >&2
-	echo "$json" >&2
+# stderr is left untouched so pnpm warnings/errors land in the CI log without
+# polluting the captured JSON.
+json=$(pnpm licenses list --prod --json) || {
+	echo "pnpm licenses list failed" >&2
+	exit 1
+}
+
+# Fail closed if the payload is not a non-empty JSON object: an unparseable or
+# empty payload would otherwise make the loop below read zero keys and pass.
+if ! echo "$json" | jq -e 'type == "object" and (keys | length > 0)' >/dev/null; then
+	echo "unexpected pnpm licenses output (not a non-empty JSON object):" >&2
+	echo "$json" | head -20 >&2
 	exit 1
 fi
 

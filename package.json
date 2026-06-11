@@ -16,7 +16,8 @@
 		"termora": "./bin/termora.js"
 	},
 	"files": [
-		"bin"
+		"bin",
+		"LICENSE"
 	],
 	"scripts": {
 		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @termora/hub dev\" \"pnpm -F @termora/web dev\"",
