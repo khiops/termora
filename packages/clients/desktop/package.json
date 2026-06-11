@@ -3,6 +3,7 @@
 	"version": "0.3.4",
 	"private": true,
 	"description": "Termora desktop app (Tauri v2)",
+	"license": "AGPL-3.0-only",
 	"scripts": {
 		"tauri": "tauri",
 		"dev": "tauri dev",

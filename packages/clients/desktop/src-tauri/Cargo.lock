@@ -4178,7 +4178,7 @@ dependencies = [
 
 [[package]]
 name = "termora-desktop"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "dirs",
  "reqwest 0.12.28",

@@ -1,0 +1,17 @@
+# cargo-deny configuration — dependency license compatibility gate (#78).
+# Scope: the root cargo workspace (crates/*). Run: cargo deny check licenses
+
+[licenses]
+version = 2
+# Permissive licenses acceptable for dependencies of both AGPL-3.0-only
+# (termora-agent) and MIT OR Apache-2.0 (async-xpty) crates.
+allow = [
+	"MIT",
+	"Apache-2.0",
+	"BSD-2-Clause",
+	"Unicode-3.0",
+]
+exceptions = [
+	# Our own application crate — AGPL by decision (#78), never a dependency of the libs.
+	{ name = "termora-agent", allow = ["AGPL-3.0-only"] },
+]

@@ -2,7 +2,7 @@
 	"name": "@termora/shared",
 	"version": "0.3.4",
 	"description": "Shared TypeScript types and codec for termora (wire protocol, entities)",
-	"license": "MIT",
+	"license": "MIT OR Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/khiops/termora.git"
@@ -12,7 +12,9 @@
 	},
 	"type": "module",
 	"files": [
-		"dist"
+		"dist",
+		"LICENSE-MIT",
+		"LICENSE-APACHE"
 	],
 	"exports": {
 		".": {

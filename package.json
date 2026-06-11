@@ -4,7 +4,7 @@
 	"private": false,
 	"type": "module",
 	"description": "Local-first session terminal platform — hub daemon + agent + SSH + PWA UI",
-	"license": "MIT",
+	"license": "AGPL-3.0-only",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/khiops/termora.git"
@@ -16,7 +16,8 @@
 		"termora": "./bin/termora.js"
 	},
 	"files": [
-		"bin"
+		"bin",
+		"LICENSE"
 	],
 	"scripts": {
 		"dev": "concurrently -n hub,web -c blue,green \"pnpm -F @termora/hub dev\" \"pnpm -F @termora/web dev\"",

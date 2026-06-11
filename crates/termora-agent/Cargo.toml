@@ -2,6 +2,8 @@
 name = "termora-agent"
 version = "0.3.4"
 edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/khiops/termora"
 
 [[bin]]
 name = "termora-agent"
