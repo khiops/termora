@@ -58,7 +58,6 @@ describe("Invariant 1: follower lease prevents premature reap", () => {
 		expect(ctx.acquisitions.get("host-1")).toBe(acq);
 
 		// Follower releases — now reap fires.
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null above
 		const reaped2 = Acq.release(ctx, followerLease!, () => false);
 		expect(reaped2).toBe(true);
 		expect(ctx.acquisitions.has("host-1")).toBe(false);
@@ -386,9 +385,7 @@ describe("B1 regression: lease released on every early-return path", () => {
 
 		// Follower's finally MUST release its lease even though the promise rejected.
 		// In the fixed code this is guaranteed by the outer try/finally wrapping ALL paths.
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null above
 		Acq.release(ctx, followerLease!, () => false);
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null above
 		expect(followerLease!.released).toBe(true);
 
 		// Leader lease release after abort (no-reap because close() already removed acq).
@@ -632,7 +629,6 @@ describe("Fix A: post-commit lease refcount is accurate", () => {
 		expect(leaderAcq.leases.size).toBe(1); // only follower lease remains
 
 		// Post-commit: follower releases its lease.
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null
 		const followerReaped = Acq.release(ctx, followerLease!, () => false);
 		expect(followerReaped).toBe(false); // still no pre-commit reap
 		// Fix A invariant: size must now be 0 — no followers remaining.
@@ -659,7 +655,6 @@ describe("Fix A: post-commit lease refcount is accurate", () => {
 		expect(acq.leases.size).toBe(1);
 
 		// Cleanup.
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null
 		Acq.release(ctx, followerLease!, () => false);
 		expect(acq.leases.size).toBe(0);
 	});
@@ -679,11 +674,9 @@ describe("Fix A: post-commit lease refcount is accurate", () => {
 		const ctx = makeCtx();
 		const { acq, lease: leaderLease } = Acq.acquire(ctx, "host-fa4", "client-test");
 		const followerLease = Acq.join(acq, "follower-client");
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null
 		expect(followerLease!._acq).toBe(acq);
 		acq.connectPromise.catch(() => {});
 		Acq.release(ctx, leaderLease, () => false);
-		// biome-ignore lint/style/noNonNullAssertion: join() was verified non-null
 		Acq.release(ctx, followerLease!, () => false);
 	});
 });
