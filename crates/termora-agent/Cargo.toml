@@ -10,7 +10,10 @@ name = "termora-agent"
 path = "src/main.rs"
 
 [dependencies]
-async-xpty = { path = "../async-xpty" }
+# Extracted to its own repo (khiops/async-xpty, #87). Git dep pinned to an
+# immutable rev during co-development; switches to a crates.io version once
+# published. Bumping the rev is a deliberate, reviewable change.
+async-xpty = { git = "https://github.com/khiops/async-xpty", rev = "10423351e093f4c83f7935d49e42243e51263db7" }
 tokio = { version = "1", features = ["full"] }
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
