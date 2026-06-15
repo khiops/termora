@@ -37,11 +37,6 @@
 					"jsonpath": "$.package.version"
 				},
 				{
-					"type": "toml",
-					"path": "crates/async-xpty/Cargo.toml",
-					"jsonpath": "$.package.version"
-				},
-				{
 					"type": "json",
 					"path": "packages/clients/desktop/src-tauri/tauri.conf.json",
 					"jsonpath": "$.version"

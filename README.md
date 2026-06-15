@@ -194,8 +194,10 @@ termora is licensed per component:
 | Component | License |
 |-----------|---------|
 | `termora` (CLI), `@termora/hub`, `@termora/web`, `@termora/desktop`, `crates/termora-agent` | [AGPL-3.0-only](./LICENSE) |
-| [`crates/async-xpty`](./crates/async-xpty) | [MIT](./crates/async-xpty/LICENSE-MIT) OR [Apache-2.0](./crates/async-xpty/LICENSE-APACHE) |
 | [`@termora/shared`](./packages/shared) | [MIT](./packages/shared/LICENSE-MIT) OR [Apache-2.0](./packages/shared/LICENSE-APACHE) |
+
+The async PTY library was extracted to its own repository,
+[khiops/async-xpty](https://github.com/khiops/async-xpty) (MIT OR Apache-2.0).
 
 The application is AGPL so termora stays fully free software and self-hostable — including
 when run as a network service. The standalone libraries are permissively dual-licensed for

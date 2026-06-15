@@ -3,8 +3,8 @@
 
 [licenses]
 version = 2
-# Permissive licenses acceptable for dependencies of both AGPL-3.0-only
-# (termora-agent) and MIT OR Apache-2.0 (async-xpty) crates.
+# Permissive licenses acceptable for dependencies of the AGPL-3.0-only
+# termora-agent crate (async-xpty extracted to its own repo, #87).
 allow = [
 	"MIT",
 	"Apache-2.0",
