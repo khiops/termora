@@ -6,7 +6,7 @@
 
 ## 1. Vision
 
-termora is a **local-first session terminal platform** that lets developers and SREs manage persistent terminal sessions across local and remote machines from a modern web UI. Sessions survive client disconnects, SSH drops, and device switches.
+termora is a **local-first session terminal platform** that lets developers and SREs manage persistent terminal sessions across local and remote machines from a modern web UI. Sessions survive client disconnects and device switches; local sessions also survive hub restarts. (Surviving a dropped SSH transport to a remote host is on the roadmap, not yet shipped.)
 
 **Core differentiators:**
 - Hub owns state (cache + snapshot) independently of UI clients

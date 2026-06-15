@@ -1,7 +1,7 @@
 # termora
 
 A local-first session terminal platform. Hub daemon + remote agents + SSH transport + PWA UI.
-Sessions survive client disconnects, SSH drops, and device switches.
+Sessions survive client disconnects and device switches; local sessions also survive hub restarts.
 
 ![Status](https://img.shields.io/badge/status-under%20active%20development-yellow)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
@@ -13,7 +13,7 @@ Sessions survive client disconnects, SSH drops, and device switches.
 
 ## Features
 
-- **Session persistence** — terminal sessions outlive UI disconnects and SSH drops; reconnect and resume exactly where you left off
+- **Session persistence** — terminal sessions outlive client/UI disconnects and device switches; reconnect and resume exactly where you left off. Local sessions also survive hub restarts. (Surviving a dropped SSH *transport* to a remote host — so a remote session keeps running across a network blip — is on the roadmap, not yet shipped.)
 - **SSH stdio transport** — agents run over SSH stdio; no extra ports opened on remote machines
 - **Local-first** — the hub daemon owns all state; the UI is a thin client that can come and go
 - **Multi-device** — attach to the same session from any browser or device; write-lock prevents conflicting input
