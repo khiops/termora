@@ -174,7 +174,7 @@ function makeAgentNotFoundClient(sftp: SFTPWrapper): SshClient {
 				stderr: "",
 				exitCode: 1,
 			},
-			'test -x "/opt/khiops/termora-agent" && echo "/opt/khiops/termora-agent"': {
+			'test -x "/opt/termora/termora-agent" && echo "/opt/termora/termora-agent"': {
 				stdout: "",
 				stderr: "",
 				exitCode: 1,
@@ -677,7 +677,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 					stderr: "",
 					exitCode: 1,
 				},
-				'test -x "/opt/khiops/termora-agent" && echo "/opt/khiops/termora-agent"': {
+				'test -x "/opt/termora/termora-agent" && echo "/opt/termora/termora-agent"': {
 					stdout: "",
 					stderr: "",
 					exitCode: 1,
@@ -714,7 +714,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 				stderr: "",
 				exitCode: 1,
 			},
-			'test -x "/opt/khiops/termora-agent" && echo "/opt/khiops/termora-agent"': {
+			'test -x "/opt/termora/termora-agent" && echo "/opt/termora/termora-agent"': {
 				stdout: "",
 				stderr: "",
 				exitCode: 1,
@@ -755,7 +755,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 					stderr: "",
 					exitCode: 1,
 				},
-				'test -x "/opt/khiops/termora-agent" && echo "/opt/khiops/termora-agent"': {
+				'test -x "/opt/termora/termora-agent" && echo "/opt/termora/termora-agent"': {
 					stdout: "",
 					stderr: "",
 					exitCode: 1,
@@ -920,7 +920,7 @@ describe("deploy + verify integration", () => {
 					stderr: "",
 					exitCode: 1,
 				},
-				'test -x "/opt/khiops/termora-agent" && echo "/opt/khiops/termora-agent"': {
+				'test -x "/opt/termora/termora-agent" && echo "/opt/termora/termora-agent"': {
 					stdout: "",
 					stderr: "",
 					exitCode: 1,

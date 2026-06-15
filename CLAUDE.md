@@ -3,7 +3,7 @@
 ## Vision
 
 Local-first session terminal platform: hub daemon + remote agents + SSH transport + PWA UI.
-Sessions survive client disconnects, SSH drops, and device switches.
+Sessions survive client disconnects and device switches; local sessions also survive hub restarts.
 
 ## Documentation
 

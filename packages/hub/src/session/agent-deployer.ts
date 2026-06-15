@@ -63,7 +63,7 @@ const COMMON_AGENT_PATHS_UNIX = [
 	"$HOME/.local/bin/termora-agent",
 	"/usr/local/bin/termora-agent",
 	"/usr/bin/termora-agent",
-	"/opt/khiops/termora-agent",
+	"/opt/termora/termora-agent",
 ];
 
 const COMMON_AGENT_PATHS_WINDOWS = [
