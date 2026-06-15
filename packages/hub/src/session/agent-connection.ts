@@ -22,6 +22,9 @@ export abstract class AgentConnection extends EventEmitter {
 	/** The HELLO message received during handshake (available after "ready"). */
 	helloMessage: HelloMessage | undefined;
 
+	/** True only when this specific connection attempt uploaded an agent binary. */
+	deployedThisSession = false;
+
 	/** Send a protocol message to the agent. */
 	abstract send(msg: ProtocolMessage): void;
 

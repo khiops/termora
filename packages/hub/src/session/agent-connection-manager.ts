@@ -15,6 +15,7 @@ import type {
 	AgentSnapshotResMessage,
 	AgentTitleChangeMessage,
 	ChannelExitMessage,
+	ErrorMessage,
 	HelloMessage,
 	LogConfig,
 	OutputMessage,
@@ -32,6 +33,17 @@ import type { SessionState, SharedSessionContext } from "./session-context.js";
 import type { SshConnectionManager } from "./ssh-connection-manager.js";
 import type { StateBroadcaster } from "./state-broadcaster.js";
 import { TermoraAgent } from "./termora-agent.js";
+
+export class AgentVersionMismatchError extends Error {
+	readonly code = "AGENT_VERSION_MISMATCH" as const;
+
+	constructor(agentVersion: string, hubVersion: string) {
+		super(
+			`Agent version mismatch after deploy: agent=${agentVersion} hub=${hubVersion}. Re-fetch or install the matching Termora agent binary, then reconnect.`,
+		);
+		this.name = "AgentVersionMismatchError";
+	}
+}
 
 /**
  * Map a raw OS string from HELLO to a SupportedOs value for launch profiles.
@@ -150,6 +162,90 @@ export class AgentConnectionManager {
 		return state;
 	}
 
+	private warnAgentVersionMismatch(helloMsg: HelloMessage): void {
+		if (helloMsg.agentVersion !== HUB_VERSION) {
+			console.warn(
+				`[termora] Agent version mismatch: agent=${helloMsg.agentVersion} hub=${HUB_VERSION}`,
+			);
+		}
+	}
+
+	private abortAgentVersionMismatch(
+		hostId: string,
+		sessionId: string,
+		agent: AgentConnection,
+		helloMsg: HelloMessage,
+	): AgentVersionMismatchError | null {
+		if (helloMsg.agentVersion === HUB_VERSION) return null;
+
+		const error = new AgentVersionMismatchError(helloMsg.agentVersion, HUB_VERSION);
+		this.ctx.hubLogger?.log("warn", "agent-connection-manager: deployed agent version mismatch", {
+			hostId,
+			sessionId,
+			code: error.code,
+			agentVersion: helloMsg.agentVersion,
+			hubVersion: HUB_VERSION,
+		});
+		this.broadcaster.broadcastToAllClients({
+			type: "ERROR",
+			code: error.code,
+			message: error.message,
+			hostId,
+		} satisfies ErrorMessage);
+		if (this.ctx.agents.get(hostId) === agent) {
+			this.ctx.agents.delete(hostId);
+			this.ctx.agentCapabilities.delete(hostId);
+		}
+		agent.close();
+		this.lifecycle.closeSession(hostId, sessionId);
+		return error;
+	}
+
+	private handleHello(
+		hostId: string,
+		sessionId: string,
+		agent: AgentConnection,
+		helloMsg: HelloMessage,
+		deployedThisSession: boolean,
+	): AgentVersionMismatchError | null {
+		this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", {
+			hostId,
+			agentVersion: helloMsg.agentVersion,
+			capabilities: helloMsg.capabilities,
+			availableShells: helloMsg.availableShells,
+		});
+		if (deployedThisSession) {
+			const mismatch = this.abortAgentVersionMismatch(hostId, sessionId, agent, helloMsg);
+			if (mismatch) return mismatch;
+		} else {
+			this.warnAgentVersionMismatch(helloMsg);
+		}
+		if (helloMsg.availableShells !== undefined) {
+			this.ctx.metaDal.updateHostDiscoveredShells(
+				hostId,
+				helloMsg.availableShells,
+				helloMsg.defaultShell,
+			);
+			// Auto-seed launch profiles for remote shells
+			if (helloMsg.availableShells.length > 0) {
+				const host = this.ctx.metaDal.getHost(hostId);
+				seedRemoteShellProfiles(
+					hostId,
+					helloMsg.availableShells,
+					helloMsg.defaultShell,
+					host?.os ?? null,
+					this.ctx.metaDal,
+				).catch((err: unknown) => {
+					console.error("[termora-ssh] seedRemoteShellProfiles failed:", err);
+				});
+			}
+		}
+		if (Array.isArray(helloMsg.capabilities)) {
+			this.ctx.agentCapabilities.set(hostId, helloMsg.capabilities);
+		}
+		return null;
+	}
+
 	// ─── Startup ──────────────────────────────────────────────────────────────
 
 	/**
@@ -227,7 +323,8 @@ export class AgentConnectionManager {
 
 	// ─── Event wiring ─────────────────────────────────────────────────────────
 
-	wireAgentEvents(hostId: string, _sessionId: string, agent: AgentConnection): void {
+	wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
+		const deployedThisSession = agent.deployedThisSession;
 		agent.on("message", (msg: ProtocolMessage) => {
 			// Dispatch pending request responses
 			const rid = (msg as { requestId?: string }).requestId;
@@ -253,40 +350,7 @@ export class AgentConnectionManager {
 
 			if (msg.type === "HELLO") {
 				const helloMsg = msg as HelloMessage;
-				this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", {
-					hostId,
-					agentVersion: helloMsg.agentVersion,
-					capabilities: helloMsg.capabilities,
-					availableShells: helloMsg.availableShells,
-				});
-				if (helloMsg.agentVersion && helloMsg.agentVersion !== HUB_VERSION) {
-					console.warn(
-						`[termora] Agent version mismatch: agent=${helloMsg.agentVersion} hub=${HUB_VERSION}`,
-					);
-				}
-				if (helloMsg.availableShells !== undefined) {
-					this.ctx.metaDal.updateHostDiscoveredShells(
-						hostId,
-						helloMsg.availableShells,
-						helloMsg.defaultShell,
-					);
-					// Auto-seed launch profiles for remote shells
-					if (helloMsg.availableShells.length > 0) {
-						const host = this.ctx.metaDal.getHost(hostId);
-						seedRemoteShellProfiles(
-							hostId,
-							helloMsg.availableShells,
-							helloMsg.defaultShell,
-							host?.os ?? null,
-							this.ctx.metaDal,
-						).catch((err: unknown) => {
-							console.error("[termora-ssh] seedRemoteShellProfiles failed:", err);
-						});
-					}
-				}
-				if (Array.isArray(helloMsg.capabilities)) {
-					this.ctx.agentCapabilities.set(hostId, helloMsg.capabilities);
-				}
+				this.handleHello(hostId, sessionId, agent, helloMsg, deployedThisSession);
 			} else if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
 				this.broadcaster.broadcastToChannel(outputMsg.channelId, outputMsg);
@@ -357,34 +421,8 @@ export class AgentConnectionManager {
 				hostId,
 				agentVersion: helloMsg.agentVersion,
 			});
-			if (helloMsg.agentVersion && helloMsg.agentVersion !== HUB_VERSION) {
-				console.warn(
-					`[termora] Agent version mismatch: agent=${helloMsg.agentVersion} hub=${HUB_VERSION}`,
-				);
-			}
-			if (helloMsg.availableShells !== undefined) {
-				this.ctx.metaDal.updateHostDiscoveredShells(
-					hostId,
-					helloMsg.availableShells,
-					helloMsg.defaultShell,
-				);
-				// Auto-seed launch profiles for remote shells (cached HELLO replay)
-				if (helloMsg.availableShells.length > 0) {
-					const host = this.ctx.metaDal.getHost(hostId);
-					seedRemoteShellProfiles(
-						hostId,
-						helloMsg.availableShells,
-						helloMsg.defaultShell,
-						host?.os ?? null,
-						this.ctx.metaDal,
-					).catch((err: unknown) => {
-						console.error("[termora-ssh] seedRemoteShellProfiles failed:", err);
-					});
-				}
-			}
-			if (Array.isArray(helloMsg.capabilities)) {
-				this.ctx.agentCapabilities.set(hostId, helloMsg.capabilities);
-			}
+			const mismatch = this.handleHello(hostId, sessionId, agent, helloMsg, deployedThisSession);
+			if (mismatch) throw mismatch;
 		}
 
 		agent.on("error", (err: Error) => {

@@ -269,6 +269,7 @@ describe("SshAgent", () => {
 			expect(command).toBe(
 				"'/opt/Termora Agent/bin/agent'\\''s test$HOME' --stdio --log-level 'debug trace' --format 'jsonl;rm'",
 			);
+			expect(agent.deployedThisSession).toBe(true);
 		},
 		TEST_TIMEOUT,
 	);
@@ -348,6 +349,7 @@ describe("SshAgent", () => {
 			expect(command).toBe("/usr/local/bin/termora-agent --stdio");
 			expect(command).not.toContain("--log-level");
 			expect(command).not.toContain("--format");
+			expect(agent.deployedThisSession).toBe(false);
 		},
 		TEST_TIMEOUT,
 	);

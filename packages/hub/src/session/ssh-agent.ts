@@ -282,6 +282,7 @@ export class SshAgent extends AgentConnection {
 		sessionTrustedFingerprint?: string | null,
 		signal?: AbortSignal,
 	): Promise<{ hello: HelloMessage; keyVerification: HostKeyVerification }> {
+		this.deployedThisSession = false;
 		if (!this.host.sshHost) {
 			throw new Error("Host has no sshHost configured");
 		}
@@ -491,6 +492,7 @@ export class SshAgent extends AgentConnection {
 							toDeployOptions(this.deployOptions, this.host, hostname),
 						)
 							.then((result) => {
+								this.deployedThisSession = result.deployed;
 								// Notify caller if new OS/arch info was detected (either via deploy or detection)
 								if (result.os && result.arch) {
 									this.deployOptions?.onOsDetected?.(this.host.id, result.os, result.arch);

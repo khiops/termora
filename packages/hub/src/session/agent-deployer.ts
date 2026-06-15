@@ -4,6 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostArch, HostOs } from "@termora/shared";
 import type { SFTPWrapper, Client as SshClient } from "ssh2";
+import { HUB_VERSION } from "../build-version.js";
+import { detectSea } from "../sea-addon-loader.js";
+import {
+	AGENT_TARGET_TRIPLES,
+	type FetchAgentBinaryOptions,
+	FetchError,
+	fetchAgentBinary,
+} from "./agent-fetch.js";
 import type { OsDetectResult } from "./os-detect.js";
 import { parseUnameOutput, parseWindowsArchOutput } from "./os-detect.js";
 import { sshExec } from "./ssh-exec.js";
@@ -35,6 +43,8 @@ export type BinaryVerifyPromptFn = (
 	pinnedSha256?: string,
 ) => Promise<"trust_permanent" | "trust_once" | "reject">;
 
+export type AgentBinaryFetcher = (options: FetchAgentBinaryOptions) => Promise<string>;
+
 export interface DeployOptions {
 	binaryCache: string;
 	hostname: string;
@@ -45,6 +55,9 @@ export interface DeployOptions {
 	onAgentPinned?: (hostId: string, sha256: string) => void;
 	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
 	onAgentUpdated?: (hostId: string) => void;
+	fetchAgentBinary?: AgentBinaryFetcher;
+	detectSea?: () => boolean;
+	hubVersion?: string;
 }
 
 export interface DeployResult {
@@ -70,6 +83,51 @@ const COMMON_AGENT_PATHS_WINDOWS = [
 	"%LOCALAPPDATA%\\termora\\termora-agent.exe",
 	"%ProgramFiles%\\termora\\termora-agent.exe",
 ];
+
+const STRICT_SEMVER = /^\d+\.\d+\.\d+$/;
+
+function canAutoFetchVersion(version: string): boolean {
+	return STRICT_SEMVER.test(version) && version !== "0.0.0";
+}
+
+function getAgentCacheFileName(os: HostOs, arch: HostArch, version: string): string {
+	const target = AGENT_TARGET_TRIPLES[os][arch];
+	return `termora-agent-${os}-${arch}-${version}${target.ext}`;
+}
+
+async function resolveLocalAgentBinary(
+	os: HostOs,
+	arch: HostArch,
+	options: DeployOptions,
+	hubVersion: string,
+): Promise<string | null> {
+	// HUB_VERSION flows into the cache filename and can derive from the untrusted
+	// TERMORA_VERSION env. An unvalidated value (path separators, "..") could
+	// resolve OUTSIDE the cache dir and load a planted binary that is then deployed
+	// as a trusted local agent (cache binaries bypass the remote TOFU gate). Refuse
+	// anything that is not a strict semver BEFORE constructing any path.
+	if (!STRICT_SEMVER.test(hubVersion)) return null;
+	const localBinary = join(options.binaryCache, getAgentCacheFileName(os, arch, hubVersion));
+	if (existsSync(localBinary)) return localBinary;
+
+	const seaDetector = options.detectSea ?? detectSea;
+	if (!seaDetector() || !canAutoFetchVersion(hubVersion)) return null;
+
+	const fetcher = options.fetchAgentBinary ?? fetchAgentBinary;
+	try {
+		return await fetcher({
+			os,
+			arch,
+			version: hubVersion,
+			cacheDir: options.binaryCache,
+		});
+	} catch (error) {
+		if (error instanceof FetchError) {
+			throw new DeployError("AGENT_NOT_AVAILABLE", error.message);
+		}
+		throw error;
+	}
+}
 
 /**
  * Check if termora-agent exists on the remote host.
@@ -303,6 +361,7 @@ export async function deployAgentIfNeeded(
 		onAgentTrustOnce,
 		onAgentUpdated,
 	} = options;
+	const hubVersion = options.hubVersion ?? HUB_VERSION;
 
 	// 1. Check if agent is already present on the remote host
 	const existingPath = await checkRemoteAgent(client);
@@ -329,11 +388,9 @@ export async function deployAgentIfNeeded(
 		const remoteSha = await getRemoteSha256(client, existingPath, os);
 
 		// 1c. Do we have a local binary for this OS/arch?
-		const binaryName =
-			os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
-		const localBinary = join(binaryCache, binaryName);
+		const localBinary = await resolveLocalAgentBinary(os, arch, options, hubVersion);
 
-		if (existsSync(localBinary)) {
+		if (localBinary !== null) {
 			// Compare local vs remote SHA256 — re-upload on mismatch or unknown remote hash
 			const localSha = getLocalSha256(localBinary);
 			if (remoteSha !== null && localSha !== null && remoteSha === localSha) {
@@ -423,13 +480,12 @@ export async function deployAgentIfNeeded(
 	}
 
 	// 3. Locate the binary in the local cache
-	const binaryName =
-		os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
-	const localBinary = join(binaryCache, binaryName);
-	if (!existsSync(localBinary)) {
+	const localBinary = await resolveLocalAgentBinary(os, arch, options, hubVersion);
+	if (localBinary === null) {
+		const expectedBinary = join(binaryCache, getAgentCacheFileName(os, arch, hubVersion));
 		throw new DeployError(
 			"AGENT_NOT_AVAILABLE",
-			`Agent binary not found in cache: ${localBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
+			`Agent binary not found in cache: ${expectedBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
 		);
 	}
 
