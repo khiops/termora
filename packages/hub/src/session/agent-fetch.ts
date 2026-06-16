@@ -716,6 +716,23 @@ function assertSecureCacheDir(cacheDir: string): void {
 	if ((stat.mode & 0o077) !== 0) chmodSync(cacheDir, 0o700);
 }
 
+/**
+ * True only if `cacheDir` exists and is safe to trust for cached agent binaries:
+ * a real directory (not a symlink), owned by the current user, with no group/other
+ * write access (tightened to 0700 if it was loose). A non-existent or unsafe dir
+ * returns false. Lets the deployer's cache-HIT path enforce the SAME hardening the
+ * fetch path applies, so a binary planted in an insecure cache cannot be deployed
+ * as a trusted local agent.
+ */
+export function isCacheDirSecure(cacheDir: string): boolean {
+	try {
+		assertSecureCacheDir(cacheDir);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function createUniqueTempPath(finalPath: string): string {
 	for (let attempt = 0; attempt < 32; attempt++) {
 		const rand = randomBytes(8).toString("hex");

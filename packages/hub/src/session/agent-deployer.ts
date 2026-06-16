@@ -11,6 +11,7 @@ import {
 	type FetchAgentBinaryOptions,
 	FetchError,
 	fetchAgentBinary,
+	isCacheDirSecure,
 } from "./agent-fetch.js";
 import type { OsDetectResult } from "./os-detect.js";
 import { parseUnameOutput, parseWindowsArchOutput } from "./os-detect.js";
@@ -108,7 +109,11 @@ async function resolveLocalAgentBinary(
 	// anything that is not a strict semver BEFORE constructing any path.
 	if (!STRICT_SEMVER.test(hubVersion)) return null;
 	const localBinary = join(options.binaryCache, getAgentCacheFileName(os, arch, hubVersion));
-	if (existsSync(localBinary)) return localBinary;
+	// Only trust a cache HIT if the cache dir passes the same hardening the fetch
+	// path enforces (real dir, owned by us, 0700). A cached binary bypasses the
+	// remote TOFU gate, so a hit in an insecure/symlinked cache must NOT be deployed;
+	// fall through to the fetch path, which re-checks and reports the failure clearly.
+	if (existsSync(localBinary) && isCacheDirSecure(options.binaryCache)) return localBinary;
 
 	const seaDetector = options.detectSea ?? detectSea;
 	if (!seaDetector() || !canAutoFetchVersion(hubVersion)) return null;

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SFTPWrapper, Client as SshClient } from "ssh2";
@@ -771,6 +771,41 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		// The planted out-of-cache binary was never deployed.
 		expect(sftp.fastPut).not.toHaveBeenCalled();
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"does not deploy a cached binary from a symlinked (untrusted) cache dir",
+		async () => {
+			const realCache = join(cacheDir, "real");
+			mkdirSync(realCache, { recursive: true, mode: 0o700 });
+			// A legit-named cached binary, reachable via a SYMLINKED cache path. A cache
+			// hit there bypasses the fetch path's dir hardening, so it must not deploy.
+			writeFileSync(join(realCache, agentCacheName("linux", "x64", TEST_HUB_VERSION)), "planted");
+			const linkCache = join(cacheDir, "link");
+			symlinkSync(realCache, linkCache);
+
+			const sftp = makeMockSftp();
+			const client = makeAgentNotFoundClient(sftp);
+			const fetcher = vi.fn(async (): Promise<string> => {
+				throw new Error("fetch should not run");
+			});
+
+			const error = await deployAgentIfNeeded(
+				client,
+				{ os: "linux", arch: "x64" },
+				makeOptions({
+					binaryCache: linkCache,
+					detectSea: () => false,
+					fetchAgentBinary: fetcher,
+					hubVersion: TEST_HUB_VERSION,
+				}),
+			).catch((e: unknown) => e);
+
+			expect(error).toBeInstanceOf(DeployError);
+			expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+			expect(fetcher).not.toHaveBeenCalled();
+			expect(sftp.fastPut).not.toHaveBeenCalled();
+		},
+	);
 
 	it("13. Agent not found + no local binary → throws AGENT_NOT_AVAILABLE", async () => {
 		// cacheDir is empty — no binary
