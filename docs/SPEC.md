@@ -238,6 +238,47 @@ Vue 3 SPA built with Vite. Served by hub in production, dev server in developmen
 - Reactive: WS messages update store → Vue reactivity updates UI
 - Persistent: workspace layout saved to hub via REST on change
 
+### 3.5 Agent Binary Distribution
+
+The agent binary reaches the machine it runs on through two distinct, deliberate paths.
+
+**Local agent (same OS/arch as the hub) — bundled.**
+The hub ships with the agent binary for its own platform, co-located with the hub (the SEA resolves it
+next to itself via `sea-agent-resolver`; the desktop bundles it as a Tauri sidecar). Local sessions use
+this agent. It is therefore available **offline and immediately** at install, and its version always
+matches the hub by construction. A terminal app must open a local shell without a network round-trip, so
+this is never fetched.
+
+**Remote agents (other OS/arch, for SSH hosts) — fetched on demand.**
+The hub does **not** bundle agents for platforms other than its own. When deploying to a remote host whose
+`os/arch` is not yet cached, the hub downloads the matching release asset
+(`termora-agent-<triple>-<version>`) from GitHub Releases — version-matched to the hub, verified against
+`SHA256SUMS-<version>.txt`, placed in a hardened (0700, owned, non-symlink) cache — then uploads it to the
+remote host over SFTP. Pre-population is available via `termora-hub agent fetch <os-arch>|--all`.
+
+Two properties follow:
+- **The remote host never needs outbound internet** — the *hub* fetches on its behalf, and the binary
+  travels hub → remote over the existing SSH/SFTP channel. Deploying to a remote host is inherently online
+  (it is an SSH connection), so the fetch always has connectivity.
+- **Bundling every target triple in every installer is unnecessary** (and would bloat installers and defeat
+  the fetch-on-demand design), so it is not done.
+
+**Air-gapped hub caveat.**
+The one case the fetch path cannot serve is a **hub that itself has no outbound internet**. There, a fetch
+fails with an actionable error naming the manual gesture (download URL, cache path, and the exact filename
+to rename to). The operator downloads the binary (and its `SHA256SUMS`) on a connected machine, transfers
+it, and places it in the binary cache; the deployer then treats it like any cached binary. A GUI
+agent-manager (list cached/missing agents per `os/arch`, fetch button, and an **import-with-integrity-check**
+flow for air-gapped transfers) is a planned follow-up to the existing CLI — an imported binary must still
+be integrity-verified (confirmed SHA256 or an imported `SHA256SUMS`) so it does not bypass the trust the
+fetch path enforces.
+
+**Trust model by provenance.** Bundled = build provenance (compiled and shipped together). Fetched = HTTPS
++ `SHA256SUMS` + hardened cache + atomic placement. Manually placed = operator-verified. In all three, a
+binary found **already present on the remote host** still goes through the deployer's TOFU/verification gate
+(`AGENT_BINARY_REJECTED`/`UNTRUSTED`); only uploads from the hub's own verified cache bypass that prompt, by
+design. (Agent fetch + version-aware deploy: see #77.)
+
 ## 4. Entity Model
 
 ```

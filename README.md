@@ -55,6 +55,19 @@ Hub never touches PTY directly — the agent is the universal PTY manager.
 
 The hub daemon binds to `127.0.0.1:4100` and serves both the REST API (`/api/*`) and the WebSocket endpoint (`/ws`). All PTY management is delegated to the agent process, whether local or remote.
 
+### Agent distribution
+
+The hub bundles the agent binary for **its own** OS/arch (used for local sessions, available offline at
+install). Agents for **remote** SSH hosts of other OS/arch are **not** bundled — the hub downloads the
+matching, version-matched, checksum-verified binary from GitHub Releases on demand and uploads it to the host
+over SFTP, so the remote host never needs outbound internet. Pre-populate with `termora-hub agent fetch
+<os-arch> | --all`.
+
+> **Air-gapped note:** this assumes the **hub** has outbound internet. If the hub itself is air-gapped, a
+> fetch fails with an actionable message (download URL + cache path + filename); download the binary and its
+> `SHA256SUMS` on a connected machine, transfer them, and drop them in the binary cache. See
+> [`docs/SPEC.md` §3.5](docs/SPEC.md) for the full distribution model.
+
 ---
 
 ## Packages
