@@ -807,6 +807,38 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		},
 	);
 
+	it.skipIf(process.platform === "win32")(
+		"does not deploy a cache entry that is a symlink, even in a secure cache dir",
+		async () => {
+			// cacheDir is a normal secure dir (real, owned, 0700), but the cache-named
+			// entry is a SYMLINK, not a regular file — it must not be trusted/deployed.
+			const realTarget = join(cacheDir, "elsewhere-binary");
+			writeFileSync(realTarget, "planted");
+			const symlinkBinary = join(cacheDir, agentCacheName("linux", "x64", TEST_HUB_VERSION));
+			symlinkSync(realTarget, symlinkBinary);
+
+			const sftp = makeMockSftp();
+			const client = makeAgentNotFoundClient(sftp);
+			const fetcher = vi.fn(async (): Promise<string> => {
+				throw new Error("fetch should not run");
+			});
+
+			const error = await deployAgentIfNeeded(
+				client,
+				{ os: "linux", arch: "x64" },
+				makeOptions({
+					detectSea: () => false,
+					fetchAgentBinary: fetcher,
+					hubVersion: TEST_HUB_VERSION,
+				}),
+			).catch((e: unknown) => e);
+
+			expect(error).toBeInstanceOf(DeployError);
+			expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+			expect(sftp.fastPut).not.toHaveBeenCalled();
+		},
+	);
+
 	it("13. Agent not found + no local binary → throws AGENT_NOT_AVAILABLE", async () => {
 		// cacheDir is empty — no binary
 		const sftp = makeMockSftp();

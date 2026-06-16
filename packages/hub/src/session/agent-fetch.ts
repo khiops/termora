@@ -733,6 +733,25 @@ export function isCacheDirSecure(cacheDir: string): boolean {
 	}
 }
 
+/**
+ * True only if `filePath` is a regular file (not a symlink, directory, or special
+ * file) owned by the current user on POSIX — i.e. a cached binary safe to deploy
+ * without the remote TOFU check. Uses lstat (NOT stat), so a planted symlink in an
+ * otherwise-secure cache dir is rejected rather than followed and uploaded as a
+ * trusted local agent.
+ */
+export function isTrustedCacheBinary(filePath: string): boolean {
+	try {
+		const info = lstatSync(filePath);
+		if (!info.isFile()) return false;
+		if (process.platform === "win32") return true;
+		const uid = process.getuid?.();
+		return uid === undefined || info.uid === uid;
+	} catch {
+		return false;
+	}
+}
+
 function createUniqueTempPath(finalPath: string): string {
 	for (let attempt = 0; attempt < 32; attempt++) {
 		const rand = randomBytes(8).toString("hex");

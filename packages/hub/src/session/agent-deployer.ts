@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostArch, HostOs } from "@termora/shared";
@@ -12,6 +12,7 @@ import {
 	FetchError,
 	fetchAgentBinary,
 	isCacheDirSecure,
+	isTrustedCacheBinary,
 } from "./agent-fetch.js";
 import type { OsDetectResult } from "./os-detect.js";
 import { parseUnameOutput, parseWindowsArchOutput } from "./os-detect.js";
@@ -109,11 +110,14 @@ async function resolveLocalAgentBinary(
 	// anything that is not a strict semver BEFORE constructing any path.
 	if (!STRICT_SEMVER.test(hubVersion)) return null;
 	const localBinary = join(options.binaryCache, getAgentCacheFileName(os, arch, hubVersion));
-	// Only trust a cache HIT if the cache dir passes the same hardening the fetch
-	// path enforces (real dir, owned by us, 0700). A cached binary bypasses the
-	// remote TOFU gate, so a hit in an insecure/symlinked cache must NOT be deployed;
-	// fall through to the fetch path, which re-checks and reports the failure clearly.
-	if (existsSync(localBinary) && isCacheDirSecure(options.binaryCache)) return localBinary;
+	// Only trust a cache HIT if BOTH the cache dir AND the binary entry pass the
+	// fetch-path hardening: a secure dir (real, owned, 0700) AND a binary that is a
+	// regular file (not a planted symlink) owned by us. A cached binary bypasses the
+	// remote TOFU gate, so anything unsafe must NOT be deployed — fall through to the
+	// fetch path, which re-checks and reports the failure clearly.
+	if (isCacheDirSecure(options.binaryCache) && isTrustedCacheBinary(localBinary)) {
+		return localBinary;
+	}
 
 	const seaDetector = options.detectSea ?? detectSea;
 	if (!seaDetector() || !canAutoFetchVersion(hubVersion)) return null;

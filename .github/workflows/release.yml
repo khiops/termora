@@ -368,19 +368,26 @@ jobs:
         run: |
           VERSION="${TAG_NAME#v}"
           rm -rf _sums && mkdir -p _sums && cd _sums
-          # Download every versioned agent asset for this version.
-          gh release download "$TAG_NAME" --pattern "termora-agent-*-${VERSION}*" --dir .
-          # Completeness: every ENABLED agent triple must be present, else fail —
-          # never publish a SHA256SUMS that looks complete for a partial release.
+          # Build the EXACT expected asset names from the matrix (windows → .exe), so
+          # a stale near-match (e.g. ...-${VERSION}.bad) can never satisfy completeness
+          # while the real asset is missing.
+          mapfile -t EXPECTED < <(
+            jq -r --arg v "$VERSION" '.targets[] | select(.enabled and .agent)
+              | "termora-agent-\(.triple)-\($v)\(if .os == "windows" then ".exe" else "" end)"' \
+              ../.github/build-matrix.json
+          )
+          # Download each exact asset; fail (never publish a partial-looking manifest)
+          # if any enabled agent triple's exact asset is missing.
           MISSING=0
-          while read -r triple; do
-            if ! ls "termora-agent-${triple}-${VERSION}"* >/dev/null 2>&1; then
-              echo "::error::Missing agent asset for ${triple} (version ${VERSION})"
+          for name in "${EXPECTED[@]}"; do
+            if ! gh release download "$TAG_NAME" --pattern "$name" --dir . 2>/dev/null || [ ! -f "$name" ]; then
+              echo "::error::Missing agent asset $name"
               MISSING=1
             fi
-          done < <(jq -r '.targets[] | select(.enabled and .agent) | .triple' ../.github/build-matrix.json)
+          done
           [ "$MISSING" -eq 0 ] || exit 1
-          sha256sum termora-agent-*-"${VERSION}"* > "SHA256SUMS-${VERSION}.txt"
+          # Checksum ONLY the exact expected files.
+          sha256sum "${EXPECTED[@]}" > "SHA256SUMS-${VERSION}.txt"
           cat "SHA256SUMS-${VERSION}.txt"
           gh release upload "$TAG_NAME" --clobber "SHA256SUMS-${VERSION}.txt"
       - name: Remove intermediate assets and publish
