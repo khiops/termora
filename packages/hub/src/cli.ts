@@ -32,6 +32,8 @@ import {
 	type FetchAgentBinaryOptions,
 	FetchError,
 	fetchAgentBinary,
+	isCacheDirSecure,
+	isTrustedCacheBinary,
 } from "./session/agent-fetch.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
@@ -427,7 +429,11 @@ export async function cmdAgentFetch(
 
 	for (const target of targets) {
 		const existing = cachePathForBuiltTarget(cacheDir, target, version);
-		if (existing && existsSync(existing)) {
+		// Only report "already cached" for an entry the deployer would actually
+		// trust: a regular file (not a dir/symlink/tampered entry) owned by us, in a
+		// secure cache dir. Anything else falls through to a fresh, checksum-verified
+		// fetch that atomically replaces it.
+		if (existing && isCacheDirSecure(cacheDir) && isTrustedCacheBinary(existing)) {
 			writeLine(`already cached ${existing}`);
 			continue;
 		}

@@ -262,6 +262,25 @@ function defaultFetchImpl(): AgentFetchImpl {
 	return (url, init) => globalThis.fetch(url, init);
 }
 
+// Accept only a COMPLETE 200 OK asset response. A 2xx-but-not-200 (e.g. 206
+// Partial Content) or a Content-Range response would cache a truncated executable —
+// and for legacy versions, where the checksum is optional, that truncation would go
+// undetected. Reject such responses before any bytes are written.
+async function rejectPartialResponse(
+	response: Response,
+	request: TimedRequest,
+	url: string,
+): Promise<void> {
+	if (!response.ok) return; // non-2xx is handled by the HTTP error mapping
+	if (response.status === 200 && !response.headers.has("content-range")) return;
+	await closeResponse(response);
+	request.clear();
+	throw new FetchError(
+		"NETWORK",
+		`Refusing a partial response (HTTP ${response.status}) for ${url}; a truncated agent binary must never be cached. Retry the fetch.`,
+	);
+}
+
 async function openAssetResponse(args: {
 	readonly baseUrl: string;
 	readonly version: string;
@@ -273,6 +292,7 @@ async function openAssetResponse(args: {
 	readonly tagUrl: string;
 }): Promise<AssetResponse> {
 	const versioned = await fetchResponse(args.versionedAssetUrl, args.fetchImpl, args.fetchTarget);
+	await rejectPartialResponse(versioned.response, versioned.request, args.versionedAssetUrl);
 	if (versioned.response.ok) {
 		return {
 			response: versioned.response,
@@ -288,6 +308,7 @@ async function openAssetResponse(args: {
 		const legacyAssetName = getLegacyAssetName(args.target.triple, args.target.ext);
 		const legacyAssetUrl = buildReleaseAssetUrl(args.baseUrl, args.version, legacyAssetName);
 		const legacy = await fetchResponse(legacyAssetUrl, args.fetchImpl, args.fetchTarget);
+		await rejectPartialResponse(legacy.response, legacy.request, legacyAssetUrl);
 		if (legacy.response.ok) {
 			return {
 				response: legacy.response,

@@ -643,6 +643,32 @@ describe("fetchAgentBinary", () => {
 		});
 		expect(readFileSync(result, "utf8")).toBe(body);
 	});
+
+	it("rejects a partial (206 / Content-Range) asset response", async () => {
+		const cacheDir = makeTempDir();
+		const { fetchImpl } = routeFetch((url) => {
+			if (url === versionedAssetUrl(VERSION)) {
+				return response("trunc", {
+					status: 206,
+					headers: { "content-range": "bytes 0-4/100" },
+				});
+			}
+			throw new Error(`unexpected URL ${url}`);
+		});
+
+		await expect(
+			fetchAgentBinary({
+				os: "linux",
+				arch: "x64",
+				version: VERSION,
+				cacheDir,
+				baseUrl: BASE_URL,
+				fetchImpl,
+			}),
+		).rejects.toMatchObject({ code: "NETWORK" });
+		// No truncated executable was written to the cache.
+		expect(listCache(cacheDir)).toEqual([]);
+	});
 });
 
 function makeTempDir(): string {

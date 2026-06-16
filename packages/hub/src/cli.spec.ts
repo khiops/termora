@@ -410,6 +410,34 @@ describe("cmdAgentFetch", () => {
 			expect(readFileSync(outsideTarget, "utf8")).toBe("outside");
 		},
 	);
+
+	it.skipIf(process.platform === "win32")(
+		"does not report a symlinked cache entry as already cached (re-fetches instead)",
+		async () => {
+			const cacheDir = makeTempDir();
+			const cachePath = agentCachePath(cacheDir, "linux", "x64", TEST_VERSION);
+			const outside = path.join(makeTempDir(), "outside");
+			writeFileSync(outside, "outside");
+			// The cache entry is a SYMLINK, not a regular file — it must not be
+			// trusted as "already cached"; the command must re-fetch (refresh) it.
+			symlinkSync(outside, cachePath);
+			const fetcher = vi.fn(async () => cachePath);
+			const lines: string[] = [];
+
+			const code = await cmdAgentFetch(
+				parsed(["agent", "fetch", "linux-x64", "--version", TEST_VERSION]),
+				{
+					fetchAgentBinary: fetcher,
+					getBinaryCacheDir: () => cacheDir,
+					writeLine: (line) => lines.push(line),
+				},
+			);
+
+			expect(code).toBe(0);
+			expect(fetcher).toHaveBeenCalledTimes(1);
+			expect(lines).not.toContain(`already cached ${cachePath}`);
+		},
+	);
 });
 
 describe("path helpers", () => {
