@@ -1,6 +1,6 @@
 {
 	"name": "@termora/shared",
-	"version": "0.3.4",
+	"version": "0.4.0",
 	"description": "Shared TypeScript types and codec for termora (wire protocol, entities)",
 	"license": "MIT OR Apache-2.0",
 	"repository": {
