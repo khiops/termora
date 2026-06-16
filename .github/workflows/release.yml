@@ -61,10 +61,11 @@ jobs:
         run: |
           VERSION="${TAG_NAME#v}"
           PKG_VERSION="$(jq -r '.version' package.json)"
+          HUB_PKG_VERSION="$(jq -r '.version' packages/hub/package.json)"
           CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/termora-agent/Cargo.toml | head -1)"
-          echo "tag=$VERSION package.json=$PKG_VERSION agent-cargo=$CARGO_VERSION"
-          if [ "$VERSION" != "$PKG_VERSION" ] || [ "$VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Version mismatch — tag=$VERSION package.json=$PKG_VERSION termora-agent Cargo.toml=$CARGO_VERSION (the agent CARGO_PKG_VERSION must equal the hub version for the HELLO lockstep)"
+          echo "tag=$VERSION root=$PKG_VERSION hub=$HUB_PKG_VERSION agent-cargo=$CARGO_VERSION"
+          if [ "$VERSION" != "$PKG_VERSION" ] || [ "$VERSION" != "$HUB_PKG_VERSION" ] || [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Version mismatch — tag=$VERSION root=$PKG_VERSION hub=$HUB_PKG_VERSION termora-agent=$CARGO_VERSION (the hub HUB_VERSION reads packages/hub/package.json and the agent CARGO_PKG_VERSION must both equal the tag for the HELLO lockstep)"
             exit 1
           fi
       - name: Create or reuse release
