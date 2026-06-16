@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/khiops/termora/compare/v0.3.4...v0.4.0) (2026-06-16)
+
+
+### Features
+
+* **hub:** populate agent cache from GitHub Releases + version-aware deploys ([#77](https://github.com/khiops/termora/issues/77)) ([#89](https://github.com/khiops/termora/issues/89)) ([46b3998](https://github.com/khiops/termora/commit/46b39981642e387acc51d0f705805083af00e5f2))
+
+
+### Refactoring
+
+* **agent:** consume async-xpty from its own repo ([#87](https://github.com/khiops/termora/issues/87)) ([#88](https://github.com/khiops/termora/issues/88)) ([a2d0ee6](https://github.com/khiops/termora/commit/a2d0ee6f92b08ed2ee12d4b51447698eab79e4cf))
+
+
+### CI/CD
+
+* **release:** bump minor for feat in pre-1.0 (drop bump-patch-for-minor-pre-major) ([#90](https://github.com/khiops/termora/issues/90)) ([cc7c221](https://github.com/khiops/termora/commit/cc7c2218b00c8e7102f53445fb38ff43a51c189f))
+* **release:** plain version tags and windows-only hub/desktop builds ([#75](https://github.com/khiops/termora/issues/75)) ([d8314a7](https://github.com/khiops/termora/commit/d8314a7906e9d141162d0810b3dab97daa97770f))
+
 ## [0.3.4](https://github.com/khiops/termora/compare/termora-v0.3.3...termora-v0.3.4) (2026-06-11)
 
 
