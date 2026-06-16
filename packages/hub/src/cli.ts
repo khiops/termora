@@ -383,7 +383,10 @@ function parseAgentBinaryCacheName(name: string): { readonly version: string } |
 }
 
 function pruneAgentBinaryCache(cacheDir: string, version: string): number {
-	if (!existsSync(cacheDir)) return 0;
+	// Never prune through an untrusted/symlinked cache dir: readdirSync follows a
+	// directory symlink and would delete matching termora-agent-* files in the link
+	// target. isCacheDirSecure also returns false for a missing dir.
+	if (!isCacheDirSecure(cacheDir)) return 0;
 
 	let removed = 0;
 	for (const name of readdirSync(cacheDir)) {

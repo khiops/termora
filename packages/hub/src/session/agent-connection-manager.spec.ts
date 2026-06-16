@@ -246,6 +246,8 @@ describe("AgentConnectionManager HELLO version check", () => {
 	it("warns and proceeds when a pre-existing remote agent reports an old version", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const connected = await connectAgent("0.1.0");
+		expect(connected.deployedThisSession).toBe(false);
+		expect(connected.remoteMatchesHubVersionCache).toBe(false);
 		const { ctx, broadcaster, lifecycle, manager } = makeHarness();
 
 		expect(() => {
@@ -273,6 +275,37 @@ describe("AgentConnectionManager HELLO version check", () => {
 			}
 		})();
 
+		expect(error).toBeInstanceOf(AgentVersionMismatchError);
+		expect((error as AgentVersionMismatchError).code).toBe("AGENT_VERSION_MISMATCH");
+		expect(lifecycle.closeSession).toHaveBeenCalledWith(HOST_ID, SESSION_ID);
+		expect(broadcaster.broadcastToAllClients).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "ERROR",
+				code: "AGENT_VERSION_MISMATCH",
+				hostId: HOST_ID,
+			}),
+		);
+		expect(warn).not.toHaveBeenCalled();
+		expect(ctx.agentCapabilities.has(HOST_ID)).toBe(false);
+		expect(connected.connected).toBe(false);
+	});
+
+	it("aborts with AGENT_VERSION_MISMATCH when a non-deployed remote agent matches the hub-version cache", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const connected = await connectAgent("0.1.0");
+		connected.remoteMatchesHubVersionCache = true;
+		const { ctx, broadcaster, lifecycle, manager } = makeHarness();
+
+		const error = (() => {
+			try {
+				manager.wireAgentEvents(HOST_ID, SESSION_ID, connected);
+				return null;
+			} catch (err) {
+				return err;
+			}
+		})();
+
+		expect(connected.deployedThisSession).toBe(false);
 		expect(error).toBeInstanceOf(AgentVersionMismatchError);
 		expect((error as AgentVersionMismatchError).code).toBe("AGENT_VERSION_MISMATCH");
 		expect(lifecycle.closeSession).toHaveBeenCalledWith(HOST_ID, SESSION_ID);

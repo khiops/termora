@@ -146,7 +146,10 @@ Post-deploy HELLO check — **net-new code** (production only `console.warn`s on
 mismatch in `agent-connection-manager.ts` today): after `deployAgentIfNeeded` resolved
 `deployed: true` and before the session transitions to connected, `hello.agentVersion !==
 HUB_VERSION` ⇒ new structured `AGENT_VERSION_MISMATCH` error + session abort. When THIS
-session did not deploy (pre-existing remote agent), keep the warning-only behavior.
+session did not deploy (pre-existing remote agent), keep the warning-only behavior — EXCEPT
+when the remote agent's SHA matched our trusted hub-version cache binary (the remote IS our
+binary, so a version mismatch means the cache is wrong): that is also fatal. A genuinely
+foreign agent (different hash) stays warning-only.
 
 ### §3.4 CLI (`cli.ts`)
 

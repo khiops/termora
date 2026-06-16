@@ -65,6 +65,8 @@ export interface DeployOptions {
 export interface DeployResult {
 	/** true if a binary was uploaded (false = agent was already present) */
 	deployed: boolean;
+	/** true when an existing remote agent's SHA matched the trusted hub-version cache binary */
+	remoteMatchesHubVersionCache: boolean;
 	/** path where agent is/was found on the remote host */
 	remotePath: string;
 	/** detected OS (null if the agent was already present or os was known) */
@@ -404,7 +406,13 @@ export async function deployAgentIfNeeded(
 			const localSha = getLocalSha256(localBinary);
 			if (remoteSha !== null && localSha !== null && remoteSha === localSha) {
 				// Hashes match — nothing to do
-				return { deployed: false, remotePath: existingPath, os, arch };
+				return {
+					deployed: false,
+					remoteMatchesHubVersionCache: true,
+					remotePath: existingPath,
+					os,
+					arch,
+				};
 			}
 			// Mismatch (or remoteSha unavailable) — re-upload from trusted local copy
 			await uploadAgentBinary(client, localBinary, existingPath);
@@ -414,7 +422,13 @@ export async function deployAgentIfNeeded(
 			if (localSha !== null) {
 				onAgentPinned?.(hostId, localSha);
 			}
-			return { deployed: true, remotePath: existingPath, os, arch };
+			return {
+				deployed: true,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// 1d. No local binary — TOFU flow
@@ -428,12 +442,24 @@ export async function deployAgentIfNeeded(
 
 		// Session trust: already trusted this exact hash this session
 		if (sessionTrustedSha256 && sessionTrustedSha256 === remoteSha) {
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// Pinned trust: pinned hash matches remote — all good
 		if (pinnedSha256 && pinnedSha256 === remoteSha) {
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// Need to prompt
@@ -458,11 +484,23 @@ export async function deployAgentIfNeeded(
 
 		if (action === "trust_permanent") {
 			onAgentPinned?.(hostId, remoteSha);
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 		if (action === "trust_once") {
 			onAgentTrustOnce?.(hostId, remoteSha);
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 		// action === "reject"
 		throw new DeployError(
@@ -504,7 +542,7 @@ export async function deployAgentIfNeeded(
 	// 5. Upload via SFTP (fastPut handles large binaries efficiently)
 	await uploadAgentBinary(client, localBinary, remotePath);
 
-	return { deployed: true, remotePath, os, arch };
+	return { deployed: true, remoteMatchesHubVersionCache: false, remotePath, os, arch };
 }
 
 /**

@@ -411,6 +411,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		const result = await deployAgentIfNeeded(client, { os: "linux", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(true);
 		expect(result.remotePath).toBe(existingPath);
 	});
 
@@ -441,6 +442,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 		expect(onAgentUpdated).toHaveBeenCalledWith("host-1");
 		expect(sftp.fastPut).toHaveBeenCalled();
@@ -497,6 +499,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(sftp.fastPut).toHaveBeenCalled();
 	});
 
@@ -534,6 +537,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(promptBinaryVerify).not.toHaveBeenCalled();
 	});
 
@@ -570,6 +574,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(promptBinaryVerify).not.toHaveBeenCalled();
 	});
 
@@ -585,6 +590,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 	});
 
@@ -600,6 +606,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(onAgentTrustOnce).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 	});
 
@@ -644,6 +651,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: "linux", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe("/home/user/.local/bin/termora-agent");
 		expect(result.os).toBe("linux");
 		expect(result.arch).toBe("x64");
@@ -681,6 +689,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 			cacheDir,
 		});
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(sftp.fastPut).toHaveBeenCalledWith(
 			join(cacheDir, binaryName),
 			"/home/user/.local/bin/termora-agent",
@@ -894,6 +903,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: null, arch: null }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.os).toBe("linux");
 		expect(result.arch).toBe("arm64");
 	});
@@ -970,6 +980,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: "windows", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe("%LOCALAPPDATA%\\termora\\termora-agent.exe");
 		expect(sftp.fastPut).toHaveBeenCalledWith(
 			join(cacheDir, binaryName),
@@ -1138,6 +1149,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(resultFirst.deployed).toBe(true);
+		expect(resultFirst.remoteMatchesHubVersionCache).toBe(false);
 		expect(resultFirst.remotePath).toBe("/home/user/.local/bin/termora-agent");
 		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
 
@@ -1162,6 +1174,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(resultSecond.deployed).toBe(false);
+		expect(resultSecond.remoteMatchesHubVersionCache).toBe(true);
 		expect(resultSecond.remotePath).toBe(deployedPath);
 	});
 
@@ -1194,6 +1207,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
 		expect(onAgentUpdated).toHaveBeenCalledWith("host-1");
 	});
@@ -1224,6 +1238,7 @@ describe("deploy + verify integration", () => {
 		);
 		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 	});
 
@@ -1241,6 +1256,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 	});
 

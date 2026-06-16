@@ -207,6 +207,7 @@ export class AgentConnectionManager {
 		agent: AgentConnection,
 		helloMsg: HelloMessage,
 		deployedThisSession: boolean,
+		remoteMatchesHubVersionCache: boolean,
 	): AgentVersionMismatchError | null {
 		this.ctx.hubLogger?.log("debug", "agent-connection-manager: HELLO received", {
 			hostId,
@@ -214,7 +215,7 @@ export class AgentConnectionManager {
 			capabilities: helloMsg.capabilities,
 			availableShells: helloMsg.availableShells,
 		});
-		if (deployedThisSession) {
+		if (deployedThisSession || remoteMatchesHubVersionCache) {
 			const mismatch = this.abortAgentVersionMismatch(hostId, sessionId, agent, helloMsg);
 			if (mismatch) return mismatch;
 		} else {
@@ -325,6 +326,7 @@ export class AgentConnectionManager {
 
 	wireAgentEvents(hostId: string, sessionId: string, agent: AgentConnection): void {
 		const deployedThisSession = agent.deployedThisSession;
+		const remoteMatchesHubVersionCache = agent.remoteMatchesHubVersionCache;
 		agent.on("message", (msg: ProtocolMessage) => {
 			// Dispatch pending request responses
 			const rid = (msg as { requestId?: string }).requestId;
@@ -350,7 +352,14 @@ export class AgentConnectionManager {
 
 			if (msg.type === "HELLO") {
 				const helloMsg = msg as HelloMessage;
-				this.handleHello(hostId, sessionId, agent, helloMsg, deployedThisSession);
+				this.handleHello(
+					hostId,
+					sessionId,
+					agent,
+					helloMsg,
+					deployedThisSession,
+					remoteMatchesHubVersionCache,
+				);
 			} else if (msg.type === "OUTPUT") {
 				const outputMsg = msg as OutputMessage;
 				this.broadcaster.broadcastToChannel(outputMsg.channelId, outputMsg);
@@ -421,7 +430,14 @@ export class AgentConnectionManager {
 				hostId,
 				agentVersion: helloMsg.agentVersion,
 			});
-			const mismatch = this.handleHello(hostId, sessionId, agent, helloMsg, deployedThisSession);
+			const mismatch = this.handleHello(
+				hostId,
+				sessionId,
+				agent,
+				helloMsg,
+				deployedThisSession,
+				remoteMatchesHubVersionCache,
+			);
 			if (mismatch) throw mismatch;
 		}
 

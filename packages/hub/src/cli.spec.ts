@@ -438,6 +438,32 @@ describe("cmdAgentFetch", () => {
 			expect(lines).not.toContain(`already cached ${cachePath}`);
 		},
 	);
+
+	it.skipIf(process.platform === "win32")(
+		"refuses to prune through a symlinked cache directory",
+		async () => {
+			const realDir = makeTempDir();
+			const stale = agentCachePath(realDir, "linux", "x64", "0.3.4");
+			writeFileSync(stale, "stale");
+			// The cache dir handed to the command is a SYMLINK to realDir. Pruning must
+			// not readdir through it and delete the stale file in the link target.
+			const linkDir = path.join(makeTempDir(), "link");
+			symlinkSync(realDir, linkDir);
+			const fetcher = vi.fn(async () => agentCachePath(linkDir, "linux", "x64", TEST_VERSION));
+
+			const code = await cmdAgentFetch(
+				parsed(["agent", "fetch", "linux-x64", "--version", TEST_VERSION, "--prune"]),
+				{
+					fetchAgentBinary: fetcher,
+					getBinaryCacheDir: () => linkDir,
+					writeLine: () => {},
+				},
+			);
+
+			expect(code).toBe(0);
+			expect(existsSync(stale)).toBe(true);
+		},
+	);
 });
 
 describe("path helpers", () => {

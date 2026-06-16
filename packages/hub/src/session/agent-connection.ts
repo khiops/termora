@@ -25,6 +25,9 @@ export abstract class AgentConnection extends EventEmitter {
 	/** True only when this specific connection attempt uploaded an agent binary. */
 	deployedThisSession = false;
 
+	/** True when this connection used an existing remote binary that matched the hub-version cache. */
+	remoteMatchesHubVersionCache = false;
+
 	/** Send a protocol message to the agent. */
 	abstract send(msg: ProtocolMessage): void;
 
