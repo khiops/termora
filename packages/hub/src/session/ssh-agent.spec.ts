@@ -17,6 +17,7 @@ vi.mock("./agent-deployer.js", async (importOriginal) => {
 		...actual,
 		deployAgentIfNeeded: vi.fn().mockResolvedValue({
 			deployed: false,
+			remoteMatchesHubVersionCache: false,
 			remotePath: "termora-agent",
 			os: null,
 			arch: null,
@@ -245,6 +246,7 @@ describe("SshAgent", () => {
 			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
 			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
 				deployed: true,
+				remoteMatchesHubVersionCache: false,
 				remotePath: "/opt/Termora Agent/bin/agent's test$HOME",
 				os: "linux",
 				arch: "x64",
@@ -269,6 +271,8 @@ describe("SshAgent", () => {
 			expect(command).toBe(
 				"'/opt/Termora Agent/bin/agent'\\''s test$HOME' --stdio --log-level 'debug trace' --format 'jsonl;rm'",
 			);
+			expect(agent.deployedThisSession).toBe(true);
+			expect(agent.remoteMatchesHubVersionCache).toBe(false);
 		},
 		TEST_TIMEOUT,
 	);
@@ -279,6 +283,7 @@ describe("SshAgent", () => {
 			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
 			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
 				deployed: true,
+				remoteMatchesHubVersionCache: false,
 				remotePath: "%LOCALAPPDATA%\\termora\\termora-agent.exe",
 				os: "windows",
 				arch: "x64",
@@ -319,6 +324,7 @@ describe("SshAgent", () => {
 			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
 			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
 				deployed: false,
+				remoteMatchesHubVersionCache: false,
 				remotePath: "/usr/local/bin/termora-agent",
 				os: "linux",
 				arch: "x64",
@@ -348,6 +354,57 @@ describe("SshAgent", () => {
 			expect(command).toBe("/usr/local/bin/termora-agent --stdio");
 			expect(command).not.toContain("--log-level");
 			expect(command).not.toContain("--format");
+			expect(agent.deployedThisSession).toBe(false);
+			expect(agent.remoteMatchesHubVersionCache).toBe(false);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"records when deployer found a remote agent matching the hub-version cache",
+		async () => {
+			const { deployAgentIfNeeded } = await import("./agent-deployer.js");
+			vi.mocked(deployAgentIfNeeded).mockResolvedValueOnce({
+				deployed: false,
+				remoteMatchesHubVersionCache: true,
+				remotePath: "/usr/local/bin/termora-agent",
+				os: "linux",
+				arch: "x64",
+			});
+
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(makeHost(port), undefined, { binaryCache: "/tmp/fake-cache" });
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(agent.deployedThisSession).toBe(false);
+			expect(agent.remoteMatchesHubVersionCache).toBe(true);
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"resets remoteMatchesHubVersionCache at the start of a new connection attempt",
+		async () => {
+			const { server, port } = await createMockSshServer((stream) => {
+				stream.write(makeHelloFrame());
+			});
+			servers.push(server);
+
+			const fp = await getServerFingerprint(port);
+			const agent = new SshAgent(makeHost(port));
+			agent.remoteMatchesHubVersionCache = true;
+			agents.push(agent);
+
+			await agent.start(fp);
+
+			expect(agent.remoteMatchesHubVersionCache).toBe(false);
 		},
 		TEST_TIMEOUT,
 	);

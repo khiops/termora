@@ -56,6 +56,27 @@ function resolveBuildHash(): string {
 }
 
 const SEA_BUILD_HASH = resolveBuildHash();
+
+// Hub semver — injected as TERMORA_VERSION so build-version.ts resolves the
+// release version INSIDE the SEA. build-version.ts's package.json fallback uses a
+// dynamic require that esbuild does not inline, so without this a packaged hub
+// falls back to "0.0.0" and version-aware agent fetch/deploy silently breaks.
+// Resolution: TERMORA_VERSION env → the hub package.json version (release CI pins
+// it to the tag via the version-consistency guard).
+function resolveHubVersion(): string {
+	const env = process.env.TERMORA_VERSION;
+	if (env && env.length > 0) return env;
+	try {
+		const pkg = JSON.parse(
+			readFileSync(join(ROOT, "packages", "hub", "package.json"), "utf-8"),
+		) as { version?: string };
+		return pkg.version ?? "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
+}
+
+const SEA_VERSION = resolveHubVersion();
 const MIGRATIONS_BASE = join(ROOT, "packages", "hub", "src", "storage", "migrations");
 const OUT_DIR = join(ROOT, "dist", "sea");
 const OUT_FILE = join(OUT_DIR, "termora-hub.cjs");
@@ -415,6 +436,7 @@ export const buildOptions: BuildOptions = {
 	define: {
 		"import.meta.url": "__importMetaUrl",
 		"process.env.TERMORA_BUILD_HASH": JSON.stringify(SEA_BUILD_HASH),
+		"process.env.TERMORA_VERSION": JSON.stringify(SEA_VERSION),
 	},
 	banner: {
 		js: [

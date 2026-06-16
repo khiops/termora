@@ -1,9 +1,19 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostArch, HostOs } from "@termora/shared";
 import type { SFTPWrapper, Client as SshClient } from "ssh2";
+import { HUB_VERSION } from "../build-version.js";
+import { detectSea } from "../sea-addon-loader.js";
+import {
+	AGENT_TARGET_TRIPLES,
+	type FetchAgentBinaryOptions,
+	FetchError,
+	fetchAgentBinary,
+	isCacheDirSecure,
+	isTrustedCacheBinary,
+} from "./agent-fetch.js";
 import type { OsDetectResult } from "./os-detect.js";
 import { parseUnameOutput, parseWindowsArchOutput } from "./os-detect.js";
 import { sshExec } from "./ssh-exec.js";
@@ -35,6 +45,8 @@ export type BinaryVerifyPromptFn = (
 	pinnedSha256?: string,
 ) => Promise<"trust_permanent" | "trust_once" | "reject">;
 
+export type AgentBinaryFetcher = (options: FetchAgentBinaryOptions) => Promise<string>;
+
 export interface DeployOptions {
 	binaryCache: string;
 	hostname: string;
@@ -45,11 +57,16 @@ export interface DeployOptions {
 	onAgentPinned?: (hostId: string, sha256: string) => void;
 	onAgentTrustOnce?: (hostId: string, sha256: string) => void;
 	onAgentUpdated?: (hostId: string) => void;
+	fetchAgentBinary?: AgentBinaryFetcher;
+	detectSea?: () => boolean;
+	hubVersion?: string;
 }
 
 export interface DeployResult {
 	/** true if a binary was uploaded (false = agent was already present) */
 	deployed: boolean;
+	/** true when an existing remote agent's SHA matched the trusted hub-version cache binary */
+	remoteMatchesHubVersionCache: boolean;
 	/** path where agent is/was found on the remote host */
 	remotePath: string;
 	/** detected OS (null if the agent was already present or os was known) */
@@ -70,6 +87,58 @@ const COMMON_AGENT_PATHS_WINDOWS = [
 	"%LOCALAPPDATA%\\termora\\termora-agent.exe",
 	"%ProgramFiles%\\termora\\termora-agent.exe",
 ];
+
+const STRICT_SEMVER = /^\d+\.\d+\.\d+$/;
+
+function canAutoFetchVersion(version: string): boolean {
+	return STRICT_SEMVER.test(version) && version !== "0.0.0";
+}
+
+function getAgentCacheFileName(os: HostOs, arch: HostArch, version: string): string {
+	const target = AGENT_TARGET_TRIPLES[os][arch];
+	return `termora-agent-${os}-${arch}-${version}${target.ext}`;
+}
+
+async function resolveLocalAgentBinary(
+	os: HostOs,
+	arch: HostArch,
+	options: DeployOptions,
+	hubVersion: string,
+): Promise<string | null> {
+	// HUB_VERSION flows into the cache filename and can derive from the untrusted
+	// TERMORA_VERSION env. An unvalidated value (path separators, "..") could
+	// resolve OUTSIDE the cache dir and load a planted binary that is then deployed
+	// as a trusted local agent (cache binaries bypass the remote TOFU gate). Refuse
+	// anything that is not a strict semver BEFORE constructing any path.
+	if (!STRICT_SEMVER.test(hubVersion)) return null;
+	const localBinary = join(options.binaryCache, getAgentCacheFileName(os, arch, hubVersion));
+	// Only trust a cache HIT if BOTH the cache dir AND the binary entry pass the
+	// fetch-path hardening: a secure dir (real, owned, 0700) AND a binary that is a
+	// regular file (not a planted symlink) owned by us. A cached binary bypasses the
+	// remote TOFU gate, so anything unsafe must NOT be deployed — fall through to the
+	// fetch path, which re-checks and reports the failure clearly.
+	if (isCacheDirSecure(options.binaryCache) && isTrustedCacheBinary(localBinary)) {
+		return localBinary;
+	}
+
+	const seaDetector = options.detectSea ?? detectSea;
+	if (!seaDetector() || !canAutoFetchVersion(hubVersion)) return null;
+
+	const fetcher = options.fetchAgentBinary ?? fetchAgentBinary;
+	try {
+		return await fetcher({
+			os,
+			arch,
+			version: hubVersion,
+			cacheDir: options.binaryCache,
+		});
+	} catch (error) {
+		if (error instanceof FetchError) {
+			throw new DeployError("AGENT_NOT_AVAILABLE", error.message);
+		}
+		throw error;
+	}
+}
 
 /**
  * Check if termora-agent exists on the remote host.
@@ -303,6 +372,7 @@ export async function deployAgentIfNeeded(
 		onAgentTrustOnce,
 		onAgentUpdated,
 	} = options;
+	const hubVersion = options.hubVersion ?? HUB_VERSION;
 
 	// 1. Check if agent is already present on the remote host
 	const existingPath = await checkRemoteAgent(client);
@@ -329,16 +399,20 @@ export async function deployAgentIfNeeded(
 		const remoteSha = await getRemoteSha256(client, existingPath, os);
 
 		// 1c. Do we have a local binary for this OS/arch?
-		const binaryName =
-			os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
-		const localBinary = join(binaryCache, binaryName);
+		const localBinary = await resolveLocalAgentBinary(os, arch, options, hubVersion);
 
-		if (existsSync(localBinary)) {
+		if (localBinary !== null) {
 			// Compare local vs remote SHA256 — re-upload on mismatch or unknown remote hash
 			const localSha = getLocalSha256(localBinary);
 			if (remoteSha !== null && localSha !== null && remoteSha === localSha) {
 				// Hashes match — nothing to do
-				return { deployed: false, remotePath: existingPath, os, arch };
+				return {
+					deployed: false,
+					remoteMatchesHubVersionCache: true,
+					remotePath: existingPath,
+					os,
+					arch,
+				};
 			}
 			// Mismatch (or remoteSha unavailable) — re-upload from trusted local copy
 			await uploadAgentBinary(client, localBinary, existingPath);
@@ -348,7 +422,13 @@ export async function deployAgentIfNeeded(
 			if (localSha !== null) {
 				onAgentPinned?.(hostId, localSha);
 			}
-			return { deployed: true, remotePath: existingPath, os, arch };
+			return {
+				deployed: true,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// 1d. No local binary — TOFU flow
@@ -362,12 +442,24 @@ export async function deployAgentIfNeeded(
 
 		// Session trust: already trusted this exact hash this session
 		if (sessionTrustedSha256 && sessionTrustedSha256 === remoteSha) {
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// Pinned trust: pinned hash matches remote — all good
 		if (pinnedSha256 && pinnedSha256 === remoteSha) {
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 
 		// Need to prompt
@@ -392,11 +484,23 @@ export async function deployAgentIfNeeded(
 
 		if (action === "trust_permanent") {
 			onAgentPinned?.(hostId, remoteSha);
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 		if (action === "trust_once") {
 			onAgentTrustOnce?.(hostId, remoteSha);
-			return { deployed: false, remotePath: existingPath, os, arch };
+			return {
+				deployed: false,
+				remoteMatchesHubVersionCache: false,
+				remotePath: existingPath,
+				os,
+				arch,
+			};
 		}
 		// action === "reject"
 		throw new DeployError(
@@ -423,13 +527,12 @@ export async function deployAgentIfNeeded(
 	}
 
 	// 3. Locate the binary in the local cache
-	const binaryName =
-		os === "windows" ? `termora-agent-${os}-${arch}.exe` : `termora-agent-${os}-${arch}`;
-	const localBinary = join(binaryCache, binaryName);
-	if (!existsSync(localBinary)) {
+	const localBinary = await resolveLocalAgentBinary(os, arch, options, hubVersion);
+	if (localBinary === null) {
+		const expectedBinary = join(binaryCache, getAgentCacheFileName(os, arch, hubVersion));
 		throw new DeployError(
 			"AGENT_NOT_AVAILABLE",
-			`Agent binary not found in cache: ${localBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
+			`Agent binary not found in cache: ${expectedBinary}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
 		);
 	}
 
@@ -439,7 +542,7 @@ export async function deployAgentIfNeeded(
 	// 5. Upload via SFTP (fastPut handles large binaries efficiently)
 	await uploadAgentBinary(client, localBinary, remotePath);
 
-	return { deployed: true, remotePath, os, arch };
+	return { deployed: true, remoteMatchesHubVersionCache: false, remotePath, os, arch };
 }
 
 /**

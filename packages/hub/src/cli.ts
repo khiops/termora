@@ -6,7 +6,16 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +27,14 @@ import {
 	waitForDaemonReady,
 } from "./daemon-launch.js";
 import { detectSea } from "./sea-addon-loader.js";
+import {
+	AGENT_TARGET_TRIPLES,
+	type FetchAgentBinaryOptions,
+	FetchError,
+	fetchAgentBinary,
+	isCacheDirSecure,
+	isTrustedCacheBinary,
+} from "./session/agent-fetch.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -134,6 +151,11 @@ export interface ParsedArgs {
 	keyPath?: string;
 	// pair verify
 	code?: string;
+	// agent fetch
+	target?: string;
+	version?: string;
+	all?: boolean;
+	prune?: boolean;
 	// json output flag
 	json?: boolean;
 	// auto-open browser after start
@@ -191,9 +213,14 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 	const codeVal = flagValue("--code");
 	if (codeVal !== undefined) result.code = codeVal;
 
+	const versionVal = flagValue("--version");
+	if (versionVal !== undefined) result.version = versionVal;
+
 	if (hasFlag("--daemon")) result.daemon = true;
 	if (hasFlag("--json")) result.json = true;
 	if (hasFlag("--open")) result.open = true;
+	if (hasFlag("--all")) result.all = true;
+	if (hasFlag("--prune")) result.prune = true;
 
 	// Positional: remaining args after flag removal
 	const positional = args.filter((a) => !a.startsWith("-"));
@@ -221,6 +248,13 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 		} else {
 			return null;
 		}
+	} else if (sub0 === "agent") {
+		if (sub1 === "fetch") {
+			result.command = "agent-fetch";
+			if (sub2) result.target = sub2;
+		} else {
+			return null;
+		}
 	} else if (sub0 === "session") {
 		if (sub1 === "list") {
 			result.command = "session-list";
@@ -240,6 +274,190 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 	}
 
 	return result;
+}
+
+// ─── Agent fetch helpers ──────────────────────────────────────────────────────
+
+type AgentTargetEntry = {
+	readonly triple: string | null;
+	readonly ext: "" | ".exe";
+	readonly built: boolean;
+};
+
+type AgentFetchTarget = {
+	readonly os: string;
+	readonly arch: string;
+};
+
+type AgentBinaryFetcher = (options: FetchAgentBinaryOptions) => Promise<string>;
+
+export interface AgentFetchCommandDeps {
+	readonly fetchAgentBinary?: AgentBinaryFetcher;
+	readonly getBinaryCacheDir?: () => string | Promise<string>;
+	readonly hubVersion?: string;
+	readonly writeLine?: (line: string) => void;
+	readonly writeError?: (line: string) => void;
+}
+
+const STRICT_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
+
+const AGENT_TARGET_TABLE = AGENT_TARGET_TRIPLES as Record<
+	string,
+	Record<string, AgentTargetEntry> | undefined
+>;
+
+async function defaultHubVersion(): Promise<string> {
+	const { HUB_VERSION } = await import("./build-version.js");
+	return HUB_VERSION;
+}
+
+async function defaultBinaryCacheDir(): Promise<string> {
+	const { getBinaryCacheDir } = await import("./session/agent-deployer.js");
+	return getBinaryCacheDir();
+}
+
+function builtAgentTargets(): AgentFetchTarget[] {
+	const targets: AgentFetchTarget[] = [];
+	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
+		if (!arches) continue;
+		for (const [arch, target] of Object.entries(arches)) {
+			if (target.built && target.triple) targets.push({ os, arch });
+		}
+	}
+	return targets;
+}
+
+function parseAgentTargetId(value: string): AgentFetchTarget | null {
+	const parts = value.split("-");
+	if (parts.length !== 2) return null;
+	const [os, arch] = parts;
+	if (!os || !arch) return null;
+	return { os, arch };
+}
+
+function resolveAgentFetchTargets(args: ParsedArgs): AgentFetchTarget[] | string {
+	if (args.all && args.target) {
+		return "Choose either an agent target or --all, not both.";
+	}
+	if (args.all) return builtAgentTargets();
+	if (!args.target) {
+		return "Usage: termora agent fetch <os-arch>|--all [--version <x.y.z>] [--prune]";
+	}
+	const target = parseAgentTargetId(args.target);
+	if (!target) {
+		return `Invalid agent target "${args.target}". Use <os-arch>, for example linux-arm64.`;
+	}
+	return [target];
+}
+
+function badVersionError(version: string): FetchError | null {
+	if (STRICT_AGENT_VERSION.test(version) && version !== "0.0.0") return null;
+	return new FetchError(
+		"BAD_VERSION",
+		`Bad Termora agent version "${version}". Use a released strict semver like 0.4.0, or rerun termora-hub agent fetch --version <x.y.z> with a real release version before downloading.`,
+	);
+}
+
+function cachePathForBuiltTarget(
+	cacheDir: string,
+	target: AgentFetchTarget,
+	version: string,
+): string | null {
+	const entry = AGENT_TARGET_TABLE[target.os]?.[target.arch];
+	if (!entry?.built || !entry.triple) return null;
+	return join(cacheDir, `termora-agent-${target.os}-${target.arch}-${version}${entry.ext}`);
+}
+
+function parseAgentBinaryCacheName(name: string): { readonly version: string } | null {
+	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
+		if (!arches) continue;
+		for (const [arch, target] of Object.entries(arches)) {
+			const prefix = `termora-agent-${os}-${arch}-`;
+			if (!name.startsWith(prefix) || !name.endsWith(target.ext)) continue;
+			const versionEnd = target.ext.length > 0 ? name.length - target.ext.length : name.length;
+			const version = name.slice(prefix.length, versionEnd);
+			if (STRICT_AGENT_VERSION.test(version)) return { version };
+		}
+	}
+	return null;
+}
+
+function pruneAgentBinaryCache(cacheDir: string, version: string): number {
+	// Never prune through an untrusted/symlinked cache dir: readdirSync follows a
+	// directory symlink and would delete matching termora-agent-* files in the link
+	// target. isCacheDirSecure also returns false for a missing dir.
+	if (!isCacheDirSecure(cacheDir)) return 0;
+
+	let removed = 0;
+	for (const name of readdirSync(cacheDir)) {
+		const parsed = parseAgentBinaryCacheName(name);
+		if (!parsed || parsed.version === version) continue;
+
+		const path = join(cacheDir, name);
+		try {
+			// lstat (not stat): never follow a symlink when deciding what to delete.
+			if (!lstatSync(path).isFile()) continue;
+			rmSync(path);
+			removed++;
+		} catch {
+			// Entry vanished or was unremovable mid-prune (raced removal); prune is
+			// best-effort cleanup, so skip it.
+		}
+	}
+	return removed;
+}
+
+export async function cmdAgentFetch(
+	args: ParsedArgs,
+	deps: AgentFetchCommandDeps = {},
+): Promise<number> {
+	const writeLine = deps.writeLine ?? ((line: string) => console.log(line));
+	const writeError = deps.writeError ?? ((line: string) => console.error(line));
+	const targets = resolveAgentFetchTargets(args);
+	if (typeof targets === "string") {
+		writeError(targets);
+		return 1;
+	}
+
+	const version = args.version ?? deps.hubVersion ?? (await defaultHubVersion());
+	const versionError = badVersionError(version);
+	if (versionError) {
+		writeError(versionError.message);
+		return 1;
+	}
+
+	const cacheDir = await (deps.getBinaryCacheDir ?? defaultBinaryCacheDir)();
+	const fetcher = deps.fetchAgentBinary ?? fetchAgentBinary;
+	let failed = false;
+
+	for (const target of targets) {
+		const existing = cachePathForBuiltTarget(cacheDir, target, version);
+		// Only report "already cached" for an entry the deployer would actually
+		// trust: a regular file (not a dir/symlink/tampered entry) owned by us, in a
+		// secure cache dir. Anything else falls through to a fresh, checksum-verified
+		// fetch that atomically replaces it.
+		if (existing && isCacheDirSecure(cacheDir) && isTrustedCacheBinary(existing)) {
+			writeLine(`already cached ${existing}`);
+			continue;
+		}
+
+		try {
+			const path = await fetcher({
+				os: target.os,
+				arch: target.arch,
+				version,
+				cacheDir,
+			});
+			writeLine(path);
+		} catch (error) {
+			failed = true;
+			const message = error instanceof Error ? error.message : String(error);
+			writeLine(message);
+		}
+	}
+
+	if (args.prune) pruneAgentBinaryCache(cacheDir, version);
+	return failed ? 1 : 0;
 }
 
 // ─── Command handlers ──────────────────────────────────────────────────────────
@@ -580,6 +798,9 @@ Usage:
   termora host list [--json]                    List all hosts
   termora host remove <label>                   Remove a host
 
+  termora agent fetch <os-arch>|--all           Populate the agent binary cache
+              [--version x.y.z] [--prune]
+
   termora session list [--json]                 List active sessions
 
   termora pair                                  Generate pairing code
@@ -625,6 +846,11 @@ export async function main(argv: string[]): Promise<void> {
 			case "host-remove":
 				await cmdHostRemove(parsed);
 				break;
+			case "agent-fetch": {
+				const code = await cmdAgentFetch(parsed);
+				if (code !== 0) process.exit(code);
+				break;
+			}
 			case "session-list":
 				await cmdSessionList(parsed);
 				break;

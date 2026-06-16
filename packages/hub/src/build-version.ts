@@ -41,8 +41,11 @@ export const BUILD_HASH: string = (() => {
 function resolvePackageVersion(): string {
 	try {
 		const require = createRequire(import.meta.url);
-		// Works in both dev (source) and SEA (embedded package.json)
-		const pkg = require("../../package.json") as { version?: string };
+		// The hub package.json sits one level above this file (packages/hub/),
+		// from both src/ (dev/tsx) and dist/ (compiled). In the SEA the version is
+		// injected via the TERMORA_VERSION esbuild define, so this require is the
+		// source-run path only.
+		const pkg = require("../package.json") as { version?: string };
 		return pkg.version ?? "0.0.0";
 	} catch {
 		return "0.0.0";

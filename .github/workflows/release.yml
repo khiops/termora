@@ -55,6 +55,19 @@ jobs:
         with:
           ref: ${{ inputs.ref || inputs.tag || github.ref }}
           fetch-depth: 0
+      - name: Assert tag, package.json, and agent Cargo.toml versions agree
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          PKG_VERSION="$(jq -r '.version' package.json)"
+          HUB_PKG_VERSION="$(jq -r '.version' packages/hub/package.json)"
+          CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/termora-agent/Cargo.toml | head -1)"
+          echo "tag=$VERSION root=$PKG_VERSION hub=$HUB_PKG_VERSION agent-cargo=$CARGO_VERSION"
+          if [ "$VERSION" != "$PKG_VERSION" ] || [ "$VERSION" != "$HUB_PKG_VERSION" ] || [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Version mismatch — tag=$VERSION root=$PKG_VERSION hub=$HUB_PKG_VERSION termora-agent=$CARGO_VERSION (the hub HUB_VERSION reads packages/hub/package.json and the agent CARGO_PKG_VERSION must both equal the tag for the HELLO lockstep)"
+            exit 1
+          fi
       - name: Create or reuse release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,6 +107,19 @@ jobs:
               # changelog body, and the tag-vs-HEAD guard above already
               # rules out building a commit the tag does not point at.
               echo "Reusing draft release $TAG_NAME id=$KEEP_DRAFT_ID"
+              # Remove legacy UNVERSIONED agent assets left by older runs so a stale
+              # binary can never be bundled or published next to the versioned ones
+              # (§3.5.5). Versioned asset names end in -<semver>[.ext].
+              for asset in $(gh release view "$TAG_NAME" --json assets -q '.assets[].name'); do
+                case "$asset" in
+                  termora-agent-*)
+                    if ! printf '%s' "$asset" | grep -Eq -- '-[0-9]+\.[0-9]+\.[0-9]+(\.[A-Za-z0-9]+)?$'; then
+                      echo "Deleting legacy unversioned asset $asset"
+                      gh release delete-asset "$TAG_NAME" "$asset" --yes || true
+                    fi
+                    ;;
+                esac
+              done
             else
               gh release create "$TAG_NAME" --draft --generate-notes --title "$TAG_NAME" --target "$(git rev-parse HEAD)"
             fi
@@ -175,10 +201,11 @@ jobs:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
           TRIPLE: ${{ matrix.triple }}
         run: |
+          VERSION="${TAG_NAME#v}"
           for f in dist/sea/termora-agent*; do
             ext="${f##*.}"
             if [ "$ext" = "$f" ]; then ext=""; else ext=".$ext"; fi
-            base="termora-agent-${TRIPLE}${ext}"
+            base="termora-agent-${TRIPLE}-${VERSION}${ext}"
             cp "$f" "$base"
             gh release upload "$TAG_NAME" --clobber "$base"
           done
@@ -288,9 +315,15 @@ jobs:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
           TRIPLE: ${{ matrix.triple }}
         run: |
+          VERSION="${TAG_NAME#v}"
+          if [ "${{ matrix.shell_sh }}" = "true" ]; then EXT=""; else EXT=".exe"; fi
           mkdir -p _tmp dist/sea
-          gh release download "$TAG_NAME" --pattern "termora-agent-${TRIPLE}*" --dir dist/sea/
-          gh release download "$TAG_NAME" --pattern "termora-hub-${TRIPLE}*" --dir dist/sea/
+          # Exact asset names, not globs (a glob silently bundles the wrong asset
+          # once two versioned files match). The agent asset is versioned; rename it
+          # to the fixed unversioned sidecar name Tauri expects.
+          gh release download "$TAG_NAME" --pattern "termora-agent-${TRIPLE}-${VERSION}${EXT}" --dir dist/sea/
+          mv "dist/sea/termora-agent-${TRIPLE}-${VERSION}${EXT}" "dist/sea/termora-agent-${TRIPLE}${EXT}"
+          gh release download "$TAG_NAME" --pattern "termora-hub-${TRIPLE}${EXT}" --dir dist/sea/
           gh release download "$TAG_NAME" --pattern web-dist.tar.gz --dir _tmp
           mkdir -p packages/clients/web/dist
           tar xzf _tmp/web-dist.tar.gz -C packages/clients/web/dist
@@ -328,6 +361,35 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || inputs.tag || github.ref }}
+      - name: Generate and verify SHA256SUMS for agent assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          rm -rf _sums && mkdir -p _sums && cd _sums
+          # Build the EXACT expected asset names from the matrix (windows → .exe), so
+          # a stale near-match (e.g. ...-${VERSION}.bad) can never satisfy completeness
+          # while the real asset is missing.
+          mapfile -t EXPECTED < <(
+            jq -r --arg v "$VERSION" '.targets[] | select(.enabled and .agent)
+              | "termora-agent-\(.triple)-\($v)\(if .os == "windows" then ".exe" else "" end)"' \
+              ../.github/build-matrix.json
+          )
+          # Download each exact asset; fail (never publish a partial-looking manifest)
+          # if any enabled agent triple's exact asset is missing.
+          MISSING=0
+          for name in "${EXPECTED[@]}"; do
+            if ! gh release download "$TAG_NAME" --pattern "$name" --dir . 2>/dev/null || [ ! -f "$name" ]; then
+              echo "::error::Missing agent asset $name"
+              MISSING=1
+            fi
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+          # Checksum ONLY the exact expected files.
+          sha256sum "${EXPECTED[@]}" > "SHA256SUMS-${VERSION}.txt"
+          cat "SHA256SUMS-${VERSION}.txt"
+          gh release upload "$TAG_NAME" --clobber "SHA256SUMS-${VERSION}.txt"
       - name: Remove intermediate assets and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

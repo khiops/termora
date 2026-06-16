@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SFTPWrapper, Client as SshClient } from "ssh2";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HUB_VERSION } from "../build-version.js";
 import type { DeployOptions } from "./agent-deployer.js";
 import {
 	checkRemoteAgent,
@@ -15,6 +16,7 @@ import {
 	getRemoteSha256,
 	uploadAgentBinary,
 } from "./agent-deployer.js";
+import { type FetchAgentBinaryOptions, FetchError } from "./agent-fetch.js";
 
 // ---------- Mock SSH helpers --------------------------------------------------
 
@@ -113,6 +115,27 @@ const LOCAL_SHA = "a".repeat(64);
 
 /** A different SHA256 representing a remote binary that differs from local. */
 const REMOTE_SHA_DIFFERENT = "b".repeat(64);
+const TEST_HUB_VERSION = "0.3.4";
+
+function agentCacheName(
+	os: "linux" | "windows" | "darwin",
+	arch: "x64" | "arm64",
+	version = HUB_VERSION,
+): string {
+	const ext = os === "windows" ? ".exe" : "";
+	return `termora-agent-${os}-${arch}-${version}${ext}`;
+}
+
+function writeCachedAgentBinary(
+	os: "linux" | "windows" | "darwin",
+	arch: "x64" | "arm64",
+	content: string | Buffer = "binary-content",
+): string {
+	const binaryName = agentCacheName(os, arch);
+	const binaryPath = join(cacheDir, binaryName);
+	writeFileSync(binaryPath, content);
+	return binaryPath;
+}
 
 /** Build default DeployOptions with no callbacks and no trust state. */
 function makeOptions(overrides: Partial<DeployOptions> = {}): DeployOptions {
@@ -370,10 +393,9 @@ describe("deployAgentIfNeeded — agent already present", () => {
 
 	it("1. SHA256 match (local cache) → deployed: false, no upload", async () => {
 		// Write a local binary and compute its real SHA256
-		const binaryName = "termora-agent-linux-x64";
 		const binaryContent = Buffer.from("fake-binary-content");
-		writeFileSync(join(cacheDir, binaryName), binaryContent);
-		const localSha = getLocalSha256(join(cacheDir, binaryName));
+		const localBinaryPath = writeCachedAgentBinary("linux", "x64", binaryContent);
+		const localSha = getLocalSha256(localBinaryPath);
 		if (!localSha) throw new Error("getLocalSha256 returned null for a freshly written file");
 
 		// Remote returns the same hash
@@ -389,12 +411,12 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		const result = await deployAgentIfNeeded(client, { os: "linux", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(true);
 		expect(result.remotePath).toBe(existingPath);
 	});
 
 	it("2. SHA256 mismatch (local cache) → re-upload, onAgentUpdated called", async () => {
-		const binaryName = "termora-agent-linux-x64";
-		writeFileSync(join(cacheDir, binaryName), "local-binary");
+		writeCachedAgentBinary("linux", "x64", "local-binary");
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -420,15 +442,15 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 		expect(onAgentUpdated).toHaveBeenCalledWith("host-1");
 		expect(sftp.fastPut).toHaveBeenCalled();
 	});
 
 	it("2b. SHA256 mismatch (local cache) → re-upload, onAgentPinned called with local SHA", async () => {
-		const binaryName = "termora-agent-linux-x64";
-		writeFileSync(join(cacheDir, binaryName), "local-binary");
-		const localSha = getLocalSha256(join(cacheDir, binaryName));
+		const localBinaryPath = writeCachedAgentBinary("linux", "x64", "local-binary");
+		const localSha = getLocalSha256(localBinaryPath);
 		if (!localSha) throw new Error("getLocalSha256 returned null");
 
 		const sftp = makeMockSftp();
@@ -455,8 +477,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 	});
 
 	it("3. remoteSha null + local binary → re-upload (precaution)", async () => {
-		const binaryName = "termora-agent-linux-x64";
-		writeFileSync(join(cacheDir, binaryName), "local-binary");
+		writeCachedAgentBinary("linux", "x64", "local-binary");
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -478,6 +499,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(sftp.fastPut).toHaveBeenCalled();
 	});
 
@@ -515,6 +537,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(promptBinaryVerify).not.toHaveBeenCalled();
 	});
 
@@ -551,6 +574,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(promptBinaryVerify).not.toHaveBeenCalled();
 	});
 
@@ -566,6 +590,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 	});
 
@@ -581,6 +606,7 @@ describe("deployAgentIfNeeded — agent already present", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(onAgentTrustOnce).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 	});
 
@@ -616,8 +642,8 @@ describe("deployAgentIfNeeded — agent already present", () => {
 
 describe("deployAgentIfNeeded — agent not found", () => {
 	it("12. Agent not found + local binary → upload, deployed: true", async () => {
-		const binaryName = "termora-agent-linux-x64";
-		writeFileSync(join(cacheDir, binaryName), "binary-content");
+		const binaryName = agentCacheName("linux", "x64");
+		writeCachedAgentBinary("linux", "x64");
 
 		const sftp = makeMockSftp();
 		const client = makeAgentNotFoundClient(sftp);
@@ -625,6 +651,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: "linux", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe("/home/user/.local/bin/termora-agent");
 		expect(result.os).toBe("linux");
 		expect(result.arch).toBe("x64");
@@ -634,6 +661,192 @@ describe("deployAgentIfNeeded — agent not found", () => {
 			expect.any(Function),
 		);
 	});
+
+	it("fetches a versioned binary on SEA cache miss, then deploys it", async () => {
+		const binaryName = agentCacheName("linux", "x64", TEST_HUB_VERSION);
+		const sftp = makeMockSftp();
+		const client = makeAgentNotFoundClient(sftp);
+		const fetcher = vi.fn(async (options: FetchAgentBinaryOptions): Promise<string> => {
+			const fetchedPath = join(options.cacheDir, binaryName);
+			writeFileSync(fetchedPath, "fetched-binary-content");
+			return fetchedPath;
+		});
+
+		const result = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({
+				detectSea: () => true,
+				fetchAgentBinary: fetcher,
+				hubVersion: TEST_HUB_VERSION,
+			}),
+		);
+
+		expect(fetcher).toHaveBeenCalledWith({
+			os: "linux",
+			arch: "x64",
+			version: TEST_HUB_VERSION,
+			cacheDir,
+		});
+		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
+		expect(sftp.fastPut).toHaveBeenCalledWith(
+			join(cacheDir, binaryName),
+			"/home/user/.local/bin/termora-agent",
+			expect.any(Function),
+		);
+	});
+
+	it("does not fetch on source runs and keeps the existing not-available error", async () => {
+		const sftp = makeMockSftp();
+		const client = makeAgentNotFoundClient(sftp);
+		const fetcher = vi.fn(async (): Promise<string> => {
+			throw new Error("fetch should not run");
+		});
+
+		const error = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({
+				detectSea: () => false,
+				fetchAgentBinary: fetcher,
+			}),
+		).catch((e: unknown) => e);
+
+		expect(fetcher).not.toHaveBeenCalled();
+		expect(error).toBeInstanceOf(DeployError);
+		expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+		expect((error as Error).message).toBe(
+			`Agent binary not found in cache: ${join(cacheDir, agentCacheName("linux", "x64"))}. Build it or copy it to the binary cache (see docs/MVP_ROADMAP.md).`,
+		);
+	});
+
+	it("maps FetchError to AGENT_NOT_AVAILABLE with the actionable fetch message", async () => {
+		const sftp = makeMockSftp();
+		const client = makeAgentNotFoundClient(sftp);
+		const fetchMessage =
+			"Download https://example.invalid/termora-agent and rename it into the binary cache.";
+		const fetcher = vi.fn(async (): Promise<string> => {
+			throw new FetchError("PRIVATE_OR_FORBIDDEN", fetchMessage);
+		});
+
+		const error = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({
+				detectSea: () => true,
+				fetchAgentBinary: fetcher,
+				hubVersion: TEST_HUB_VERSION,
+			}),
+		).catch((e: unknown) => e);
+
+		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(error).toBeInstanceOf(DeployError);
+		expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+		expect((error as Error).message).toBe(fetchMessage);
+	});
+
+	it("refuses a path-traversing hub version (cannot deploy a binary outside the cache)", async () => {
+		// `cache` is a subdir; the malicious version resolves the lookup OUT of it.
+		const cache = join(cacheDir, "cache");
+		mkdirSync(cache);
+		const maliciousVersion = "1.0.0/../../evil";
+		// Plant a binary at the exact path the lookup would resolve to (cacheDir/evil,
+		// outside `cache`). Without the strict-semver guard this file would be
+		// returned as a "trusted" cache binary and deployed.
+		const escaped = join(cache, `termora-agent-linux-x64-${maliciousVersion}`);
+		writeFileSync(escaped, "evil-binary");
+
+		const sftp = makeMockSftp();
+		const client = makeAgentNotFoundClient(sftp);
+		const fetcher = vi.fn(async (): Promise<string> => {
+			throw new Error("fetch should not run");
+		});
+
+		const error = await deployAgentIfNeeded(
+			client,
+			{ os: "linux", arch: "x64" },
+			makeOptions({
+				binaryCache: cache,
+				detectSea: () => true,
+				fetchAgentBinary: fetcher,
+				hubVersion: maliciousVersion,
+			}),
+		).catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(DeployError);
+		expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+		expect(fetcher).not.toHaveBeenCalled();
+		// The planted out-of-cache binary was never deployed.
+		expect(sftp.fastPut).not.toHaveBeenCalled();
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"does not deploy a cached binary from a symlinked (untrusted) cache dir",
+		async () => {
+			const realCache = join(cacheDir, "real");
+			mkdirSync(realCache, { recursive: true, mode: 0o700 });
+			// A legit-named cached binary, reachable via a SYMLINKED cache path. A cache
+			// hit there bypasses the fetch path's dir hardening, so it must not deploy.
+			writeFileSync(join(realCache, agentCacheName("linux", "x64", TEST_HUB_VERSION)), "planted");
+			const linkCache = join(cacheDir, "link");
+			symlinkSync(realCache, linkCache);
+
+			const sftp = makeMockSftp();
+			const client = makeAgentNotFoundClient(sftp);
+			const fetcher = vi.fn(async (): Promise<string> => {
+				throw new Error("fetch should not run");
+			});
+
+			const error = await deployAgentIfNeeded(
+				client,
+				{ os: "linux", arch: "x64" },
+				makeOptions({
+					binaryCache: linkCache,
+					detectSea: () => false,
+					fetchAgentBinary: fetcher,
+					hubVersion: TEST_HUB_VERSION,
+				}),
+			).catch((e: unknown) => e);
+
+			expect(error).toBeInstanceOf(DeployError);
+			expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+			expect(fetcher).not.toHaveBeenCalled();
+			expect(sftp.fastPut).not.toHaveBeenCalled();
+		},
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"does not deploy a cache entry that is a symlink, even in a secure cache dir",
+		async () => {
+			// cacheDir is a normal secure dir (real, owned, 0700), but the cache-named
+			// entry is a SYMLINK, not a regular file — it must not be trusted/deployed.
+			const realTarget = join(cacheDir, "elsewhere-binary");
+			writeFileSync(realTarget, "planted");
+			const symlinkBinary = join(cacheDir, agentCacheName("linux", "x64", TEST_HUB_VERSION));
+			symlinkSync(realTarget, symlinkBinary);
+
+			const sftp = makeMockSftp();
+			const client = makeAgentNotFoundClient(sftp);
+			const fetcher = vi.fn(async (): Promise<string> => {
+				throw new Error("fetch should not run");
+			});
+
+			const error = await deployAgentIfNeeded(
+				client,
+				{ os: "linux", arch: "x64" },
+				makeOptions({
+					detectSea: () => false,
+					fetchAgentBinary: fetcher,
+					hubVersion: TEST_HUB_VERSION,
+				}),
+			).catch((e: unknown) => e);
+
+			expect(error).toBeInstanceOf(DeployError);
+			expect((error as DeployError).code).toBe("AGENT_NOT_AVAILABLE");
+			expect(sftp.fastPut).not.toHaveBeenCalled();
+		},
+	);
 
 	it("13. Agent not found + no local binary → throws AGENT_NOT_AVAILABLE", async () => {
 		// cacheDir is empty — no binary
@@ -651,8 +864,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 	});
 
 	it("deploys binary when os/arch auto-detected (host record has nulls)", async () => {
-		const binaryName = "termora-agent-linux-arm64";
-		writeFileSync(join(cacheDir, binaryName), "binary-content");
+		writeCachedAgentBinary("linux", "arm64");
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -691,6 +903,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: null, arch: null }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.os).toBe("linux");
 		expect(result.arch).toBe("arm64");
 	});
@@ -729,8 +942,8 @@ describe("deployAgentIfNeeded — agent not found", () => {
 	});
 
 	it("uses windows path for windows host", async () => {
-		const binaryName = "termora-agent-windows-x64.exe";
-		writeFileSync(join(cacheDir, binaryName), "binary-content");
+		const binaryName = agentCacheName("windows", "x64");
+		writeCachedAgentBinary("windows", "x64");
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -767,6 +980,7 @@ describe("deployAgentIfNeeded — agent not found", () => {
 		const result = await deployAgentIfNeeded(client, { os: "windows", arch: "x64" }, makeOptions());
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe("%LOCALAPPDATA%\\termora\\termora-agent.exe");
 		expect(sftp.fastPut).toHaveBeenCalledWith(
 			join(cacheDir, binaryName),
@@ -892,10 +1106,8 @@ describe("getLocalSha256", () => {
 describe("deploy + verify integration", () => {
 	it("deploys from cache, then skips on second connect (SHA256 match)", async () => {
 		// First connect: agent NOT found on remote, local binary exists → upload
-		const binaryName = "termora-agent-linux-x64";
 		const binaryContent = Buffer.from("fake-binary-content-for-integration");
-		const localBinaryPath = join(cacheDir, binaryName);
-		writeFileSync(localBinaryPath, binaryContent);
+		const localBinaryPath = writeCachedAgentBinary("linux", "x64", binaryContent);
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -937,6 +1149,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(resultFirst.deployed).toBe(true);
+		expect(resultFirst.remoteMatchesHubVersionCache).toBe(false);
 		expect(resultFirst.remotePath).toBe("/home/user/.local/bin/termora-agent");
 		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
 
@@ -961,13 +1174,13 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(resultSecond.deployed).toBe(false);
+		expect(resultSecond.remoteMatchesHubVersionCache).toBe(true);
 		expect(resultSecond.remotePath).toBe(deployedPath);
 	});
 
 	it("re-uploads when remote SHA256 differs from local cache", async () => {
 		// Local binary exists; remote agent at existingPath has a different hash
-		const binaryName = "termora-agent-linux-x64";
-		writeFileSync(join(cacheDir, binaryName), "local-binary-content");
+		writeCachedAgentBinary("linux", "x64", "local-binary-content");
 
 		const sftp = makeMockSftp();
 		const sftpImpl = (cb: (err: Error | undefined, sftp: SFTPWrapper) => void): void => {
@@ -994,6 +1207,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(result.deployed).toBe(true);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(sftp.fastPut).toHaveBeenCalledTimes(1);
 		expect(onAgentUpdated).toHaveBeenCalledWith("host-1");
 	});
@@ -1024,6 +1238,7 @@ describe("deploy + verify integration", () => {
 		);
 		expect(onAgentPinned).toHaveBeenCalledWith("host-1", REMOTE_SHA_DIFFERENT);
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 	});
 
@@ -1041,6 +1256,7 @@ describe("deploy + verify integration", () => {
 		);
 
 		expect(result.deployed).toBe(false);
+		expect(result.remoteMatchesHubVersionCache).toBe(false);
 		expect(result.remotePath).toBe(existingPath);
 	});
 
