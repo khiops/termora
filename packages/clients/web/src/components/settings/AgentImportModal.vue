@@ -84,6 +84,17 @@
 						</div>
 					</div>
 
+					<div v-if="nativePickerAvailable" class="native-picker-row">
+						<button
+							class="modal-button modal-button--secondary"
+							type="button"
+							:disabled="pickingNativeFiles"
+							@click="pickNativeFiles"
+						>
+							{{ pickingNativeFiles ? "Opening..." : "Choose with native picker..." }}
+						</button>
+					</div>
+
 					<label class="attestation">
 						<input v-model="attested" type="checkbox" />
 						<span>
@@ -128,6 +139,8 @@ import type { HostArch, HostOs } from "@termora/shared";
 import { computed, ref, watch } from "vue";
 import { useFileDrop } from "../../composables/useFileDrop.js";
 import { type AgentImportResult, useAgentManagerStore } from "../../stores/agent-manager.js";
+import { pickDesktopAgentImportFiles } from "../../utils/desktop-agent-picker.js";
+import { isTauriRuntime } from "../../utils/hub-url.js";
 
 const props = defineProps<{
 	show: boolean;
@@ -146,9 +159,11 @@ const binary = ref<File | null>(null);
 const manifest = ref<File | null>(null);
 const attested = ref(false);
 const submitting = ref(false);
+const pickingNativeFiles = ref(false);
 const importResult = ref<AgentImportResult | null>(null);
 const binaryInput = ref<HTMLInputElement | null>(null);
 const manifestInput = ref<HTMLInputElement | null>(null);
+const nativePickerAvailable = isTauriRuntime();
 
 const importableTargets = computed(() =>
 	store.targets.filter(
@@ -191,6 +206,7 @@ const versionOptions = computed(() => {
 const submitDisabled = computed(
 	() =>
 		submitting.value ||
+		pickingNativeFiles.value ||
 		!binary.value ||
 		!manifest.value ||
 		!attested.value ||
@@ -284,6 +300,27 @@ function onManifestInputChange(event: Event): void {
 	const input = event.target as HTMLInputElement;
 	assignManifest(Array.from(input.files ?? []));
 	input.value = "";
+}
+
+async function pickNativeFiles(): Promise<void> {
+	if (!nativePickerAvailable) return;
+
+	pickingNativeFiles.value = true;
+	importResult.value = null;
+	try {
+		const picked = await pickDesktopAgentImportFiles();
+		if (picked === null) return;
+		if (picked.binary) binary.value = picked.binary;
+		if (picked.manifest) manifest.value = picked.manifest;
+	} catch (error) {
+		importResult.value = {
+			code: "PICK_FAILED",
+			message: error instanceof Error ? error.message : String(error),
+			verified: false,
+		};
+	} finally {
+		pickingNativeFiles.value = false;
+	}
 }
 
 async function submit(): Promise<void> {
@@ -480,6 +517,11 @@ function formatOs(os: HostOs): string {
 
 .hidden-input {
 	display: none;
+}
+
+.native-picker-row {
+	display: flex;
+	justify-content: flex-start;
 }
 
 .attestation {
