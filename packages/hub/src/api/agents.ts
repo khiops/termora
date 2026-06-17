@@ -290,7 +290,7 @@ export function registerAgentRoutes(server: FastifyInstance, deps: AgentRoutesDe
 				);
 			}
 
-			const targetKey = `${targetOs}/${targetArch}`;
+			const targetKey = agentFetchTargetKey(targetOs, targetArch, version);
 			const existingJob = jobsByTarget.get(targetKey);
 			if (existingJob) {
 				return reply.code(202).send({
@@ -787,6 +787,10 @@ function snapshotToWire(snapshot: AgentFetchSnapshot): {
 		...(snapshot.total !== undefined && { total: snapshot.total }),
 		phase: snapshot.phase,
 	};
+}
+
+function agentFetchTargetKey(os: AgentTargetOs, arch: AgentTargetArch, version: string): string {
+	return `${os}/${arch}/${version}`;
 }
 
 export function createAgentMutationOriginGuard(

@@ -276,6 +276,75 @@ describe("POST /api/agents/fetch", () => {
 		expect(done.path).toBe(agentCachePath(cacheDir, "linux", "arm64", HUB_VERSION));
 		expect(listCache(cacheDir).filter((name) => name === path.basename(done.path))).toHaveLength(1);
 	});
+
+	it("keeps concurrent fetches for different versions of one target in distinct jobs", async () => {
+		const cacheDir = makeTempDir();
+		const messages: AgentFetchMessage[] = [];
+		const otherVersion = "0.4.2";
+		const currentAssetBody = "linux-arm64-current-agent";
+		const otherAssetBody = "linux-arm64-other-agent";
+		const currentAsset = deferredResponse();
+		const otherAsset = deferredResponse();
+		let currentDownloads = 0;
+		let otherDownloads = 0;
+		const fetchImpl = vi.fn<AgentFetchImpl>(async (url) => {
+			if (url === versionedAssetUrl("linux", "arm64", HUB_VERSION)) {
+				currentDownloads++;
+				return currentAsset.promise;
+			}
+			if (url === versionedAssetUrl("linux", "arm64", otherVersion)) {
+				otherDownloads++;
+				return otherAsset.promise;
+			}
+			if (url === checksumUrl(HUB_VERSION)) {
+				return response(sums(versionedAssetName("linux", "arm64", HUB_VERSION), currentAssetBody));
+			}
+			if (url === checksumUrl(otherVersion)) {
+				return response(sums(versionedAssetName("linux", "arm64", otherVersion), otherAssetBody));
+			}
+			throw new Error(`unexpected URL ${url}`);
+		});
+		server = makeAgentRouteServer(cacheDir, { fetchImpl, messages });
+
+		const current = postFetch({ os: "linux", arch: "arm64", version: HUB_VERSION });
+		const other = postFetch({ os: "linux", arch: "arm64", version: otherVersion });
+		const [currentRes, otherRes] = await Promise.all([current, other]);
+
+		expect(currentRes.statusCode).toBe(202);
+		expect(otherRes.statusCode).toBe(202);
+		expect(otherRes.json().job_id).not.toBe(currentRes.json().job_id);
+		expect(currentDownloads).toBe(1);
+		expect(otherDownloads).toBe(1);
+
+		currentAsset.resolve(
+			response(currentAssetBody, {
+				headers: { "content-length": String(currentAssetBody.length) },
+			}),
+		);
+		otherAsset.resolve(
+			response(otherAssetBody, {
+				headers: { "content-length": String(otherAssetBody.length) },
+			}),
+		);
+		const currentDone = await waitForMessage<AgentFetchDoneMessage>(
+			messages,
+			(msg): msg is AgentFetchDoneMessage =>
+				msg.type === "AGENT_FETCH_DONE" && msg.jobId === currentRes.json().job_id,
+		);
+		const otherDone = await waitForMessage<AgentFetchDoneMessage>(
+			messages,
+			(msg): msg is AgentFetchDoneMessage =>
+				msg.type === "AGENT_FETCH_DONE" && msg.jobId === otherRes.json().job_id,
+		);
+
+		expect(currentDone.path).toBe(agentCachePath(cacheDir, "linux", "arm64", HUB_VERSION));
+		expect(otherDone.path).toBe(agentCachePath(cacheDir, "linux", "arm64", otherVersion));
+		expect(readFileSync(currentDone.path, "utf8")).toBe(currentAssetBody);
+		expect(readFileSync(otherDone.path, "utf8")).toBe(otherAssetBody);
+		expect(listCache(cacheDir)).toEqual(
+			[path.basename(currentDone.path), path.basename(otherDone.path)].sort(),
+		);
+	});
 });
 
 describe("POST /api/agents/prune", () => {
@@ -665,6 +734,17 @@ function response(
 	init: { readonly status?: number; readonly headers?: HeadersInit } = {},
 ): Response {
 	return new Response(body, { status: init.status ?? 200, headers: init.headers });
+}
+
+function deferredResponse(): {
+	readonly promise: Promise<Response>;
+	readonly resolve: (response: Response) => void;
+} {
+	let resolveResponse: (response: Response) => void = () => {};
+	const promise = new Promise<Response>((resolve) => {
+		resolveResponse = resolve;
+	});
+	return { promise, resolve: resolveResponse };
 }
 
 function sums(assetName: string, body: string): string {
