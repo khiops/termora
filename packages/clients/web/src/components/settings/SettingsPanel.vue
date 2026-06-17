@@ -63,6 +63,10 @@
 										v-else-if="settingsStore.activeCategory === 'elevation'"
 										:scope="settingsStore.activeScope"
 									/>
+									<AgentManagerCategory
+										v-else-if="settingsStore.activeCategory === 'agents'"
+										:desktop-version="desktopVersion"
+									/>
 									<SchemaCategory
 										v-else-if="settingsStore.activeCategory !== 'keybindings'"
 										:category="settingsStore.activeCategory"
@@ -102,6 +106,7 @@ import { type Scope, useSettingsStore } from '../../stores/settings.js';
 import { useToastStore } from '../../stores/toast.js';
 import AboutModal from '../AboutModal.vue';
 import CategoryNav from './CategoryNav.vue';
+import AgentManagerCategory from './categories/AgentManagerCategory.vue';
 import AppearanceCategory from './categories/AppearanceCategory.vue';
 import ElevationCategory from './categories/ElevationCategory.vue';
 import KeybindingsCategory from './categories/KeybindingsCategory.vue';
@@ -112,6 +117,7 @@ import ScopeTabBar from './ScopeTabBar.vue';
 
 const props = defineProps<{
 	visible: boolean;
+	desktopVersion?: string | undefined;
 }>();
 
 defineEmits<{

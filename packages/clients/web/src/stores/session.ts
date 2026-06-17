@@ -4,6 +4,7 @@ import { markRaw, ref } from "vue";
 import { showSimpleNotification } from "../composables/useDesktopNotifications.js";
 import { WsClient } from "../services/ws-client.js";
 import { hubWsUrl } from "../utils/hub-url.js";
+import { useAgentManagerStore } from "./agent-manager.js";
 import { useAgentVerifyStore } from "./agent-verify.js";
 import { useAuthStore } from "./auth.js";
 import { useAuthPromptStore } from "./auth-prompt.js";
@@ -73,6 +74,9 @@ export const useSessionStore = defineStore("session", () => {
 		const agentVerifyStore = useAgentVerifyStore();
 		agentVerifyStore.setWsClient(wsClient);
 		_registerAgentVerifyHandlers(agentVerifyStore);
+
+		const agentManagerStore = useAgentManagerStore();
+		_registerAgentFetchHandlers(agentManagerStore);
 
 		_registerPromptCancelHandlers(authPromptStore, hostVerifyStore, agentVerifyStore);
 
@@ -267,6 +271,31 @@ export const useSessionStore = defineStore("session", () => {
 				// SSH_HOST_KEY_REJECTED, etc.) are surfaced as error toasts.
 				const toastStore = useToastStore();
 				toastStore.show("error", msg.message, 10_000);
+			}
+		});
+	}
+
+	/**
+	 * Wire up agent fetch progress messages to the agent manager cache panel.
+	 */
+	function _registerAgentFetchHandlers(
+		agentManagerStore: ReturnType<typeof useAgentManagerStore>,
+	): void {
+		wsClient.on("AGENT_FETCH_PROGRESS", (msg) => {
+			if (msg.type === "AGENT_FETCH_PROGRESS") {
+				agentManagerStore.handleAgentFetchProgress(msg);
+			}
+		});
+
+		wsClient.on("AGENT_FETCH_DONE", (msg) => {
+			if (msg.type === "AGENT_FETCH_DONE") {
+				agentManagerStore.handleAgentFetchDone(msg);
+			}
+		});
+
+		wsClient.on("AGENT_FETCH_ERROR", (msg) => {
+			if (msg.type === "AGENT_FETCH_ERROR") {
+				agentManagerStore.handleAgentFetchError(msg);
 			}
 		});
 	}
