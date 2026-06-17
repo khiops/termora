@@ -1,5 +1,5 @@
 import { closeSync, constants, openSync, writeSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type {
 	AgentFetchDoneMessage,
 	AgentFetchErrorMessage,
@@ -462,7 +462,6 @@ async function readAgentImportMultipart(
 	let validation: AgentImportValidation | null = null;
 	let cacheDir: string | null = null;
 	let tempPath: string | null = null;
-	let expectedBasename: string | null = null;
 	let manifestContent: string | null = null;
 	let totalPayloadBytes = 0;
 	let fileCount = 0;
@@ -508,25 +507,18 @@ async function readAgentImportMultipart(
 				await drainFilePart(part);
 				throw new RouteError(400, "BAD_MULTIPART", "Duplicate binary file part.");
 			}
-			let finalPath: string;
 			let binaryTempPath: string;
 			try {
-				validation = validateAgentImportFields(fields, deps);
 				cacheDir = await resolveBinaryCacheDir(deps);
-				expectedBasename = releaseAssetBasename(validation.target, validation.version);
-				finalPath = join(
-					cacheDir,
-					`termora-agent-${validation.os}-${validation.arch}-${validation.version}${validation.target.ext}`,
-				);
 				ensureCacheDir(cacheDir);
-				binaryTempPath = createUniqueTempPath(finalPath);
+				binaryTempPath = createUniqueTempPath(join(cacheDir, "termora-agent-import"));
 				tempPath = binaryTempPath;
 				setTempPath(binaryTempPath);
 			} catch (error) {
 				await drainFilePart(part);
 				throw error;
 			}
-			const written = await writeBinaryPartToTemp(part, binaryTempPath, finalPath);
+			const written = await writeBinaryPartToTemp(part, binaryTempPath);
 			totalPayloadBytes += written;
 			sawBinary = true;
 		} else {
@@ -548,9 +540,10 @@ async function readAgentImportMultipart(
 	}
 
 	validation ??= validateAgentImportFields(fields, deps);
-	if (!tempPath || !expectedBasename || manifestContent === null || !cacheDir) {
+	if (!tempPath || manifestContent === null || !cacheDir) {
 		throw new RouteError(400, "BAD_MULTIPART", "Agent import is missing required parts.");
 	}
+	const expectedBasename = releaseAssetBasename(validation.target, validation.version);
 
 	return {
 		tempPath,
@@ -661,11 +654,7 @@ async function readManifestPart(
 	return { content: Buffer.concat(chunks, bytes).toString("utf8"), bytes };
 }
 
-async function writeBinaryPartToTemp(
-	part: MultipartFilePart,
-	tempPath: string,
-	finalPath: string,
-): Promise<number> {
+async function writeBinaryPartToTemp(part: MultipartFilePart, tempPath: string): Promise<number> {
 	let fd: number | null = null;
 	let written = 0;
 	try {
@@ -677,7 +666,7 @@ async function writeBinaryPartToTemp(
 				throw new RouteError(
 					413,
 					"TOO_LARGE",
-					`Uploaded ${basename(finalPath)} exceeds the 64 MiB Termora agent limit.`,
+					"Uploaded agent binary exceeds the 64 MiB Termora agent limit.",
 				);
 			}
 			let chunkOffset = 0;
@@ -690,7 +679,7 @@ async function writeBinaryPartToTemp(
 			throw new RouteError(
 				413,
 				"TOO_LARGE",
-				`Uploaded ${basename(finalPath)} exceeds the 64 MiB Termora agent limit.`,
+				"Uploaded agent binary exceeds the 64 MiB Termora agent limit.",
 			);
 		}
 		return written;

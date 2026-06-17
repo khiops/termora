@@ -98,6 +98,20 @@ fn get_hub_port() -> u16 {
     HUB_PORT.load(Ordering::Relaxed)
 }
 
+#[tauri::command]
+async fn read_agent_file(path: String) -> Result<Vec<u8>, String> {
+    let file_path = std::path::PathBuf::from(path);
+    if !file_path.is_absolute() {
+        return Err("Agent file path must be absolute".to_string());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::read(&file_path)
+            .map_err(|error| format!("Failed to read {}: {}", file_path.display(), error))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
 
 /// In release builds, spawn the hub sidecar and wait for it to become ready.
 /// In dev builds, the hub is already running externally — just show the window.
@@ -240,8 +254,11 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![get_hub_auth_token, get_hub_port])
+        .invoke_handler(tauri::generate_handler![
+            get_hub_auth_token,
+            get_hub_port,
+            read_agent_file
+        ])
         .setup(setup_app)
         .run(tauri::generate_context!())
         .expect("error while running termora");

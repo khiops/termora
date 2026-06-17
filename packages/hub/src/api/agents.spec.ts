@@ -387,6 +387,27 @@ describe("POST /api/agents/import", () => {
 		expect(listTempFiles(cacheDir)).toEqual([]);
 	});
 
+	it("accepts a valid import when the binary part arrives before the fields", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		const binary = "windows-agent";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary,
+			manifest: sums(assetName, binary),
+			binaryFirst: true,
+		});
+
+		const finalPath = agentCachePath(cacheDir, "windows", "x64", version);
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ path: finalPath, version, verified: true });
+		expect(readFileSync(finalPath, "utf8")).toBe(binary);
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
 	it("SC-11 rejects a mismatched hash and leaves no cached binary or temp file", async () => {
 		const cacheDir = makeTempDir();
 		const version = "0.4.2";
@@ -481,15 +502,9 @@ describe("POST /api/agents/import", () => {
 		},
 	);
 
-	it("SC-18 rejects bad target/version before resolving the cache dir", async () => {
+	it("SC-18 rejects bad target/version without placing cache entries", async () => {
 		const cacheDir = makeTempDir();
-		let cacheDirReads = 0;
-		server = makeAgentRouteServer(cacheDir, {
-			getBinaryCacheDir: () => {
-				cacheDirReads++;
-				return cacheDir;
-			},
-		});
+		server = makeAgentRouteServer(cacheDir);
 
 		const unsupported = await postImport({
 			fields: importFields({
@@ -518,19 +533,12 @@ describe("POST /api/agents/import", () => {
 		expect(badVersion.json().error.code).toBe("BAD_VERSION");
 		expect(bundled.statusCode).toBe(400);
 		expect(bundled.json().error.code).toBe("BUNDLED_TARGET");
-		expect(cacheDirReads).toBe(0);
 		expect(listCache(cacheDir)).toEqual([]);
 	});
 
-	it("SC-22 rejects imports without explicit attestation before resolving the cache dir", async () => {
+	it("SC-22 rejects imports without explicit attestation without placing cache entries", async () => {
 		const cacheDir = makeTempDir();
-		let cacheDirReads = 0;
-		server = makeAgentRouteServer(cacheDir, {
-			getBinaryCacheDir: () => {
-				cacheDirReads++;
-				return cacheDir;
-			},
-		});
+		server = makeAgentRouteServer(cacheDir);
 		const version = "0.4.2";
 		const assetName = versionedAssetName("windows", "x64", version);
 
@@ -542,7 +550,38 @@ describe("POST /api/agents/import", () => {
 
 		expect(res.statusCode).toBe(400);
 		expect(res.json().error.code).toBe("ATTESTATION_REQUIRED");
-		expect(cacheDirReads).toBe(0);
+		expect(listCache(cacheDir)).toEqual([]);
+	});
+
+	it("rejects binary-first invalid fields and removes the temporary import", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(cacheDir);
+
+		const unsupported = await postImport({
+			fields: importFields({
+				os: "darwin",
+				arch: "arm64",
+				version,
+				attested: "true",
+			}),
+			binary: "agent",
+			manifest: sums("unused", "agent"),
+			binaryFirst: true,
+		});
+		const missingAttestation = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version }),
+			binary: "agent",
+			manifest: sums(assetName, "agent"),
+			binaryFirst: true,
+		});
+
+		expect(unsupported.statusCode).toBe(400);
+		expect(unsupported.json().error.code).toBe("UNSUPPORTED_TARGET");
+		expect(missingAttestation.statusCode).toBe(400);
+		expect(missingAttestation.json().error.code).toBe("ATTESTATION_REQUIRED");
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", version))).toBe(false);
 		expect(listCache(cacheDir)).toEqual([]);
 	});
 
@@ -671,6 +710,7 @@ function postImport(
 			readonly filename: string;
 			readonly content: Buffer | string;
 		}>;
+		readonly binaryFirst?: boolean;
 	},
 	extraHeaders: Record<string, string> = {},
 ) {
@@ -772,17 +812,26 @@ function buildAgentImportMultipart(args: {
 		readonly filename: string;
 		readonly content: Buffer | string;
 	}>;
+	readonly binaryFirst?: boolean;
 }): { readonly payload: Buffer; readonly headers: Record<string, string> } {
 	const boundary = `----TermoraAgentImport${Math.random().toString(16).slice(2)}`;
 	const parts: Buffer[] = [];
-	for (const [name, value] of Object.entries(args.fields)) {
-		parts.push(
-			Buffer.from(
-				`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
-			),
-		);
+	const pushFields = () => {
+		for (const [name, value] of Object.entries(args.fields)) {
+			parts.push(
+				Buffer.from(
+					`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+				),
+			);
+		}
+	};
+	if (args.binaryFirst) {
+		pushFilePart(parts, boundary, "binary", "termora-agent", args.binary);
+		pushFields();
+	} else {
+		pushFields();
+		pushFilePart(parts, boundary, "binary", "termora-agent", args.binary);
 	}
-	pushFilePart(parts, boundary, "binary", "termora-agent", args.binary);
 	pushFilePart(parts, boundary, "manifest", "SHA256SUMS.txt", args.manifest);
 	for (const extra of args.extraFiles ?? []) {
 		pushFilePart(parts, boundary, extra.fieldname, extra.filename, extra.content);

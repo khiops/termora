@@ -131,6 +131,26 @@ describe("useAgentManagerStore", () => {
 		expect(store.jobsById["job-1"]).toBeDefined();
 	});
 
+	it("fetchTarget includes backend error code and message from the nested envelope", async () => {
+		mockFetch.mockResolvedValueOnce(
+			makeJsonResponse(
+				{
+					error: {
+						code: "UNSUPPORTED_TARGET",
+						message: "No Termora agent release is built for darwin/arm64.",
+					},
+				},
+				400,
+			),
+		);
+
+		const store = useAgentManagerStore();
+
+		await expect(store.fetchTarget("darwin", "arm64")).rejects.toThrow(
+			"Failed to fetch agent target: UNSUPPORTED_TARGET: No Termora agent release is built for darwin/arm64.",
+		);
+	});
+
 	it("importAgent appends validated fields before file parts", async () => {
 		mockFetch
 			.mockResolvedValueOnce(makeJsonResponse({ verified: true, version: "1.2.3" }))
@@ -158,5 +178,38 @@ describe("useAgentManagerStore", () => {
 			"binary",
 			"manifest",
 		]);
+	});
+
+	it("importAgent surfaces nested backend rejection code and message", async () => {
+		mockFetch.mockResolvedValueOnce(
+			makeJsonResponse(
+				{
+					error: {
+						code: "ATTESTATION_REQUIRED",
+						message: "Agent import requires attested: true.",
+					},
+				},
+				400,
+			),
+		);
+
+		const store = useAgentManagerStore();
+		const binary = new File(["binary"], "termora-agent-linux-arm64");
+		const manifest = new File(["checksum"], "SHA256SUMS-1.2.3.txt");
+
+		const result = await store.importAgent({
+			binary,
+			manifest,
+			os: "linux",
+			arch: "arm64",
+			version: "1.2.3",
+			attested: false,
+		});
+
+		expect(result).toMatchObject({
+			code: "ATTESTATION_REQUIRED",
+			message: "Agent import requires attested: true.",
+		});
+		expect(mockFetch).toHaveBeenCalledTimes(1);
 	});
 });

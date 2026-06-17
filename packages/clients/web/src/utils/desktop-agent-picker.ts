@@ -5,17 +5,18 @@ export interface DesktopAgentImportFiles {
 	manifest: File | null;
 }
 
-type ReadFile = (path: string | URL) => Promise<Uint8Array<ArrayBuffer>>;
+type ReadAgentFile = (path: string) => Promise<number[] | Uint8Array<ArrayBuffer>>;
 
 const SHA256SUMS_MANIFEST_RE = /^SHA256SUMS-.+\.txt$/i;
 
 export async function pickDesktopAgentImportFiles(): Promise<DesktopAgentImportFiles | null> {
 	if (!isTauriRuntime()) return null;
 
-	const [{ open }, { readFile }] = await Promise.all([
+	const [{ open }, { invoke }] = await Promise.all([
 		import("@tauri-apps/plugin-dialog"),
-		import("@tauri-apps/plugin-fs"),
+		import("@tauri-apps/api/core"),
 	]);
+	const readAgentFile: ReadAgentFile = (path) => invoke("read_agent_file", { path });
 
 	const selected = await open({
 		title: "Select agent binary and SHA256SUMS manifest",
@@ -31,7 +32,7 @@ export async function pickDesktopAgentImportFiles(): Promise<DesktopAgentImportF
 	const paths = Array.isArray(selected) ? selected : selected === null ? [] : [selected];
 	if (paths.length === 0) return null;
 
-	return classifyFiles(await Promise.all(paths.map((path) => readPathAsFile(path, readFile))));
+	return classifyFiles(await Promise.all(paths.map((path) => readPathAsFile(path, readAgentFile))));
 }
 
 function classifyFiles(files: File[]): DesktopAgentImportFiles {
@@ -43,11 +44,11 @@ function classifyFiles(files: File[]): DesktopAgentImportFiles {
 	return { binary, manifest };
 }
 
-async function readPathAsFile(path: string, readFile: ReadFile): Promise<File> {
-	const bytes = await readFile(path);
+async function readPathAsFile(path: string, readFile: ReadAgentFile): Promise<File> {
+	const rawBytes = await readFile(path);
+	const bytes = rawBytes instanceof Uint8Array ? rawBytes : Uint8Array.from(rawBytes);
 	const name = basename(path);
-	const buffer = new Uint8Array(bytes).buffer;
-	return new File([buffer], name, { type: mimeTypeForName(name) });
+	return new File([bytes], name, { type: mimeTypeForName(name) });
 }
 
 function basename(path: string): string {

@@ -85,6 +85,11 @@ interface AgentFetchSnapshotWire {
 	phase?: AgentFetchProgressPhase;
 }
 
+interface AgentErrorWire {
+	code?: string;
+	message?: string;
+}
+
 export function agentTargetKey(os: HostOs, arch: HostArch): string {
 	return `${os}:${arch}`;
 }
@@ -139,17 +144,32 @@ async function readResponseBody(response: Response): Promise<unknown> {
 
 async function responseErrorMessage(response: Response): Promise<string> {
 	const body = await readResponseBody(response);
+	const error = unwrapAgentError(body);
+	if (error.code && error.message) return `${error.code}: ${error.message}`;
+	if (error.message) return error.message;
 	if (typeof body === "string" && body.length > 0) return body;
 	const message = asRecord(body).message;
 	if (typeof message === "string" && message.length > 0) return message;
 	return `${response.status} ${response.statusText}`.trim();
 }
 
+function unwrapAgentError(body: unknown): AgentErrorWire {
+	const record = asRecord(body);
+	const nested = asRecord(record.error);
+	const result: AgentErrorWire = {};
+	if (typeof nested.code === "string") result.code = nested.code;
+	else if (typeof record.code === "string") result.code = record.code;
+	if (typeof nested.message === "string") result.message = nested.message;
+	else if (typeof record.message === "string") result.message = record.message;
+	return result;
+}
+
 function normalizeImportResult(body: unknown): AgentImportResult {
 	const record = asRecord(body);
+	const error = unwrapAgentError(body);
 	const result: AgentImportResult = {};
-	if (typeof record.code === "string") result.code = record.code;
-	if (typeof record.message === "string") result.message = record.message;
+	if (error.code !== undefined) result.code = error.code;
+	if (error.message !== undefined) result.message = error.message;
 	if (typeof record.verified === "boolean") result.verified = record.verified;
 	if (typeof record.path === "string") result.path = record.path;
 	if (typeof record.version === "string") result.version = record.version;
