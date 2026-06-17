@@ -329,8 +329,10 @@ export function registerAgentRoutes(server: FastifyInstance, deps: AgentRoutesDe
 			};
 			jobsByTarget.set(targetKey, job);
 			queuedJobs.push(job);
-			drainFetchQueue();
 
+			reply.raw.once("finish", () => {
+				setImmediate(drainFetchQueue);
+			});
 			return reply.code(202).send({
 				job_id: job.id,
 				snapshot: snapshotToWire(job.snapshot),

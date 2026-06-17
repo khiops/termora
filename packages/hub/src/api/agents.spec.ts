@@ -171,6 +171,36 @@ describe("POST /api/agents/fetch", () => {
 		expect(targetStatus(targets.json(), "linux", "arm64")).toBe("cached");
 	});
 
+	it("sends the 202 response before starting the fetch job", async () => {
+		const cacheDir = makeTempDir();
+		const messages: AgentFetchMessage[] = [];
+		const assetBody = "linux-arm64-agent";
+		const { fetchImpl: upstreamFetchImpl } = agentAssetFetch(
+			"linux",
+			"arm64",
+			HUB_VERSION,
+			assetBody,
+		);
+		let responseReturned = false;
+		let startedBeforeResponse = false;
+		const fetchImpl = vi.fn<AgentFetchImpl>(async (url, init) => {
+			if (!responseReturned) startedBeforeResponse = true;
+			return upstreamFetchImpl(url, init);
+		});
+		server = makeAgentRouteServer(cacheDir, { fetchImpl, messages });
+
+		const res = await postFetch({ os: "linux", arch: "arm64" });
+		responseReturned = true;
+
+		expect(res.statusCode).toBe(202);
+		const jobId = res.json().job_id as string;
+		await waitForMessage<AgentFetchDoneMessage>(
+			messages,
+			(msg): msg is AgentFetchDoneMessage => msg.type === "AGENT_FETCH_DONE" && msg.jobId === jobId,
+		);
+		expect(startedBeforeResponse).toBe(false);
+	});
+
 	it("SC-06 rejects an unsupported target before any network call", async () => {
 		const cacheDir = makeTempDir();
 		const fetchImpl = vi.fn<AgentFetchImpl>();
@@ -263,6 +293,10 @@ describe("POST /api/agents/fetch", () => {
 		expect(firstRes.statusCode).toBe(202);
 		expect(secondRes.statusCode).toBe(202);
 		expect(secondRes.json().job_id).toBe(firstRes.json().job_id);
+		await waitForCondition(
+			() => assetDownloads === 1,
+			"Timed out waiting for deduped asset download to start",
+		);
 		expect(assetDownloads).toBe(1);
 
 		resolveAsset?.(
@@ -313,6 +347,10 @@ describe("POST /api/agents/fetch", () => {
 		expect(currentRes.statusCode).toBe(202);
 		expect(otherRes.statusCode).toBe(202);
 		expect(otherRes.json().job_id).not.toBe(currentRes.json().job_id);
+		await waitForCondition(
+			() => currentDownloads === 1 && otherDownloads === 1,
+			"Timed out waiting for versioned asset downloads to start",
+		);
 		expect(currentDownloads).toBe(1);
 		expect(otherDownloads).toBe(1);
 
@@ -884,6 +922,15 @@ async function waitForMessage<T extends AgentFetchMessage>(
 		const found = messages.find(predicate);
 		if (found) return found;
 		if (Date.now() >= deadline) throw new Error("Timed out waiting for agent fetch message");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMessage: string): Promise<void> {
+	const deadline = Date.now() + 1_000;
+	for (;;) {
+		if (predicate()) return;
+		if (Date.now() >= deadline) throw new Error(timeoutMessage);
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }

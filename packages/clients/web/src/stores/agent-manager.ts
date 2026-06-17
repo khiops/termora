@@ -90,6 +90,16 @@ interface AgentErrorWire {
 	message?: string;
 }
 
+type AgentFetchTerminalMessage = AgentFetchDoneMessage | AgentFetchErrorMessage;
+
+interface BufferedAgentFetchTerminal {
+	readonly message: AgentFetchTerminalMessage;
+	readonly receivedAt: number;
+}
+
+const AGENT_FETCH_TERMINAL_BUFFER_TTL_MS = 30_000;
+const AGENT_FETCH_TERMINAL_BUFFER_MAX = 32;
+
 export function agentTargetKey(os: HostOs, arch: HostArch): string {
 	return `${os}:${arch}`;
 }
@@ -193,6 +203,7 @@ export const useAgentManagerStore = defineStore("agentManager", () => {
 	const lastFetchError = ref<AgentFetchTerminalError | null>(null);
 	const jobsById = ref<Record<string, AgentFetchJob>>({});
 	const targetJobIds = ref<Record<string, string>>({});
+	const bufferedFetchTerminals = new Map<string, BufferedAgentFetchTerminal>();
 
 	const inFlightCount = computed(() => Object.keys(jobsById.value).length);
 
@@ -227,6 +238,49 @@ export const useAgentManagerStore = defineStore("agentManager", () => {
 
 	function isTargetInFlight(os: HostOs, arch: HostArch): boolean {
 		return progressFor(os, arch) !== null;
+	}
+
+	function pruneBufferedFetchTerminals(now = Date.now()): void {
+		for (const [jobId, entry] of bufferedFetchTerminals) {
+			if (now - entry.receivedAt > AGENT_FETCH_TERMINAL_BUFFER_TTL_MS) {
+				bufferedFetchTerminals.delete(jobId);
+			}
+		}
+
+		while (bufferedFetchTerminals.size > AGENT_FETCH_TERMINAL_BUFFER_MAX) {
+			const oldestJobId = bufferedFetchTerminals.keys().next().value;
+			if (oldestJobId === undefined) return;
+			bufferedFetchTerminals.delete(oldestJobId);
+		}
+	}
+
+	function bufferFetchTerminal(message: AgentFetchTerminalMessage): void {
+		const now = Date.now();
+		pruneBufferedFetchTerminals(now);
+		bufferedFetchTerminals.delete(message.jobId);
+		bufferedFetchTerminals.set(message.jobId, { message, receivedAt: now });
+		pruneBufferedFetchTerminals(now);
+	}
+
+	function applyFetchTerminal(message: AgentFetchTerminalMessage): void {
+		if (message.type === "AGENT_FETCH_ERROR") {
+			lastFetchError.value = {
+				jobId: message.jobId,
+				code: message.code,
+				message: message.message,
+			};
+		}
+		removeJob(message.jobId);
+		void loadTargets();
+	}
+
+	function replayBufferedFetchTerminal(jobId: string): void {
+		pruneBufferedFetchTerminals();
+		const entry = bufferedFetchTerminals.get(jobId);
+		if (!entry) return;
+
+		bufferedFetchTerminals.delete(jobId);
+		applyFetchTerminal(entry.message);
 	}
 
 	async function loadTargets(): Promise<void> {
@@ -266,6 +320,7 @@ export const useAgentManagerStore = defineStore("agentManager", () => {
 		};
 		if (snapshot?.total !== undefined) job.total = snapshot.total;
 		setJob(job);
+		replayBufferedFetchTerminal(jobId);
 	}
 
 	async function fetchTarget(
@@ -391,25 +446,20 @@ export const useAgentManagerStore = defineStore("agentManager", () => {
 
 	function handleAgentFetchDone(message: AgentFetchDoneMessage): void {
 		if (!jobsById.value[message.jobId]) {
+			bufferFetchTerminal(message);
 			void loadTargets();
 			return;
 		}
-		removeJob(message.jobId);
-		void loadTargets();
+		applyFetchTerminal(message);
 	}
 
 	function handleAgentFetchError(message: AgentFetchErrorMessage): void {
 		if (!jobsById.value[message.jobId]) {
+			bufferFetchTerminal(message);
 			void loadTargets();
 			return;
 		}
-		lastFetchError.value = {
-			jobId: message.jobId,
-			code: message.code,
-			message: message.message,
-		};
-		removeJob(message.jobId);
-		void loadTargets();
+		applyFetchTerminal(message);
 	}
 
 	function clearLastFetchError(): void {

@@ -13,12 +13,15 @@ vi.stubGlobal("localStorage", {
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-function makeJsonResponse(data: unknown, status = 200): Response {
+function makeJsonResponse(data: unknown, status = 200, onJson?: () => void): Response {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
 		statusText: String(status),
-		json: () => Promise.resolve(data),
+		json: () => {
+			onJson?.();
+			return Promise.resolve(data);
+		},
 		text: () => Promise.resolve(JSON.stringify(data)),
 	} as Response;
 }
@@ -129,6 +132,116 @@ describe("useAgentManagerStore", () => {
 			phase: "download",
 		});
 		expect(store.jobsById["job-1"]).toBeDefined();
+	});
+
+	it("replays AGENT_FETCH_DONE that arrives before fetch acceptance is recorded", async () => {
+		const store = useAgentManagerStore();
+		mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+			if (String(input) === "/api/agents/fetch") {
+				return makeJsonResponse(
+					{
+						job_id: "job-done-first",
+						snapshot: {
+							downloaded: 0,
+							phase: "download",
+						},
+					},
+					202,
+					() => {
+						store.handleAgentFetchDone({
+							type: "AGENT_FETCH_DONE",
+							jobId: "job-done-first",
+							path: "/tmp/termora-agent-linux-arm64",
+						});
+					},
+				);
+			}
+			return makeJsonResponse(targetsResponse);
+		});
+
+		const result = await store.fetchTarget("linux", "arm64");
+
+		expect(result).toEqual({ status: "accepted", jobId: "job-done-first" });
+		expect(store.progressFor("linux", "arm64")).toBeNull();
+		expect(store.jobsById["job-done-first"]).toBeUndefined();
+		expect(
+			mockFetch.mock.calls.filter((call) => String(call[0]) === "/api/agents/targets"),
+		).not.toHaveLength(0);
+	});
+
+	it("replays AGENT_FETCH_ERROR that arrives before fetch acceptance is recorded", async () => {
+		const store = useAgentManagerStore();
+		mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+			if (String(input) === "/api/agents/fetch") {
+				return makeJsonResponse(
+					{
+						job_id: "job-error-first",
+						snapshot: {
+							downloaded: 0,
+							phase: "download",
+						},
+					},
+					202,
+					() => {
+						store.handleAgentFetchError({
+							type: "AGENT_FETCH_ERROR",
+							jobId: "job-error-first",
+							code: "NETWORK",
+							message: "offline",
+						});
+					},
+				);
+			}
+			return makeJsonResponse(targetsResponse);
+		});
+
+		const result = await store.fetchTarget("linux", "arm64");
+
+		expect(result).toEqual({ status: "accepted", jobId: "job-error-first" });
+		expect(store.progressFor("linux", "arm64")).toBeNull();
+		expect(store.lastFetchError).toEqual({
+			jobId: "job-error-first",
+			code: "NETWORK",
+			message: "offline",
+		});
+		expect(
+			mockFetch.mock.calls.filter((call) => String(call[0]) === "/api/agents/targets"),
+		).not.toHaveLength(0);
+	});
+
+	it("clears in-flight state when AGENT_FETCH_DONE arrives after fetch acceptance", async () => {
+		mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+			if (String(input) === "/api/agents/fetch") {
+				return makeJsonResponse(
+					{
+						job_id: "job-normal",
+						snapshot: {
+							downloaded: 10,
+							total: 100,
+							phase: "download",
+						},
+					},
+					202,
+				);
+			}
+			return makeJsonResponse(targetsResponse);
+		});
+
+		const store = useAgentManagerStore();
+		await store.fetchTarget("linux", "arm64");
+		expect(store.progressFor("linux", "arm64")).toMatchObject({ jobId: "job-normal" });
+
+		store.handleAgentFetchDone({
+			type: "AGENT_FETCH_DONE",
+			jobId: "job-normal",
+			path: "/tmp/termora-agent-linux-arm64",
+		});
+
+		expect(store.progressFor("linux", "arm64")).toBeNull();
+		expect(store.jobsById["job-normal"]).toBeUndefined();
+		expect(
+			mockFetch.mock.calls.filter((call) => String(call[0]) === "/api/agents/targets"),
+		).toHaveLength(1);
 	});
 
 	it("fetchTarget includes backend error code and message from the nested envelope", async () => {
