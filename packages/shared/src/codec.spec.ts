@@ -220,6 +220,29 @@ describe("encodeMessage / decodeMessage round-trip", () => {
 		expect(decoded).toEqual(msg);
 	});
 
+	it("round-trips an AGENT_FETCH_PROGRESS message with snake_case wire fields", () => {
+		const msg: ProtocolMessage = {
+			type: "AGENT_FETCH_PROGRESS",
+			jobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			os: "linux",
+			arch: "arm64",
+			downloaded: 12,
+			total: 42,
+			phase: "download",
+		};
+
+		expect(toSnakeCase(msg)).toMatchObject({
+			type: "AGENT_FETCH_PROGRESS",
+			job_id: msg.jobId,
+			os: "linux",
+			arch: "arm64",
+			downloaded: 12,
+			total: 42,
+			phase: "download",
+		});
+		expect(decodeMessage(encodeMessage(msg))).toEqual(msg);
+	});
+
 	it("round-trips an AUTH_PROMPT message without optional fields (back-compat)", () => {
 		const msg: ProtocolMessage = {
 			type: "AUTH_PROMPT",

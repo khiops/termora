@@ -455,6 +455,34 @@ export interface AgentBinaryVerifyResponseMessage {
 	action: "trust_permanent" | "trust_once" | "reject";
 }
 
+export type AgentFetchProgressPhase = "download" | "verify";
+
+/** Hub -> UI: progress for an agent binary fetch job. */
+export interface AgentFetchProgressMessage {
+	type: "AGENT_FETCH_PROGRESS";
+	jobId: string;
+	os: HostOs;
+	arch: HostArch;
+	downloaded: number;
+	total?: number;
+	phase: AgentFetchProgressPhase;
+}
+
+/** Hub -> UI: terminal success for an agent binary fetch job. */
+export interface AgentFetchDoneMessage {
+	type: "AGENT_FETCH_DONE";
+	jobId: string;
+	path: string;
+}
+
+/** Hub -> UI: terminal failure for an agent binary fetch job. */
+export interface AgentFetchErrorMessage {
+	type: "AGENT_FETCH_ERROR";
+	jobId: string;
+	code: string;
+	message: string;
+}
+
 /** Hub → UI: request a secret from the user during SSH connection */
 export interface AuthPromptMessage {
 	type: "AUTH_PROMPT";
@@ -614,6 +642,9 @@ export type HubToUiMessage =
 	| TestConnectOkMessage
 	| TestConnectFailMessage
 	| AgentBinaryVerifyMessage
+	| AgentFetchProgressMessage
+	| AgentFetchDoneMessage
+	| AgentFetchErrorMessage
 	| ErrorMessage;
 
 /** Master union of every distinct protocol message type */
@@ -671,4 +702,7 @@ export type ProtocolMessage =
 	| TestConnectFailMessage
 	| AgentBinaryVerifyMessage
 	| AgentBinaryVerifyResponseMessage
+	| AgentFetchProgressMessage
+	| AgentFetchDoneMessage
+	| AgentFetchErrorMessage
 	| ErrorMessage;

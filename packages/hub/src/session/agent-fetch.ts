@@ -46,6 +46,12 @@ export {
 
 export type AgentFetchImpl = (url: string, init: RequestInit) => Promise<Response>;
 
+export type FetchAgentBinaryProgress = {
+	readonly downloaded: number;
+	readonly total?: number;
+	readonly phase: "download" | "verify";
+};
+
 export type FetchAgentBinaryOptions = {
 	readonly os: string;
 	readonly arch: string;
@@ -53,6 +59,7 @@ export type FetchAgentBinaryOptions = {
 	readonly cacheDir: string;
 	readonly baseUrl?: string;
 	readonly fetchImpl?: AgentFetchImpl;
+	readonly onProgress?: (progress: FetchAgentBinaryProgress) => void;
 };
 
 type AssetResponse = {
@@ -115,7 +122,15 @@ export async function fetchAgentBinary(options: FetchAgentBinaryOptions): Promis
 	const tempPath = createUniqueTempPath(finalPath);
 
 	try {
-		await writeResponseToTemp(asset.response, asset.request, asset.assetUrl, tempPath, fetchTarget);
+		const progress = await writeResponseToTemp(
+			asset.response,
+			asset.request,
+			asset.assetUrl,
+			tempPath,
+			fetchTarget,
+			options.onProgress,
+		);
+		emitFetchProgress(options.onProgress, { ...progress, phase: "verify" });
 		return await verifyChecksumAndPlace({
 			cacheDir: options.cacheDir,
 			version: options.version,
@@ -507,13 +522,16 @@ async function writeResponseToTemp(
 	url: string,
 	tempPath: string,
 	target: FetchTarget,
-): Promise<void> {
+	onProgress?: (progress: FetchAgentBinaryProgress) => void,
+): Promise<Omit<FetchAgentBinaryProgress, "phase">> {
 	const finalPath = target.path;
 	assertIdentityResponse(response, url, target);
 	const body = response.body;
 	if (!body) throw networkError(url, target, new Error("response body was empty"));
 
+	const total = contentLengthBytes(response);
 	let fd: number | null = null;
+	let written = 0;
 	try {
 		// O_EXCL guarantees this path did not exist and is created here as a fresh
 		// regular file (open fails otherwise) — that is the symlink / pre-existing
@@ -521,7 +539,6 @@ async function writeResponseToTemp(
 		fd = openSync(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
 
 		const reader = body.getReader();
-		let written = 0;
 		try {
 			for (;;) {
 				const read = await readChunkWithTimeout(reader, request, url, target);
@@ -542,6 +559,11 @@ async function writeResponseToTemp(
 					chunkOffset += writeSync(fd, chunk, chunkOffset, chunk.byteLength - chunkOffset);
 				}
 				written += chunk.byteLength;
+				emitFetchProgress(onProgress, {
+					downloaded: written,
+					...(total !== undefined && { total }),
+					phase: "download",
+				});
 			}
 		} finally {
 			await reader.cancel().catch(() => undefined);
@@ -552,6 +574,22 @@ async function writeResponseToTemp(
 	} finally {
 		if (fd !== null) closeSync(fd);
 	}
+	return { downloaded: written, ...(total !== undefined && { total }) };
+}
+
+function contentLengthBytes(response: Response): number | undefined {
+	const raw = response.headers.get("content-length");
+	if (!raw || !/^\d+$/.test(raw)) return undefined;
+	const parsed = Number(raw);
+	if (!Number.isSafeInteger(parsed)) return undefined;
+	return parsed;
+}
+
+function emitFetchProgress(
+	onProgress: ((progress: FetchAgentBinaryProgress) => void) | undefined,
+	progress: FetchAgentBinaryProgress,
+): void {
+	onProgress?.(progress);
 }
 
 async function readResponseBytes(

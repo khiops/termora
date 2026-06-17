@@ -70,6 +70,19 @@ export function addCorsOrigins(...origins: string[]): void {
 	}
 }
 
+function corsAllowedHosts(): string[] {
+	const hosts = new Set<string>();
+	for (const origin of _corsAllowedOrigins) {
+		try {
+			const host = new URL(origin).host;
+			if (host) hosts.add(host);
+		} catch {
+			// Ignore malformed operator config here; the CORS matcher rejects it.
+		}
+	}
+	return [...hosts];
+}
+
 export interface ServerOptions {
 	host?: string; // default: "127.0.0.1"
 	port?: number; // default: DEFAULT_PORT (4100)
@@ -261,11 +274,16 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		return { assetToken: token, token };
 	});
 
-	registerAgentRoutes(server, {
+	const agentRouteDeps = {
 		authToken: options?.authToken ?? null,
 		db: options?.dbManager?.meta ?? null,
 		tokenTtlDays: authConfig.tokenTtlDays,
-	});
+		allowedOrigins: () => _corsAllowedOrigins,
+		allowedHosts: corsAllowedHosts,
+	};
+	if (!options?.dbManager) {
+		registerAgentRoutes(server, agentRouteDeps);
+	}
 
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
@@ -327,6 +345,13 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		}
 
 		await sessionManager.startup();
+
+		registerAgentRoutes(server, {
+			...agentRouteDeps,
+			broadcastAgentFetchMessage: (message) => {
+				sessionManager.broadcastToAllClients(message);
+			},
+		});
 
 		await registerWsRoutes(
 			server,

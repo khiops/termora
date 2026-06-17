@@ -328,6 +328,10 @@ export class SessionManager {
 		return this.broadcaster.getStateSnapshot();
 	}
 
+	broadcastToAllClients(msg: ProtocolMessage): void {
+		this.broadcaster.broadcastToAllClients(msg);
+	}
+
 	notifyChannelRenamed(channelId: string): void {
 		this.broadcaster.notifyChannelRenamed(channelId);
 	}
