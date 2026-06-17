@@ -1,12 +1,51 @@
-use std::sync::atomic::{AtomicU16, Ordering};
+use serde::Serialize;
+use std::io::Read;
 #[cfg(not(dev))]
 use std::io::Write;
-use tauri::Manager;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU16, Ordering};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 /// Stores the resolved hub port after startup (default 4100).
 static HUB_PORT: AtomicU16 = AtomicU16::new(4100);
+const MAX_AGENT_BINARY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_AGENT_MANIFEST_BYTES: u64 = 1024 * 1024;
+
+#[derive(Clone, Copy)]
+enum AgentFileKind {
+    Binary,
+    Manifest,
+}
+
+impl AgentFileKind {
+    fn max_bytes(self) -> u64 {
+        match self {
+            Self::Binary => MAX_AGENT_BINARY_BYTES,
+            Self::Manifest => MAX_AGENT_MANIFEST_BYTES,
+        }
+    }
+}
+
+impl TryFrom<&str> for AgentFileKind {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "binary" => Ok(Self::Binary),
+            "manifest" => Ok(Self::Manifest),
+            _ => Err("INVALID_KIND: expected \"binary\" or \"manifest\"".to_string()),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct PickedAgentFile {
+    name: String,
+    bytes: Vec<u8>,
+}
 
 /// Resolves the hub config directory and reads the auth token from auth.json.
 /// Returns `Some(token)` only if the token is a valid 64-char lowercase hex string.
@@ -99,18 +138,95 @@ fn get_hub_port() -> u16 {
 }
 
 #[tauri::command]
-async fn read_agent_file(path: String) -> Result<Vec<u8>, String> {
-    let file_path = std::path::PathBuf::from(path);
-    if !file_path.is_absolute() {
-        return Err("Agent file path must be absolute".to_string());
+async fn pick_and_read_agent_file(
+    app: tauri::AppHandle,
+    kind: String,
+) -> Result<Option<PickedAgentFile>, String> {
+    let kind = AgentFileKind::try_from(kind.as_str())?;
+    let mut dialog = app.dialog().file().set_can_create_directories(false);
+
+    dialog = match kind {
+        AgentFileKind::Binary => dialog
+            .set_title("Select agent binary")
+            .add_filter("All files", &["*"]),
+        AgentFileKind::Manifest => dialog
+            .set_title("Select SHA256SUMS manifest")
+            .add_filter("SHA256SUMS manifests", &["txt"])
+            .add_filter("All files", &["*"]),
+    };
+
+    let (tx, mut rx) = tauri::async_runtime::channel(1);
+    dialog.pick_file(move |file_path| {
+        let _ = tx.blocking_send(file_path);
+    });
+
+    let Some(selected) = rx.recv().await else {
+        return Err("DIALOG_CLOSED: file dialog did not return a selection".to_string());
+    };
+    let Some(path) = selected else {
+        return Ok(None);
+    };
+    let path = path
+        .into_path()
+        .map_err(|error| format!("INVALID_PATH: {}", error))?;
+    let max_bytes = kind.max_bytes();
+
+    tauri::async_runtime::spawn_blocking(move || read_picked_agent_file(path, max_bytes))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(Some)
+}
+
+fn read_picked_agent_file(path: PathBuf, max_bytes: u64) -> Result<PickedAgentFile, String> {
+    let selected_metadata = std::fs::symlink_metadata(&path)
+        .map_err(|error| format!("INVALID_PATH: failed to inspect selected file: {}", error))?;
+    if selected_metadata.file_type().is_symlink() {
+        return Err("SYMLINK_NOT_ALLOWED: selected file must not be a symlink".to_string());
     }
 
-    tauri::async_runtime::spawn_blocking(move || {
-        std::fs::read(&file_path)
-            .map_err(|error| format!("Failed to read {}: {}", file_path.display(), error))
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|error| format!("INVALID_PATH: failed to resolve selected file: {}", error))?;
+    let canonical_metadata = std::fs::symlink_metadata(&canonical_path)
+        .map_err(|error| format!("INVALID_PATH: failed to inspect selected file: {}", error))?;
+    if canonical_metadata.file_type().is_symlink() {
+        return Err("SYMLINK_NOT_ALLOWED: selected file must not be a symlink".to_string());
+    }
+
+    let file = std::fs::File::open(&canonical_path)
+        .map_err(|error| format!("READ_FAILED: failed to open selected file: {}", error))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("INVALID_PATH: failed to inspect selected file: {}", error))?;
+    if !metadata.is_file() {
+        return Err("NOT_REGULAR_FILE: selected path must be a regular file".to_string());
+    }
+    if metadata.len() > max_bytes {
+        return Err(format!(
+            "TOO_LARGE: selected file is {} bytes, maximum is {} bytes",
+            metadata.len(),
+            max_bytes
+        ));
+    }
+
+    let name = canonical_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "INVALID_PATH: selected file has no usable name".to_string())?
+        .to_string();
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut reader = file.take(max_bytes.saturating_add(1));
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("READ_FAILED: failed to read selected file: {}", error))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!(
+            "TOO_LARGE: selected file is larger than {} bytes",
+            max_bytes
+        ));
+    }
+
+    Ok(PickedAgentFile { name, bytes })
 }
 
 /// In release builds, spawn the hub sidecar and wait for it to become ready.
@@ -257,7 +373,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_hub_auth_token,
             get_hub_port,
-            read_agent_file
+            pick_and_read_agent_file
         ])
         .setup(setup_app)
         .run(tauri::generate_context!())

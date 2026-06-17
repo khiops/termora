@@ -5,63 +5,33 @@ export interface DesktopAgentImportFiles {
 	manifest: File | null;
 }
 
-type ReadAgentFile = (path: string) => Promise<number[] | Uint8Array<ArrayBuffer>>;
-
-const SHA256SUMS_MANIFEST_RE = /^SHA256SUMS-.+\.txt$/i;
+type AgentFileKind = "binary" | "manifest";
+type PickedAgentFile = {
+	name: string;
+	bytes: number[] | Uint8Array<ArrayBuffer>;
+};
+type PickAndReadAgentFile = (kind: AgentFileKind) => Promise<PickedAgentFile | null>;
 
 export async function pickDesktopAgentImportFiles(): Promise<DesktopAgentImportFiles | null> {
 	if (!isTauriRuntime()) return null;
 
-	const [{ open }, { invoke }] = await Promise.all([
-		import("@tauri-apps/plugin-dialog"),
-		import("@tauri-apps/api/core"),
-	]);
-	const readAgentFile: ReadAgentFile = (path) => invoke("read_agent_file", { path });
-
-	const selected = await open({
-		title: "Select agent binary and SHA256SUMS manifest",
-		multiple: true,
-		directory: false,
-		canCreateDirectories: false,
-		filters: [
-			{ name: "Agent binaries and SHA256SUMS manifests", extensions: ["exe", "txt"] },
-			{ name: "All files", extensions: ["*"] },
-		],
-	});
-
-	const paths = Array.isArray(selected) ? selected : selected === null ? [] : [selected];
-	if (paths.length === 0) return null;
-
-	return classifyFiles(await Promise.all(paths.map((path) => readPathAsFile(path, readAgentFile))));
-}
-
-function classifyFiles(files: File[]): DesktopAgentImportFiles {
-	const manifest =
-		files.find((file) => SHA256SUMS_MANIFEST_RE.test(file.name)) ??
-		files.find((file) => file.name.toLowerCase().endsWith(".txt")) ??
-		null;
-	const binary = files.find((file) => file !== manifest) ?? null;
+	const { invoke } = await import("@tauri-apps/api/core");
+	const pickAndReadAgentFile: PickAndReadAgentFile = (kind) =>
+		invoke("pick_and_read_agent_file", { kind });
+	const binary = await pickAgentFile("binary", pickAndReadAgentFile);
+	if (binary === null) return null;
+	const manifest = await pickAgentFile("manifest", pickAndReadAgentFile);
 	return { binary, manifest };
 }
 
-async function readPathAsFile(path: string, readFile: ReadAgentFile): Promise<File> {
-	const rawBytes = await readFile(path);
-	const bytes = rawBytes instanceof Uint8Array ? rawBytes : Uint8Array.from(rawBytes);
-	const name = basename(path);
-	return new File([bytes], name, { type: mimeTypeForName(name) });
-}
-
-function basename(path: string): string {
-	if (path.startsWith("file:")) {
-		try {
-			const urlPath = new URL(path).pathname;
-			return decodeURIComponent(urlPath.split(/[\\/]/).filter(Boolean).pop() ?? "selected-file");
-		} catch {
-			return "selected-file";
-		}
-	}
-
-	return path.split(/[\\/]/).filter(Boolean).pop() ?? "selected-file";
+async function pickAgentFile(
+	kind: AgentFileKind,
+	pickAndReadAgentFile: PickAndReadAgentFile,
+): Promise<File | null> {
+	const picked = await pickAndReadAgentFile(kind);
+	if (picked === null) return null;
+	const bytes = picked.bytes instanceof Uint8Array ? picked.bytes : Uint8Array.from(picked.bytes);
+	return new File([bytes], picked.name, { type: mimeTypeForName(picked.name) });
 }
 
 function mimeTypeForName(name: string): string {
