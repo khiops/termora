@@ -49,7 +49,7 @@ export interface AgentRoutesDeps extends AgentMutationOriginGuardOptions {
 
 export interface AgentMutationOriginGuardOptions {
 	readonly allowedOrigins?: Iterable<string> | (() => Iterable<string>);
-	readonly allowedHosts?: Iterable<string> | (() => Iterable<string>);
+	readonly isOriginAllowed?: (origin: string) => boolean;
 }
 
 type AgentPreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -789,21 +789,10 @@ export function createAgentMutationOriginGuard(
 		const origin = request.headers.origin;
 		if (!origin) return;
 
-		const allowedOrigins = new Set(readAllowList(opts.allowedOrigins));
-		const allowedHosts = new Set(readAllowList(opts.allowedHosts));
-		let originHost: string;
-		try {
-			originHost = new URL(origin).host;
-		} catch {
-			return sendError(reply, 403, "ORIGIN_FORBIDDEN", "Origin is not allowed");
-		}
-
-		const host = request.headers.host;
-		const originAllowed = allowedOrigins.has(origin) || allowedHosts.has(originHost);
-		const hostAllowed = !host || allowedHosts.size === 0 || allowedHosts.has(host);
-		if (!originAllowed || !hostAllowed) {
-			return sendError(reply, 403, "ORIGIN_FORBIDDEN", "Origin or Host is not allowed");
-		}
+		const originAllowed = opts.isOriginAllowed
+			? opts.isOriginAllowed(origin)
+			: new Set(readAllowList(opts.allowedOrigins)).has(origin);
+		if (!originAllowed) return sendError(reply, 403, "ORIGIN_FORBIDDEN", "Origin is not allowed");
 	};
 }
 

@@ -91,19 +91,6 @@ export function addStartupCorsOrigins(address: string, requestedPort: number): n
 	return actualPort;
 }
 
-function corsAllowedHosts(): string[] {
-	const hosts = new Set<string>();
-	for (const origin of _corsAllowedOrigins) {
-		try {
-			const host = new URL(origin).host;
-			if (host) hosts.add(host);
-		} catch {
-			// Ignore malformed operator config here; the CORS matcher rejects it.
-		}
-	}
-	return [...hosts];
-}
-
 export interface ServerOptions {
 	host?: string; // default: "127.0.0.1"
 	port?: number; // default: DEFAULT_PORT (4100)
@@ -191,15 +178,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		}
 	}
 	const compiledCorsRegexps = corsOriginsToRegexps(wildcardPatterns);
+	const isCorsOriginAllowed = (origin: string): boolean =>
+		_corsAllowedOrigins.has(origin) || matchCorsOrigin(origin, compiledCorsRegexps);
 
 	await server.register(cors, {
 		origin: (origin, cb) => {
 			// No origin header (same-origin or non-browser): deny CORS headers
 			if (!origin) return cb(null, false);
 			// Exact match first (O(1)), then wildcard regexp matching.
-			if (_corsAllowedOrigins.has(origin)) return cb(null, true);
-			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
-			cb(null, matched);
+			cb(null, isCorsOriginAllowed(origin));
 		},
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 		allowedHeaders: ["Content-Type", "Authorization"],
@@ -302,8 +289,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		authToken: options?.authToken ?? null,
 		db: options?.dbManager?.meta ?? null,
 		tokenTtlDays: authConfig.tokenTtlDays,
-		allowedOrigins: () => _corsAllowedOrigins,
-		allowedHosts: corsAllowedHosts,
+		isOriginAllowed: isCorsOriginAllowed,
 	};
 	if (!options?.dbManager) {
 		registerAgentRoutes(server, agentRouteDeps);

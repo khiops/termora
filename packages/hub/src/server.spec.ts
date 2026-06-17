@@ -314,6 +314,58 @@ describe("Hub Server — startup CORS origin injection", () => {
 			message: "No Termora agent release is built for plan9/x64.",
 		});
 	});
+
+	it("allows agent mutations from a wildcard CORS origin when the hub Host differs", async () => {
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			corsOrigins: ["https://ui.example.com:*"],
+		});
+
+		const response = await server.inject({
+			method: "POST",
+			url: "/api/agents/fetch",
+			headers: {
+				authorization: `Bearer ${TEST_TOKEN}`,
+				"content-type": "application/json",
+				host: "hub.example.com",
+				origin: "https://ui.example.com:8443",
+			},
+			payload: { os: "plan9", arch: "x64" },
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error.code).toBe("UNSUPPORTED_TARGET");
+	});
+
+	it("allows agent mutations from an exact CORS origin regardless of Host", async () => {
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			corsOrigins: ["https://ui.example.com"],
+		});
+
+		const response = await server.inject({
+			method: "POST",
+			url: "/api/agents/fetch",
+			headers: {
+				authorization: `Bearer ${TEST_TOKEN}`,
+				"content-type": "application/json",
+				host: "hub.example.com",
+				origin: "https://ui.example.com",
+			},
+			payload: { os: "plan9", arch: "x64" },
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error.code).toBe("UNSUPPORTED_TARGET");
+	});
 });
 
 describe("Hub Server — security headers", () => {
