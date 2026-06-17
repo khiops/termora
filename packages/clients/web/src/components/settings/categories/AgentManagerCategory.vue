@@ -112,10 +112,10 @@
 										v-if="canFetchTarget(target)"
 										class="agent-button agent-button--compact"
 										type="button"
-										:disabled="store.isTargetInFlight(target.os, target.arch)"
+										:disabled="store.isTargetInFlight(target.os, target.arch) || target.status === 'cached'"
 										@click="onFetchTarget(target)"
 									>
-										{{ store.isTargetInFlight(target.os, target.arch) ? "Fetching..." : "Fetch" }}
+										{{ store.isTargetInFlight(target.os, target.arch) ? "Fetching..." : target.status === "cached" ? "Up to date" : "Fetch" }}
 									</button>
 								</td>
 							</tr>
