@@ -11,14 +11,23 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cmdAgentFetch, getConfigDir, getStateDir, type ParsedArgs, parseArgs } from "./cli.js";
+import {
+	cmdAgentFetch,
+	cmdAgentStatus,
+	getConfigDir,
+	getStateDir,
+	type ParsedArgs,
+	parseArgs,
+} from "./cli.js";
 import {
 	AGENT_TARGET_TRIPLES,
 	type FetchAgentBinaryOptions,
 	FetchError,
 } from "./session/agent-fetch.js";
+import { computeTargetStatus, type HubPlatform } from "./session/agent-status.js";
 
 const TEST_VERSION = "0.4.1";
+const HUB_PLATFORM = { os: "linux", arch: "x64" } as const satisfies HubPlatform;
 
 type AgentTargetEntry = {
 	readonly triple: string | null;
@@ -164,6 +173,13 @@ describe("parseArgs", () => {
 			expect(r?.port).toBe(4200);
 			expect(r?.version).toBe(TEST_VERSION);
 			expect(parseArgs(["-V"])).toBeNull();
+		});
+	});
+
+	describe("agent status", () => {
+		it("parses agent status", () => {
+			const r = parseArgs(["agent", "status"]);
+			expect(r?.command).toBe("agent-status");
 		});
 	});
 
@@ -464,6 +480,42 @@ describe("cmdAgentFetch", () => {
 			expect(existsSync(stale)).toBe(true);
 		},
 	);
+});
+
+describe("cmdAgentStatus", () => {
+	it("prints statuses consistent with computeTargetStatus", async () => {
+		const cacheDir = makeTempDir();
+		writeFileSync(agentCachePath(cacheDir, "linux", "arm64", TEST_VERSION), "agent");
+		const lines: string[] = [];
+		const statusDeps = {
+			getBinaryCacheDir: () => cacheDir,
+			hubVersion: TEST_VERSION,
+			hubPlatform: HUB_PLATFORM,
+			resolveAgentBinaryPath: () => "/tmp/termora-agent-cli-test",
+			versionReader: () => TEST_VERSION,
+		};
+		const expected = await computeTargetStatus({
+			cacheDir,
+			hubVersion: TEST_VERSION,
+			hubPlatform: HUB_PLATFORM,
+			resolveAgentBinaryPath: statusDeps.resolveAgentBinaryPath,
+			versionReader: statusDeps.versionReader,
+		});
+
+		const code = await cmdAgentStatus(parsed(["agent", "status"]), {
+			...statusDeps,
+			writeLine: (line) => lines.push(line),
+		});
+
+		expect(code).toBe(0);
+		const output = lines.join("\n");
+		expect(output).toContain(`Hub version: ${expected.hub_version}`);
+		for (const target of expected.targets) {
+			expect(output).toContain(`${target.os}/${target.arch}`);
+			expect(output).toContain(target.status);
+			if (target.version) expect(output).toContain(target.version);
+		}
+	});
 });
 
 describe("path helpers", () => {

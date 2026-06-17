@@ -28,6 +28,12 @@ import {
 	validateAgentVersion,
 } from "./session/agent-cache.js";
 import { type FetchAgentBinaryOptions, fetchAgentBinary } from "./session/agent-fetch.js";
+import {
+	type AgentTargetStatusSnapshot,
+	type AgentVersionReader,
+	type ComputeTargetStatusOptions,
+	computeTargetStatus,
+} from "./session/agent-status.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -245,6 +251,8 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 		if (sub1 === "fetch") {
 			result.command = "agent-fetch";
 			if (sub2) result.target = sub2;
+		} else if (sub1 === "status") {
+			result.command = "agent-status";
 		} else {
 			return null;
 		}
@@ -284,6 +292,15 @@ export interface AgentFetchCommandDeps {
 	readonly hubVersion?: string;
 	readonly writeLine?: (line: string) => void;
 	readonly writeError?: (line: string) => void;
+}
+
+export interface AgentStatusCommandDeps {
+	readonly getBinaryCacheDir?: () => string | Promise<string>;
+	readonly hubVersion?: string;
+	readonly versionReader?: AgentVersionReader;
+	readonly resolveAgentBinaryPath?: () => string | null;
+	readonly hubPlatform?: ComputeTargetStatusOptions["hubPlatform"];
+	readonly writeLine?: (line: string) => void;
 }
 
 async function defaultHubVersion(): Promise<string> {
@@ -393,6 +410,46 @@ export async function cmdAgentFetch(
 
 	if (args.prune) pruneAgentBinaryCache(cacheDir, version);
 	return failed ? 1 : 0;
+}
+
+export async function cmdAgentStatus(
+	args: ParsedArgs,
+	deps: AgentStatusCommandDeps = {},
+): Promise<number> {
+	const writeLine = deps.writeLine ?? ((line: string) => console.log(line));
+	const cacheDir = await (deps.getBinaryCacheDir ?? defaultBinaryCacheDir)();
+	const snapshot = await computeTargetStatus({
+		cacheDir,
+		...(deps.hubVersion !== undefined && { hubVersion: deps.hubVersion }),
+		...(deps.versionReader !== undefined && { versionReader: deps.versionReader }),
+		...(deps.resolveAgentBinaryPath !== undefined && {
+			resolveAgentBinaryPath: deps.resolveAgentBinaryPath,
+		}),
+		...(deps.hubPlatform !== undefined && { hubPlatform: deps.hubPlatform }),
+	});
+
+	if (args.json) {
+		writeLine(JSON.stringify(snapshot));
+		return 0;
+	}
+
+	printAgentStatusTable(snapshot, writeLine);
+	return 0;
+}
+
+function printAgentStatusTable(
+	snapshot: AgentTargetStatusSnapshot,
+	writeLine: (line: string) => void,
+): void {
+	const pad = (value: string, width: number) => value.padEnd(width);
+	writeLine(`Hub version: ${snapshot.hub_version}`);
+	writeLine(`${pad("TARGET", 16)}  ${pad("STATUS", 11)}  ${pad("VERSION", 12)}  EXPECTED`);
+	writeLine(`${"-".repeat(16)}  ${"-".repeat(11)}  ${"-".repeat(12)}  ${"-".repeat(8)}`);
+	for (const target of snapshot.targets) {
+		writeLine(
+			`${pad(`${target.os}/${target.arch}`, 16)}  ${pad(target.status, 11)}  ${pad(target.version ?? "-", 12)}  ${target.expected_version}`,
+		);
+	}
 }
 
 // ─── Command handlers ──────────────────────────────────────────────────────────
@@ -735,6 +792,7 @@ Usage:
 
   termora agent fetch <os-arch>|--all           Populate the agent binary cache
               [--version x.y.z] [--prune]
+  termora agent status [--json]                 Show bundled/cache status by target
 
   termora session list [--json]                 List active sessions
 
@@ -783,6 +841,11 @@ export async function main(argv: string[]): Promise<void> {
 				break;
 			case "agent-fetch": {
 				const code = await cmdAgentFetch(parsed);
+				if (code !== 0) process.exit(code);
+				break;
+			}
+			case "agent-status": {
+				const code = await cmdAgentStatus(parsed);
 				if (code !== 0) process.exit(code);
 				break;
 			}

@@ -5,6 +5,7 @@ import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@termora/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
+import { registerAgentRoutes } from "./api/agents.js";
 import { registerChannelRoutes } from "./api/channels.js";
 import { registerConfigRoutes } from "./api/config.js";
 import { registerFontRoutes } from "./api/fonts.js";
@@ -258,6 +259,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	server.get("/api/assets/token", async () => {
 		const token = getBootAssetToken();
 		return { assetToken: token, token };
+	});
+
+	registerAgentRoutes(server, {
+		authToken: options?.authToken ?? null,
+		db: options?.dbManager?.meta ?? null,
+		tokenTtlDays: authConfig.tokenTtlDays,
 	});
 
 	// Register WebSocket support and routes when a dbManager is provided
