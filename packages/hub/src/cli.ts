@@ -666,7 +666,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	}
 
 	// Foreground — dynamic import keeps heavy deps out of parse-time module graph
-	const { createServer, startServer } = await import("./server.js");
+	const { addStartupCorsOrigins, createServer, startServer } = await import("./server.js");
 	const { initAuth } = await import("./auth.js");
 	const { openDatabases } = await import("./storage/db.js");
 	const { openBrowser } = await import("./open-browser.js");
@@ -683,9 +683,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 
 	const server = await createServer({ port, authToken, dbManager });
 	const address = await startServer(server, { port });
-
-	// Extract actual port (may differ from requested due to zero_conf)
-	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
+	const actualPort = addStartupCorsOrigins(address, port);
 	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
 	console.log(`termora hub listening on ${address} (build: ${BUILD_HASH})`);

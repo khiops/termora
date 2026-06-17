@@ -1,9 +1,9 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addCorsOrigins, createServer } from "./server.js";
+import { addCorsOrigins, addStartupCorsOrigins, createServer } from "./server.js";
 import type { DatabaseManager } from "./storage/db.js";
 import { openTestDatabases } from "./storage/db.js";
 
@@ -164,7 +164,7 @@ describe("Hub Server — CORS allowlist", () => {
 
 	it("allowed origin (localhost:5173) gets Access-Control-Allow-Origin header when explicitly allowed", async () => {
 		// SEC-020: localhost:5173 is NOT in the default allowlist — it must be explicitly added
-		// (done in main.ts after startServer() in non-production, or via corsOrigins override).
+		// (done by startup code after startServer() in non-production, or via corsOrigins override).
 		server = await createServer({ logger: false, corsOrigins: ["http://localhost:5173"] });
 		const response = await server.inject({
 			method: "GET",
@@ -235,7 +235,7 @@ describe("Hub Server — CORS allowlist", () => {
 
 	it("127.0.0.1 origin is allowed after addCorsOrigins() injects the actual port", async () => {
 		// SEC-020: Exact localhost origins are not in defaults — addCorsOrigins() injects them
-		// after startServer() returns the actual port (done in main.ts).
+		// after startServer() returns the actual port.
 		server = await createServer({ logger: false });
 		addCorsOrigins("http://127.0.0.1:4100");
 		const response = await server.inject({
@@ -266,6 +266,53 @@ describe("Hub Server — CORS allowlist", () => {
 			headers: { origin: "http://localhost:9999" },
 		});
 		expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:9999");
+	});
+});
+
+describe("Hub Server — startup CORS origin injection", () => {
+	let server: FastifyInstance | undefined;
+	let dbs: DatabaseManager | undefined;
+	const tempDirs: string[] = [];
+
+	afterEach(async () => {
+		if (server) await server.close();
+		dbs?.close();
+		server = undefined;
+		dbs = undefined;
+		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("adds the actual bound loopback port so agent mutations are not blocked by Origin guard", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "termora-startup-cors-config-"));
+		tempDirs.push(configDir);
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			configDir,
+		});
+
+		const actualPort = addStartupCorsOrigins("http://127.0.0.1:4217", 4100);
+		const response = await server.inject({
+			method: "POST",
+			url: "/api/agents/fetch",
+			headers: {
+				authorization: `Bearer ${TEST_TOKEN}`,
+				"content-type": "application/json",
+				host: "127.0.0.1:4217",
+				origin: "http://127.0.0.1:4217",
+			},
+			payload: { os: "plan9", arch: "x64" },
+		});
+
+		expect(actualPort).toBe(4217);
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error).toEqual({
+			code: "UNSUPPORTED_TARGET",
+			message: "No Termora agent release is built for plan9/x64.",
+		});
 	});
 });
 
