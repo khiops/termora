@@ -571,7 +571,39 @@ These messages originate from the agent (see §3.12–3.15, above) and are relay
 { type: "NOTIFICATION",   channel_id: string, message: string }
 ```
 
-### 4.13 ERROR
+### 4.13 Agent Fetch Messages (Hub → UI)
+
+Broadcast to all authenticated UI clients for agent-manager fetch jobs accepted by `POST /api/agents/fetch`. Wire keys are snake_case.
+
+```typescript
+// Progress
+{
+  type: "AGENT_FETCH_PROGRESS",
+  job_id: string,
+  os: "linux" | "windows" | "darwin",
+  arch: "x64" | "arm64",
+  downloaded: number,
+  total?: number,
+  phase: "download" | "verify"
+}
+
+// Success
+{
+  type: "AGENT_FETCH_DONE",
+  job_id: string,
+  path: string
+}
+
+// Failure
+{
+  type: "AGENT_FETCH_ERROR",
+  job_id: string,
+  code: string,
+  message: string
+}
+```
+
+### 4.14 ERROR
 
 ```typescript
 { type: "ERROR", code: string, message: string, channel_id?: string }
@@ -811,6 +843,15 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 |--------|------|------|--------------|
 | GET | `/api/assets/token` | ● | `{ assetToken, token }` — per-boot token appended to `/public/*` URLs as `asset_token` |
 
+#### Agent Manager
+
+| Method | Path | Auth | Body / Notes |
+|--------|------|------|--------------|
+| GET | `/api/agents/targets` | ● | `{ hub_version, targets }` |
+| POST | `/api/agents/fetch` | ● | `{ os, arch, version? }` → 202 `{ job_id, snapshot }` or 200 `{ status: "already_cached" }`; Origin guard |
+| POST | `/api/agents/prune` | ● | `{ version? }` → `{ removed }`; Origin guard |
+| POST | `/api/agents/import` | ● | multipart fields `os`, `arch`, `version`, `attested`, `force?` before files `binary`, `manifest` → `{ path, version, verified }`; Origin guard |
+
 #### Pairing
 
 | Method | Path | Auth | Body / Notes |
@@ -912,9 +953,106 @@ Auth column: `●` = `Authorization: Bearer <token>` required, `○` = unauthent
 
 **UpdateLaunchProfile:** Same fields as CreateLaunchProfile, all optional.
 
+**AgentTarget:**
+```typescript
+{
+  os: 'linux' | 'windows' | 'darwin',
+  arch: 'x64' | 'arm64',
+  triple: string | null,
+  status: 'bundled' | 'error' | 'cached' | 'stale' | 'missing' | 'untrusted' | 'unsupported',
+  version?: string,
+  expected_version: string,
+  size?: number,
+  mtime?: string                  // ISO 8601
+}
+```
+
+**Agent targets:**
+```typescript
+// GET /api/agents/targets
+{
+  hub_version: string,
+  targets: AgentTarget[]
+}
+```
+
+Errors: `AGENT_STATUS_ERROR` (500).
+
+**Agent fetch:**
+```typescript
+// POST /api/agents/fetch
+{ os: 'linux' | 'windows' | 'darwin', arch: 'x64' | 'arm64', version?: string }
+
+// 202 Accepted
+{
+  job_id: string,
+  snapshot: {
+    os: 'linux' | 'windows' | 'darwin',
+    arch: 'x64' | 'arm64',
+    downloaded: number,
+    total?: number,
+    phase: 'download' | 'verify'
+  }
+}
+
+// 200 OK
+{ status: 'already_cached' }
+```
+
+Errors: `UNSUPPORTED_TARGET`, `BUNDLED_TARGET`, `BAD_VERSION`.
+
+**Agent prune:**
+```typescript
+// POST /api/agents/prune
+{ version?: string }
+
+// 200 OK
+{ removed: number }
+```
+
+Errors: `BAD_VERSION`.
+
+**Agent import:**
+```typescript
+// POST /api/agents/import
+// multipart/form-data; all fields must precede files
+fields: {
+  os: 'linux' | 'windows' | 'darwin',
+  arch: 'x64' | 'arm64',
+  version: string,
+  attested: 'true',
+  force?: 'true'
+}
+files: {
+  binary: File,
+  manifest: File
+}
+
+// 200 OK
+{
+  path: string,
+  version: string,
+  verified: true
+}
+```
+
+Errors: `CHECKSUM_MISMATCH`/`CHECKSUM_MISSING` (422), `INSECURE_CACHE_DIR`/`ALREADY_CURRENT` (409), `UNSUPPORTED_TARGET`/`BUNDLED_TARGET`/`BAD_VERSION`/`ATTESTATION_REQUIRED`/`BAD_MULTIPART` (400), `TOO_LARGE` (413), `DISK` (500).
+
+**Agent manager error responses:**
+```typescript
+{
+  error: {
+    code: string,
+    message: string
+  }
+}
+```
+
+All agent-manager routes require `Authorization: Bearer <token>` (`AUTH_REQUIRED`, `AUTH_INVALID`). Mutation routes also enforce the Origin guard (`ORIGIN_FORBIDDEN`).
+
 **Error responses:**
 ```typescript
-// All non-2xx responses return:
+// Most legacy non-2xx responses return:
 {
   error: string,                // machine-readable code (e.g., "NOT_FOUND", "VALIDATION_ERROR")
   message: string               // human-readable description
