@@ -1,7 +1,18 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import fastifyMultipart from "@fastify/multipart";
 import type {
 	AgentFetchDoneMessage,
 	AgentFetchErrorMessage,
@@ -10,7 +21,7 @@ import type {
 import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENT_TARGET_TRIPLES } from "../session/agent-cache.js";
+import { AGENT_FETCH_MAX_BYTES, AGENT_TARGET_TRIPLES } from "../session/agent-cache.js";
 import type { AgentFetchImpl } from "../session/agent-fetch.js";
 import type { AgentTargetArch, AgentTargetOs, HubPlatform } from "../session/agent-status.js";
 import { registerAgentRoutes } from "./agents.js";
@@ -267,6 +278,260 @@ describe("POST /api/agents/fetch", () => {
 	});
 });
 
+describe("POST /api/agents/prune", () => {
+	it("SC-08 removes non-current versions and keeps the current one", async () => {
+		const cacheDir = makeTempDir();
+		const current = agentCachePath(cacheDir, "linux", "arm64", HUB_VERSION);
+		const stale = agentCachePath(cacheDir, "linux", "arm64", "0.3.4");
+		writeFileSync(current, "current");
+		writeFileSync(stale, "stale");
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postPrune({});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ removed: 1 });
+		expect(existsSync(current)).toBe(true);
+		expect(existsSync(stale)).toBe(false);
+	});
+});
+
+describe("POST /api/agents/import", () => {
+	it("SC-10 verifies and caches a matching attested import with mode 755", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		const binary = "windows-agent";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary,
+			manifest: sums(assetName, binary),
+		});
+
+		const finalPath = agentCachePath(cacheDir, "windows", "x64", version);
+		expect(res.statusCode).toBe(200);
+		expect(res.json()).toEqual({ path: finalPath, version, verified: true });
+		expect(readFileSync(finalPath, "utf8")).toBe(binary);
+		expect(statSync(finalPath).mode & 0o777).toBe(0o755);
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
+	it("SC-11 rejects a mismatched hash and leaves no cached binary or temp file", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary: "corrupt",
+			manifest: sums(assetName, "expected"),
+		});
+
+		expect(res.statusCode).toBe(422);
+		expect(res.json().error.code).toBe("CHECKSUM_MISMATCH");
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", version))).toBe(false);
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
+	it("SC-12 rejects a manifest with no expected entry", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary: "agent",
+			manifest: sums("other-file", "agent"),
+		});
+
+		expect(res.statusCode).toBe(422);
+		expect(res.json().error.code).toBe("CHECKSUM_MISSING");
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", version))).toBe(false);
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
+	it("SC-13 rejects oversized and surplus-part imports without orphan temps", async () => {
+		const oversizedCacheDir = makeTempDir();
+		const version = "0.4.2";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(oversizedCacheDir);
+
+		const oversized = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary: Buffer.alloc(AGENT_FETCH_MAX_BYTES + 1),
+			manifest: sums(assetName, "unused"),
+		});
+
+		expect(oversized.statusCode).toBe(413);
+		expect(existsSync(agentCachePath(oversizedCacheDir, "windows", "x64", version))).toBe(false);
+		expect(listTempFiles(oversizedCacheDir)).toEqual([]);
+
+		await server!.close();
+		server = null;
+		const surplusCacheDir = makeTempDir();
+		server = makeAgentRouteServer(surplusCacheDir);
+
+		const surplus = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary: "agent",
+			manifest: sums(assetName, "agent"),
+			extraFiles: [{ fieldname: "extra", filename: "extra.bin", content: "extra" }],
+		});
+
+		expect(surplus.statusCode).toBe(400);
+		expect(surplus.json().error.code).toBe("BAD_MULTIPART");
+		expect(existsSync(agentCachePath(surplusCacheDir, "windows", "x64", version))).toBe(false);
+		expect(listTempFiles(surplusCacheDir)).toEqual([]);
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"SC-14 maps an insecure cache dir to INSECURE_CACHE_DIR and places nothing",
+		async () => {
+			const realDir = makeTempDir();
+			const linkParent = makeTempDir();
+			const linkDir = path.join(linkParent, "agent-cache-link");
+			symlinkSync(realDir, linkDir);
+			const version = "0.4.2";
+			const binary = "agent";
+			const assetName = versionedAssetName("windows", "x64", version);
+			server = makeAgentRouteServer(linkDir);
+
+			const res = await postImport({
+				fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+				binary,
+				manifest: sums(assetName, binary),
+			});
+
+			expect(res.statusCode).toBe(409);
+			expect(res.json().error.code).toBe("INSECURE_CACHE_DIR");
+			expect(existsSync(agentCachePath(realDir, "windows", "x64", version))).toBe(false);
+			expect(listTempFiles(realDir)).toEqual([]);
+		},
+	);
+
+	it("SC-18 rejects bad target/version before resolving the cache dir", async () => {
+		const cacheDir = makeTempDir();
+		let cacheDirReads = 0;
+		server = makeAgentRouteServer(cacheDir, {
+			getBinaryCacheDir: () => {
+				cacheDirReads++;
+				return cacheDir;
+			},
+		});
+
+		const unsupported = await postImport({
+			fields: importFields({
+				os: "darwin",
+				arch: "arm64",
+				version: "0.4.2",
+				attested: "true",
+			}),
+			binary: "agent",
+			manifest: sums("unused", "agent"),
+		});
+		const badVersion = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version: "0.0.0", attested: "true" }),
+			binary: "agent",
+			manifest: sums("unused", "agent"),
+		});
+		const bundled = await postImport({
+			fields: importFields({ os: "linux", arch: "x64", version: "0.4.2", attested: "true" }),
+			binary: "agent",
+			manifest: sums("unused", "agent"),
+		});
+
+		expect(unsupported.statusCode).toBe(400);
+		expect(unsupported.json().error.code).toBe("UNSUPPORTED_TARGET");
+		expect(badVersion.statusCode).toBe(400);
+		expect(badVersion.json().error.code).toBe("BAD_VERSION");
+		expect(bundled.statusCode).toBe(400);
+		expect(bundled.json().error.code).toBe("BUNDLED_TARGET");
+		expect(cacheDirReads).toBe(0);
+		expect(listCache(cacheDir)).toEqual([]);
+	});
+
+	it("SC-22 rejects imports without explicit attestation before resolving the cache dir", async () => {
+		const cacheDir = makeTempDir();
+		let cacheDirReads = 0;
+		server = makeAgentRouteServer(cacheDir, {
+			getBinaryCacheDir: () => {
+				cacheDirReads++;
+				return cacheDir;
+			},
+		});
+		const version = "0.4.2";
+		const assetName = versionedAssetName("windows", "x64", version);
+
+		const res = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version }),
+			binary: "agent",
+			manifest: sums(assetName, "agent"),
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.json().error.code).toBe("ATTESTATION_REQUIRED");
+		expect(cacheDirReads).toBe(0);
+		expect(listCache(cacheDir)).toEqual([]);
+	});
+
+	it("SC-25 rejects disallowed browser Origin but allows no-Origin Bearer requests", async () => {
+		const cacheDir = makeTempDir();
+		const version = "0.4.2";
+		const binary = "agent";
+		const assetName = versionedAssetName("windows", "x64", version);
+		server = makeAgentRouteServer(cacheDir);
+
+		const blocked = await postImport(
+			{
+				fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+				binary,
+				manifest: sums(assetName, binary),
+			},
+			{ origin: "https://evil.example", host: "127.0.0.1:4100" },
+		);
+
+		expect(blocked.statusCode).toBe(403);
+		expect(blocked.json().error.code).toBe("ORIGIN_FORBIDDEN");
+
+		const allowed = await postImport({
+			fields: importFields({ os: "windows", arch: "x64", version, attested: "true" }),
+			binary,
+			manifest: sums(assetName, binary),
+		});
+
+		expect(allowed.statusCode).toBe(200);
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", version))).toBe(true);
+	});
+
+	it("SC-27 refuses to overwrite a trusted current binary without force", async () => {
+		const cacheDir = makeTempDir();
+		const existing = agentCachePath(cacheDir, "windows", "x64", HUB_VERSION);
+		writeFileSync(existing, "existing");
+		chmodSync(existing, 0o755);
+		const assetName = versionedAssetName("windows", "x64", HUB_VERSION);
+		server = makeAgentRouteServer(cacheDir);
+
+		const res = await postImport({
+			fields: importFields({
+				os: "windows",
+				arch: "x64",
+				version: HUB_VERSION,
+				attested: "true",
+			}),
+			binary: "replacement",
+			manifest: sums(assetName, "replacement"),
+		});
+
+		expect(res.statusCode).toBe(409);
+		expect(res.json().error.code).toBe("ALREADY_CURRENT");
+		expect(readFileSync(existing, "utf8")).toBe("existing");
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+});
+
 function targetStatus(
 	body: { targets: Array<{ os: string; arch: string; status: string }> },
 	os: AgentTargetOs,
@@ -289,12 +554,14 @@ function makeAgentRouteServer(
 	opts: {
 		readonly fetchImpl?: AgentFetchImpl;
 		readonly messages?: AgentFetchMessage[];
+		readonly getBinaryCacheDir?: () => string;
 	} = {},
 ): FastifyInstance {
 	const instance = Fastify({ logger: false });
+	void instance.register(fastifyMultipart, { limits: { fileSize: AGENT_FETCH_MAX_BYTES } });
 	registerAgentRoutes(instance, {
 		authToken: TEST_TOKEN,
-		getBinaryCacheDir: () => cacheDir,
+		getBinaryCacheDir: opts.getBinaryCacheDir ?? (() => cacheDir),
 		hubVersion: HUB_VERSION,
 		hubPlatform: HUB_PLATFORM,
 		resolveAgentBinaryPath: () => BUNDLED_PATH,
@@ -312,6 +579,37 @@ function postFetch(payload: unknown) {
 		method: "POST",
 		url: "/api/agents/fetch",
 		headers: authHeaders(),
+		payload,
+	});
+}
+
+function postPrune(payload: unknown) {
+	return server!.inject({
+		method: "POST",
+		url: "/api/agents/prune",
+		headers: authHeaders(),
+		payload,
+	});
+}
+
+function postImport(
+	args: {
+		readonly fields: Record<string, string>;
+		readonly binary: Buffer | string;
+		readonly manifest: Buffer | string;
+		readonly extraFiles?: Array<{
+			readonly fieldname: string;
+			readonly filename: string;
+			readonly content: Buffer | string;
+		}>;
+	},
+	extraHeaders: Record<string, string> = {},
+) {
+	const { payload, headers } = buildAgentImportMultipart(args);
+	return server!.inject({
+		method: "POST",
+		url: "/api/agents/import",
+		headers: { ...headers, ...extraHeaders },
 		payload,
 	});
 }
@@ -373,9 +671,78 @@ function sums(assetName: string, body: string): string {
 	return `${createHash("sha256").update(body).digest("hex")}  ${assetName}\n`;
 }
 
+function importFields(fields: {
+	readonly os: string;
+	readonly arch: string;
+	readonly version: string;
+	readonly attested?: string;
+	readonly force?: string;
+}): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(fields).filter((entry): entry is [string, string] => entry[1] !== undefined),
+	);
+}
+
+function buildAgentImportMultipart(args: {
+	readonly fields: Record<string, string>;
+	readonly binary: Buffer | string;
+	readonly manifest: Buffer | string;
+	readonly extraFiles?: Array<{
+		readonly fieldname: string;
+		readonly filename: string;
+		readonly content: Buffer | string;
+	}>;
+}): { readonly payload: Buffer; readonly headers: Record<string, string> } {
+	const boundary = `----TermoraAgentImport${Math.random().toString(16).slice(2)}`;
+	const parts: Buffer[] = [];
+	for (const [name, value] of Object.entries(args.fields)) {
+		parts.push(
+			Buffer.from(
+				`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+			),
+		);
+	}
+	pushFilePart(parts, boundary, "binary", "termora-agent", args.binary);
+	pushFilePart(parts, boundary, "manifest", "SHA256SUMS.txt", args.manifest);
+	for (const extra of args.extraFiles ?? []) {
+		pushFilePart(parts, boundary, extra.fieldname, extra.filename, extra.content);
+	}
+	parts.push(Buffer.from(`--${boundary}--\r\n`));
+	return {
+		payload: Buffer.concat(parts),
+		headers: {
+			...authHeaders(),
+			"content-type": `multipart/form-data; boundary=${boundary}`,
+		},
+	};
+}
+
+function pushFilePart(
+	parts: Buffer[],
+	boundary: string,
+	fieldname: string,
+	filename: string,
+	content: Buffer | string,
+): void {
+	const body = Buffer.isBuffer(content) ? content : Buffer.from(content);
+	parts.push(
+		Buffer.from(
+			`--${boundary}\r\nContent-Disposition: form-data; name="${fieldname}"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+		),
+	);
+	parts.push(body);
+	parts.push(Buffer.from("\r\n"));
+}
+
 function listCache(cacheDir: string): string[] {
 	return readdirSync(cacheDir)
 		.filter((name) => !name.startsWith("SHA256SUMS-"))
+		.sort();
+}
+
+function listTempFiles(cacheDir: string): string[] {
+	return readdirSync(cacheDir)
+		.filter((name) => name.endsWith(".tmp"))
 		.sort();
 }
 

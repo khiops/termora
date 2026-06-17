@@ -26,13 +26,21 @@ export type FetchErrorCode =
 	| "CHECKSUM_MISSING"
 	| "ALREADY_CURRENT";
 
+export type FetchErrorPolicyCode = "INSECURE_CACHE_DIR";
+
 export class FetchError extends Error {
 	readonly code: FetchErrorCode;
+	readonly policyCode?: FetchErrorPolicyCode;
 
-	constructor(code: FetchErrorCode, message: string) {
+	constructor(
+		code: FetchErrorCode,
+		message: string,
+		opts: { readonly policyCode?: FetchErrorPolicyCode } = {},
+	) {
 		super(message);
 		this.name = "FetchError";
 		this.code = code;
+		if (opts.policyCode !== undefined) this.policyCode = opts.policyCode;
 	}
 }
 
@@ -220,8 +228,7 @@ export function ensureCacheDir(cacheDir: string): void {
 // hosts, reject an unsafe directory and tighten a loose one we own.
 export function assertSecureCacheDir(cacheDir: string): void {
 	if (lstatSync(cacheDir).isSymbolicLink()) {
-		throw new FetchError(
-			"DISK",
+		throw insecureCacheDirError(
 			`Termora agent cache ${cacheDir} is a symlink; refusing to place agent binaries there. Replace it with a real directory (mode 0700) and rerun the agent fetch.`,
 		);
 	}
@@ -230,13 +237,21 @@ export function assertSecureCacheDir(cacheDir: string): void {
 	const stat = statSync(cacheDir);
 	const uid = process.getuid?.();
 	if (uid !== undefined && stat.uid !== uid) {
-		throw new FetchError(
-			"DISK",
+		throw insecureCacheDirError(
 			`Termora agent cache ${cacheDir} is not owned by the current user; refusing to place agent binaries there. Fix its ownership (or point the cache elsewhere), then rerun the agent fetch.`,
 		);
 	}
 	// Owned by us but group/other-accessible — tighten to 0700.
-	if ((stat.mode & 0o077) !== 0) chmodSync(cacheDir, 0o700);
+	if ((stat.mode & 0o077) !== 0) {
+		try {
+			chmodSync(cacheDir, 0o700);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			throw insecureCacheDirError(
+				`Termora agent cache ${cacheDir} has loose permissions and could not be tightened to mode 0700: ${detail}. Fix permissions and rerun the agent fetch.`,
+			);
+		}
+	}
 }
 
 /**
@@ -297,6 +312,10 @@ export function diskError(path: string, finalPath: string, error: unknown): Fetc
 		"DISK",
 		`Disk error while writing ${path}: ${detail}. Free space or fix cache permissions, then rerun the agent fetch or manually place the binary at ${finalPath}.`,
 	);
+}
+
+function insecureCacheDirError(message: string): FetchError {
+	return new FetchError("DISK", message, { policyCode: "INSECURE_CACHE_DIR" });
 }
 
 function parseAgentBinaryCacheName(name: string): { readonly version: string } | null {

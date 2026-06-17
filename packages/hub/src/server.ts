@@ -274,6 +274,9 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		return { assetToken: token, token };
 	});
 
+	const fastifyMultipart = (await import("@fastify/multipart")).default;
+	await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
+
 	const agentRouteDeps = {
 		authToken: options?.authToken ?? null,
 		db: options?.dbManager?.meta ?? null,
@@ -287,9 +290,6 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
-		const fastifyMultipart = (await import("@fastify/multipart")).default;
-		await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
-
 		await server.register(websocket);
 
 		// Load config from config.toml before creating SessionManager
