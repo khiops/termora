@@ -6,16 +6,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import {
-	closeSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { closeSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -29,12 +20,14 @@ import {
 import { detectSea } from "./sea-addon-loader.js";
 import {
 	AGENT_TARGET_TRIPLES,
-	type FetchAgentBinaryOptions,
 	FetchError,
-	fetchAgentBinary,
 	isCacheDirSecure,
 	isTrustedCacheBinary,
-} from "./session/agent-fetch.js";
+	pruneAgentBinaryCache,
+	resolveTarget,
+	validateAgentVersion,
+} from "./session/agent-cache.js";
+import { type FetchAgentBinaryOptions, fetchAgentBinary } from "./session/agent-fetch.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -278,12 +271,6 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 
 // ─── Agent fetch helpers ──────────────────────────────────────────────────────
 
-type AgentTargetEntry = {
-	readonly triple: string | null;
-	readonly ext: "" | ".exe";
-	readonly built: boolean;
-};
-
 type AgentFetchTarget = {
 	readonly os: string;
 	readonly arch: string;
@@ -299,13 +286,6 @@ export interface AgentFetchCommandDeps {
 	readonly writeError?: (line: string) => void;
 }
 
-const STRICT_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
-
-const AGENT_TARGET_TABLE = AGENT_TARGET_TRIPLES as Record<
-	string,
-	Record<string, AgentTargetEntry> | undefined
->;
-
 async function defaultHubVersion(): Promise<string> {
 	const { HUB_VERSION } = await import("./build-version.js");
 	return HUB_VERSION;
@@ -318,7 +298,7 @@ async function defaultBinaryCacheDir(): Promise<string> {
 
 function builtAgentTargets(): AgentFetchTarget[] {
 	const targets: AgentFetchTarget[] = [];
-	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
+	for (const [os, arches] of Object.entries(AGENT_TARGET_TRIPLES)) {
 		if (!arches) continue;
 		for (const [arch, target] of Object.entries(arches)) {
 			if (target.built && target.triple) targets.push({ os, arch });
@@ -350,61 +330,14 @@ function resolveAgentFetchTargets(args: ParsedArgs): AgentFetchTarget[] | string
 	return [target];
 }
 
-function badVersionError(version: string): FetchError | null {
-	if (STRICT_AGENT_VERSION.test(version) && version !== "0.0.0") return null;
-	return new FetchError(
-		"BAD_VERSION",
-		`Bad Termora agent version "${version}". Use a released strict semver like 0.4.0, or rerun termora-hub agent fetch --version <x.y.z> with a real release version before downloading.`,
-	);
-}
-
 function cachePathForBuiltTarget(
 	cacheDir: string,
 	target: AgentFetchTarget,
 	version: string,
 ): string | null {
-	const entry = AGENT_TARGET_TABLE[target.os]?.[target.arch];
-	if (!entry?.built || !entry.triple) return null;
+	const entry = resolveTarget(target.os, target.arch);
+	if (!entry) return null;
 	return join(cacheDir, `termora-agent-${target.os}-${target.arch}-${version}${entry.ext}`);
-}
-
-function parseAgentBinaryCacheName(name: string): { readonly version: string } | null {
-	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
-		if (!arches) continue;
-		for (const [arch, target] of Object.entries(arches)) {
-			const prefix = `termora-agent-${os}-${arch}-`;
-			if (!name.startsWith(prefix) || !name.endsWith(target.ext)) continue;
-			const versionEnd = target.ext.length > 0 ? name.length - target.ext.length : name.length;
-			const version = name.slice(prefix.length, versionEnd);
-			if (STRICT_AGENT_VERSION.test(version)) return { version };
-		}
-	}
-	return null;
-}
-
-function pruneAgentBinaryCache(cacheDir: string, version: string): number {
-	// Never prune through an untrusted/symlinked cache dir: readdirSync follows a
-	// directory symlink and would delete matching termora-agent-* files in the link
-	// target. isCacheDirSecure also returns false for a missing dir.
-	if (!isCacheDirSecure(cacheDir)) return 0;
-
-	let removed = 0;
-	for (const name of readdirSync(cacheDir)) {
-		const parsed = parseAgentBinaryCacheName(name);
-		if (!parsed || parsed.version === version) continue;
-
-		const path = join(cacheDir, name);
-		try {
-			// lstat (not stat): never follow a symlink when deciding what to delete.
-			if (!lstatSync(path).isFile()) continue;
-			rmSync(path);
-			removed++;
-		} catch {
-			// Entry vanished or was unremovable mid-prune (raced removal); prune is
-			// best-effort cleanup, so skip it.
-		}
-	}
-	return removed;
 }
 
 export async function cmdAgentFetch(
@@ -420,9 +353,11 @@ export async function cmdAgentFetch(
 	}
 
 	const version = args.version ?? deps.hubVersion ?? (await defaultHubVersion());
-	const versionError = badVersionError(version);
-	if (versionError) {
-		writeError(versionError.message);
+	try {
+		validateAgentVersion(version);
+	} catch (error) {
+		if (!(error instanceof FetchError)) throw error;
+		writeError(error.message);
 		return 1;
 	}
 
