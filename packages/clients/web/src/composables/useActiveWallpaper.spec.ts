@@ -5,6 +5,7 @@ import { createApp, defineComponent, nextTick, ref } from "vue";
 import type { ProfileChangeEvent } from "../stores/config.js";
 import { setAssetTokenForTests } from "../utils/hub-url.js";
 import type { PaneNode } from "./usePaneTree.js";
+import type { Tab } from "./useTabManager.js";
 
 function withSetup<T>(setup: () => T): { result: T; unmount: () => void } {
 	let result!: T;
@@ -30,16 +31,29 @@ async function flushAsync(): Promise<void> {
 	await nextTick();
 }
 
-vi.mock("../stores/config.js", () => {
+vi.mock("../stores/config.js", async () => {
+	const shared = await vi.importActual<typeof import("@termora/shared")>("@termora/shared");
+	const vue = await vi.importActual<typeof import("vue")>("vue");
 	let listeners = new Set<(e: ProfileChangeEvent) => void>();
+	const profile = vue.ref<TerminalProfile>({ ...shared.DEFAULT_PROFILE });
 	return {
 		useConfigStore: () => ({
+			get profile() {
+				return profile.value;
+			},
+			set profile(next: TerminalProfile) {
+				profile.value = next;
+			},
 			onProfileChange(cb: (e: ProfileChangeEvent) => void) {
 				listeners.add(cb);
 				return () => listeners.delete(cb);
 			},
+			_setProfile(next: TerminalProfile) {
+				profile.value = next;
+			},
 			_reset() {
 				listeners = new Set();
+				profile.value = { ...shared.DEFAULT_PROFILE };
 			},
 		}),
 	};
@@ -88,6 +102,7 @@ describe("useActiveWallpaper", () => {
 	let usePaneTree: typeof import("./usePaneTree.js").usePaneTree;
 	let useConfigStore: () => ReturnType<typeof import("../stores/config.js").useConfigStore> & {
 		_reset: () => void;
+		_setProfile: (profile: TerminalProfile) => void;
 	};
 
 	beforeEach(async () => {
@@ -211,6 +226,109 @@ describe("useActiveWallpaper", () => {
 
 		expect(result.activeChannelId.value).toBeNull();
 		expect(result.wallpaperStyle.value).toBeNull();
+
+		unmount();
+	});
+
+	it("uses the global profile appearance while no channel is active", async () => {
+		const configStore = useConfigStore();
+		configStore._setProfile({
+			...DEFAULT_PROFILE,
+			backgroundMode: "transparent",
+			windowEffect: "mica",
+			wallpaper: "global-glass.jpg",
+			wallpaperBlur: 6,
+			wallpaperDim: 35,
+		});
+
+		const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input));
+			const channelId = url.searchParams.get("channel_id");
+			return {
+				ok: true,
+				json: async () => ({
+					terminal: {
+						resolved: {
+							...DEFAULT_PROFILE,
+							...(channelId === "ch-1"
+								? {
+										backgroundMode: "solid",
+										windowEffect: "none",
+										wallpaper: "channel-hidden.jpg",
+										wallpaperBlur: 1,
+										wallpaperDim: 5,
+									}
+								: {
+										backgroundMode: "image",
+										wallpaper: "ignored-cascade-global.jpg",
+										wallpaperBlur: 0,
+										wallpaperDim: 0,
+									}),
+						},
+					},
+				}),
+			};
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { result, unmount } = withSetup(() => {
+			const activeTab = ref<Tab | null>(null);
+			const channelHostMap = ref<ReadonlyMap<string, string>>(new Map([["ch-1", "host-1"]]));
+			const wallpaper = useActiveWallpaper({
+				activeTab,
+				getActiveChannelId: (tabId) => (tabId === "tab-1" ? "ch-1" : null),
+				channelHostMap,
+			});
+
+			return {
+				...wallpaper,
+				activeTab,
+			};
+		});
+
+		await flushAsync();
+
+		expect(result.activeChannelId.value).toBeNull();
+		expect(result.backgroundMode.value).toBe("transparent");
+		expect(result.displayedEffectState.value).toEqual({
+			mode: "transparent",
+			windowEffect: "mica",
+		});
+		expect(result.profile.value.wallpaper).toBe("global-glass.jpg");
+		expect(result.profile.value.wallpaperBlur).toBe(6);
+		expect(result.profile.value.wallpaperDim).toBe(35);
+		expect(result.wallpaperStyle.value).toBeNull();
+
+		configStore._setProfile({
+			...DEFAULT_PROFILE,
+			backgroundMode: "image",
+			windowEffect: "auto",
+			wallpaper: "global-wall.jpg",
+			wallpaperBlur: 2,
+			wallpaperDim: 45,
+		});
+		await flushAsync();
+
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("global-wall.jpg");
+		expect(result.wallpaperStyle.value?.filter).toBe("blur(2px)");
+		expect(result.dimStyle.value?.background).toBe("rgba(0, 0, 0, 0.45)");
+
+		result.activeTab.value = { id: "tab-1" };
+		await flushAsync();
+
+		expect(result.activeChannelId.value).toBe("ch-1");
+		expect(result.activeHostId.value).toBe("host-1");
+		expect(result.backgroundMode.value).toBe("solid");
+		expect(result.profile.value.wallpaper).toBe("channel-hidden.jpg");
+		expect(result.wallpaperStyle.value).toBeNull();
+
+		result.activeTab.value = null;
+		await flushAsync();
+
+		expect(result.activeChannelId.value).toBeNull();
+		expect(result.backgroundMode.value).toBe("image");
+		expect(result.wallpaperStyle.value?.backgroundImage).toContain("global-wall.jpg");
 
 		unmount();
 	});
