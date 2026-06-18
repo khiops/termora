@@ -559,7 +559,7 @@ export class SshAgent extends AgentConnection {
 	}
 
 	/** Close the SSH channel and the underlying SSH connection. */
-	close(): void {
+	async close(): Promise<void> {
 		this.cleanup();
 	}
 

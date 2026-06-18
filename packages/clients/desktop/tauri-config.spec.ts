@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,6 +57,13 @@ describe("tauri.conf.json", () => {
 	it("devUrl is configured for vite dev server", () => {
 		const build = conf.build as Record<string, unknown>;
 		expect(build.devUrl).toBe("http://localhost:5173");
+	});
+
+	it("does not point at a desktop-local TypeScript frontend", () => {
+		const build = conf.build as Record<string, unknown>;
+		expect(build.devUrl).toBe("http://localhost:5173");
+		expect(build.frontendDist).toBe("../../web/dist");
+		expect(existsSync(resolve(DESKTOP_DIR, "src"))).toBe(false);
 	});
 
 	it("creates the main window as transparent and enables macOS private API at app level", () => {
@@ -181,30 +188,50 @@ describe("package.json", () => {
 	});
 });
 
-describe("src/lib.ts", () => {
-	const src = readText("src/lib.ts");
-
-	it("exports startHub function", () => {
-		expect(src).toMatch(/export\s+async\s+function\s+startHub/);
-	});
-
-	it("exports stopHub function", () => {
-		expect(src).toMatch(/export\s+async\s+function\s+stopHub/);
-	});
-
-	it("uses Command.sidecar for hub binary", () => {
-		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']termora-hub["']/);
-	});
-
-	it("polls /api/health endpoint for readiness", () => {
-		expect(src).toMatch(/\/api\/health/);
-	});
-});
-
 describe("src-tauri/src/lib.rs", () => {
 	const src = readText("src-tauri/src/lib.rs");
 
 	it("registers the OS plugin", () => {
 		expect(src).toMatch(/\.plugin\(tauri_plugin_os::init\(\)\)/);
+	});
+
+	it("includes the webview caller client id on native tray shutdown requests", () => {
+		expect(src).toContain("set_shutdown_caller_client_id");
+		expect(src).toContain("X-Termora-Client-Id");
+	});
+
+	it("does not expose the owner token through the renderer runtime command", () => {
+		const hubRuntimeStart = src.indexOf("struct HubRuntime");
+		const stopResultStart = src.indexOf("struct StopHubCommandResult");
+		const hubRuntime = src.slice(hubRuntimeStart, stopResultStart);
+		expect(hubRuntime).not.toContain("owner_token");
+		expect(hubRuntime).not.toContain("ownerToken");
+
+		const commandStart = src.indexOf("fn get_hub_runtime()");
+		const nextCommandStart = src.indexOf("fn is_tray_available()", commandStart);
+		const getHubRuntime = src.slice(commandStart, nextCommandStart);
+		expect(getHubRuntime).not.toContain("owner_token");
+		expect(getHubRuntime).not.toContain("ownerToken");
+	});
+
+	it("has a legacy no-owner-token hub stop fallback", () => {
+		expect(src).toContain("stop_legacy_hub");
+		expect(src).toMatch(/runtime\.owner_token(?:\.clone\(\))?\s+else/);
+		expect(src).toContain("validate_hub_process_identity");
+		expect(src).toContain("signal_hub_pid");
+	});
+
+	it("fails closed on owner-token shutdown failures", () => {
+		expect(src).toContain("owner_token_shutdown_failed");
+		expect(src).toContain("owner-token shutdown request failed; refusing PID fallback");
+		expect(src).toContain("owner-token shutdown failed with HTTP");
+	});
+
+	it("pid-confirms hub shutdown before desktop exit paths report success", () => {
+		expect(src).toContain("stop_hub");
+		expect(src).toContain("confirm_hub_stopped_or_kill");
+		expect(src).toContain("wait_for_pid_exit");
+		expect(src).toMatch(/validate_hub_process_identity\(pid\)/);
+		expect(src).toMatch(/hub pid \{\} still alive after graceful shutdown; killing by PID/);
 	});
 });

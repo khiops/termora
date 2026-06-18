@@ -29,6 +29,23 @@
 			@close="showSettings = false"
 		/>
 
+		<CloseModal
+			:visible="closeModalVisible"
+			:busy="closeInProgress"
+			@select="onCloseModalSelect"
+			@cancel="closeModalVisible = false"
+		/>
+
+		<ConfirmDialog
+			:visible="shutdownForceOthers !== null"
+			title="Other Clients Connected"
+			:message="shutdownForceMessage"
+			confirm-label="Stop anyway"
+			:show-remember="false"
+			@confirm="onForceShutdownConfirm"
+			@cancel="onForceShutdownCancel"
+		/>
+
 		<!-- Configure Command dialog — opened from tab context menu or exit overlay -->
 		<ConfigureCommandDialog
 			:visible="showConfigureDialog"
@@ -324,6 +341,7 @@ import AgentDeployFailed from './components/AgentDeployFailed.vue';
 import AuthPromptDialog from './components/AuthPromptDialog.vue';
 import BatchImportModal from './components/BatchImportModal.vue';
 import ChannelSidebar from './components/ChannelSidebar.vue';
+import CloseModal from './components/CloseModal.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import ConfigureCommandDialog from './components/ConfigureCommandDialog.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -374,13 +392,24 @@ import { useHostsStore } from './stores/hosts.js';
 import { useProfilesStore } from './stores/profiles.js';
 import { useSessionStore } from './stores/session.js';
 import { useThemeStore } from './stores/theme.js';
+import { useToastStore } from './stores/toast.js';
 import { useWriteLockStore } from './stores/writelock.js';
 import { loadDesktopVersion } from './utils/desktop-version.js';
+import {
+	readCloseBehavior,
+	resolveCloseAction,
+	writeCloseBehavior,
+} from './utils/close-behavior.js';
+import {
+	forceShutdownMessage,
+	quitCompletely,
+} from './utils/desktop-lifecycle.js';
 import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
 const configStore = useConfigStore();
+const toastStore = useToastStore();
 
 // ─── Resizable panels ────────────────────────────────────────────────────────
 
@@ -476,6 +505,9 @@ const commandPalette = useCommandPalette();
 const profilesStore = useProfilesStore();
 const showSettings = ref(false);
 const desktopVersion = ref<string | undefined>(undefined);
+const closeModalVisible = ref(false);
+const closeInProgress = ref(false);
+const shutdownForceOthers = ref<number | null>(null);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
 const showHostModal = ref(false);
@@ -484,6 +516,19 @@ const deleteHostId = ref<string | null>(null);
 const showBatchImport = ref(false);
 
 const showPairingGenerator = ref(false);
+let closeUnlisten: (() => void) | null = null;
+let shutdownForceResolver: ((confirmed: boolean) => void) | null = null;
+const shutdownForceMessage = computed(() =>
+	shutdownForceOthers.value === null ? '' : forceShutdownMessage(shutdownForceOthers.value),
+);
+
+watch(
+	() => authStore.clientId,
+	(clientId) => {
+		void syncShutdownCallerClientId(clientId);
+	},
+	{ immediate: true },
+);
 
 // Sync auto-switch composable with server appearance config (SC-14)
 // This ensures OS dark/light preference is respected at boot, not just when Settings is open.
@@ -714,6 +759,11 @@ function openPendingTab(hostId: string): void {
 onMounted(async () => {
 	// Ctrl+K / Cmd+K must be captured before Chrome's omnibox intercepts it (SC-14)
 	window.addEventListener('keydown', onGlobalKeydown, { capture: true });
+	try {
+		await registerDesktopCloseHandler();
+	} catch (error) {
+		console.warn('[desktop] failed to register close handler:', error);
+	}
 
 	// In Tauri desktop, resolve the hub port BEFORE any API calls so that
 	// hubBaseUrl() / hubWsUrl() use the correct port (zero_conf may pick != 4100).
@@ -775,7 +825,120 @@ onMounted(async () => {
 
 onUnmounted(() => {
 	window.removeEventListener('keydown', onGlobalKeydown, { capture: true });
+	closeUnlisten?.();
 });
+
+async function registerDesktopCloseHandler(): Promise<void> {
+	if (!isTauriRuntime()) return;
+	const { getCurrentWindow } = await import('@tauri-apps/api/window');
+	closeUnlisten = await getCurrentWindow().onCloseRequested((event) => {
+		event.preventDefault();
+		void handleDesktopCloseRequested();
+	});
+}
+
+async function handleDesktopCloseRequested(): Promise<void> {
+	if (closeInProgress.value || closeModalVisible.value || shutdownForceOthers.value !== null) {
+		return;
+	}
+
+	const action = resolveCloseAction(readCloseBehavior());
+	if (action === 'hide') {
+		await minimizeWindowToTray();
+		return;
+	}
+	if (action === 'quit') {
+		await runQuitCompletely();
+		return;
+	}
+
+	closeModalVisible.value = true;
+}
+
+async function onCloseModalSelect(decision: { action: 'quit' | 'tray'; remember: boolean }): Promise<void> {
+	if (decision.remember) {
+		writeCloseBehavior(decision.action);
+	}
+	if (decision.action === 'tray') {
+		closeModalVisible.value = false;
+		await minimizeWindowToTray();
+		return;
+	}
+
+	await runQuitCompletely();
+}
+
+async function minimizeWindowToTray(): Promise<void> {
+	const { invoke } = await import('@tauri-apps/api/core');
+	const { getCurrentWindow } = await import('@tauri-apps/api/window');
+	const currentWindow = getCurrentWindow();
+	let trayAvailable = false;
+	try {
+		trayAvailable = await invoke<boolean>('is_tray_available');
+	} catch {
+		trayAvailable = false;
+	}
+	if (trayAvailable) {
+		await currentWindow.hide();
+	} else {
+		await currentWindow.minimize();
+	}
+}
+
+async function syncShutdownCallerClientId(clientId: string | null): Promise<void> {
+	if (!isTauriRuntime()) return;
+	try {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('set_shutdown_caller_client_id', { clientId });
+	} catch {
+		// Older desktop shells do not have this command; the server guard still applies.
+	}
+}
+
+function confirmForceShutdown(others: number): Promise<boolean> {
+	shutdownForceOthers.value = others;
+	return new Promise((resolve) => {
+		shutdownForceResolver = resolve;
+	});
+}
+
+function resolveForceShutdown(confirmed: boolean): void {
+	const resolver = shutdownForceResolver;
+	shutdownForceResolver = null;
+	shutdownForceOthers.value = null;
+	resolver?.(confirmed);
+}
+
+function onForceShutdownConfirm(): void {
+	resolveForceShutdown(true);
+}
+
+function onForceShutdownCancel(): void {
+	resolveForceShutdown(false);
+}
+
+async function runQuitCompletely(): Promise<void> {
+	closeInProgress.value = true;
+	try {
+		const { invoke } = await import('@tauri-apps/api/core');
+		const outcome = await quitCompletely({
+			confirmForce: confirmForceShutdown,
+			exitApp: () => invoke('exit_app'),
+		});
+		if (outcome.status === 'failed') {
+			console.error('[desktop] shutdown failed:', outcome.error);
+			toastStore.show('error', `Quit failed: ${outcome.error.message}`, 10_000);
+		} else {
+			closeModalVisible.value = false;
+		}
+	} catch (error) {
+		console.error('[desktop] quit failed:', error);
+		const message = error instanceof Error ? error.message : String(error);
+		toastStore.show('error', `Quit failed: ${message}`, 10_000);
+	} finally {
+		closeInProgress.value = false;
+	}
+}
 
 /**
  * When the selected host changes, fetch the channel list for that host.

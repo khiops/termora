@@ -42,6 +42,7 @@
 							<CategoryNav
 								v-model="settingsStore.activeCategory"
 								:scope="settingsStore.activeScope"
+								:show-desktop="runsInTauri"
 							/>
 							<div class="settings-content">
 								<div v-if="settingsStore.loading" class="settings-loading">
@@ -66,6 +67,9 @@
 									<AgentManagerCategory
 										v-else-if="settingsStore.activeCategory === 'agents'"
 										:desktop-version="desktopVersion"
+									/>
+									<DesktopCategory
+										v-else-if="settingsStore.activeCategory === 'desktop'"
 									/>
 									<SchemaCategory
 										v-else-if="settingsStore.activeCategory !== 'keybindings'"
@@ -108,12 +112,14 @@ import AboutModal from '../AboutModal.vue';
 import CategoryNav from './CategoryNav.vue';
 import AgentManagerCategory from './categories/AgentManagerCategory.vue';
 import AppearanceCategory from './categories/AppearanceCategory.vue';
+import DesktopCategory from './categories/DesktopCategory.vue';
 import ElevationCategory from './categories/ElevationCategory.vue';
 import KeybindingsCategory from './categories/KeybindingsCategory.vue';
 import SchemaCategory from './categories/SchemaCategory.vue';
 import WallpaperCategory from './categories/WallpaperCategory.vue';
 import ProfilesSettings from './ProfilesSettings.vue';
 import ScopeTabBar from './ScopeTabBar.vue';
+import { isTauriRuntime } from '../../utils/hub-url.js';
 
 const props = defineProps<{
 	visible: boolean;
@@ -130,6 +136,7 @@ const channelsStore = useChannelsStore();
 const toastStore = useToastStore();
 
 const showAbout = ref(false);
+const runsInTauri = isTauriRuntime();
 
 // ─── Derived context ──────────────────────────────────────────────────
 

@@ -13,6 +13,15 @@ export interface DatabaseManager {
 	close(): void;
 }
 
+function checkpointAndClose(db: Database.Database): void {
+	if (!db.open) return;
+	try {
+		db.pragma("wal_checkpoint(TRUNCATE)");
+	} finally {
+		if (db.open) db.close();
+	}
+}
+
 function applyCommonPragmas(db: Database.Database): void {
 	db.pragma("journal_mode = WAL");
 	db.pragma("synchronous = NORMAL");
@@ -101,8 +110,8 @@ export function openDatabases(dataDir: string): DatabaseManager {
 		meta: metaDb,
 		spool: spoolDb,
 		close() {
-			metaDb.close();
-			spoolDb.close();
+			checkpointAndClose(metaDb);
+			checkpointAndClose(spoolDb);
 		},
 	};
 }
@@ -124,8 +133,8 @@ export function openTestDatabases(): DatabaseManager {
 		meta: metaDb,
 		spool: spoolDb,
 		close() {
-			metaDb.close();
-			spoolDb.close();
+			checkpointAndClose(metaDb);
+			checkpointAndClose(spoolDb);
 		},
 	};
 }

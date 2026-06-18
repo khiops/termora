@@ -6,12 +6,16 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
 	closeSync,
 	copyFileSync,
 	existsSync,
+	fchmodSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -50,6 +54,7 @@ import {
 	computeTargetStatus,
 	getHubPlatform,
 } from "./session/agent-status.js";
+import { createOwnerToken, gracefulShutdown } from "./shutdown.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -73,6 +78,7 @@ export interface RuntimeInfo {
 	pid: number;
 	port: number;
 	started_at: string;
+	ownerToken?: string;
 }
 
 export function loadRuntime(): RuntimeInfo | null {
@@ -88,7 +94,29 @@ export function loadRuntime(): RuntimeInfo | null {
 export function persistRuntime(info: RuntimeInfo): void {
 	const stateDir = getStateDir();
 	mkdirSync(stateDir, { recursive: true });
-	writeFileSync(join(stateDir, "runtime.json"), JSON.stringify(info, null, 2));
+	const runtimePath = join(stateDir, "runtime.json");
+	const tempPath = createRuntimeTempPath(runtimePath);
+	let fd: number | null = openSync(tempPath, "wx", 0o600);
+	let renamed = false;
+	try {
+		writeFileSync(fd, JSON.stringify(info, null, 2), { encoding: "utf8" });
+		fchmodSync(fd, 0o600);
+		closeSync(fd);
+		fd = null;
+		renameSync(tempPath, runtimePath);
+		renamed = true;
+	} finally {
+		if (fd !== null) closeSync(fd);
+		if (!renamed) rmSync(tempPath, { force: true });
+	}
+}
+
+function createRuntimeTempPath(runtimePath: string): string {
+	for (let attempt = 0; attempt < 32; attempt++) {
+		const tempPath = `${runtimePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+		if (!existsSync(tempPath)) return tempPath;
+	}
+	throw new Error(`Could not allocate a unique temp file beside ${runtimePath}`);
 }
 
 export function deleteRuntime(): void {
@@ -103,6 +131,61 @@ function isPidAlive(pid: number): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function assertHubProcessIdentity(pid: number): void {
+	const command = readProcessCommandLine(pid);
+	if (command !== null && commandLooksLikeTermoraHub(command)) return;
+
+	const detail =
+		command === null ? "process command line could not be read" : summarizeCommand(command);
+	throw new Error(`Refusing to signal pid ${pid}: ${detail}`);
+}
+
+function readProcessCommandLine(pid: number): string | null {
+	if (process.platform === "linux") {
+		try {
+			const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+			if (command.length > 0) return command;
+		} catch {
+			// Fall back to ps below.
+		}
+	}
+
+	try {
+		if (process.platform === "win32") {
+			const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" | Select-Object -ExpandProperty CommandLine)`;
+			const command = execFileSync(
+				"powershell",
+				["-NoProfile", "-NonInteractive", "-Command", script],
+				{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+			).trim();
+			return command.length > 0 ? command : null;
+		}
+
+		const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return command.length > 0 ? command : null;
+	} catch {
+		return null;
+	}
+}
+
+function commandLooksLikeTermoraHub(command: string): boolean {
+	const normalized = command.toLowerCase();
+	return (
+		normalized.includes("termora-hub") ||
+		normalized.includes("termora_hub") ||
+		normalized.includes("@termora/hub") ||
+		normalized.includes("packages/hub/src") ||
+		normalized.includes("packages\\hub\\src")
+	);
+}
+
+function summarizeCommand(command: string): string {
+	return command.length > 160 ? `${command.slice(0, 157)}...` : command;
 }
 
 // ─── Auth helpers ──────────────────────────────────────────────────────────────
@@ -677,14 +760,27 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	mkdirSync(stateDir, { recursive: true });
 
 	const authToken = initAuth(configDir);
+	const ownerToken = createOwnerToken();
 	const dbManager = openDatabases(stateDir);
 
 	const { BUILD_HASH } = await import("./build-version.js");
 
-	const server = await createServer({ port, authToken, dbManager });
+	let shutdown: () => Promise<void> = async () => {};
+	const server = await createServer({
+		port,
+		authToken,
+		ownerToken,
+		dbManager,
+		onShutdown: () => shutdown(),
+	});
 	const address = await startServer(server, { port });
 	const actualPort = addStartupCorsOrigins(address, port);
-	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
+	persistRuntime({
+		pid: process.pid,
+		port: actualPort,
+		started_at: new Date().toISOString(),
+		ownerToken,
+	});
 
 	console.log(`termora hub listening on ${address} (build: ${BUILD_HASH})`);
 	console.log(`Config dir : ${configDir}`);
@@ -698,16 +794,16 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 		openBrowser(url);
 	}
 
-	const shutdown = async () => {
-		deleteRuntime();
-		await server.close();
-		process.exit(0);
-	};
-	process.on("SIGTERM", shutdown);
-	process.on("SIGINT", shutdown);
+	shutdown = () => gracefulShutdown({ server, dbManager, deleteRuntime });
+	process.on("SIGTERM", () => {
+		void shutdown();
+	});
+	process.on("SIGINT", () => {
+		void shutdown();
+	});
 }
 
-async function cmdStop(): Promise<void> {
+export async function cmdStop(args: ParsedArgs = { command: "stop" }): Promise<void> {
 	const runtime = loadRuntime();
 	if (!runtime) {
 		console.error("Hub is not running (no runtime.json)");
@@ -718,9 +814,45 @@ async function cmdStop(): Promise<void> {
 		deleteRuntime();
 		return;
 	}
+
+	if (runtime.ownerToken) {
+		try {
+			const force = args.force === true ? "?force=1" : "";
+			const res = await fetch(`http://127.0.0.1:${runtime.port}/api/shutdown${force}`, {
+				method: "POST",
+				headers: {
+					"X-Termora-Owner": runtime.ownerToken,
+				},
+				signal: AbortSignal.timeout(2_000),
+			});
+			if (res.ok) {
+				console.log(`Requested graceful hub shutdown (pid ${runtime.pid})`);
+				return;
+			}
+			if (res.status === 409) {
+				const body = (await res.json().catch(() => ({}))) as { others?: number };
+				const others = typeof body.others === "number" ? body.others : "other";
+				console.error(
+					`Hub has ${others} other connected client(s); rerun with --force to stop anyway.`,
+				);
+				process.exit(1);
+			}
+			throw new Error(`HTTP ${res.status}`);
+		} catch (err) {
+			if (!isPidAlive(runtime.pid)) {
+				console.log(`Hub process stopped before shutdown confirmation (pid ${runtime.pid})`);
+				return;
+			}
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(
+				`Graceful shutdown request failed; refusing SIGTERM fallback for owner-token hub: ${message}`,
+			);
+		}
+	}
+
+	assertHubProcessIdentity(runtime.pid);
 	process.kill(runtime.pid, "SIGTERM");
 	console.log(`Sent SIGTERM to hub (pid ${runtime.pid})`);
-	deleteRuntime();
 }
 
 async function cmdStatus(args: ParsedArgs): Promise<void> {
@@ -950,7 +1082,7 @@ export async function main(argv: string[]): Promise<void> {
 				await cmdStart(parsed);
 				break;
 			case "stop":
-				await cmdStop();
+				await cmdStop(parsed);
 				break;
 			case "status":
 				await cmdStatus(parsed);

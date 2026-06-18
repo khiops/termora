@@ -66,6 +66,7 @@ export interface WsClient {
 }
 
 const ATTACH_TIMEOUT_MS = 5_000;
+const AGENT_CLOSE_TIMEOUT_MS = 2_000;
 
 function isAgentChannelNotFoundError(err: unknown, channelId: string): err is ErrorMessage {
 	if (typeof err !== "object" || err === null) return false;
@@ -255,6 +256,9 @@ export class SessionManager {
 	}
 
 	async shutdown(): Promise<void> {
+		// Abort all in-flight acquisitions before awaiting agent close so no
+		// connect/start continuation can outlive a slow agent teardown.
+		Acq.shutdownAll(this.ctx);
 		for (const timer of this.ctx.reconnectTimers.values()) clearTimeout(timer);
 		this.ctx.reconnectTimers.clear();
 		for (const ac of this.ctx.reconnectAbortControllers.values()) ac.abort();
@@ -277,14 +281,20 @@ export class SessionManager {
 		this.ctx.scheduler.shutdown();
 		this.ctx.chunker.shutdown();
 		this.gc.stop();
-		for (const agent of this.ctx.agents.values()) agent.close();
+		const agentCloseResults = await Promise.allSettled(
+			[...this.ctx.agents.values()].map((agent) => closeAgentWithTimeout(agent)),
+		);
+		for (const result of agentCloseResults) {
+			if (result.status === "rejected") {
+				this.ctx.hubLogger?.log("warn", "agent close failed during shutdown", {
+					err: result.reason instanceof Error ? result.reason.message : String(result.reason),
+				});
+			}
+		}
 		this.ctx.agents.clear();
 		this.ctx.clients.clear();
 		this.ctx.channels.clear();
 		this.ctx.sessions.clear();
-		// Abort all in-flight acquisitions via the state-machine primitive.
-		// P1: shutdownAll sets CLOSING synchronously on each before rejecting.
-		Acq.shutdownAll(this.ctx);
 	}
 
 	// ─── DAL accessors ────────────────────────────────────────────────────────
@@ -317,6 +327,18 @@ export class SessionManager {
 		// ctx.clients still contains the departing client while PromptContext ops
 		// send PROMPT_CANCEL and retarget prompts.
 		this.broadcaster.removeClient(clientId);
+	}
+
+	getOthersCount(callerClientId?: string): number {
+		let others = 0;
+		for (const [clientId, client] of [...this.ctx.clients.entries()]) {
+			if (!client || typeof client.send !== "function") {
+				this.ctx.clients.delete(clientId);
+				continue;
+			}
+			if (clientId !== callerClientId) others++;
+		}
+		return others;
 	}
 
 	getClientsForChannel(channelId: string): WsClient[] {
@@ -1489,5 +1511,19 @@ export class SessionManager {
 		}
 
 		return { method, customCommand };
+	}
+}
+
+async function closeAgentWithTimeout(agent: import("./agent-connection.js").AgentConnection) {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			agent.close(),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, AGENT_CLOSE_TIMEOUT_MS);
+			}),
+		]);
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
 	}
 }

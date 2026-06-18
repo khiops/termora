@@ -15,31 +15,12 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import type { Scope } from "../../stores/settings.js";
-
-interface CategoryDef {
-	id: string;
-	label: string;
-	scopes: Scope[];
-}
-
-const ALL_CATEGORIES: CategoryDef[] = [
-	{ id: "appearance", label: "Appearance", scopes: ["global", "host", "channel"] },
-	{ id: "wallpaper", label: "Wallpaper", scopes: ["global", "host", "channel"] },
-	{ id: "terminal", label: "Terminal", scopes: ["global", "host", "channel"] },
-	{ id: "tabs", label: "Tabs", scopes: ["global"] },
-	{ id: "channels", label: "Channels", scopes: ["global"] },
-	{ id: "panes", label: "Panes", scopes: ["global"] },
-	{ id: "search", label: "Search", scopes: ["global"] },
-	{ id: "startup", label: "Startup", scopes: ["global"] },
-	{ id: "elevation", label: "Elevation", scopes: ["global"] },
-	{ id: "agents", label: "Agents", scopes: ["global"] },
-	{ id: "profiles", label: "Profiles", scopes: ["global"] },
-	{ id: "keybindings", label: "Keybindings", scopes: ["global"] },
-];
+import { getVisibleSettingsCategories } from "./settingsCategories.js";
 
 const props = defineProps<{
 	modelValue: string;
 	scope: Scope;
+	showDesktop?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,15 +28,19 @@ const emit = defineEmits<{
 }>();
 
 const visibleCategories = computed(() =>
-	ALL_CATEGORIES.filter((cat) => cat.scopes.includes(props.scope)),
+	getVisibleSettingsCategories(props.scope, props.showDesktop === true),
 );
 
 // Auto-select first visible category if the active one becomes hidden after scope change
-watch(visibleCategories, (cats) => {
-	if (cats.length > 0 && !cats.some((c) => c.id === props.modelValue)) {
-		emit("update:modelValue", cats[0]!.id);
-	}
-});
+watch(
+	visibleCategories,
+	(cats) => {
+		if (cats.length > 0 && !cats.some((c) => c.id === props.modelValue)) {
+			emit("update:modelValue", cats[0]!.id);
+		}
+	},
+	{ immediate: true },
+);
 </script>
 
 <style scoped>

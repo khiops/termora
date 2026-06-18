@@ -32,7 +32,7 @@ export abstract class AgentConnection extends EventEmitter {
 	abstract send(msg: ProtocolMessage): void;
 
 	/** Close the agent connection. */
-	abstract close(): void;
+	abstract close(): Promise<void>;
 
 	/** Whether the underlying transport is still active. */
 	abstract get connected(): boolean;
