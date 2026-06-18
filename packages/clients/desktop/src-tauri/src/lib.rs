@@ -950,3 +950,50 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running termora");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_looks_like_termora_hub_matches_known_hub_invocations() {
+        assert!(command_looks_like_termora_hub("termora-hub --port 4130"));
+        assert!(command_looks_like_termora_hub(
+            "TERMORA_HUB.exe --port 4130"
+        ));
+        assert!(command_looks_like_termora_hub(
+            "node packages/hub/src/index.ts"
+        ));
+        assert!(command_looks_like_termora_hub(
+            "node packages\\hub\\src\\index.ts"
+        ));
+        assert!(command_looks_like_termora_hub(
+            "pnpm --filter @termora/hub dev"
+        ));
+    }
+
+    #[test]
+    fn command_looks_like_termora_hub_rejects_unrelated_commands() {
+        assert!(!command_looks_like_termora_hub(""));
+        assert!(!command_looks_like_termora_hub("termora-agent --version"));
+        assert!(!command_looks_like_termora_hub(
+            "node packages/web/src/main.ts"
+        ));
+    }
+
+    #[test]
+    fn summarize_command_keeps_short_commands_unchanged() {
+        let command = "termora-hub --port 4130";
+
+        assert_eq!(summarize_command(command), command);
+    }
+
+    #[test]
+    fn summarize_command_truncates_long_commands_with_ellipsis() {
+        let command = "a".repeat(161);
+        let summary = summarize_command(&command);
+
+        assert_eq!(summary.chars().count(), 160);
+        assert_eq!(summary, format!("{}...", "a".repeat(157)));
+    }
+}

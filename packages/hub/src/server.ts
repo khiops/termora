@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import * as path from "node:path";
 import cors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
@@ -476,9 +477,12 @@ function hasValidShutdownOwnerToken(
 	request: FastifyRequest,
 	ownerToken: string | undefined,
 ): boolean {
-	return (
-		ownerToken !== undefined && getHeaderValue(request.headers["x-termora-owner"]) === ownerToken
-	);
+	const candidate = getHeaderValue(request.headers["x-termora-owner"]);
+	if (ownerToken === undefined || candidate === undefined) return false;
+
+	const expected = Buffer.from(ownerToken);
+	const actual = Buffer.from(candidate);
+	return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 function sendOwnerTokenRequired(reply: FastifyReply): FastifyReply {
