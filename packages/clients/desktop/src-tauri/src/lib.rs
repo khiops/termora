@@ -229,6 +229,11 @@ fn read_picked_agent_file(path: PathBuf, max_bytes: u64) -> Result<PickedAgentFi
     Ok(PickedAgentFile { name, bytes })
 }
 
+#[cfg(target_os = "windows")]
+fn set_windows_transparent_background(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)))
+}
+
 /// In release builds, spawn the hub sidecar and wait for it to become ready.
 /// In dev builds, the hub is already running externally — just show the window.
 fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -353,6 +358,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Show the main window (hidden by default in config)
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "windows")]
+        set_windows_transparent_background(&window)?;
+
         // Enable DevTools in debug builds only
         #[cfg(debug_assertions)]
         window.open_devtools();
