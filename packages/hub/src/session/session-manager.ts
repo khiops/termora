@@ -18,6 +18,7 @@ import type {
 	AgentAttachOkMessage,
 	AgentConfig,
 	AgentSpawnMessage,
+	AgentSyncedMessage,
 	ElevationMethod,
 	ErrorMessage,
 	Host,
@@ -425,12 +426,18 @@ export class SessionManager {
 			onAgentTrustOnce: (hid, sha256) => {
 				this.ctx.trustedAgentSha256.set(hid, sha256);
 			},
-			onAgentUpdated: (_hid) => {
+			onAgentUpdated: (hid) => {
+				this.ctx.hubLogger?.log(
+					"info",
+					"session-manager: remote agent re-uploaded after SHA256 mismatch",
+					{ hostId: hid, hostname: sshHostname },
+				);
 				this.broadcaster.broadcastToAllClients({
-					type: "ERROR",
-					code: "AGENT_UPDATED",
-					message: `Remote agent on ${sshHostname} was updated (SHA256 mismatch)`,
-				} satisfies ErrorMessage);
+					type: "AGENT_SYNCED",
+					hostId: hid,
+					hostname: sshHostname,
+					message: `Agent on ${sshHostname} updated to the current version`,
+				} satisfies AgentSyncedMessage);
 			},
 		};
 	}

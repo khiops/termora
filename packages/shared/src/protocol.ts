@@ -483,6 +483,14 @@ export interface AgentFetchErrorMessage {
 	message: string;
 }
 
+/** Hub -> UI: informational notification that the remote agent was synchronized. */
+export interface AgentSyncedMessage {
+	type: "AGENT_SYNCED";
+	hostId: string;
+	hostname: string;
+	message: string;
+}
+
 /** Hub → UI: request a secret from the user during SSH connection */
 export interface AuthPromptMessage {
 	type: "AUTH_PROMPT";
@@ -645,6 +653,7 @@ export type HubToUiMessage =
 	| AgentFetchProgressMessage
 	| AgentFetchDoneMessage
 	| AgentFetchErrorMessage
+	| AgentSyncedMessage
 	| ErrorMessage;
 
 /** Master union of every distinct protocol message type */
@@ -705,4 +714,5 @@ export type ProtocolMessage =
 	| AgentFetchProgressMessage
 	| AgentFetchDoneMessage
 	| AgentFetchErrorMessage
+	| AgentSyncedMessage
 	| ErrorMessage;

@@ -144,13 +144,23 @@ afterEach(() => {
 let mockSshAgentInstance: MockSshAgent | null = null;
 /** Set to an Error before a test to make the next new SshAgent's start() reject once. */
 let nextSshStartError: Error | null = null;
+let nextSshStartCallsAgentUpdated = false;
+
+interface MockSshAgentDeployOptions {
+	onAgentUpdated?: (hostId: string) => void;
+}
 
 class MockSshAgent {
 	private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
 	private _connected = true;
 
 	lastKeyVerification = { capturedFingerprint: "SHA256:mockfp", mismatch: false };
-	start = vi.fn().mockResolvedValue(undefined);
+	start = vi.fn(async () => {
+		if (nextSshStartCallsAgentUpdated) {
+			nextSshStartCallsAgentUpdated = false;
+			this.deployOptions?.onAgentUpdated?.(this.host.id);
+		}
+	});
 	send = vi.fn((msg: ProtocolMessage) => {
 		if (msg.type === "SPAWN") {
 			const spawnMsg = msg as unknown as Record<string, string>;
@@ -187,6 +197,11 @@ class MockSshAgent {
 	get connected() {
 		return this._connected;
 	}
+
+	constructor(
+		private readonly host: { id: string },
+		private readonly deployOptions?: MockSshAgentDeployOptions,
+	) {}
 
 	on(event: string, listener: (...args: unknown[]) => void) {
 		if (!this.listeners.has(event)) this.listeners.set(event, []);
@@ -229,8 +244,12 @@ vi.mock("./ssh-agent.js", async (importOriginal) => {
 	return {
 		...actual,
 		// biome-ignore lint/complexity/useArrowFunction: vitest 4 needs a constructable function for new-ed mocks
-		SshAgent: vi.fn().mockImplementation(function () {
-			mockSshAgentInstance = new MockSshAgent();
+		SshAgent: vi.fn().mockImplementation(function (
+			host: { id: string },
+			_promptAuth: unknown,
+			deployOptions?: MockSshAgentDeployOptions,
+		) {
+			mockSshAgentInstance = new MockSshAgent(host, deployOptions);
 			if (nextSshStartError !== null) {
 				const err = nextSshStartError;
 				nextSshStartError = null;
@@ -268,6 +287,7 @@ describe("SessionManager", () => {
 		localChannelStateWaitCount = 0;
 		mockLocalAgents.length = 0;
 		mockSshAgentInstance = null;
+		nextSshStartCallsAgentUpdated = false;
 		dbManager = openTestDatabases();
 		sm = new SessionManager(dbManager);
 		vi.mocked(_connectOrLaunchForMock).mockClear();
@@ -921,6 +941,45 @@ describe("SessionManager", () => {
 		const sessions = dal.listSessions(host.id);
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0]?.status).toBe("active");
+	});
+
+	it("SSH host: agent redeploy emits AGENT_SYNCED and spawn continues", async () => {
+		const { MetaDAL } = await import("../storage/meta.js");
+		const dal = new MetaDAL(dbManager.meta);
+
+		const host = dal.createHost({
+			type: "ssh",
+			label: "test-ssh-sync",
+			sshHost: "user@localhost",
+			sshAuth: "key",
+			sshKeyPath: "/nonexistent/key",
+		});
+
+		nextSshStartCallsAgentUpdated = true;
+		const received: ProtocolMessage[] = [];
+		const client = makeClient("c-sync", received);
+		sm.addClient(client);
+
+		const channelId = await sm.handleSpawn("c-sync", { type: "SPAWN", hostId: host.id });
+
+		expect(channelId).toBe("ssh-ch-1");
+		expect(received.some((m) => m.type === "SPAWN_OK")).toBe(true);
+		expect(
+			received.some(
+				(m) =>
+					m.type === "ERROR" && (m as ProtocolMessage & { code?: string }).code === "AGENT_UPDATED",
+			),
+		).toBe(false);
+		expect(JSON.stringify(received)).not.toContain("Remote agent on localhost was updated");
+		expect(JSON.stringify(received)).not.toContain("SHA256 mismatch");
+
+		const synced = received.find((m) => m.type === "AGENT_SYNCED");
+		expect(synced).toMatchObject({
+			type: "AGENT_SYNCED",
+			hostId: host.id,
+			hostname: "localhost",
+			message: "Agent on localhost updated to the current version",
+		});
 	});
 
 	it("SSH host: session reused on second SPAWN", async () => {

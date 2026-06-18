@@ -495,6 +495,82 @@ describe("useChannelsStore — spawnChannel autoGroup", () => {
 	});
 });
 
+describe("useChannelsStore — spawnChannel agent sync handling", () => {
+	function setupManualWsClient(sentMessages: unknown[]): {
+		emit: (type: string, msg: unknown) => void;
+		on: ReturnType<typeof vi.fn>;
+		send: ReturnType<typeof vi.fn>;
+	} {
+		const listeners = new Map<string, ((msg: unknown) => void)[]>();
+		const on = vi.fn((type: string, cb: (msg: unknown) => void) => {
+			if (!listeners.has(type)) listeners.set(type, []);
+			listeners.get(type)?.push(cb);
+			return () => {
+				const arr = listeners.get(type) ?? [];
+				const idx = arr.indexOf(cb);
+				if (idx !== -1) arr.splice(idx, 1);
+			};
+		});
+		const send = vi.fn((msg: unknown) => {
+			sentMessages.push(msg);
+		});
+		const emit = (type: string, msg: unknown) => {
+			for (const cb of listeners.get(type) ?? []) {
+				cb(msg);
+			}
+		};
+		return { emit, on, send };
+	}
+
+	beforeEach(() => {
+		localStorageMap.set("termora_token", "test-token");
+		mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
+	});
+
+	it("does not reject a pending spawn when AGENT_SYNCED arrives before SPAWN_OK", async () => {
+		const sentMessages: unknown[] = [];
+		const store = useChannelsStore();
+		const sessionStore = useSessionStore();
+		const { emit, on, send } = setupManualWsClient(sentMessages);
+		// @ts-expect-error — overwrite reactive wsClient for test
+		sessionStore.wsClient = { on, send };
+
+		const spawn = store.spawnChannel("host-1");
+
+		emit("AGENT_SYNCED", {
+			type: "AGENT_SYNCED",
+			hostId: "host-1",
+			hostname: "prod-box",
+			message: "Agent on prod-box updated to the current version",
+		});
+		emit("SPAWN_OK", { type: "SPAWN_OK", channelId: "ch-new" });
+
+		await expect(spawn).resolves.toBe("ch-new");
+		expect(send).toHaveBeenCalledOnce();
+	});
+
+	it("ignores legacy AGENT_UPDATED error frames while waiting for SPAWN_OK", async () => {
+		const sentMessages: unknown[] = [];
+		const store = useChannelsStore();
+		const sessionStore = useSessionStore();
+		const { emit, on, send } = setupManualWsClient(sentMessages);
+		// @ts-expect-error — overwrite reactive wsClient for test
+		sessionStore.wsClient = { on, send };
+
+		const spawn = store.spawnChannel("host-1");
+
+		emit("ERROR", {
+			type: "ERROR",
+			code: "AGENT_UPDATED",
+			message: "Legacy agent update notice",
+		});
+		emit("SPAWN_OK", { type: "SPAWN_OK", channelId: "ch-new" });
+
+		await expect(spawn).resolves.toBe("ch-new");
+		expect(send).toHaveBeenCalledOnce();
+	});
+});
+
 // ---------------------------------------------------------------------------
 // handleChannelCreated — multi-client sync (CHANNEL_CREATED WS message)
 // ---------------------------------------------------------------------------
