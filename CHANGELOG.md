@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/khiops/termora/compare/v0.4.0...v0.5.0) (2026-06-18)
+
+
+### Features
+
+* GUI agent manager (list / fetch / prune / import) ([#97](https://github.com/khiops/termora/issues/97)) ([86e6e50](https://github.com/khiops/termora/commit/86e6e502cef942720a4664ba843281637108a87f))
+
+
+### Bug Fixes
+
+* **desktop:** window transparency on Windows ([#102](https://github.com/khiops/termora/issues/102)) ([fb533ab](https://github.com/khiops/termora/commit/fb533ab7b86f708dda907ef4b78d84d4cc031f77))
+* signal a successful agent re-deploy as an AGENT_SYNCED info event, not an error ([#99](https://github.com/khiops/termora/issues/99)) ([#103](https://github.com/khiops/termora/issues/103)) ([2828cdf](https://github.com/khiops/termora/commit/2828cdfadfea9efcb05c042e82353f08413b97d0))
+
+
+### Documentation
+
+* document the agent binary distribution model (bundle local, fetch remote) ([#91](https://github.com/khiops/termora/issues/91)) ([2339df6](https://github.com/khiops/termora/commit/2339df69b46f62d9cccea6e8ce21b4af6ac3823c))
+
 ## [0.4.0](https://github.com/khiops/termora/compare/v0.3.4...v0.4.0) (2026-06-16)
 
 
