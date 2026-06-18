@@ -97,6 +97,8 @@ export interface ServerOptions {
 	logger?: boolean; // default: true
 	dbManager?: DatabaseManager; // when provided, WS routes are registered
 	authToken?: string; // when provided, Bearer auth is enforced on all routes except /api/health
+	ownerToken?: string; // shutdown-only owner token from runtime.json
+	onShutdown?: () => Promise<void> | void; // called after POST /api/shutdown has replied
 	authConfig?: AuthConfig; // override auth config (bypasses config.toml, useful for tests)
 	configDir?: string; // override config directory (defaults to getConfigDir())
 	corsOrigins?: string[]; // override CORS allowlist (bypasses config.toml, useful for tests)
@@ -189,8 +191,35 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			cb(null, isCorsOriginAllowed(origin));
 		},
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-		allowedHeaders: ["Content-Type", "Authorization"],
+		allowedHeaders: [
+			"Content-Type",
+			"Authorization",
+			"X-Termora-Owner",
+			"X-Termora-Client",
+			"X-Termora-Client-Id",
+		],
 		credentials: true,
+	});
+
+	server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
+		const pathname = new URL(request.url, "http://localhost").pathname;
+		if (request.method !== "POST" || pathname !== "/api/shutdown") return;
+
+		const ownerHeader = request.headers["x-termora-owner"];
+		const ownerToken = Array.isArray(ownerHeader) ? ownerHeader[0] : ownerHeader;
+		if (!options?.ownerToken || ownerToken !== options.ownerToken) {
+			return reply.code(401).send({
+				error: "OWNER_TOKEN_REQUIRED",
+				message: "Valid X-Termora-Owner header required",
+			});
+		}
+
+		if (!isLoopbackAddress(request.ip)) {
+			return reply.code(403).send({
+				error: "LOOPBACK_REQUIRED",
+				message: "Shutdown is only accepted from loopback clients",
+			});
+		}
 	});
 
 	// Auth enforcement — applied before route matching
@@ -216,6 +245,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
+			if (pathname === "/api/shutdown") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -296,6 +326,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	}
 
 	// Register WebSocket support and routes when a dbManager is provided
+	let sessionManager: SessionManager | null = null;
 	if (options?.dbManager) {
 		await server.register(websocket);
 
@@ -310,7 +341,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		// Build a shared LoggerRegistry if not provided (shared across SessionManager + agents)
 		const loggerRegistry: LoggerRegistry = options.loggerRegistry ?? new Map();
 
-		const sessionManager = new SessionManager(
+		sessionManager = new SessionManager(
 			options.dbManager,
 			gcConfig,
 			configResolver.agentConfig,
@@ -319,16 +350,17 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			loggerRegistry,
 			options.logsDir,
 		);
+		const activeSessionManager = sessionManager;
 		if (options?.authToken) {
-			sessionManager.setPrimaryToken(options.authToken);
+			activeSessionManager.setPrimaryToken(options.authToken);
 		}
-		const metaDal = sessionManager.getMetaDal();
+		const metaDal = activeSessionManager.getMetaDal();
 		metaDal.migrateHostGroupData();
 		migrateLegacyShellDefaults(metaDal, configResolver);
 
 		// First-run: ensure the built-in "local" host exists
 		const wasNew = !metaDal.getHostByLabel("local");
-		await sessionManager.ensureLocalHost();
+		await activeSessionManager.ensureLocalHost();
 		if (wasNew) {
 			server.log.info("Created default local host");
 		}
@@ -351,18 +383,18 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			});
 		}
 
-		await sessionManager.startup();
+		await activeSessionManager.startup();
 
 		registerAgentRoutes(server, {
 			...agentRouteDeps,
 			broadcastAgentFetchMessage: (message) => {
-				sessionManager.broadcastToAllClients(message);
+				activeSessionManager.broadcastToAllClients(message);
 			},
 		});
 
 		await registerWsRoutes(
 			server,
-			sessionManager,
+			activeSessionManager,
 			options.authToken,
 			options.authToken ? (options.dbManager.meta ?? null) : null,
 			options.authToken ? authConfig.tokenTtlDays : undefined,
@@ -370,10 +402,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		registerHostRoutes(server, metaDal);
 		registerHostGroupRoutes(server, metaDal);
 		registerLaunchProfileRoutes(server, metaDal);
-		registerSessionRoutes(server, metaDal, sessionManager);
-		registerChannelRoutes(server, metaDal, sessionManager, sessionManager.getSpoolDal());
+		registerSessionRoutes(server, metaDal, activeSessionManager);
+		registerChannelRoutes(
+			server,
+			metaDal,
+			activeSessionManager,
+			activeSessionManager.getSpoolDal(),
+		);
 		registerGroupRoutes(server, metaDal);
-		registerConfigRoutes(server, metaDal, configResolver, sessionManager);
+		registerConfigRoutes(server, metaDal, configResolver, activeSessionManager);
 		registerFontRoutes(server, configDir);
 		registerWallpaperRoutes(server, configDir);
 		registerSshKeyRoutes(server);
@@ -395,9 +432,30 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const logsDir = options.logsDir ?? path.join(getStateDir(), "logs");
 		await registerLogRoutes(server, logsDir);
 		server.addHook("onClose", async () => {
-			await sessionManager.shutdown();
+			await activeSessionManager.shutdown();
 		});
 	}
+
+	server.post("/api/shutdown", (request, reply) => {
+		const url = new URL(request.url, "http://localhost");
+		const force = url.searchParams.get("force") === "1";
+		const callerClientId = getHeaderValue(
+			request.headers["x-termora-client-id"] ?? request.headers["x-termora-client"],
+		);
+		const others = sessionManager?.getOthersCount(callerClientId) ?? 0;
+
+		if (others > 0 && !force) {
+			reply.code(409).send({ others });
+			return;
+		}
+
+		reply.code(200).send({ ok: true });
+		setImmediate(() => {
+			Promise.resolve(options?.onShutdown?.()).catch((err) => {
+				server.log.error({ err }, "shutdown request failed after response");
+			});
+		});
+	});
 
 	// Serve the embedded web client.
 	// Priority: disk static/ directory → SEA embedded manifest → dev mode (no serving).
@@ -407,6 +465,14 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	await registerSeaStaticServing(server);
 
 	return server;
+}
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+	return Array.isArray(value) ? value[0] : value;
+}
+
+function isLoopbackAddress(ip: string): boolean {
+	return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip.startsWith("127.");
 }
 
 export async function startServer(

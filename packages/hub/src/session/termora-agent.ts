@@ -5,6 +5,7 @@ import { AgentConnection } from "./agent-connection.js";
 import { SendQueue } from "./send-queue.js";
 
 const HELLO_TIMEOUT_MS = 5_000;
+const CLOSE_TIMEOUT_MS = 1_000;
 
 /**
  * Hub-side agent connection for the daemon transport (UDS/named pipe).
@@ -19,6 +20,8 @@ export class TermoraAgent extends AgentConnection {
 	private sendQueue: SendQueue;
 	private connId: number;
 	private readonly hubLogger: HubLogger | undefined;
+	private socketClosed = false;
+	private closePromise: Promise<void> | null = null;
 	private static _connSeq = 0;
 
 	/**
@@ -52,6 +55,7 @@ export class TermoraAgent extends AgentConnection {
 		});
 
 		socket.on("close", () => {
+			this.socketClosed = true;
 			this.logDebug("termora-agent: socket closed");
 			this.sendQueue.clear();
 			this.emit("close");
@@ -117,9 +121,24 @@ export class TermoraAgent extends AgentConnection {
 	}
 
 	/** Disconnect from the agent (agent keeps running). */
-	close(): void {
-		this.sendQueue.clear();
-		this.socket.destroy();
+	close(): Promise<void> {
+		if (this.socketClosed) return Promise.resolve();
+		if (this.closePromise) return this.closePromise;
+
+		this.closePromise = new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				resolve();
+			}, CLOSE_TIMEOUT_MS);
+
+			this.once("close", () => {
+				clearTimeout(timer);
+				resolve();
+			});
+
+			this.sendQueue.clear();
+			this.socket.destroy();
+		});
+		return this.closePromise;
 	}
 
 	/** True when the underlying socket is still open. */

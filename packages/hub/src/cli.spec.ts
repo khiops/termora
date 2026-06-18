@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
@@ -11,6 +12,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,10 +20,14 @@ import {
 	cmdAgentFetch,
 	cmdAgentImport,
 	cmdAgentStatus,
+	cmdStop,
+	deleteRuntime,
 	getConfigDir,
 	getStateDir,
+	loadRuntime,
 	type ParsedArgs,
 	parseArgs,
+	persistRuntime,
 } from "./cli.js";
 import {
 	AGENT_TARGET_TRIPLES,
@@ -691,6 +697,61 @@ describe("path helpers", () => {
 	});
 });
 
+describe("runtime state", () => {
+	it.skipIf(process.platform === "win32")(
+		"persistRuntime writes ownerToken and clamps runtime.json to 0600",
+		() => {
+			const orig = process.env.XDG_STATE_HOME;
+			const stateRoot = makeTempDir();
+			process.env.XDG_STATE_HOME = stateRoot;
+			try {
+				persistRuntime({
+					pid: 123,
+					port: 456,
+					started_at: "2026-06-18T00:00:00.000Z",
+					ownerToken: "b".repeat(64),
+				});
+
+				const runtimePath = path.join(getStateDir(), "runtime.json");
+				expect(loadRuntime()?.ownerToken).toBe("b".repeat(64));
+				expect(statSync(runtimePath).mode & 0o777).toBe(0o600);
+			} finally {
+				deleteRuntime();
+				process.env.XDG_STATE_HOME = orig;
+			}
+		},
+	);
+
+	it("cmdStop falls back to SIGTERM on a dead HTTP port without deleting runtime.json", async () => {
+		const orig = process.env.XDG_STATE_HOME;
+		const stateRoot = makeTempDir();
+		const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+			stdio: "ignore",
+		});
+
+		process.env.XDG_STATE_HOME = stateRoot;
+		try {
+			if (child.pid === undefined) throw new Error("child pid missing");
+			const port = await getUnusedPort();
+			persistRuntime({
+				pid: child.pid,
+				port,
+				started_at: "2026-06-18T00:00:00.000Z",
+				ownerToken: "c".repeat(64),
+			});
+
+			await cmdStop({ command: "stop" });
+
+			expect(existsSync(path.join(getStateDir(), "runtime.json"))).toBe(true);
+			await waitForExit(child);
+		} finally {
+			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+			deleteRuntime();
+			process.env.XDG_STATE_HOME = orig;
+		}
+	});
+});
+
 function parsed(argv: string[]): ParsedArgs {
 	const result = parseArgs(argv);
 	expect(result).not.toBeNull();
@@ -701,6 +762,30 @@ function makeTempDir(): string {
 	const dir = mkdtempSync(path.join(os.tmpdir(), "termora-cli-agent-fetch-"));
 	tempDirs.push(dir);
 	return dir;
+}
+
+function getUnusedPort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const server = net.createServer();
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => {
+			const address = server.address();
+			if (typeof address !== "object" || address === null) {
+				server.close();
+				reject(new Error("expected TCP address"));
+				return;
+			}
+			const port = address.port;
+			server.close(() => resolve(port));
+		});
+	});
+}
+
+function waitForExit(child: ReturnType<typeof spawn>): Promise<void> {
+	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+	return new Promise((resolve) => {
+		child.once("exit", () => resolve());
+	});
 }
 
 function agentCachePath(cacheDir: string, osName: string, arch: string, version: string): string {

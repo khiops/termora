@@ -10,11 +10,13 @@ import {
 	closeSync,
 	copyFileSync,
 	existsSync,
+	fchmodSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	rmSync,
 	statSync,
-	writeFileSync,
+	writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +52,7 @@ import {
 	computeTargetStatus,
 	getHubPlatform,
 } from "./session/agent-status.js";
+import { createOwnerToken, gracefulShutdown } from "./shutdown.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -73,6 +76,7 @@ export interface RuntimeInfo {
 	pid: number;
 	port: number;
 	started_at: string;
+	ownerToken?: string;
 }
 
 export function loadRuntime(): RuntimeInfo | null {
@@ -88,7 +92,13 @@ export function loadRuntime(): RuntimeInfo | null {
 export function persistRuntime(info: RuntimeInfo): void {
 	const stateDir = getStateDir();
 	mkdirSync(stateDir, { recursive: true });
-	writeFileSync(join(stateDir, "runtime.json"), JSON.stringify(info, null, 2));
+	const fd = openSync(join(stateDir, "runtime.json"), "w", 0o600);
+	try {
+		writeSync(fd, JSON.stringify(info, null, 2));
+		fchmodSync(fd, 0o600);
+	} finally {
+		closeSync(fd);
+	}
 }
 
 export function deleteRuntime(): void {
@@ -677,14 +687,27 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	mkdirSync(stateDir, { recursive: true });
 
 	const authToken = initAuth(configDir);
+	const ownerToken = createOwnerToken();
 	const dbManager = openDatabases(stateDir);
 
 	const { BUILD_HASH } = await import("./build-version.js");
 
-	const server = await createServer({ port, authToken, dbManager });
+	let shutdown: () => Promise<void> = async () => {};
+	const server = await createServer({
+		port,
+		authToken,
+		ownerToken,
+		dbManager,
+		onShutdown: () => shutdown(),
+	});
 	const address = await startServer(server, { port });
 	const actualPort = addStartupCorsOrigins(address, port);
-	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
+	persistRuntime({
+		pid: process.pid,
+		port: actualPort,
+		started_at: new Date().toISOString(),
+		ownerToken,
+	});
 
 	console.log(`termora hub listening on ${address} (build: ${BUILD_HASH})`);
 	console.log(`Config dir : ${configDir}`);
@@ -698,16 +721,16 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 		openBrowser(url);
 	}
 
-	const shutdown = async () => {
-		deleteRuntime();
-		await server.close();
-		process.exit(0);
-	};
-	process.on("SIGTERM", shutdown);
-	process.on("SIGINT", shutdown);
+	shutdown = () => gracefulShutdown({ server, dbManager, deleteRuntime });
+	process.on("SIGTERM", () => {
+		void shutdown();
+	});
+	process.on("SIGINT", () => {
+		void shutdown();
+	});
 }
 
-async function cmdStop(): Promise<void> {
+export async function cmdStop(args: ParsedArgs = { command: "stop" }): Promise<void> {
 	const runtime = loadRuntime();
 	if (!runtime) {
 		console.error("Hub is not running (no runtime.json)");
@@ -718,9 +741,37 @@ async function cmdStop(): Promise<void> {
 		deleteRuntime();
 		return;
 	}
+
+	if (runtime.ownerToken) {
+		try {
+			const force = args.force === true ? "?force=1" : "";
+			const res = await fetch(`http://127.0.0.1:${runtime.port}/api/shutdown${force}`, {
+				method: "POST",
+				headers: {
+					"X-Termora-Owner": runtime.ownerToken,
+				},
+				signal: AbortSignal.timeout(2_000),
+			});
+			if (res.ok) {
+				console.log(`Requested graceful hub shutdown (pid ${runtime.pid})`);
+				return;
+			}
+			if (res.status === 409) {
+				const body = (await res.json().catch(() => ({}))) as { others?: number };
+				const others = typeof body.others === "number" ? body.others : "other";
+				console.error(
+					`Hub has ${others} other connected client(s); rerun with --force to stop anyway.`,
+				);
+				process.exit(1);
+			}
+			console.error(`Graceful shutdown request failed with HTTP ${res.status}; falling back`);
+		} catch {
+			// Dead/stuck HTTP path: fall back to SIGTERM for older or wedged hubs.
+		}
+	}
+
 	process.kill(runtime.pid, "SIGTERM");
 	console.log(`Sent SIGTERM to hub (pid ${runtime.pid})`);
-	deleteRuntime();
 }
 
 async function cmdStatus(args: ParsedArgs): Promise<void> {
@@ -950,7 +1001,7 @@ export async function main(argv: string[]): Promise<void> {
 				await cmdStart(parsed);
 				break;
 			case "stop":
-				await cmdStop();
+				await cmdStop(parsed);
 				break;
 			case "status":
 				await cmdStatus(parsed);

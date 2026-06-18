@@ -7,6 +7,7 @@ import { HubLogger } from "./logging/hub-logger.js";
 import { runLogGc } from "./logging/log-gc.js";
 import { openBrowser } from "./open-browser.js";
 import { addStartupCorsOrigins, createServer, startServer } from "./server.js";
+import { createOwnerToken, gracefulShutdown } from "./shutdown.js";
 import { openDatabases } from "./storage/db.js";
 
 async function main() {
@@ -38,13 +39,28 @@ async function main() {
 	const hubLogger = new HubLogger(logsDir, earlyConfigResolver.logConfig);
 
 	const authToken = initAuth(configDir);
+	const ownerToken = createOwnerToken();
 	const dbManager = openDatabases(stateDir);
 
-	const server = await createServer({ port, authToken, dbManager, hubLogger, logsDir });
+	let shutdown: () => Promise<void> = async () => {};
+	const server = await createServer({
+		port,
+		authToken,
+		ownerToken,
+		dbManager,
+		hubLogger,
+		logsDir,
+		onShutdown: () => shutdown(),
+	});
 	const address = await startServer(server, { port });
 	const actualPort = addStartupCorsOrigins(address, port);
 
-	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
+	persistRuntime({
+		pid: process.pid,
+		port: actualPort,
+		started_at: new Date().toISOString(),
+		ownerToken,
+	});
 
 	hubLogger.log("info", "hub started", { port: actualPort, address, configDir });
 
@@ -64,15 +80,14 @@ async function main() {
 		openBrowser(`http://127.0.0.1:${actualPort}`);
 	}
 
-	const shutdown = async () => {
-		deleteRuntime();
-		dbManager.close();
-		await server.close();
-		process.exit(0);
-	};
+	shutdown = () => gracefulShutdown({ server, dbManager, deleteRuntime });
 
-	process.on("SIGTERM", shutdown);
-	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", () => {
+		void shutdown();
+	});
+	process.on("SIGINT", () => {
+		void shutdown();
+	});
 }
 
 main().catch((err) => {
