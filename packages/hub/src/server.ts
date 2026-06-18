@@ -5,6 +5,7 @@ import websocket from "@fastify/websocket";
 import { DEFAULT_PORT, MAX_WALLPAPER_SIZE } from "@termora/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
+import { registerAgentRoutes } from "./api/agents.js";
 import { registerChannelRoutes } from "./api/channels.js";
 import { registerConfigRoutes } from "./api/config.js";
 import { registerFontRoutes } from "./api/fonts.js";
@@ -47,7 +48,7 @@ import { registerWsRoutes } from "./ws/ws-handler.js";
  * Mutable set of exact CORS origins allowed by the server.
  * Pre-populated with Tauri origins and user-configured origins at server creation.
  * Exact localhost origins (e.g. http://localhost:4100) are added after the server
- * starts and the actual port is known — call addCorsOrigins() from main.ts.
+ * starts and the actual port is known — call addStartupCorsOrigins() after listen.
  */
 const _corsAllowedOrigins = new Set<string>();
 const PROTECTED_PUBLIC_ASSET_PREFIXES = ["/public/fonts", "/public/sounds", "/public/wallpapers"];
@@ -67,6 +68,27 @@ export function addCorsOrigins(...origins: string[]): void {
 	for (const o of origins) {
 		_corsAllowedOrigins.add(o);
 	}
+}
+
+/**
+ * Add startup-only loopback origins once the server has bound.
+ *
+ * Returns the actual port from the listen address, which may differ from the
+ * requested port due to zero_conf auto-increment on EADDRINUSE.
+ */
+export function addStartupCorsOrigins(address: string, requestedPort: number): number {
+	const port = new URL(address).port;
+	const actualPort = port ? Number(port) : requestedPort;
+
+	// SEC-020: Inject exact localhost origins now that the actual port is known.
+	// These replace the former wildcard http://localhost:* and http://127.0.0.1:* patterns.
+	addCorsOrigins(`http://localhost:${actualPort}`, `http://127.0.0.1:${actualPort}`);
+	// In non-production environments also allow the Vite dev server origin.
+	if (process.env.NODE_ENV !== "production") {
+		addCorsOrigins("http://localhost:5173");
+	}
+
+	return actualPort;
 }
 
 export interface ServerOptions {
@@ -132,7 +154,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	//   1. _corsAllowedOrigins — exact strings (Tauri + localhost:actualPort injected after listen)
 	//   2. compiledCorsRegexps — regexp patterns from user config.toml [server] cors_origins
 	// SEC-020: No wildcard localhost origins in defaults. Exact port origins are injected
-	//          by addCorsOrigins() in main.ts after startServer() returns the actual port.
+	//          by addStartupCorsOrigins() after startServer() returns the actual port.
 	const configDir = options?.configDir ?? getConfigDir();
 	// SEC-027: load auth config once and reuse across all call sites
 	const authConfig =
@@ -156,15 +178,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		}
 	}
 	const compiledCorsRegexps = corsOriginsToRegexps(wildcardPatterns);
+	const isCorsOriginAllowed = (origin: string): boolean =>
+		_corsAllowedOrigins.has(origin) || matchCorsOrigin(origin, compiledCorsRegexps);
 
 	await server.register(cors, {
 		origin: (origin, cb) => {
 			// No origin header (same-origin or non-browser): deny CORS headers
 			if (!origin) return cb(null, false);
 			// Exact match first (O(1)), then wildcard regexp matching.
-			if (_corsAllowedOrigins.has(origin)) return cb(null, true);
-			const matched = matchCorsOrigin(origin, compiledCorsRegexps);
-			cb(null, matched);
+			cb(null, isCorsOriginAllowed(origin));
 		},
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 		allowedHeaders: ["Content-Type", "Authorization"],
@@ -260,11 +282,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		return { assetToken: token, token };
 	});
 
+	const fastifyMultipart = (await import("@fastify/multipart")).default;
+	await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
+
+	const agentRouteDeps = {
+		authToken: options?.authToken ?? null,
+		db: options?.dbManager?.meta ?? null,
+		tokenTtlDays: authConfig.tokenTtlDays,
+		isOriginAllowed: isCorsOriginAllowed,
+	};
+	if (!options?.dbManager) {
+		registerAgentRoutes(server, agentRouteDeps);
+	}
+
 	// Register WebSocket support and routes when a dbManager is provided
 	if (options?.dbManager) {
-		const fastifyMultipart = (await import("@fastify/multipart")).default;
-		await server.register(fastifyMultipart, { limits: { fileSize: MAX_WALLPAPER_SIZE } });
-
 		await server.register(websocket);
 
 		// Load config from config.toml before creating SessionManager
@@ -320,6 +352,13 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		}
 
 		await sessionManager.startup();
+
+		registerAgentRoutes(server, {
+			...agentRouteDeps,
+			broadcastAgentFetchMessage: (message) => {
+				sessionManager.broadcastToAllClients(message);
+			},
+		});
 
 		await registerWsRoutes(
 			server,

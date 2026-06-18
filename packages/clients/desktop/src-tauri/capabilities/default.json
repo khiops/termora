@@ -15,6 +15,7 @@
 		"core:window:allow-set-focus",
 		"core:window:allow-set-effects",
 		"core:window:allow-start-resize-dragging",
+		"dialog:allow-open",
 		"os:allow-platform",
 		"os:allow-version",
 		{

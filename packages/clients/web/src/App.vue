@@ -23,7 +23,11 @@
 		<CommandPalette />
 
 		<!-- Settings panel — rendered globally, outside layout, via Teleport -->
-		<SettingsPanel :visible="showSettings" @close="showSettings = false" />
+		<SettingsPanel
+			:visible="showSettings"
+			:desktop-version="desktopVersion"
+			@close="showSettings = false"
+		/>
 
 		<!-- Configure Command dialog — opened from tab context menu or exit overlay -->
 		<ConfigureCommandDialog
@@ -371,6 +375,7 @@ import { useProfilesStore } from './stores/profiles.js';
 import { useSessionStore } from './stores/session.js';
 import { useThemeStore } from './stores/theme.js';
 import { useWriteLockStore } from './stores/writelock.js';
+import { loadDesktopVersion } from './utils/desktop-version.js';
 import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 
 const authStore = useAuthStore();
@@ -470,6 +475,7 @@ provide(MULTI_PANE_SEARCH_KEY, multiPaneSearch);
 const commandPalette = useCommandPalette();
 const profilesStore = useProfilesStore();
 const showSettings = ref(false);
+const desktopVersion = ref<string | undefined>(undefined);
 const showConfigureDialog = ref(false);
 const configureChannelId = ref<string | null>(null);
 const showHostModal = ref(false);
@@ -716,6 +722,8 @@ onMounted(async () => {
 	} catch {
 		// Not in Tauri context — ignore
 	}
+
+	desktopVersion.value = await loadDesktopVersion();
 
 	// In Tauri desktop, fetch the hub auth token via invoke BEFORE the
 	// token check — connect() is gated by token !== null, so the invoke

@@ -1,66 +1,56 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-	chmodSync,
 	closeSync,
 	constants,
-	existsSync,
 	lstatSync,
-	mkdirSync,
 	openSync,
 	readFileSync,
 	renameSync,
-	rmSync,
-	statSync,
 	writeFileSync,
 	writeSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import {
+	AGENT_FETCH_IDLE_TIMEOUT_MS,
+	AGENT_FETCH_MANIFEST_MAX_BYTES,
+	AGENT_FETCH_MAX_BYTES,
+	AGENT_FETCH_TOTAL_TIMEOUT_MS,
+	createUniqueTempPath,
+	diskError,
+	ensureCacheDir,
+	FetchError,
+	type ResolvedTarget,
+	removeFileIfPresent,
+	resolveTarget,
+	validateAgentVersion,
+	verifyAndPlace,
+} from "./agent-cache.js";
 
-export type FetchErrorCode =
-	| "BAD_VERSION"
-	| "UNSUPPORTED_TARGET"
-	| "NOT_FOUND"
-	| "RELEASE_INCOMPLETE"
-	| "RATE_LIMITED"
-	| "PRIVATE_OR_FORBIDDEN"
-	| "NETWORK"
-	| "TOO_LARGE"
-	| "DISK"
-	| "CHECKSUM_MISMATCH"
-	| "CHECKSUM_MISSING";
-
-export class FetchError extends Error {
-	readonly code: FetchErrorCode;
-
-	constructor(code: FetchErrorCode, message: string) {
-		super(message);
-		this.name = "FetchError";
-		this.code = code;
-	}
-}
-
-type AgentTargetEntry = {
-	readonly triple: string | null;
-	readonly ext: "" | ".exe";
-	readonly built: boolean;
-};
-
-export const AGENT_TARGET_TRIPLES = {
-	linux: {
-		x64: { triple: "x86_64-unknown-linux-gnu", ext: "", built: true },
-		arm64: { triple: "aarch64-unknown-linux-gnu", ext: "", built: true },
-	},
-	windows: {
-		x64: { triple: "x86_64-pc-windows-msvc", ext: ".exe", built: true },
-		arm64: { triple: null, ext: ".exe", built: false },
-	},
-	darwin: {
-		x64: { triple: null, ext: "", built: false },
-		arm64: { triple: null, ext: "", built: false },
-	},
-} as const satisfies Record<string, Record<string, AgentTargetEntry>>;
+export type { FetchErrorCode, ResolvedTarget } from "./agent-cache.js";
+export {
+	AGENT_FETCH_IDLE_TIMEOUT_MS,
+	AGENT_FETCH_MANIFEST_MAX_BYTES,
+	AGENT_FETCH_MAX_BYTES,
+	AGENT_FETCH_TOTAL_TIMEOUT_MS,
+	AGENT_TARGET_TRIPLES,
+	assertSecureCacheDir,
+	FetchError,
+	isCacheDirSecure,
+	isTrustedCacheBinary,
+	parseChecksumManifest,
+	pruneAgentBinaryCache,
+	resolveTarget,
+	validateAgentVersion,
+	verifyAndPlace,
+} from "./agent-cache.js";
 
 export type AgentFetchImpl = (url: string, init: RequestInit) => Promise<Response>;
+
+export type FetchAgentBinaryProgress = {
+	readonly downloaded: number;
+	readonly total?: number;
+	readonly phase: "download" | "verify";
+};
 
 export type FetchAgentBinaryOptions = {
 	readonly os: string;
@@ -69,11 +59,7 @@ export type FetchAgentBinaryOptions = {
 	readonly cacheDir: string;
 	readonly baseUrl?: string;
 	readonly fetchImpl?: AgentFetchImpl;
-};
-
-type ResolvedTarget = {
-	readonly triple: string;
-	readonly ext: "" | ".exe";
+	readonly onProgress?: (progress: FetchAgentBinaryProgress) => void;
 };
 
 type AssetResponse = {
@@ -90,12 +76,7 @@ interface FetchTarget {
 }
 
 const DEFAULT_BASE_URL = "https://github.com/khiops/termora";
-const STRICT_SEMVER = /^\d+\.\d+\.\d+$/;
 const LEGACY_VERSION_CUTOFF = "0.4.0";
-const MANIFEST_MAX_BYTES = 1024 * 1024;
-export const AGENT_FETCH_MAX_BYTES = 64 * 1024 * 1024;
-export const AGENT_FETCH_TOTAL_TIMEOUT_MS = 120_000;
-export const AGENT_FETCH_IDLE_TIMEOUT_MS = 30_000;
 
 const FETCH_HEADERS = {
 	"accept-encoding": "identity",
@@ -103,7 +84,7 @@ const FETCH_HEADERS = {
 } as const;
 
 export async function fetchAgentBinary(options: FetchAgentBinaryOptions): Promise<string> {
-	validateVersion(options.version);
+	validateAgentVersion(options.version);
 
 	const target = resolveTarget(options.os, options.arch);
 	if (!target) {
@@ -141,8 +122,16 @@ export async function fetchAgentBinary(options: FetchAgentBinaryOptions): Promis
 	const tempPath = createUniqueTempPath(finalPath);
 
 	try {
-		await writeResponseToTemp(asset.response, asset.request, asset.assetUrl, tempPath, fetchTarget);
-		await verifyChecksum({
+		const progress = await writeResponseToTemp(
+			asset.response,
+			asset.request,
+			asset.assetUrl,
+			tempPath,
+			fetchTarget,
+			options.onProgress,
+		);
+		emitFetchProgress(options.onProgress, { ...progress, phase: "verify" });
+		return await verifyChecksumAndPlace({
 			cacheDir: options.cacheDir,
 			version: options.version,
 			baseUrl,
@@ -152,9 +141,6 @@ export async function fetchAgentBinary(options: FetchAgentBinaryOptions): Promis
 			assetUrl: asset.assetUrl,
 			finalPath,
 		});
-		chmodSync(tempPath, 0o755);
-		renameSync(tempPath, finalPath);
-		return finalPath;
 	} catch (error) {
 		asset.request.abort();
 		removeFileIfPresent(tempPath);
@@ -164,70 +150,6 @@ export async function fetchAgentBinary(options: FetchAgentBinaryOptions): Promis
 	} finally {
 		asset.request.clear();
 	}
-}
-
-export function parseChecksumManifest(manifest: string, expectedBasename: string): string | null {
-	let found: string | null = null;
-	const seenFiles = new Set<string>();
-
-	for (const rawLine of manifest.split("\n")) {
-		const line = rawLine.replace(/\r$/, "").trim();
-		if (line.length === 0) continue;
-
-		const match = /^([0-9a-fA-F]{64})[ \t]+[*]?(.+)$/.exec(line);
-		if (!match) {
-			throw new FetchError(
-				"CHECKSUM_MISMATCH",
-				`Checksum manifest has an invalid line. Re-download SHA256SUMS or publish a sha256sum-compatible line for ${expectedBasename}.`,
-			);
-		}
-
-		const digest = match[1]?.toLowerCase();
-		const filename = match[2];
-		if (!digest || !filename) {
-			throw new FetchError(
-				"CHECKSUM_MISMATCH",
-				`Checksum manifest has an invalid line. Re-download SHA256SUMS or publish a sha256sum-compatible line for ${expectedBasename}.`,
-			);
-		}
-		if (filename.includes("/") || filename.includes("\\")) {
-			throw new FetchError(
-				"CHECKSUM_MISMATCH",
-				`Checksum manifest must name ${expectedBasename} by exact basename only, not a path-prefixed filename.`,
-			);
-		}
-		if (seenFiles.has(filename)) {
-			throw new FetchError(
-				"CHECKSUM_MISMATCH",
-				`Checksum manifest lists ${filename} more than once. Remove duplicate SHA256SUMS lines and rerun the agent fetch.`,
-			);
-		}
-		seenFiles.add(filename);
-
-		if (filename !== expectedBasename) continue;
-		found = digest;
-	}
-
-	return found;
-}
-
-function validateVersion(version: string): void {
-	if (!STRICT_SEMVER.test(version) || version === "0.0.0") {
-		throw new FetchError(
-			"BAD_VERSION",
-			`Bad Termora agent version "${version}". Use a released strict semver like 0.4.0, or rerun termora-hub agent fetch --version <x.y.z> with a real release version before downloading.`,
-		);
-	}
-}
-
-function resolveTarget(os: string, arch: string): ResolvedTarget | null {
-	const table = AGENT_TARGET_TRIPLES as Record<
-		string,
-		Record<string, AgentTargetEntry> | undefined
-	>;
-	const row = table[os]?.[arch];
-	if (!row?.built || !row.triple) return null;
-	return { triple: row.triple, ext: row.ext };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -388,7 +310,7 @@ async function throwHttpError(args: {
 	}
 }
 
-async function verifyChecksum(args: {
+async function verifyChecksumAndPlace(args: {
 	readonly cacheDir: string;
 	readonly version: string;
 	readonly baseUrl: string;
@@ -397,32 +319,63 @@ async function verifyChecksum(args: {
 	readonly assetName: string;
 	readonly assetUrl: string;
 	readonly finalPath: string;
-}): Promise<void> {
+}): Promise<string> {
 	const manifest = await getChecksumManifest(args);
 	if (manifest === null) {
 		handleMissingChecksum(args.version, args.assetName, args.assetUrl, args.finalPath);
-		return;
-	}
-
-	const expected = parseChecksumManifest(manifest.text, args.assetName);
-	if (!expected) {
-		handleMissingChecksum(args.version, args.assetName, args.assetUrl, args.finalPath);
-		return;
-	}
-
-	const actual = sha256File(args.tempPath);
-	if (actual !== expected) {
-		throw new FetchError(
-			"CHECKSUM_MISMATCH",
-			`Checksum mismatch for ${args.assetName}. Delete the partial download, rerun the agent fetch, or manually download ${args.assetUrl}, verify SHA256SUMS, and rename it to ${args.finalPath}.`,
+		return verifyAndPlace(
+			args.tempPath,
+			args.assetName,
+			checksumManifestForTemp(args.tempPath, args.assetName),
+			args.cacheDir,
+			{ force: true },
 		);
 	}
 
-	// Cache the manifest only AFTER it has verified the binary. A transiently bad
-	// or incomplete manifest (e.g. published mid-release-build) is never persisted,
-	// so a corrected release is picked up on the next attempt instead of failing
-	// forever from a poisoned cache.
-	if (!manifest.fromCache) writeManifestCache(manifest.manifestPath, manifest.text);
+	try {
+		const finalPath = verifyAndPlace(args.tempPath, args.assetName, manifest.text, args.cacheDir, {
+			force: true,
+		});
+		// Cache the manifest only AFTER it has verified the binary. A transiently bad
+		// or incomplete manifest (e.g. published mid-release-build) is never persisted,
+		// so a corrected release is picked up on the next attempt instead of failing
+		// forever from a poisoned cache.
+		if (!manifest.fromCache) writeManifestCache(manifest.manifestPath, manifest.text);
+		return finalPath;
+	} catch (error) {
+		if (
+			error instanceof FetchError &&
+			error.code === "CHECKSUM_MISSING" &&
+			isLegacyVersion(args.version)
+		) {
+			handleMissingChecksum(args.version, args.assetName, args.assetUrl, args.finalPath);
+			return verifyAndPlace(
+				args.tempPath,
+				args.assetName,
+				checksumManifestForTemp(args.tempPath, args.assetName),
+				args.cacheDir,
+				{ force: true },
+			);
+		}
+		if (error instanceof FetchError && error.code === "CHECKSUM_MISSING") {
+			handleMissingChecksum(args.version, args.assetName, args.assetUrl, args.finalPath);
+		}
+		if (
+			error instanceof FetchError &&
+			error.code === "CHECKSUM_MISMATCH" &&
+			error.message.startsWith(`Checksum mismatch for ${args.assetName}.`)
+		) {
+			throw new FetchError(
+				"CHECKSUM_MISMATCH",
+				`Checksum mismatch for ${args.assetName}. Delete the partial download, rerun the agent fetch, or manually download ${args.assetUrl}, verify SHA256SUMS, and rename it to ${args.finalPath}.`,
+			);
+		}
+		throw error;
+	}
+}
+
+function checksumManifestForTemp(tempPath: string, assetName: string): string {
+	return `${createHash("sha256").update(readFileSync(tempPath)).digest("hex")}  ${assetName}\n`;
 }
 
 async function getChecksumManifest(args: {
@@ -459,7 +412,7 @@ async function getChecksumManifest(args: {
 			fetched.request,
 			manifestUrl,
 			fetchTarget,
-			MANIFEST_MAX_BYTES,
+			AGENT_FETCH_MANIFEST_MAX_BYTES,
 		);
 		const text = body.toString("utf8");
 		return { text, manifestPath, fromCache: false };
@@ -569,13 +522,16 @@ async function writeResponseToTemp(
 	url: string,
 	tempPath: string,
 	target: FetchTarget,
-): Promise<void> {
+	onProgress?: (progress: FetchAgentBinaryProgress) => void,
+): Promise<Omit<FetchAgentBinaryProgress, "phase">> {
 	const finalPath = target.path;
 	assertIdentityResponse(response, url, target);
 	const body = response.body;
 	if (!body) throw networkError(url, target, new Error("response body was empty"));
 
+	const total = contentLengthBytes(response);
 	let fd: number | null = null;
+	let written = 0;
 	try {
 		// O_EXCL guarantees this path did not exist and is created here as a fresh
 		// regular file (open fails otherwise) — that is the symlink / pre-existing
@@ -583,7 +539,6 @@ async function writeResponseToTemp(
 		fd = openSync(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
 
 		const reader = body.getReader();
-		let written = 0;
 		try {
 			for (;;) {
 				const read = await readChunkWithTimeout(reader, request, url, target);
@@ -604,6 +559,11 @@ async function writeResponseToTemp(
 					chunkOffset += writeSync(fd, chunk, chunkOffset, chunk.byteLength - chunkOffset);
 				}
 				written += chunk.byteLength;
+				emitFetchProgress(onProgress, {
+					downloaded: written,
+					...(total !== undefined && { total }),
+					phase: "download",
+				});
 			}
 		} finally {
 			await reader.cancel().catch(() => undefined);
@@ -614,6 +574,22 @@ async function writeResponseToTemp(
 	} finally {
 		if (fd !== null) closeSync(fd);
 	}
+	return { downloaded: written, ...(total !== undefined && { total }) };
+}
+
+function contentLengthBytes(response: Response): number | undefined {
+	const raw = response.headers.get("content-length");
+	if (!raw || !/^\d+$/.test(raw)) return undefined;
+	const parsed = Number(raw);
+	if (!Number.isSafeInteger(parsed)) return undefined;
+	return parsed;
+}
+
+function emitFetchProgress(
+	onProgress: ((progress: FetchAgentBinaryProgress) => void) | undefined,
+	progress: FetchAgentBinaryProgress,
+): void {
+	onProgress?.(progress);
 }
 
 async function readResponseBytes(
@@ -698,93 +674,6 @@ function assertIdentityResponse(response: Response, url: string, target: FetchTa
 	}
 }
 
-function ensureCacheDir(cacheDir: string): void {
-	try {
-		mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
-	} catch (error) {
-		if (isErrno(error, "ENOSPC")) throw diskError(cacheDir, cacheDir, error);
-		throw new FetchError(
-			"DISK",
-			`Could not create Termora agent cache directory ${cacheDir}. Fix permissions or create it with mode 0700, then rerun the agent fetch.`,
-		);
-	}
-	assertSecureCacheDir(cacheDir);
-}
-
-// mkdirSync's mode only applies when it CREATES the directory; a pre-existing
-// cache dir with loose permissions (or a hostile owner / symlink) would let a
-// local attacker swap the temp or final binary after checksum verification.
-// Because this cache holds executables that get uploaded to and run on remote
-// hosts, reject an unsafe directory and tighten a loose one we own.
-function assertSecureCacheDir(cacheDir: string): void {
-	if (lstatSync(cacheDir).isSymbolicLink()) {
-		throw new FetchError(
-			"DISK",
-			`Termora agent cache ${cacheDir} is a symlink; refusing to place agent binaries there. Replace it with a real directory (mode 0700) and rerun the agent fetch.`,
-		);
-	}
-	// POSIX ownership/permission model only (skip on Windows).
-	if (process.platform === "win32") return;
-	const stat = statSync(cacheDir);
-	const uid = process.getuid?.();
-	if (uid !== undefined && stat.uid !== uid) {
-		throw new FetchError(
-			"DISK",
-			`Termora agent cache ${cacheDir} is not owned by the current user; refusing to place agent binaries there. Fix its ownership (or point the cache elsewhere), then rerun the agent fetch.`,
-		);
-	}
-	// Owned by us but group/other-accessible — tighten to 0700.
-	if ((stat.mode & 0o077) !== 0) chmodSync(cacheDir, 0o700);
-}
-
-/**
- * True only if `cacheDir` exists and is safe to trust for cached agent binaries:
- * a real directory (not a symlink), owned by the current user, with no group/other
- * write access (tightened to 0700 if it was loose). A non-existent or unsafe dir
- * returns false. Lets the deployer's cache-HIT path enforce the SAME hardening the
- * fetch path applies, so a binary planted in an insecure cache cannot be deployed
- * as a trusted local agent.
- */
-export function isCacheDirSecure(cacheDir: string): boolean {
-	try {
-		assertSecureCacheDir(cacheDir);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * True only if `filePath` is a regular file (not a symlink, directory, or special
- * file) owned by the current user on POSIX — i.e. a cached binary safe to deploy
- * without the remote TOFU check. Uses lstat (NOT stat), so a planted symlink in an
- * otherwise-secure cache dir is rejected rather than followed and uploaded as a
- * trusted local agent.
- */
-export function isTrustedCacheBinary(filePath: string): boolean {
-	try {
-		const info = lstatSync(filePath);
-		if (!info.isFile()) return false;
-		if (process.platform === "win32") return true;
-		const uid = process.getuid?.();
-		return uid === undefined || info.uid === uid;
-	} catch {
-		return false;
-	}
-}
-
-function createUniqueTempPath(finalPath: string): string {
-	for (let attempt = 0; attempt < 32; attempt++) {
-		const rand = randomBytes(8).toString("hex");
-		const tempPath = `${finalPath}.${process.pid}.${rand}.tmp`;
-		if (!existsSync(tempPath)) return tempPath;
-	}
-	throw new FetchError(
-		"DISK",
-		`Could not allocate a unique temp file beside ${finalPath}. Remove stale *.tmp files from the cache and rerun the agent fetch.`,
-	);
-}
-
 // Read a previously-cached checksum manifest, but only trust a regular file we
 // wrote: never follow a symlink (an attacker-planted link would substitute an
 // arbitrary checksum source) or read a special/oversize file. Anything
@@ -792,7 +681,7 @@ function createUniqueTempPath(finalPath: string): string {
 function readCachedManifest(manifestPath: string): string | null {
 	try {
 		const info = lstatSync(manifestPath);
-		if (!info.isFile() || info.size > MANIFEST_MAX_BYTES) return null;
+		if (!info.isFile() || info.size > AGENT_FETCH_MANIFEST_MAX_BYTES) return null;
 		return readFileSync(manifestPath, "utf8");
 	} catch {
 		return null;
@@ -809,14 +698,6 @@ function writeManifestCache(manifestPath: string, text: string): void {
 		if (isErrno(error, "EEXIST")) return;
 		throw error;
 	}
-}
-
-function sha256File(path: string): string {
-	return createHash("sha256").update(readFileSync(path)).digest("hex");
-}
-
-function removeFileIfPresent(path: string): void {
-	rmSync(path, { force: true });
 }
 
 function getCacheFileName(os: string, arch: string, version: string, ext: "" | ".exe"): string {
@@ -912,14 +793,6 @@ function networkError(url: string, target: FetchTarget, error: unknown): FetchEr
 		target.executable
 			? `Network error while downloading ${url}: ${detail}. Retry the agent fetch, or manually download the asset and rename it to ${target.path}; Node fetch does not honor proxy environment variables here.`
 			: `Network error while downloading ${url}: ${detail}. Retry the agent fetch, or manually download the ${target.noun} and place it at ${target.path}; Node fetch does not honor proxy environment variables here.`,
-	);
-}
-
-function diskError(path: string, finalPath: string, error: unknown): FetchError {
-	const detail = error instanceof Error ? error.message : String(error);
-	return new FetchError(
-		"DISK",
-		`Disk error while writing ${path}: ${detail}. Free space or fix cache permissions, then rerun the agent fetch or manually place the binary at ${finalPath}.`,
 	);
 }
 

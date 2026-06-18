@@ -1,24 +1,37 @@
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cmdAgentFetch, getConfigDir, getStateDir, type ParsedArgs, parseArgs } from "./cli.js";
+import {
+	cmdAgentFetch,
+	cmdAgentImport,
+	cmdAgentStatus,
+	getConfigDir,
+	getStateDir,
+	type ParsedArgs,
+	parseArgs,
+} from "./cli.js";
 import {
 	AGENT_TARGET_TRIPLES,
 	type FetchAgentBinaryOptions,
 	FetchError,
 } from "./session/agent-fetch.js";
+import { computeTargetStatus, type HubPlatform } from "./session/agent-status.js";
 
 const TEST_VERSION = "0.4.1";
+const HUB_PLATFORM = { os: "linux", arch: "x64" } as const satisfies HubPlatform;
 
 type AgentTargetEntry = {
 	readonly triple: string | null;
@@ -164,6 +177,40 @@ describe("parseArgs", () => {
 			expect(r?.port).toBe(4200);
 			expect(r?.version).toBe(TEST_VERSION);
 			expect(parseArgs(["-V"])).toBeNull();
+		});
+	});
+
+	describe("agent status", () => {
+		it("parses agent status", () => {
+			const r = parseArgs(["agent", "status"]);
+			expect(r?.command).toBe("agent-status");
+		});
+	});
+
+	describe("agent import", () => {
+		it("parses agent import paths and required flags", () => {
+			const r = parseArgs([
+				"agent",
+				"import",
+				"/tmp/agent",
+				"/tmp/SHA256SUMS",
+				"--os",
+				"windows",
+				"--arch",
+				"x64",
+				"--version",
+				TEST_VERSION,
+				"--attest",
+				"--force",
+			]);
+			expect(r?.command).toBe("agent-import");
+			expect(r?.binaryPath).toBe("/tmp/agent");
+			expect(r?.manifestPath).toBe("/tmp/SHA256SUMS");
+			expect(r?.agentOs).toBe("windows");
+			expect(r?.agentArch).toBe("x64");
+			expect(r?.version).toBe(TEST_VERSION);
+			expect(r?.attest).toBe(true);
+			expect(r?.force).toBe(true);
 		});
 	});
 
@@ -466,6 +513,158 @@ describe("cmdAgentFetch", () => {
 	);
 });
 
+describe("cmdAgentStatus", () => {
+	it("prints statuses consistent with computeTargetStatus", async () => {
+		const cacheDir = makeTempDir();
+		writeFileSync(agentCachePath(cacheDir, "linux", "arm64", TEST_VERSION), "agent");
+		const lines: string[] = [];
+		const statusDeps = {
+			getBinaryCacheDir: () => cacheDir,
+			hubVersion: TEST_VERSION,
+			hubPlatform: HUB_PLATFORM,
+			resolveAgentBinaryPath: () => "/tmp/termora-agent-cli-test",
+			versionReader: () => TEST_VERSION,
+		};
+		const expected = await computeTargetStatus({
+			cacheDir,
+			hubVersion: TEST_VERSION,
+			hubPlatform: HUB_PLATFORM,
+			resolveAgentBinaryPath: statusDeps.resolveAgentBinaryPath,
+			versionReader: statusDeps.versionReader,
+		});
+
+		const code = await cmdAgentStatus(parsed(["agent", "status"]), {
+			...statusDeps,
+			writeLine: (line) => lines.push(line),
+		});
+
+		expect(code).toBe(0);
+		const output = lines.join("\n");
+		expect(output).toContain(`Hub version: ${expected.hub_version}`);
+		for (const target of expected.targets) {
+			expect(output).toContain(`${target.os}/${target.arch}`);
+			expect(output).toContain(target.status);
+			if (target.version) expect(output).toContain(target.version);
+		}
+	});
+});
+
+describe("cmdAgentImport", () => {
+	it("SC-29 refuses without --attest", async () => {
+		const cacheDir = makeTempDir();
+		const binaryPath = path.join(makeTempDir(), "termora-agent");
+		const manifestPath = path.join(makeTempDir(), "SHA256SUMS");
+		writeFileSync(binaryPath, "agent");
+		writeFileSync(manifestPath, "unused");
+		const errors: string[] = [];
+
+		const code = await cmdAgentImport(
+			parsed([
+				"agent",
+				"import",
+				binaryPath,
+				manifestPath,
+				"--os",
+				"windows",
+				"--arch",
+				"x64",
+				"--version",
+				TEST_VERSION,
+			]),
+			{
+				getBinaryCacheDir: () => cacheDir,
+				hubPlatform: HUB_PLATFORM,
+				writeError: (line) => errors.push(line),
+			},
+		);
+
+		expect(code).toBe(1);
+		expect(errors).toEqual([
+			"agent import requires --attest after operator verification of the source.",
+		]);
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", TEST_VERSION))).toBe(false);
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
+	it("SC-29 rejects a mismatched binary and places nothing", async () => {
+		const cacheDir = makeTempDir();
+		const inputDir = makeTempDir();
+		const binaryPath = path.join(inputDir, "termora-agent");
+		const manifestPath = path.join(inputDir, "SHA256SUMS");
+		const assetName = versionedAssetName("windows", "x64", TEST_VERSION);
+		writeFileSync(binaryPath, "corrupt");
+		writeFileSync(manifestPath, sums(assetName, "expected"));
+		const errors: string[] = [];
+
+		const code = await cmdAgentImport(
+			parsed([
+				"agent",
+				"import",
+				binaryPath,
+				manifestPath,
+				"--os",
+				"windows",
+				"--arch",
+				"x64",
+				"--version",
+				TEST_VERSION,
+				"--attest",
+			]),
+			{
+				getBinaryCacheDir: () => cacheDir,
+				hubPlatform: HUB_PLATFORM,
+				writeError: (line) => errors.push(line),
+			},
+		);
+
+		expect(code).toBe(1);
+		expect(errors[0]).toContain("Checksum mismatch");
+		expect(existsSync(agentCachePath(cacheDir, "windows", "x64", TEST_VERSION))).toBe(false);
+		expect(readFileSync(binaryPath, "utf8")).toBe("corrupt");
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+
+	it("SC-29 verifies and caches a matching binary", async () => {
+		const cacheDir = makeTempDir();
+		const inputDir = makeTempDir();
+		const binaryPath = path.join(inputDir, "termora-agent");
+		const manifestPath = path.join(inputDir, "SHA256SUMS");
+		const assetName = versionedAssetName("windows", "x64", TEST_VERSION);
+		writeFileSync(binaryPath, "agent");
+		writeFileSync(manifestPath, sums(assetName, "agent"));
+		const lines: string[] = [];
+		const finalPath = agentCachePath(cacheDir, "windows", "x64", TEST_VERSION);
+
+		const code = await cmdAgentImport(
+			parsed([
+				"agent",
+				"import",
+				binaryPath,
+				manifestPath,
+				"--os",
+				"windows",
+				"--arch",
+				"x64",
+				"--version",
+				TEST_VERSION,
+				"--attest",
+			]),
+			{
+				getBinaryCacheDir: () => cacheDir,
+				hubPlatform: HUB_PLATFORM,
+				writeLine: (line) => lines.push(line),
+			},
+		);
+
+		expect(code).toBe(0);
+		expect(lines).toEqual([finalPath]);
+		expect(readFileSync(finalPath, "utf8")).toBe("agent");
+		expect(statSync(finalPath).mode & 0o777).toBe(0o755);
+		expect(readFileSync(binaryPath, "utf8")).toBe("agent");
+		expect(listTempFiles(cacheDir)).toEqual([]);
+	});
+});
+
 describe("path helpers", () => {
 	it("getStateDir returns a non-empty string", () => {
 		expect(getStateDir().length).toBeGreaterThan(0);
@@ -508,6 +707,24 @@ function agentCachePath(cacheDir: string, osName: string, arch: string, version:
 	const target = AGENT_TARGET_TABLE[osName]?.[arch];
 	if (!target) throw new Error(`unknown target ${osName}-${arch}`);
 	return path.join(cacheDir, `termora-agent-${osName}-${arch}-${version}${target.ext}`);
+}
+
+function versionedAssetName(osName: string, arch: string, version: string): string {
+	const target = AGENT_TARGET_TABLE[osName]?.[arch];
+	if (!target?.triple) throw new Error(`unsupported test target ${osName}-${arch}`);
+	return `termora-agent-${target.triple}-${version}${target.ext}`;
+}
+
+function sums(fileName: string, body: string): string {
+	return `${createHash("sha256").update(body).digest("hex")}  ${fileName}\n`;
+}
+
+function listTempFiles(cacheDir: string): string[] {
+	return existsSync(cacheDir)
+		? readdirSync(cacheDir)
+				.filter((name) => name.endsWith(".tmp"))
+				.sort()
+		: [];
 }
 
 function builtAgentTargetIds(): string[] {

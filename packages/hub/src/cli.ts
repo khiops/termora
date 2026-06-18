@@ -8,12 +8,12 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
 	closeSync,
+	copyFileSync,
 	existsSync,
-	lstatSync,
 	mkdirSync,
-	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -28,13 +28,28 @@ import {
 } from "./daemon-launch.js";
 import { detectSea } from "./sea-addon-loader.js";
 import {
+	AGENT_FETCH_MANIFEST_MAX_BYTES,
+	AGENT_FETCH_MAX_BYTES,
 	AGENT_TARGET_TRIPLES,
-	type FetchAgentBinaryOptions,
+	createUniqueTempPath,
+	ensureCacheDir,
 	FetchError,
-	fetchAgentBinary,
 	isCacheDirSecure,
 	isTrustedCacheBinary,
-} from "./session/agent-fetch.js";
+	pruneAgentBinaryCache,
+	removeFileIfPresent,
+	resolveTarget,
+	validateAgentVersion,
+	verifyAndPlace,
+} from "./session/agent-cache.js";
+import { type FetchAgentBinaryOptions, fetchAgentBinary } from "./session/agent-fetch.js";
+import {
+	type AgentTargetStatusSnapshot,
+	type AgentVersionReader,
+	type ComputeTargetStatusOptions,
+	computeTargetStatus,
+	getHubPlatform,
+} from "./session/agent-status.js";
 
 // ─── Platform paths ────────────────────────────────────────────────────────────
 
@@ -156,6 +171,13 @@ export interface ParsedArgs {
 	version?: string;
 	all?: boolean;
 	prune?: boolean;
+	// agent import
+	binaryPath?: string;
+	manifestPath?: string;
+	agentOs?: string;
+	agentArch?: string;
+	attest?: boolean;
+	force?: boolean;
 	// json output flag
 	json?: boolean;
 	// auto-open browser after start
@@ -216,11 +238,19 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 	const versionVal = flagValue("--version");
 	if (versionVal !== undefined) result.version = versionVal;
 
+	const agentOsVal = flagValue("--os");
+	if (agentOsVal !== undefined) result.agentOs = agentOsVal;
+
+	const agentArchVal = flagValue("--arch");
+	if (agentArchVal !== undefined) result.agentArch = agentArchVal;
+
 	if (hasFlag("--daemon")) result.daemon = true;
 	if (hasFlag("--json")) result.json = true;
 	if (hasFlag("--open")) result.open = true;
 	if (hasFlag("--all")) result.all = true;
 	if (hasFlag("--prune")) result.prune = true;
+	if (hasFlag("--attest")) result.attest = true;
+	if (hasFlag("--force")) result.force = true;
 
 	// Positional: remaining args after flag removal
 	const positional = args.filter((a) => !a.startsWith("-"));
@@ -228,6 +258,7 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 	const sub0 = positional[0];
 	const sub1 = positional[1];
 	const sub2 = positional[2];
+	const sub3 = positional[3];
 
 	if (!sub0) return null;
 
@@ -252,6 +283,12 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 		if (sub1 === "fetch") {
 			result.command = "agent-fetch";
 			if (sub2) result.target = sub2;
+		} else if (sub1 === "status") {
+			result.command = "agent-status";
+		} else if (sub1 === "import") {
+			result.command = "agent-import";
+			if (sub2) result.binaryPath = sub2;
+			if (sub3) result.manifestPath = sub3;
 		} else {
 			return null;
 		}
@@ -278,12 +315,6 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 
 // ─── Agent fetch helpers ──────────────────────────────────────────────────────
 
-type AgentTargetEntry = {
-	readonly triple: string | null;
-	readonly ext: "" | ".exe";
-	readonly built: boolean;
-};
-
 type AgentFetchTarget = {
 	readonly os: string;
 	readonly arch: string;
@@ -299,12 +330,21 @@ export interface AgentFetchCommandDeps {
 	readonly writeError?: (line: string) => void;
 }
 
-const STRICT_AGENT_VERSION = /^\d+\.\d+\.\d+$/;
+export interface AgentStatusCommandDeps {
+	readonly getBinaryCacheDir?: () => string | Promise<string>;
+	readonly hubVersion?: string;
+	readonly versionReader?: AgentVersionReader;
+	readonly resolveAgentBinaryPath?: () => string | null;
+	readonly hubPlatform?: ComputeTargetStatusOptions["hubPlatform"];
+	readonly writeLine?: (line: string) => void;
+}
 
-const AGENT_TARGET_TABLE = AGENT_TARGET_TRIPLES as Record<
-	string,
-	Record<string, AgentTargetEntry> | undefined
->;
+export interface AgentImportCommandDeps {
+	readonly getBinaryCacheDir?: () => string | Promise<string>;
+	readonly hubPlatform?: ComputeTargetStatusOptions["hubPlatform"];
+	readonly writeLine?: (line: string) => void;
+	readonly writeError?: (line: string) => void;
+}
 
 async function defaultHubVersion(): Promise<string> {
 	const { HUB_VERSION } = await import("./build-version.js");
@@ -318,7 +358,7 @@ async function defaultBinaryCacheDir(): Promise<string> {
 
 function builtAgentTargets(): AgentFetchTarget[] {
 	const targets: AgentFetchTarget[] = [];
-	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
+	for (const [os, arches] of Object.entries(AGENT_TARGET_TRIPLES)) {
 		if (!arches) continue;
 		for (const [arch, target] of Object.entries(arches)) {
 			if (target.built && target.triple) targets.push({ os, arch });
@@ -350,61 +390,14 @@ function resolveAgentFetchTargets(args: ParsedArgs): AgentFetchTarget[] | string
 	return [target];
 }
 
-function badVersionError(version: string): FetchError | null {
-	if (STRICT_AGENT_VERSION.test(version) && version !== "0.0.0") return null;
-	return new FetchError(
-		"BAD_VERSION",
-		`Bad Termora agent version "${version}". Use a released strict semver like 0.4.0, or rerun termora-hub agent fetch --version <x.y.z> with a real release version before downloading.`,
-	);
-}
-
 function cachePathForBuiltTarget(
 	cacheDir: string,
 	target: AgentFetchTarget,
 	version: string,
 ): string | null {
-	const entry = AGENT_TARGET_TABLE[target.os]?.[target.arch];
-	if (!entry?.built || !entry.triple) return null;
+	const entry = resolveTarget(target.os, target.arch);
+	if (!entry) return null;
 	return join(cacheDir, `termora-agent-${target.os}-${target.arch}-${version}${entry.ext}`);
-}
-
-function parseAgentBinaryCacheName(name: string): { readonly version: string } | null {
-	for (const [os, arches] of Object.entries(AGENT_TARGET_TABLE)) {
-		if (!arches) continue;
-		for (const [arch, target] of Object.entries(arches)) {
-			const prefix = `termora-agent-${os}-${arch}-`;
-			if (!name.startsWith(prefix) || !name.endsWith(target.ext)) continue;
-			const versionEnd = target.ext.length > 0 ? name.length - target.ext.length : name.length;
-			const version = name.slice(prefix.length, versionEnd);
-			if (STRICT_AGENT_VERSION.test(version)) return { version };
-		}
-	}
-	return null;
-}
-
-function pruneAgentBinaryCache(cacheDir: string, version: string): number {
-	// Never prune through an untrusted/symlinked cache dir: readdirSync follows a
-	// directory symlink and would delete matching termora-agent-* files in the link
-	// target. isCacheDirSecure also returns false for a missing dir.
-	if (!isCacheDirSecure(cacheDir)) return 0;
-
-	let removed = 0;
-	for (const name of readdirSync(cacheDir)) {
-		const parsed = parseAgentBinaryCacheName(name);
-		if (!parsed || parsed.version === version) continue;
-
-		const path = join(cacheDir, name);
-		try {
-			// lstat (not stat): never follow a symlink when deciding what to delete.
-			if (!lstatSync(path).isFile()) continue;
-			rmSync(path);
-			removed++;
-		} catch {
-			// Entry vanished or was unremovable mid-prune (raced removal); prune is
-			// best-effort cleanup, so skip it.
-		}
-	}
-	return removed;
 }
 
 export async function cmdAgentFetch(
@@ -420,9 +413,11 @@ export async function cmdAgentFetch(
 	}
 
 	const version = args.version ?? deps.hubVersion ?? (await defaultHubVersion());
-	const versionError = badVersionError(version);
-	if (versionError) {
-		writeError(versionError.message);
+	try {
+		validateAgentVersion(version);
+	} catch (error) {
+		if (!(error instanceof FetchError)) throw error;
+		writeError(error.message);
 		return 1;
 	}
 
@@ -458,6 +453,128 @@ export async function cmdAgentFetch(
 
 	if (args.prune) pruneAgentBinaryCache(cacheDir, version);
 	return failed ? 1 : 0;
+}
+
+export async function cmdAgentStatus(
+	args: ParsedArgs,
+	deps: AgentStatusCommandDeps = {},
+): Promise<number> {
+	const writeLine = deps.writeLine ?? ((line: string) => console.log(line));
+	const cacheDir = await (deps.getBinaryCacheDir ?? defaultBinaryCacheDir)();
+	const snapshot = await computeTargetStatus({
+		cacheDir,
+		...(deps.hubVersion !== undefined && { hubVersion: deps.hubVersion }),
+		...(deps.versionReader !== undefined && { versionReader: deps.versionReader }),
+		...(deps.resolveAgentBinaryPath !== undefined && {
+			resolveAgentBinaryPath: deps.resolveAgentBinaryPath,
+		}),
+		...(deps.hubPlatform !== undefined && { hubPlatform: deps.hubPlatform }),
+	});
+
+	if (args.json) {
+		writeLine(JSON.stringify(snapshot));
+		return 0;
+	}
+
+	printAgentStatusTable(snapshot, writeLine);
+	return 0;
+}
+
+export async function cmdAgentImport(
+	args: ParsedArgs,
+	deps: AgentImportCommandDeps = {},
+): Promise<number> {
+	const writeLine = deps.writeLine ?? ((line: string) => console.log(line));
+	const writeError = deps.writeError ?? ((line: string) => console.error(line));
+	const usage =
+		"Usage: termora agent import <binary> <manifest> --os <os> --arch <arch> --version <x.y.z> --attest [--force]";
+
+	if (!args.binaryPath || !args.manifestPath || !args.agentOs || !args.agentArch || !args.version) {
+		writeError(usage);
+		return 1;
+	}
+	if (!args.attest) {
+		writeError("agent import requires --attest after operator verification of the source.");
+		return 1;
+	}
+
+	const target = resolveTarget(args.agentOs, args.agentArch);
+	if (!target) {
+		writeError(`No Termora agent release is built for ${args.agentOs}/${args.agentArch}.`);
+		return 1;
+	}
+
+	try {
+		validateAgentVersion(args.version);
+	} catch (error) {
+		if (!(error instanceof FetchError)) throw error;
+		writeError(error.message);
+		return 1;
+	}
+
+	const hubPlatform =
+		deps.hubPlatform === undefined
+			? getHubPlatform(process.platform, process.arch)
+			: deps.hubPlatform;
+	if (hubPlatform?.os === args.agentOs && hubPlatform.arch === args.agentArch) {
+		writeError(
+			`The hub platform target ${args.agentOs}/${args.agentArch} is served by the bundled agent and is not imported into the cache.`,
+		);
+		return 1;
+	}
+
+	const binarySize = statSync(args.binaryPath).size;
+	if (binarySize > AGENT_FETCH_MAX_BYTES) {
+		writeError("Agent binary exceeds the 64 MiB Termora agent limit.");
+		return 1;
+	}
+	const manifestSize = statSync(args.manifestPath).size;
+	if (manifestSize > AGENT_FETCH_MANIFEST_MAX_BYTES) {
+		writeError(`Checksum manifest exceeds the ${AGENT_FETCH_MANIFEST_MAX_BYTES} byte limit.`);
+		return 1;
+	}
+
+	const cacheDir = await (deps.getBinaryCacheDir ?? defaultBinaryCacheDir)();
+	const finalPath = join(
+		cacheDir,
+		`termora-agent-${args.agentOs}-${args.agentArch}-${args.version}${target.ext}`,
+	);
+	let tempPath: string | null = null;
+	try {
+		ensureCacheDir(cacheDir);
+		tempPath = createUniqueTempPath(finalPath);
+		copyFileSync(args.binaryPath, tempPath);
+		const placed = verifyAndPlace(
+			tempPath,
+			`termora-agent-${target.triple}-${args.version}${target.ext}`,
+			readFileSync(args.manifestPath, "utf8"),
+			cacheDir,
+			{ force: args.force === true },
+		);
+		tempPath = null;
+		writeLine(placed);
+		return 0;
+	} catch (error) {
+		if (tempPath) removeFileIfPresent(tempPath);
+		const message = error instanceof Error ? error.message : String(error);
+		writeError(message);
+		return 1;
+	}
+}
+
+function printAgentStatusTable(
+	snapshot: AgentTargetStatusSnapshot,
+	writeLine: (line: string) => void,
+): void {
+	const pad = (value: string, width: number) => value.padEnd(width);
+	writeLine(`Hub version: ${snapshot.hub_version}`);
+	writeLine(`${pad("TARGET", 16)}  ${pad("STATUS", 11)}  ${pad("VERSION", 12)}  EXPECTED`);
+	writeLine(`${"-".repeat(16)}  ${"-".repeat(11)}  ${"-".repeat(12)}  ${"-".repeat(8)}`);
+	for (const target of snapshot.targets) {
+		writeLine(
+			`${pad(`${target.os}/${target.arch}`, 16)}  ${pad(target.status, 11)}  ${pad(target.version ?? "-", 12)}  ${target.expected_version}`,
+		);
+	}
 }
 
 // ─── Command handlers ──────────────────────────────────────────────────────────
@@ -549,7 +666,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 	}
 
 	// Foreground — dynamic import keeps heavy deps out of parse-time module graph
-	const { createServer, startServer } = await import("./server.js");
+	const { addStartupCorsOrigins, createServer, startServer } = await import("./server.js");
 	const { initAuth } = await import("./auth.js");
 	const { openDatabases } = await import("./storage/db.js");
 	const { openBrowser } = await import("./open-browser.js");
@@ -566,9 +683,7 @@ async function cmdStart(args: ParsedArgs): Promise<void> {
 
 	const server = await createServer({ port, authToken, dbManager });
 	const address = await startServer(server, { port });
-
-	// Extract actual port (may differ from requested due to zero_conf)
-	const actualPort = new URL(address).port ? Number(new URL(address).port) : port;
+	const actualPort = addStartupCorsOrigins(address, port);
 	persistRuntime({ pid: process.pid, port: actualPort, started_at: new Date().toISOString() });
 
 	console.log(`termora hub listening on ${address} (build: ${BUILD_HASH})`);
@@ -800,6 +915,9 @@ Usage:
 
   termora agent fetch <os-arch>|--all           Populate the agent binary cache
               [--version x.y.z] [--prune]
+  termora agent status [--json]                 Show bundled/cache status by target
+  termora agent import <binary> <manifest>       Verify and cache an agent binary
+              --os OS --arch ARCH --version x.y.z --attest [--force]
 
   termora session list [--json]                 List active sessions
 
@@ -848,6 +966,16 @@ export async function main(argv: string[]): Promise<void> {
 				break;
 			case "agent-fetch": {
 				const code = await cmdAgentFetch(parsed);
+				if (code !== 0) process.exit(code);
+				break;
+			}
+			case "agent-status": {
+				const code = await cmdAgentStatus(parsed);
+				if (code !== 0) process.exit(code);
+				break;
+			}
+			case "agent-import": {
+				const code = await cmdAgentImport(parsed);
 				if (code !== 0) process.exit(code);
 				break;
 			}

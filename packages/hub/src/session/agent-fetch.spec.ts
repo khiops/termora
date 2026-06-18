@@ -501,6 +501,57 @@ describe("fetchAgentBinary", () => {
 		expect(listCache(cacheDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
 
+	it("SC-09 keeps placement byte-identical when onProgress observes download and verify", async () => {
+		const cacheDir = makeTempDir();
+		const body = "progress-agent";
+		const assetName = versionedAssetName(VERSION);
+		const { fetchImpl } = routeFetch((url) => {
+			if (url === versionedAssetUrl(VERSION)) {
+				return response(body, { headers: { "content-length": String(body.length) } });
+			}
+			if (url === checksumUrl(VERSION)) return response(sums(assetName, body));
+			throw new Error(`unexpected URL ${url}`);
+		});
+
+		const withoutProgressPath = await fetchAgentBinary({
+			os: "linux",
+			arch: "x64",
+			version: VERSION,
+			cacheDir,
+			baseUrl: BASE_URL,
+			fetchImpl,
+		});
+		const withoutProgress = readFileSync(withoutProgressPath);
+		rmSync(withoutProgressPath);
+
+		const progress: Array<{
+			downloaded: number;
+			total?: number;
+			phase: "download" | "verify";
+		}> = [];
+		const withProgressPath = await fetchAgentBinary({
+			os: "linux",
+			arch: "x64",
+			version: VERSION,
+			cacheDir,
+			baseUrl: BASE_URL,
+			fetchImpl,
+			onProgress: (event) => {
+				progress.push(event);
+			},
+		});
+
+		expect(withProgressPath).toBe(withoutProgressPath);
+		expect(readFileSync(withProgressPath)).toEqual(withoutProgress);
+		expect(progress.some((event) => event.phase === "download")).toBe(true);
+		expect(progress.at(-1)).toMatchObject({
+			downloaded: body.length,
+			total: body.length,
+			phase: "verify",
+		});
+		expect(statSync(withProgressPath).mode & 0o777).toBe(0o755);
+	});
+
 	it.skipIf(process.platform === "win32")(
 		"tightens a pre-existing group/world-writable cache directory to 0700",
 		async () => {
