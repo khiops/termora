@@ -5,6 +5,7 @@ import {
 	type WindowEffect,
 } from "@termora/shared";
 import { computed, onUnmounted, type Ref, ref, watch } from "vue";
+import { useConfigStore } from "../stores/config.js";
 import { useResolvedProfile } from "./useResolvedProfile.js";
 import type { Tab } from "./useTabManager.js";
 import { useWallpaper } from "./useWallpaper.js";
@@ -79,6 +80,7 @@ function terminalProfileFromBackground(profile: WindowBackgroundProfile): Termin
  * The host/channel cascade still comes from the existing resolved-profile API.
  */
 export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
+	const configStore = useConfigStore();
 	const activeChannelId = computed<string | null>(() => {
 		const tab = options.activeTab.value;
 		if (tab === null) return null;
@@ -100,6 +102,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 	const activeScopeKey = computed(() =>
 		wallpaperScopeKey(activeHostId.value, activeChannelId.value),
 	);
+	const globalBackground = computed(() => backgroundFields(configStore.profile ?? DEFAULT_PROFILE));
 	const resolvedForActivePane = computed(() => {
 		const channelId = activeChannelId.value;
 		if (channelId === null) return false;
@@ -119,16 +122,14 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		unresolvedFallbackTimer = null;
 	}
 
-	function showDefaultWallpaper(): void {
-		clearUnresolvedFallbackTimer();
-		fallbackActive.value = false;
-		displayedBackground.value = backgroundFields(DEFAULT_PROFILE);
-	}
-
 	function showWallpaper(profile: WindowBackgroundProfile): void {
 		clearUnresolvedFallbackTimer();
 		fallbackActive.value = false;
 		displayedBackground.value = { ...profile };
+	}
+
+	function showGlobalWallpaper(): void {
+		showWallpaper(globalBackground.value);
 	}
 
 	function showCachedWallpaper(key: string): boolean {
@@ -154,7 +155,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		activeScopeKey,
 		(key) => {
 			if (key === null) {
-				showDefaultWallpaper();
+				showGlobalWallpaper();
 				return;
 			}
 			if (showCachedWallpaper(key)) return;
@@ -168,7 +169,7 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 		() => {
 			const key = activeScopeKey.value;
 			if (key === null) {
-				showDefaultWallpaper();
+				showGlobalWallpaper();
 				return;
 			}
 			if (!resolvedForActivePane.value) return;
@@ -178,6 +179,14 @@ export function useActiveWallpaper(options: UseActiveWallpaperOptions) {
 			showWallpaper(profile);
 		},
 		{ immediate: true, flush: "sync" },
+	);
+
+	watch(
+		globalBackground,
+		() => {
+			if (activeScopeKey.value === null) showGlobalWallpaper();
+		},
+		{ flush: "sync" },
 	);
 
 	onUnmounted(() => {
