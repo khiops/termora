@@ -243,6 +243,23 @@ describe("encodeMessage / decodeMessage round-trip", () => {
 		expect(decodeMessage(encodeMessage(msg))).toEqual(msg);
 	});
 
+	it("round-trips an AGENT_SYNCED message with snake_case wire fields", () => {
+		const msg: ProtocolMessage = {
+			type: "AGENT_SYNCED",
+			hostId: "host-1",
+			hostname: "prod-box",
+			message: "Agent on prod-box updated to the current version",
+		};
+
+		expect(toSnakeCase(msg)).toMatchObject({
+			type: "AGENT_SYNCED",
+			host_id: "host-1",
+			hostname: "prod-box",
+			message: "Agent on prod-box updated to the current version",
+		});
+		expect(decodeMessage(encodeMessage(msg))).toEqual(msg);
+	});
+
 	it("round-trips an AUTH_PROMPT message without optional fields (back-compat)", () => {
 		const msg: ProtocolMessage = {
 			type: "AUTH_PROMPT",

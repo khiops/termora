@@ -8,7 +8,7 @@ import type { IWsClient } from "../services/ws-client.js";
  * Agent-verify store — receives AGENT_BINARY_VERIFY from the hub,
  * surfaces the AgentBinaryVerify dialog to the user, and sends back
  * AGENT_BINARY_VERIFY_RESPONSE (trust_permanent, trust_once, or reject).
- * Also surfaces AGENT_NOT_AVAILABLE / AGENT_UPDATED error codes.
+ * Also surfaces AGENT_NOT_AVAILABLE deploy errors.
  */
 
 export interface AgentVerifyRequest extends AgentBinaryVerifyMessage {}

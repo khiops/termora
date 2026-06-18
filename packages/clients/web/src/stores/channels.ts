@@ -688,6 +688,10 @@ export const useChannelsStore = defineStore("channels", () => {
 			// wait 10 s before seeing the timeout message.
 			unsubErr = sessionStore.wsClient.on("ERROR", (msg) => {
 				if (msg.type === "ERROR") {
+					if (msg.code === "AGENT_UPDATED") {
+						// Legacy informational frame; modern hubs send AGENT_SYNCED instead.
+						return;
+					}
 					clearTimeout(timer);
 					unsubOk();
 					unsubErr();

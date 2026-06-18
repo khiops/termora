@@ -241,7 +241,7 @@ export const useSessionStore = defineStore("session", () => {
 	}
 
 	/**
-	 * Wire up AGENT_BINARY_VERIFY and agent-related ERROR message handlers.
+	 * Wire up agent verification, sync, and deploy error handlers.
 	 */
 	function _registerAgentVerifyHandlers(
 		agentVerifyStore: ReturnType<typeof useAgentVerifyStore>,
@@ -252,6 +252,13 @@ export const useSessionStore = defineStore("session", () => {
 			}
 		});
 
+		wsClient.on("AGENT_SYNCED", (msg) => {
+			if (msg.type === "AGENT_SYNCED") {
+				const toastStore = useToastStore();
+				toastStore.show("info", msg.message);
+			}
+		});
+
 		wsClient.on("ERROR", (msg) => {
 			if (msg.type === "ERROR") {
 				if (msg.code === "AGENT_NOT_AVAILABLE") {
@@ -259,8 +266,7 @@ export const useSessionStore = defineStore("session", () => {
 					return;
 				}
 				if (msg.code === "AGENT_UPDATED") {
-					// Informational — agent binary was updated; no user action required.
-					// Intentionally not surfaced as a generic error.
+					// Legacy hub frame. Modern hubs send AGENT_SYNCED on a non-error channel.
 					return;
 				}
 				if (msg.code === "AGENT_BINARY_REJECTED") {
