@@ -1,6 +1,7 @@
 import { hubBaseUrl } from "./hub-url.js";
 
 export interface ShutdownTarget {
+	pid?: number | null;
 	port: number;
 	ownerToken: string | null;
 	clientId?: string | null;
@@ -14,6 +15,7 @@ export type QuitOutcome =
 export interface QuitCompletelyDeps {
 	fetch?: typeof fetch;
 	getShutdownTarget?: () => Promise<ShutdownTarget | null>;
+	stopLegacyHub?: () => Promise<boolean>;
 	confirmForce?: (others: number) => Promise<boolean>;
 	exitApp?: () => Promise<void>;
 	timeoutMs?: number;
@@ -42,18 +44,38 @@ async function defaultExitApp(): Promise<void> {
 	await invoke("exit_app");
 }
 
+async function defaultStopLegacyHub(): Promise<boolean> {
+	const { invoke } = await import("@tauri-apps/api/core");
+	return invoke<boolean>("stop_legacy_hub");
+}
+
 function shutdownUrl(port: number, force: boolean): string {
 	const base = hubBaseUrl() || `http://localhost:${port}`;
 	return `${base}/api/shutdown${force ? "?force=1" : ""}`;
 }
 
-function othersFromBody(body: unknown): number {
+function othersFromBody(body: unknown): number | null {
 	if (body && typeof body === "object" && "others" in body) {
 		const others = (body as { others?: unknown }).others;
 		if (typeof others === "number" && Number.isFinite(others) && others > 0) {
 			return Math.floor(others);
 		}
 	}
+	return null;
+}
+
+async function readConflictOthers(response: ShutdownResponse): Promise<number> {
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch (error) {
+		console.warn("[desktop] malformed shutdown conflict response", error);
+		return 1;
+	}
+
+	const others = othersFromBody(body);
+	if (others !== null) return others;
+	console.warn("[desktop] shutdown conflict response missing others count", body);
 	return 1;
 }
 
@@ -85,10 +107,29 @@ export async function quitCompletely(deps: QuitCompletelyDeps = {}): Promise<Qui
 		deps.confirmForce ??
 		((others: number) => Promise.resolve(window.confirm(forceShutdownMessage(others))));
 	const exitApp = deps.exitApp ?? defaultExitApp;
+	const stopLegacyHub = deps.stopLegacyHub ?? defaultStopLegacyHub;
 	const timeoutMs = deps.timeoutMs ?? 2_000;
 	const target = await getShutdownTarget();
 
-	if (!target?.ownerToken) {
+	if (!target) {
+		await exitApp();
+		return { status: "exited" };
+	}
+
+	if (!target.ownerToken) {
+		try {
+			if (!(await stopLegacyHub())) {
+				return {
+					status: "failed",
+					error: new Error("Legacy hub shutdown failed"),
+				};
+			}
+		} catch (error) {
+			return {
+				status: "failed",
+				error: error instanceof Error ? error : new Error(String(error)),
+			};
+		}
 		await exitApp();
 		return { status: "exited" };
 	}
@@ -101,8 +142,7 @@ export async function quitCompletely(deps: QuitCompletelyDeps = {}): Promise<Qui
 		}
 
 		if (first.status === 409) {
-			const body = await first.json().catch(() => ({}));
-			const others = othersFromBody(body);
+			const others = await readConflictOthers(first);
 			const confirmed = await confirmForce(others);
 			if (!confirmed) return { status: "cancelled", others };
 

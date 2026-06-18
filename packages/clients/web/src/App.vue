@@ -392,6 +392,7 @@ import { useHostsStore } from './stores/hosts.js';
 import { useProfilesStore } from './stores/profiles.js';
 import { useSessionStore } from './stores/session.js';
 import { useThemeStore } from './stores/theme.js';
+import { useToastStore } from './stores/toast.js';
 import { useWriteLockStore } from './stores/writelock.js';
 import { loadDesktopVersion } from './utils/desktop-version.js';
 import {
@@ -409,6 +410,7 @@ import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 const authStore = useAuthStore();
 const sessionStore = useSessionStore();
 const configStore = useConfigStore();
+const toastStore = useToastStore();
 
 // ─── Resizable panels ────────────────────────────────────────────────────────
 
@@ -519,6 +521,14 @@ let closeUnlisten: (() => void) | null = null;
 let shutdownForceResolver: ((confirmed: boolean) => void) | null = null;
 const shutdownForceMessage = computed(() =>
 	shutdownForceOthers.value === null ? '' : forceShutdownMessage(shutdownForceOthers.value),
+);
+
+watch(
+	() => authStore.clientId,
+	(clientId) => {
+		void syncShutdownCallerClientId(clientId);
+	},
+	{ immediate: true },
 );
 
 // Sync auto-switch composable with server appearance config (SC-14)
@@ -878,11 +888,23 @@ async function minimizeWindowToTray(): Promise<void> {
 
 async function getShutdownTarget(): Promise<ShutdownTarget | null> {
 	const { invoke } = await import('@tauri-apps/api/core');
-	const runtime = await invoke<{ port: number; ownerToken: string | null }>('get_hub_runtime');
+	const runtime = await invoke<{ pid?: number | null; port: number; ownerToken: string | null }>(
+		'get_hub_runtime',
+	);
 	return {
 		...runtime,
 		clientId: authStore.clientId,
 	};
+}
+
+async function syncShutdownCallerClientId(clientId: string | null): Promise<void> {
+	if (!isTauriRuntime()) return;
+	try {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('set_shutdown_caller_client_id', { clientId });
+	} catch {
+		// Older desktop shells do not have this command; the server guard still applies.
+	}
 }
 
 function confirmForceShutdown(others: number): Promise<boolean> {
@@ -918,11 +940,14 @@ async function runQuitCompletely(): Promise<void> {
 		});
 		if (outcome.status === 'failed') {
 			console.error('[desktop] shutdown failed:', outcome.error);
+			toastStore.show('error', `Quit failed: ${outcome.error.message}`, 10_000);
 		} else {
 			closeModalVisible.value = false;
 		}
 	} catch (error) {
 		console.error('[desktop] quit failed:', error);
+		const message = error instanceof Error ? error.message : String(error);
+		toastStore.show('error', `Quit failed: ${message}`, 10_000);
 	} finally {
 		closeInProgress.value = false;
 	}

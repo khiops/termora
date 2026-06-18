@@ -4,6 +4,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -12,6 +13,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 /// Stores the resolved hub port after startup (default 4100).
 static HUB_PORT: AtomicU16 = AtomicU16::new(4100);
 static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_CALLER_CLIENT_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 const MAX_AGENT_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_AGENT_MANIFEST_BYTES: u64 = 1024 * 1024;
 
@@ -50,6 +52,7 @@ struct PickedAgentFile {
 
 #[derive(Deserialize)]
 struct RuntimeInfo {
+    pid: Option<u32>,
     port: u16,
     #[serde(rename = "ownerToken")]
     owner_token: Option<String>,
@@ -57,6 +60,7 @@ struct RuntimeInfo {
 
 #[derive(Serialize)]
 struct HubRuntime {
+    pid: Option<u32>,
     port: u16,
     #[serde(rename = "ownerToken")]
     owner_token: Option<String>,
@@ -137,6 +141,14 @@ fn read_runtime_info() -> Option<RuntimeInfo> {
     serde_json::from_str(&contents).ok()
 }
 
+fn shutdown_caller_client_id() -> &'static Mutex<Option<String>> {
+    SHUTDOWN_CALLER_CLIENT_ID.get_or_init(|| Mutex::new(None))
+}
+
+fn current_shutdown_caller_client_id() -> Option<String> {
+    shutdown_caller_client_id().lock().ok()?.clone()
+}
+
 /// Reads the hub port from runtime.json in the state dir.
 #[cfg(not(dev))]
 fn read_runtime_port() -> Option<u16> {
@@ -144,7 +156,6 @@ fn read_runtime_port() -> Option<u16> {
 }
 
 /// Checks whether a hub is alive by probing its /api/health endpoint.
-#[cfg(not(dev))]
 fn is_hub_alive(port: u16) -> bool {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -176,10 +187,12 @@ fn get_hub_port() -> u16 {
 fn get_hub_runtime() -> HubRuntime {
     match read_runtime_info() {
         Some(runtime) => HubRuntime {
+            pid: runtime.pid,
             port: runtime.port,
             owner_token: runtime.owner_token,
         },
         None => HubRuntime {
+            pid: None,
             port: HUB_PORT.load(Ordering::Relaxed),
             owner_token: None,
         },
@@ -196,12 +209,42 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[allow(non_snake_case)]
+#[tauri::command]
+fn set_shutdown_caller_client_id(clientId: Option<String>) {
+    if let Ok(mut stored) = shutdown_caller_client_id().lock() {
+        *stored = clientId.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+    }
+}
+
+#[tauri::command]
+fn stop_legacy_hub() -> Result<bool, String> {
+    let Some(runtime) = read_runtime_info() else {
+        return Ok(true);
+    };
+
+    match stop_legacy_hub_from_runtime(&runtime) {
+        ShutdownRequestResult::Stopped | ShutdownRequestResult::HubUnavailable => Ok(true),
+        ShutdownRequestResult::Conflict(_) => {
+            Err("legacy hub shutdown unexpectedly conflicted".to_string())
+        }
+        ShutdownRequestResult::Failed(message) => Err(message),
+    }
+}
+
 fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
     let Some(runtime) = read_runtime_info() else {
         return ShutdownRequestResult::HubUnavailable;
     };
     let Some(owner_token) = runtime.owner_token else {
-        return ShutdownRequestResult::Failed("runtime.json is missing ownerToken".to_string());
+        return stop_legacy_hub_from_runtime(&runtime);
     };
 
     let client = match reqwest::blocking::Client::builder()
@@ -216,11 +259,12 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
         "http://127.0.0.1:{}/api/shutdown{}",
         runtime.port, force_query
     );
-    let response = match client
-        .post(url)
-        .header("X-Termora-Owner", owner_token)
-        .send()
-    {
+    let mut request = client.post(url).header("X-Termora-Owner", owner_token);
+    if let Some(client_id) = current_shutdown_caller_client_id() {
+        request = request.header("X-Termora-Client-Id", client_id);
+    }
+
+    let response = match request.send() {
         Ok(response) => response,
         Err(_) => return ShutdownRequestResult::HubUnavailable,
     };
@@ -230,14 +274,85 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
     }
 
     if response.status().as_u16() == 409 {
-        let body = response
-            .text()
-            .ok()
-            .and_then(|text| serde_json::from_str::<ShutdownConflictBody>(&text).ok());
-        return ShutdownRequestResult::Conflict(body.and_then(|b| b.others).unwrap_or(1));
+        let body_text = response.text().unwrap_or_else(|error| {
+            eprintln!(
+                "[termora] failed to read shutdown conflict response: {}",
+                error
+            );
+            String::new()
+        });
+        let others = match serde_json::from_str::<ShutdownConflictBody>(&body_text) {
+            Ok(body) => body.others.unwrap_or_else(|| {
+                eprintln!(
+                    "[termora] shutdown conflict response missing others count: {}",
+                    body_text
+                );
+                1
+            }),
+            Err(error) => {
+                eprintln!(
+                    "[termora] malformed shutdown conflict response: {}; body={}",
+                    error, body_text
+                );
+                1
+            }
+        };
+        return ShutdownRequestResult::Conflict(others);
     }
 
     ShutdownRequestResult::Failed(format!("shutdown failed with HTTP {}", response.status()))
+}
+
+fn stop_legacy_hub_from_runtime(runtime: &RuntimeInfo) -> ShutdownRequestResult {
+    let Some(pid) = runtime.pid else {
+        return ShutdownRequestResult::Failed("legacy runtime.json is missing pid".to_string());
+    };
+
+    if !is_hub_alive(runtime.port) {
+        return ShutdownRequestResult::HubUnavailable;
+    }
+
+    match signal_hub_pid(pid) {
+        Ok(()) => ShutdownRequestResult::Stopped,
+        Err(message) => ShutdownRequestResult::Failed(message),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn signal_hub_pid(pid: u32) -> Result<(), String> {
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status()
+        .map_err(|error| {
+            format!(
+                "failed to run taskkill for legacy hub pid {}: {}",
+                pid, error
+            )
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "taskkill failed for legacy hub pid {}: {}",
+            pid, status
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn signal_hub_pid(pid: u32) -> Result<(), String> {
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .map_err(|error| format!("failed to signal legacy hub pid {}: {}", pid, error))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "kill failed for legacy hub pid {}: {}",
+            pid, status
+        ))
+    }
 }
 
 fn show_shutdown_error(app: &tauri::AppHandle, message: String) {
@@ -567,6 +682,8 @@ pub fn run() {
             get_hub_runtime,
             is_tray_available,
             exit_app,
+            set_shutdown_caller_client_id,
+            stop_legacy_hub,
             pick_and_read_agent_file
         ])
         .setup(setup_app)

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigResolver } from "../config.js";
 import { openTestDatabases } from "../storage/db.js";
 import { SpoolDAL } from "../storage/spool.js";
+import type { AgentConnection } from "./agent-connection.js";
 import { connectOrLaunch as _connectOrLaunchForMock } from "./agent-launcher.js";
 import {
 	clearContext,
@@ -3892,6 +3893,31 @@ describe("SessionManager — concurrent SSH connect coalescing", () => {
 		await sm.shutdown();
 
 		expect(sm.acquisitions.size).toBe(0);
+	});
+
+	it("shutdown awaits agent close before clearing agent state", async () => {
+		const ctx = (sm as unknown as { ctx: import("./session-context.js").SharedSessionContext }).ctx;
+		let resolveClose!: () => void;
+		const closePromise = new Promise<void>((resolve) => {
+			resolveClose = resolve;
+		});
+		const agent = {
+			close: vi.fn(() => closePromise),
+			send: vi.fn(),
+			connected: true,
+		} as unknown as AgentConnection;
+		ctx.agents.set("host-await-close", agent);
+
+		const shutdownPromise = sm.shutdown();
+		await flushImmediate();
+
+		expect(agent.close).toHaveBeenCalledOnce();
+		expect(ctx.agents.has("host-await-close")).toBe(true);
+
+		resolveClose();
+		await shutdownPromise;
+
+		expect(ctx.agents.has("host-await-close")).toBe(false);
 	});
 
 	// ── NEW Fix 1: same-client sequential re-prompt uses isolated prompt ids ──

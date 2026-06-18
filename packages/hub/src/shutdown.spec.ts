@@ -141,6 +141,31 @@ describe("POST /api/shutdown", () => {
 		expect(shutdownCalls).toBe(1);
 	});
 
+	it("rejects a valid paired bearer on shutdown when the owner token is missing", async () => {
+		dbs = openTestDatabases();
+		let shutdownCalls = 0;
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			ownerToken: OWNER_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+			onShutdown: () => {
+				shutdownCalls++;
+			},
+		});
+
+		const pairedBearerOnly = await server.inject({
+			method: "POST",
+			url: "/api/shutdown",
+			headers: { authorization: `Bearer ${TEST_TOKEN}` },
+		});
+
+		expect(pairedBearerOnly.statusCode).toBe(401);
+		await tick();
+		expect(shutdownCalls).toBe(0);
+	});
+
 	it("guards other connected clients and allows force=1", async () => {
 		dbs = openTestDatabases();
 		let shutdownCalls = 0;

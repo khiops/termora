@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,6 +57,13 @@ describe("tauri.conf.json", () => {
 	it("devUrl is configured for vite dev server", () => {
 		const build = conf.build as Record<string, unknown>;
 		expect(build.devUrl).toBe("http://localhost:5173");
+	});
+
+	it("does not point at a desktop-local TypeScript frontend", () => {
+		const build = conf.build as Record<string, unknown>;
+		expect(build.devUrl).toBe("http://localhost:5173");
+		expect(build.frontendDist).toBe("../../web/dist");
+		expect(existsSync(resolve(DESKTOP_DIR, "src"))).toBe(false);
 	});
 
 	it("creates the main window as transparent and enables macOS private API at app level", () => {
@@ -181,30 +188,21 @@ describe("package.json", () => {
 	});
 });
 
-describe("src/lib.ts", () => {
-	const src = readText("src/lib.ts");
-
-	it("exports startHub function", () => {
-		expect(src).toMatch(/export\s+async\s+function\s+startHub/);
-	});
-
-	it("exports stopHub function", () => {
-		expect(src).toMatch(/export\s+async\s+function\s+stopHub/);
-	});
-
-	it("uses Command.sidecar for hub binary", () => {
-		expect(src).toMatch(/Command\.sidecar\s*\(\s*["']termora-hub["']/);
-	});
-
-	it("polls /api/health endpoint for readiness", () => {
-		expect(src).toMatch(/\/api\/health/);
-	});
-});
-
 describe("src-tauri/src/lib.rs", () => {
 	const src = readText("src-tauri/src/lib.rs");
 
 	it("registers the OS plugin", () => {
 		expect(src).toMatch(/\.plugin\(tauri_plugin_os::init\(\)\)/);
+	});
+
+	it("includes the webview caller client id on native tray shutdown requests", () => {
+		expect(src).toContain("set_shutdown_caller_client_id");
+		expect(src).toContain("X-Termora-Client-Id");
+	});
+
+	it("has a legacy no-owner-token hub stop fallback", () => {
+		expect(src).toContain("stop_legacy_hub");
+		expect(src).toMatch(/runtime\.owner_token\s+else/);
+		expect(src).toContain("signal_hub_pid");
 	});
 });
