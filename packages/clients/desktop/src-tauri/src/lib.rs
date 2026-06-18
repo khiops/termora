@@ -63,8 +63,6 @@ struct RuntimeInfo {
 struct HubRuntime {
     pid: Option<u32>,
     port: u16,
-    #[serde(rename = "ownerToken")]
-    owner_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -198,12 +196,10 @@ fn get_hub_runtime() -> HubRuntime {
         Some(runtime) => HubRuntime {
             pid: runtime.pid,
             port: runtime.port,
-            owner_token: runtime.owner_token,
         },
         None => HubRuntime {
             pid: None,
             port: HUB_PORT.load(Ordering::Relaxed),
-            owner_token: None,
         },
     }
 }
@@ -294,10 +290,10 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
         Ok(response) => response,
         Err(error) => {
             eprintln!(
-                "[termora] shutdown request failed; verifying hub pid before exit: {}",
+                "[termora] owner-token shutdown request failed; refusing PID fallback: {}",
                 error
             );
-            return confirm_hub_stopped_or_kill(&runtime);
+            return owner_token_shutdown_failed(&runtime, error.to_string());
         }
     };
 
@@ -333,10 +329,27 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
     }
 
     eprintln!(
-        "[termora] shutdown failed with HTTP {}; verifying hub pid before exit",
+        "[termora] owner-token shutdown failed with HTTP {}; refusing PID fallback",
         response.status()
     );
-    confirm_hub_stopped_or_kill(&runtime)
+    owner_token_shutdown_failed(&runtime, format!("HTTP {}", response.status()))
+}
+
+fn owner_token_shutdown_failed(runtime: &RuntimeInfo, reason: String) -> ShutdownRequestResult {
+    if let Some(pid) = runtime.pid {
+        if pid != 0 && pid != std::process::id() && !is_pid_alive(pid) {
+            eprintln!(
+                "[termora] hub pid {} is already stopped after owner-token shutdown failure",
+                pid
+            );
+            return ShutdownRequestResult::HubUnavailable;
+        }
+    }
+
+    ShutdownRequestResult::Failed(format!(
+        "owner-token shutdown request failed; refusing PID fallback: {}",
+        reason
+    ))
 }
 
 fn stop_legacy_hub_from_runtime(runtime: &RuntimeInfo) -> ShutdownRequestResult {
@@ -350,6 +363,10 @@ fn stop_legacy_hub_from_runtime(runtime: &RuntimeInfo) -> ShutdownRequestResult 
 
     if !is_pid_alive(pid) {
         return ShutdownRequestResult::HubUnavailable;
+    }
+
+    if let Err(message) = validate_hub_process_identity(pid) {
+        return ShutdownRequestResult::Failed(message);
     }
 
     match signal_hub_pid(pid) {
@@ -387,6 +404,10 @@ fn confirm_hub_stopped_or_kill(runtime: &RuntimeInfo) -> ShutdownRequestResult {
     if wait_for_pid_exit(pid, Duration::from_secs(10)) {
         eprintln!("[termora] confirmed hub pid {} is stopped", pid);
         return ShutdownRequestResult::Stopped;
+    }
+
+    if let Err(message) = validate_hub_process_identity(pid) {
+        return ShutdownRequestResult::Failed(message);
     }
 
     eprintln!(
@@ -431,6 +452,100 @@ fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
         let remaining = deadline.saturating_duration_since(now);
         std::thread::sleep(remaining.min(Duration::from_millis(100)));
     }
+}
+
+fn validate_hub_process_identity(pid: u32) -> Result<(), String> {
+    let Some(command) = read_process_command_line(pid) else {
+        return Err(format!(
+            "refusing to kill hub pid {} because process identity could not be verified",
+            pid
+        ));
+    };
+
+    if command_looks_like_termora_hub(&command) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "refusing to kill hub pid {} because process does not look like termora-hub: {}",
+        pid,
+        summarize_command(&command)
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn read_process_command_line(pid: u32) -> Option<String> {
+    let script = format!(
+        "(Get-CimInstance Win32_Process -Filter \"ProcessId = {}\" | Select-Object -ExpandProperty CommandLine)",
+        pid
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if command.is_empty() {
+        None
+    } else {
+        Some(command)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_process_command_line(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(raw) = std::fs::read(format!("/proc/{}/cmdline", pid)) {
+            let command = String::from_utf8_lossy(&raw)
+                .replace('\0', " ")
+                .trim()
+                .to_string();
+            if !command.is_empty() {
+                return Some(command);
+            }
+        }
+    }
+
+    let pid_text = pid.to_string();
+    let output = std::process::Command::new("ps")
+        .args(["-p", pid_text.as_str(), "-o", "command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if command.is_empty() {
+        None
+    } else {
+        Some(command)
+    }
+}
+
+fn command_looks_like_termora_hub(command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    normalized.contains("termora-hub")
+        || normalized.contains("termora_hub")
+        || normalized.contains("@termora/hub")
+        || normalized.contains("packages/hub/src")
+        || normalized.contains("packages\\hub\\src")
+}
+
+fn summarize_command(command: &str) -> String {
+    const MAX_COMMAND_CHARS: usize = 160;
+    if command.chars().count() <= MAX_COMMAND_CHARS {
+        return command.to_string();
+    }
+
+    let mut summary = command
+        .chars()
+        .take(MAX_COMMAND_CHARS.saturating_sub(3))
+        .collect::<String>();
+    summary.push_str("...");
+    summary
 }
 
 #[cfg(target_os = "windows")]

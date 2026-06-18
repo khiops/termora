@@ -699,7 +699,7 @@ describe("path helpers", () => {
 
 describe("runtime state", () => {
 	it.skipIf(process.platform === "win32")(
-		"persistRuntime writes ownerToken and clamps runtime.json to 0600",
+		"persistRuntime writes ownerToken via a 0600 atomic replacement",
 		() => {
 			const orig = process.env.XDG_STATE_HOME;
 			const stateRoot = makeTempDir();
@@ -715,6 +715,7 @@ describe("runtime state", () => {
 				const runtimePath = path.join(getStateDir(), "runtime.json");
 				expect(loadRuntime()?.ownerToken).toBe("b".repeat(64));
 				expect(statSync(runtimePath).mode & 0o777).toBe(0o600);
+				expect(readdirSync(getStateDir()).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 			} finally {
 				deleteRuntime();
 				process.env.XDG_STATE_HOME = orig;
@@ -722,7 +723,7 @@ describe("runtime state", () => {
 		},
 	);
 
-	it("cmdStop falls back to SIGTERM on a dead HTTP port without deleting runtime.json", async () => {
+	it("cmdStop fails closed on owner-token shutdown errors without signaling the pid", async () => {
 		const orig = process.env.XDG_STATE_HOME;
 		const stateRoot = makeTempDir();
 		const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -740,12 +741,47 @@ describe("runtime state", () => {
 				ownerToken: "c".repeat(64),
 			});
 
-			await cmdStop({ command: "stop" });
+			await expect(cmdStop({ command: "stop" })).rejects.toThrow(
+				/refusing SIGTERM fallback for owner-token hub/,
+			);
 
 			expect(existsSync(path.join(getStateDir(), "runtime.json"))).toBe(true);
-			await waitForExit(child);
+			expect(isChildAlive(child)).toBe(true);
 		} finally {
-			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+			if (child.exitCode === null && child.signalCode === null) {
+				child.kill("SIGKILL");
+				await waitForExit(child);
+			}
+			deleteRuntime();
+			process.env.XDG_STATE_HOME = orig;
+		}
+	});
+
+	it("cmdStop validates legacy process identity before signaling the pid", async () => {
+		const orig = process.env.XDG_STATE_HOME;
+		const stateRoot = makeTempDir();
+		const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+			stdio: "ignore",
+		});
+
+		process.env.XDG_STATE_HOME = stateRoot;
+		try {
+			if (child.pid === undefined) throw new Error("child pid missing");
+			persistRuntime({
+				pid: child.pid,
+				port: await getUnusedPort(),
+				started_at: "2026-06-18T00:00:00.000Z",
+			});
+
+			await expect(cmdStop({ command: "stop" })).rejects.toThrow(/Refusing to signal pid/);
+
+			expect(existsSync(path.join(getStateDir(), "runtime.json"))).toBe(true);
+			expect(isChildAlive(child)).toBe(true);
+		} finally {
+			if (child.exitCode === null && child.signalCode === null) {
+				child.kill("SIGKILL");
+				await waitForExit(child);
+			}
 			deleteRuntime();
 			process.env.XDG_STATE_HOME = orig;
 		}
@@ -779,6 +815,16 @@ function getUnusedPort(): Promise<number> {
 			server.close(() => resolve(port));
 		});
 	});
+}
+
+function isChildAlive(child: ReturnType<typeof spawn>): boolean {
+	if (child.pid === undefined) return false;
+	try {
+		process.kill(child.pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function waitForExit(child: ReturnType<typeof spawn>): Promise<void> {

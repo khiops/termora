@@ -6,6 +6,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
 	closeSync,
 	copyFileSync,
@@ -14,9 +15,10 @@ import {
 	mkdirSync,
 	openSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	statSync,
-	writeSync,
+	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -92,13 +94,29 @@ export function loadRuntime(): RuntimeInfo | null {
 export function persistRuntime(info: RuntimeInfo): void {
 	const stateDir = getStateDir();
 	mkdirSync(stateDir, { recursive: true });
-	const fd = openSync(join(stateDir, "runtime.json"), "w", 0o600);
+	const runtimePath = join(stateDir, "runtime.json");
+	const tempPath = createRuntimeTempPath(runtimePath);
+	let fd: number | null = openSync(tempPath, "wx", 0o600);
+	let renamed = false;
 	try {
-		writeSync(fd, JSON.stringify(info, null, 2));
+		writeFileSync(fd, JSON.stringify(info, null, 2), { encoding: "utf8" });
 		fchmodSync(fd, 0o600);
-	} finally {
 		closeSync(fd);
+		fd = null;
+		renameSync(tempPath, runtimePath);
+		renamed = true;
+	} finally {
+		if (fd !== null) closeSync(fd);
+		if (!renamed) rmSync(tempPath, { force: true });
 	}
+}
+
+function createRuntimeTempPath(runtimePath: string): string {
+	for (let attempt = 0; attempt < 32; attempt++) {
+		const tempPath = `${runtimePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+		if (!existsSync(tempPath)) return tempPath;
+	}
+	throw new Error(`Could not allocate a unique temp file beside ${runtimePath}`);
 }
 
 export function deleteRuntime(): void {
@@ -113,6 +131,61 @@ function isPidAlive(pid: number): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function assertHubProcessIdentity(pid: number): void {
+	const command = readProcessCommandLine(pid);
+	if (command !== null && commandLooksLikeTermoraHub(command)) return;
+
+	const detail =
+		command === null ? "process command line could not be read" : summarizeCommand(command);
+	throw new Error(`Refusing to signal pid ${pid}: ${detail}`);
+}
+
+function readProcessCommandLine(pid: number): string | null {
+	if (process.platform === "linux") {
+		try {
+			const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+			if (command.length > 0) return command;
+		} catch {
+			// Fall back to ps below.
+		}
+	}
+
+	try {
+		if (process.platform === "win32") {
+			const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" | Select-Object -ExpandProperty CommandLine)`;
+			const command = execFileSync(
+				"powershell",
+				["-NoProfile", "-NonInteractive", "-Command", script],
+				{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+			).trim();
+			return command.length > 0 ? command : null;
+		}
+
+		const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return command.length > 0 ? command : null;
+	} catch {
+		return null;
+	}
+}
+
+function commandLooksLikeTermoraHub(command: string): boolean {
+	const normalized = command.toLowerCase();
+	return (
+		normalized.includes("termora-hub") ||
+		normalized.includes("termora_hub") ||
+		normalized.includes("@termora/hub") ||
+		normalized.includes("packages/hub/src") ||
+		normalized.includes("packages\\hub\\src")
+	);
+}
+
+function summarizeCommand(command: string): string {
+	return command.length > 160 ? `${command.slice(0, 157)}...` : command;
 }
 
 // ─── Auth helpers ──────────────────────────────────────────────────────────────
@@ -764,12 +837,20 @@ export async function cmdStop(args: ParsedArgs = { command: "stop" }): Promise<v
 				);
 				process.exit(1);
 			}
-			console.error(`Graceful shutdown request failed with HTTP ${res.status}; falling back`);
-		} catch {
-			// Dead/stuck HTTP path: fall back to SIGTERM for older or wedged hubs.
+			throw new Error(`HTTP ${res.status}`);
+		} catch (err) {
+			if (!isPidAlive(runtime.pid)) {
+				console.log(`Hub process stopped before shutdown confirmation (pid ${runtime.pid})`);
+				return;
+			}
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(
+				`Graceful shutdown request failed; refusing SIGTERM fallback for owner-token hub: ${message}`,
+			);
 		}
 	}
 
+	assertHubProcessIdentity(runtime.pid);
 	process.kill(runtime.pid, "SIGTERM");
 	console.log(`Sent SIGTERM to hub (pid ${runtime.pid})`);
 }
