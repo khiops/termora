@@ -205,20 +205,12 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 		const pathname = new URL(request.url, "http://localhost").pathname;
 		if (request.method !== "POST" || pathname !== "/api/shutdown") return;
 
-		const ownerHeader = request.headers["x-termora-owner"];
-		const ownerToken = Array.isArray(ownerHeader) ? ownerHeader[0] : ownerHeader;
-		if (!options?.ownerToken || ownerToken !== options.ownerToken) {
-			return reply.code(401).send({
-				error: "OWNER_TOKEN_REQUIRED",
-				message: "Valid X-Termora-Owner header required",
-			});
+		if (!hasValidShutdownOwnerToken(request, options?.ownerToken)) {
+			return sendOwnerTokenRequired(reply);
 		}
 
 		if (!isLoopbackAddress(request.ip)) {
-			return reply.code(403).send({
-				error: "LOOPBACK_REQUIRED",
-				message: "Shutdown is only accepted from loopback clients",
-			});
+			return sendLoopbackRequired(reply);
 		}
 	});
 
@@ -245,7 +237,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 			// Unauthenticated endpoints — exact pathname match
 			if (pathname === "/api/health") return;
 			if (pathname === "/api/pair/verify") return;
-			if (pathname === "/api/shutdown") return;
+			if (request.method === "POST" && pathname === "/api/shutdown") return;
 
 			// WebSocket auth is handled at the message level (AUTH → AUTH_OK/AUTH_FAIL),
 			// not at the HTTP upgrade level.
@@ -437,6 +429,15 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 	}
 
 	server.post("/api/shutdown", (request, reply) => {
+		if (!hasValidShutdownOwnerToken(request, options?.ownerToken)) {
+			sendOwnerTokenRequired(reply);
+			return;
+		}
+		if (!isLoopbackAddress(request.ip)) {
+			sendLoopbackRequired(reply);
+			return;
+		}
+
 		const url = new URL(request.url, "http://localhost");
 		const force = url.searchParams.get("force") === "1";
 		const callerClientId = getHeaderValue(
@@ -469,6 +470,29 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 function getHeaderValue(value: string | string[] | undefined): string | undefined {
 	return Array.isArray(value) ? value[0] : value;
+}
+
+function hasValidShutdownOwnerToken(
+	request: FastifyRequest,
+	ownerToken: string | undefined,
+): boolean {
+	return (
+		ownerToken !== undefined && getHeaderValue(request.headers["x-termora-owner"]) === ownerToken
+	);
+}
+
+function sendOwnerTokenRequired(reply: FastifyReply): FastifyReply {
+	return reply.code(401).send({
+		error: "OWNER_TOKEN_REQUIRED",
+		message: "Valid X-Termora-Owner header required",
+	});
+}
+
+function sendLoopbackRequired(reply: FastifyReply): FastifyReply {
+	return reply.code(403).send({
+		error: "LOOPBACK_REQUIRED",
+		message: "Shutdown is only accepted from loopback clients",
+	});
 }
 
 function isLoopbackAddress(ip: string): boolean {

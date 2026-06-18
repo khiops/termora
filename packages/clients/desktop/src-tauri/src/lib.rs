@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -64,6 +65,13 @@ struct HubRuntime {
     port: u16,
     #[serde(rename = "ownerToken")]
     owner_token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct StopHubCommandResult {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    others: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +164,7 @@ fn read_runtime_port() -> Option<u16> {
 }
 
 /// Checks whether a hub is alive by probing its /api/health endpoint.
+#[cfg(not(dev))]
 fn is_hub_alive(port: u16) -> bool {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -239,11 +248,28 @@ fn stop_legacy_hub() -> Result<bool, String> {
     }
 }
 
+#[tauri::command]
+fn stop_hub(force: bool) -> Result<StopHubCommandResult, String> {
+    match request_hub_shutdown(force) {
+        ShutdownRequestResult::Stopped | ShutdownRequestResult::HubUnavailable => {
+            Ok(StopHubCommandResult {
+                status: "stopped",
+                others: None,
+            })
+        }
+        ShutdownRequestResult::Conflict(others) => Ok(StopHubCommandResult {
+            status: "conflict",
+            others: Some(others),
+        }),
+        ShutdownRequestResult::Failed(message) => Err(message),
+    }
+}
+
 fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
     let Some(runtime) = read_runtime_info() else {
         return ShutdownRequestResult::HubUnavailable;
     };
-    let Some(owner_token) = runtime.owner_token else {
+    let Some(owner_token) = runtime.owner_token.clone() else {
         return stop_legacy_hub_from_runtime(&runtime);
     };
 
@@ -266,11 +292,17 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
 
     let response = match request.send() {
         Ok(response) => response,
-        Err(_) => return ShutdownRequestResult::HubUnavailable,
+        Err(error) => {
+            eprintln!(
+                "[termora] shutdown request failed; verifying hub pid before exit: {}",
+                error
+            );
+            return confirm_hub_stopped_or_kill(&runtime);
+        }
     };
 
     if response.status().is_success() {
-        return ShutdownRequestResult::Stopped;
+        return confirm_hub_stopped_or_kill(&runtime);
     }
 
     if response.status().as_u16() == 409 {
@@ -300,7 +332,11 @@ fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
         return ShutdownRequestResult::Conflict(others);
     }
 
-    ShutdownRequestResult::Failed(format!("shutdown failed with HTTP {}", response.status()))
+    eprintln!(
+        "[termora] shutdown failed with HTTP {}; verifying hub pid before exit",
+        response.status()
+    );
+    confirm_hub_stopped_or_kill(&runtime)
 }
 
 fn stop_legacy_hub_from_runtime(runtime: &RuntimeInfo) -> ShutdownRequestResult {
@@ -308,14 +344,122 @@ fn stop_legacy_hub_from_runtime(runtime: &RuntimeInfo) -> ShutdownRequestResult 
         return ShutdownRequestResult::Failed("legacy runtime.json is missing pid".to_string());
     };
 
-    if !is_hub_alive(runtime.port) {
+    if pid == 0 || pid == std::process::id() {
+        return ShutdownRequestResult::Failed(format!("refusing to kill invalid hub pid {}", pid));
+    }
+
+    if !is_pid_alive(pid) {
         return ShutdownRequestResult::HubUnavailable;
     }
 
     match signal_hub_pid(pid) {
-        Ok(()) => ShutdownRequestResult::Stopped,
-        Err(message) => ShutdownRequestResult::Failed(message),
+        Ok(()) => {
+            if wait_for_pid_exit(pid, Duration::from_secs(5)) {
+                ShutdownRequestResult::Stopped
+            } else {
+                ShutdownRequestResult::Failed(format!(
+                    "hub pid {} is still alive after PID-kill fallback",
+                    pid
+                ))
+            }
+        }
+        Err(message) => {
+            if !is_pid_alive(pid) {
+                ShutdownRequestResult::Stopped
+            } else {
+                ShutdownRequestResult::Failed(message)
+            }
+        }
     }
+}
+
+fn confirm_hub_stopped_or_kill(runtime: &RuntimeInfo) -> ShutdownRequestResult {
+    let Some(pid) = runtime.pid else {
+        return ShutdownRequestResult::Failed(
+            "runtime.json is missing pid; cannot confirm hub stopped".to_string(),
+        );
+    };
+
+    if pid == 0 || pid == std::process::id() {
+        return ShutdownRequestResult::Failed(format!("refusing to kill invalid hub pid {}", pid));
+    }
+
+    if wait_for_pid_exit(pid, Duration::from_secs(10)) {
+        eprintln!("[termora] confirmed hub pid {} is stopped", pid);
+        return ShutdownRequestResult::Stopped;
+    }
+
+    eprintln!(
+        "[termora] hub pid {} still alive after graceful shutdown; killing by PID",
+        pid
+    );
+    match signal_hub_pid(pid) {
+        Ok(()) => {
+            if wait_for_pid_exit(pid, Duration::from_secs(5)) {
+                eprintln!(
+                    "[termora] confirmed hub pid {} is stopped after PID kill",
+                    pid
+                );
+                ShutdownRequestResult::Stopped
+            } else {
+                ShutdownRequestResult::Failed(format!(
+                    "hub pid {} is still alive after PID-kill fallback",
+                    pid
+                ))
+            }
+        }
+        Err(message) => {
+            if !is_pid_alive(pid) {
+                ShutdownRequestResult::Stopped
+            } else {
+                ShutdownRequestResult::Failed(message)
+            }
+        }
+    }
+}
+
+fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !is_pid_alive(pid) {
+            return true;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        std::thread::sleep(remaining.min(Duration::from_millis(100)));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_pid_alive(pid: u32) -> bool {
+    let filter = format!("PID eq {}", pid);
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let expected = pid.to_string();
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split(',').nth(1))
+        .any(|field| field.trim().trim_matches('"') == expected)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_pid_alive(pid: u32) -> bool {
+    matches!(
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status(),
+        Ok(status) if status.success()
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -342,7 +486,7 @@ fn signal_hub_pid(pid: u32) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn signal_hub_pid(pid: u32) -> Result<(), String> {
     let status = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
+        .args(["-KILL", &pid.to_string()])
         .status()
         .map_err(|error| format!("failed to signal legacy hub pid {}: {}", pid, error))?;
     if status.success() {
@@ -683,6 +827,7 @@ pub fn run() {
             is_tray_available,
             exit_app,
             set_shutdown_caller_client_id,
+            stop_hub,
             stop_legacy_hub,
             pick_and_read_agent_file
         ])

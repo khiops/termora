@@ -256,6 +256,9 @@ export class SessionManager {
 	}
 
 	async shutdown(): Promise<void> {
+		// Abort all in-flight acquisitions before awaiting agent close so no
+		// connect/start continuation can outlive a slow agent teardown.
+		Acq.shutdownAll(this.ctx);
 		for (const timer of this.ctx.reconnectTimers.values()) clearTimeout(timer);
 		this.ctx.reconnectTimers.clear();
 		for (const ac of this.ctx.reconnectAbortControllers.values()) ac.abort();
@@ -292,9 +295,6 @@ export class SessionManager {
 		this.ctx.clients.clear();
 		this.ctx.channels.clear();
 		this.ctx.sessions.clear();
-		// Abort all in-flight acquisitions via the state-machine primitive.
-		// P1: shutdownAll sets CLOSING synchronously on each before rejecting.
-		Acq.shutdownAll(this.ctx);
 	}
 
 	// ─── DAL accessors ────────────────────────────────────────────────────────

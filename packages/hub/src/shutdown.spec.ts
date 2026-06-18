@@ -141,6 +141,26 @@ describe("POST /api/shutdown", () => {
 		expect(shutdownCalls).toBe(1);
 	});
 
+	it("does not run shutdown when no owner token is configured", async () => {
+		let shutdownCalls = 0;
+		server = await createServer({
+			logger: false,
+			onShutdown: () => {
+				shutdownCalls++;
+			},
+		});
+
+		const response = await server.inject({
+			method: "POST",
+			url: "/api/shutdown",
+			headers: { "x-termora-owner": OWNER_TOKEN },
+		});
+
+		expect(response.statusCode).toBe(401);
+		await tick();
+		expect(shutdownCalls).toBe(0);
+	});
+
 	it("rejects a valid paired bearer on shutdown when the owner token is missing", async () => {
 		dbs = openTestDatabases();
 		let shutdownCalls = 0;
@@ -164,6 +184,27 @@ describe("POST /api/shutdown", () => {
 		expect(pairedBearerOnly.statusCode).toBe(401);
 		await tick();
 		expect(shutdownCalls).toBe(0);
+	});
+
+	it("does not exempt non-POST /api/shutdown from bearer auth", async () => {
+		dbs = openTestDatabases();
+		server = await createServer({
+			logger: false,
+			authToken: TEST_TOKEN,
+			ownerToken: OWNER_TOKEN,
+			dbManager: dbs,
+			skipShellDiscovery: true,
+		});
+
+		const missingBearer = await server.inject({ method: "GET", url: "/api/shutdown" });
+		expect(missingBearer.statusCode).toBe(401);
+
+		const withBearer = await server.inject({
+			method: "GET",
+			url: "/api/shutdown",
+			headers: { authorization: `Bearer ${TEST_TOKEN}` },
+		});
+		expect(withBearer.statusCode).toBe(404);
 	});
 
 	it("guards other connected clients and allows force=1", async () => {

@@ -202,7 +202,14 @@ describe("src-tauri/src/lib.rs", () => {
 
 	it("has a legacy no-owner-token hub stop fallback", () => {
 		expect(src).toContain("stop_legacy_hub");
-		expect(src).toMatch(/runtime\.owner_token\s+else/);
+		expect(src).toMatch(/runtime\.owner_token(?:\.clone\(\))?\s+else/);
 		expect(src).toContain("signal_hub_pid");
+	});
+
+	it("pid-confirms hub shutdown before desktop exit paths report success", () => {
+		expect(src).toContain("stop_hub");
+		expect(src).toContain("confirm_hub_stopped_or_kill");
+		expect(src).toContain("wait_for_pid_exit");
+		expect(src).toMatch(/hub pid \{\} still alive after graceful shutdown; killing by PID/);
 	});
 });

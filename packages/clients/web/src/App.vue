@@ -403,7 +403,6 @@ import {
 import {
 	forceShutdownMessage,
 	quitCompletely,
-	type ShutdownTarget,
 } from './utils/desktop-lifecycle.js';
 import { hubBaseUrl, initAssetToken, initHubPort } from './utils/hub-url.js';
 
@@ -886,17 +885,6 @@ async function minimizeWindowToTray(): Promise<void> {
 	}
 }
 
-async function getShutdownTarget(): Promise<ShutdownTarget | null> {
-	const { invoke } = await import('@tauri-apps/api/core');
-	const runtime = await invoke<{ pid?: number | null; port: number; ownerToken: string | null }>(
-		'get_hub_runtime',
-	);
-	return {
-		...runtime,
-		clientId: authStore.clientId,
-	};
-}
-
 async function syncShutdownCallerClientId(clientId: string | null): Promise<void> {
 	if (!isTauriRuntime()) return;
 	try {
@@ -934,7 +922,6 @@ async function runQuitCompletely(): Promise<void> {
 	try {
 		const { invoke } = await import('@tauri-apps/api/core');
 		const outcome = await quitCompletely({
-			getShutdownTarget,
 			confirmForce: confirmForceShutdown,
 			exitApp: () => invoke('exit_app'),
 		});
