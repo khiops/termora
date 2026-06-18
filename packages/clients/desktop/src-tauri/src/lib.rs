@@ -1,16 +1,17 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Read;
 #[cfg(not(dev))]
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// Stores the resolved hub port after startup (default 4100).
 static HUB_PORT: AtomicU16 = AtomicU16::new(4100);
+static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 const MAX_AGENT_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_AGENT_MANIFEST_BYTES: u64 = 1024 * 1024;
 
@@ -47,6 +48,32 @@ struct PickedAgentFile {
     bytes: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+struct RuntimeInfo {
+    port: u16,
+    #[serde(rename = "ownerToken")]
+    owner_token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HubRuntime {
+    port: u16,
+    #[serde(rename = "ownerToken")]
+    owner_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ShutdownConflictBody {
+    others: Option<usize>,
+}
+
+enum ShutdownRequestResult {
+    Stopped,
+    Conflict(usize),
+    HubUnavailable,
+    Failed(String),
+}
+
 /// Resolves the hub config directory and reads the auth token from auth.json.
 /// Returns `Some(token)` only if the token is a valid 64-char lowercase hex string.
 fn read_hub_auth_token() -> Option<String> {
@@ -75,17 +102,22 @@ fn read_hub_auth_token() -> Option<String> {
 
     // Only inject if it looks like a valid 64-char lowercase hex string
     let valid = token.len() == 64 && token.chars().all(|c| matches!(c, 'a'..='f' | '0'..='9'));
-    if valid { Some(token) } else { None }
+    if valid {
+        Some(token)
+    } else {
+        None
+    }
 }
 
 /// Resolves the termora state directory:
 /// - Linux/macOS: $XDG_STATE_HOME/termora or ~/.local/state/termora
 /// - Windows: %LOCALAPPDATA%\termora
-#[cfg(not(dev))]
 fn get_state_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("termora"))
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|p| std::path::PathBuf::from(p).join("termora"))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -97,14 +129,18 @@ fn get_state_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Reads the hub port from runtime.json in the state dir.
-#[cfg(not(dev))]
-fn read_runtime_port() -> Option<u16> {
+/// Reads runtime.json in the state dir.
+fn read_runtime_info() -> Option<RuntimeInfo> {
     let state_dir = get_state_dir()?;
     let runtime_path = state_dir.join("runtime.json");
     let contents = std::fs::read_to_string(&runtime_path).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    parsed.get("port")?.as_u64().map(|p| p as u16)
+    serde_json::from_str(&contents).ok()
+}
+
+/// Reads the hub port from runtime.json in the state dir.
+#[cfg(not(dev))]
+fn read_runtime_port() -> Option<u16> {
+    read_runtime_info().map(|runtime| runtime.port)
 }
 
 /// Checks whether a hub is alive by probing its /api/health endpoint.
@@ -120,7 +156,6 @@ fn is_hub_alive(port: u16) -> bool {
     )
 }
 
-
 #[tauri::command]
 fn get_hub_auth_token() -> Option<String> {
     let result = read_hub_auth_token();
@@ -135,6 +170,132 @@ fn get_hub_auth_token() -> Option<String> {
 #[tauri::command]
 fn get_hub_port() -> u16 {
     HUB_PORT.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+fn get_hub_runtime() -> HubRuntime {
+    match read_runtime_info() {
+        Some(runtime) => HubRuntime {
+            port: runtime.port,
+            owner_token: runtime.owner_token,
+        },
+        None => HubRuntime {
+            port: HUB_PORT.load(Ordering::Relaxed),
+            owner_token: None,
+        },
+    }
+}
+
+#[tauri::command]
+fn is_tray_available() -> bool {
+    TRAY_AVAILABLE.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+fn request_hub_shutdown(force: bool) -> ShutdownRequestResult {
+    let Some(runtime) = read_runtime_info() else {
+        return ShutdownRequestResult::HubUnavailable;
+    };
+    let Some(owner_token) = runtime.owner_token else {
+        return ShutdownRequestResult::Failed("runtime.json is missing ownerToken".to_string());
+    };
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => return ShutdownRequestResult::Failed(error.to_string()),
+    };
+    let force_query = if force { "?force=1" } else { "" };
+    let url = format!(
+        "http://127.0.0.1:{}/api/shutdown{}",
+        runtime.port, force_query
+    );
+    let response = match client
+        .post(url)
+        .header("X-Termora-Owner", owner_token)
+        .send()
+    {
+        Ok(response) => response,
+        Err(_) => return ShutdownRequestResult::HubUnavailable,
+    };
+
+    if response.status().is_success() {
+        return ShutdownRequestResult::Stopped;
+    }
+
+    if response.status().as_u16() == 409 {
+        let body = response
+            .text()
+            .ok()
+            .and_then(|text| serde_json::from_str::<ShutdownConflictBody>(&text).ok());
+        return ShutdownRequestResult::Conflict(body.and_then(|b| b.others).unwrap_or(1));
+    }
+
+    ShutdownRequestResult::Failed(format!("shutdown failed with HTTP {}", response.status()))
+}
+
+fn show_shutdown_error(app: &tauri::AppHandle, message: String) {
+    app.dialog()
+        .message(message)
+        .title("Quit Failed")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::Ok)
+        .show(|_| {});
+}
+
+fn handle_tray_quit(app: tauri::AppHandle) {
+    std::thread::spawn(move || match request_hub_shutdown(false) {
+        ShutdownRequestResult::Stopped | ShutdownRequestResult::HubUnavailable => {
+            app.exit(0);
+        }
+        ShutdownRequestResult::Conflict(others) => {
+            let suffix = if others == 1 {
+                "client is"
+            } else {
+                "clients are"
+            };
+            let confirmed = app
+                .dialog()
+                .message(format!(
+                    "{} other {} connected. Stop the hub anyway?",
+                    others, suffix
+                ))
+                .title("Other Clients Connected")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Stop anyway".to_string(),
+                    "Cancel".to_string(),
+                ))
+                .blocking_show();
+            if !confirmed {
+                return;
+            }
+
+            match request_hub_shutdown(true) {
+                ShutdownRequestResult::Stopped | ShutdownRequestResult::HubUnavailable => {
+                    app.exit(0);
+                }
+                ShutdownRequestResult::Conflict(_) => {
+                    show_shutdown_error(
+                        &app,
+                        "The hub still reports other connected clients.".to_string(),
+                    );
+                }
+                ShutdownRequestResult::Failed(message) => {
+                    show_shutdown_error(&app, message);
+                }
+            }
+        }
+        ShutdownRequestResult::Failed(message) => {
+            show_shutdown_error(&app, message);
+        }
+    });
 }
 
 #[tauri::command]
@@ -242,7 +403,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
@@ -252,11 +413,22 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
-                app.exit(0);
+                handle_tray_quit(app.clone());
             }
             _ => {}
         })
-        .build(app)?;
+        .build(app);
+
+    match tray {
+        Ok(tray) => {
+            TRAY_AVAILABLE.store(true, Ordering::Relaxed);
+            app.manage(tray);
+        }
+        Err(error) => {
+            TRAY_AVAILABLE.store(false, Ordering::Relaxed);
+            eprintln!("[termora] failed to initialize tray: {}", error);
+        }
+    }
 
     // In release mode, spawn the hub sidecar
     #[cfg(not(dev))]
@@ -270,15 +442,17 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(port) = read_runtime_port() {
             if is_hub_alive(port) {
-                eprintln!("[termora] found existing hub on port {} (from runtime.json)", port);
+                eprintln!(
+                    "[termora] found existing hub on port {} (from runtime.json)",
+                    port
+                );
                 hub_port = port;
                 need_spawn = false;
             }
         }
 
         if need_spawn {
-            let sidecar = app.shell().sidecar("termora-hub").unwrap()
-                .args(["start"]);
+            let sidecar = app.shell().sidecar("termora-hub").unwrap().args(["start"]);
             let (mut rx, _child) = sidecar.spawn().expect("failed to spawn hub sidecar");
 
             // Store the child handle so it stays alive for the app's lifetime
@@ -306,13 +480,19 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(line) => {
-                            let _ = writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
+                            let _ =
+                                writeln!(file, "[hub:stdout] {}", String::from_utf8_lossy(&line));
                         }
                         CommandEvent::Stderr(line) => {
-                            let _ = writeln!(file, "[hub:stderr] {}", String::from_utf8_lossy(&line));
+                            let _ =
+                                writeln!(file, "[hub:stderr] {}", String::from_utf8_lossy(&line));
                         }
                         CommandEvent::Terminated(payload) => {
-                            let _ = writeln!(file, "[hub:exit] code={:?} signal={:?}", payload.code, payload.signal);
+                            let _ = writeln!(
+                                file,
+                                "[hub:exit] code={:?} signal={:?}",
+                                payload.code, payload.signal
+                            );
                             break;
                         }
                         CommandEvent::Error(err) => {
@@ -332,7 +512,10 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let mut ready = false;
             for _ in 0..30 {
                 // 30 attempts × 500ms = 15s max wait
-                match client.get(format!("http://localhost:{}/api/health", hub_port)).send() {
+                match client
+                    .get(format!("http://localhost:{}/api/health", hub_port))
+                    .send()
+                {
                     Ok(resp) if resp.status().is_success() => {
                         ready = true;
                         break;
@@ -345,7 +528,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Hub sidecar did not become ready within 15 seconds");
             } else {
                 // Read actual port from runtime.json (hub may have used zero_conf)
-        // First check runtime.json for a known port
+                // First check runtime.json for a known port
                 if let Some(port) = read_runtime_port() {
                     hub_port = port;
                 }
@@ -381,6 +564,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_hub_auth_token,
             get_hub_port,
+            get_hub_runtime,
+            is_tray_available,
+            exit_app,
             pick_and_read_agent_file
         ])
         .setup(setup_app)

@@ -6,7 +6,7 @@ let hubProcess: Awaited<ReturnType<Command<string>["spawn"]>> | null = null;
 export async function startHub(port = 4100): Promise<void> {
 	if (hubProcess) return; // Already running
 
-	const command = Command.sidecar("termora-hub", ["--port", String(port)]);
+	const command = Command.sidecar("termora-hub", ["start", "--port", String(port)]);
 
 	command.on("error", (error) => {
 		console.error("[termora-desktop] hub error:", error);
